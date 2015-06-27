@@ -4,10 +4,10 @@ project(HeartValves)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "http://www.example.com/Slicer/Extensions/HeartValves")
-set(EXTENSION_CATEGORY "Heart Valves")
-set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab)")
-set(EXTENSION_DESCRIPTION "Modules for analyzing heart valves")
+set(EXTENSION_HOMEPAGE "https://github.com/SlicerHeart")
+set(EXTENSION_CATEGORY "Cardiac")
+set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts), Matthew Jolley (Children's Harvard)")
+set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention planning and guidance")
 set(EXTENSION_ICONURL "http://www.example.com/Slicer/Extensions/HeartValves.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.example.com/Slicer/Extensions/HeartValves/Screenshots/1.png")
 
