@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-set(MODULE_NAME DicomPatcher)
+set(MODULE_NAME Philips4dUsDicomPatcher)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS

@@ -1,6 +1,7 @@
 import os
 import string
 from __main__ import vtk, qt, ctk, slicer
+import logging
 import numpy
 import dicom
 from DICOMLib import DICOMPlugin
@@ -54,7 +55,11 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # currently only this one (bogus, non-standard) Philips 4D US format is supported
       return []
 
-    ds = dicom.read_file(filePath, stop_before_pixels=True)
+    try:
+      ds = dicom.read_file(filePath, stop_before_pixels=True)
+    except Exception as e:
+      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      return [] 
 
     if ds.PhotometricInterpretation != 'MONOCHROME2':
       logging.warning('Warning: unsupported PhotometricInterpretation')

@@ -6,28 +6,28 @@ import logging
 import dicom
 
 #
-# DicomPatcher
+# Philips4dUsDicomPatcher
 #
 
-class DicomPatcher(ScriptedLoadableModule):
+class Philips4dUsDicomPatcher(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
-    self.parent.title = "DICOM Patcher"
+    self.parent.title = "Philips 4D US DICOM patcher"
     self.parent.categories = ["Heart"]
     self.parent.dependencies = []
     self.parent.contributors = ["Andras Lasso (PerkLab), Steve Pieper (Isomics)"]
-    self.parent.helpText = """Fix common error in invalid DICOM files."""
+    self.parent.helpText = """Fix invalid 4D US DICOM files so that they can be imported into Slicer."""
     self.parent.acknowledgementText = """Funded by CHOP"""
 
 #
-# DicomPatcherWidget
+# Philips4dUsDicomPatcherWidget
 #
 
-class DicomPatcherWidget(ScriptedLoadableModuleWidget):
+class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
   """Uses ScriptedLoadableModuleWidget base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
@@ -49,12 +49,12 @@ class DicomPatcherWidget(ScriptedLoadableModuleWidget):
 
     self.inputDirSelector = ctk.ctkPathLineEdit()
     self.inputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-    self.inputDirSelector.settingKey = 'DicomPatcherInputDir'
+    self.inputDirSelector.settingKey = 'Philips4dUsDicomPatcherInputDir'
     parametersFormLayout.addRow("Input DICOM directory:", self.inputDirSelector)
 
     self.outputDirSelector = ctk.ctkPathLineEdit()
     self.outputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-    self.outputDirSelector.settingKey = 'DicomPatcherOutputDir'
+    self.outputDirSelector.settingKey = 'Philips4dUsDicomPatcherOutputDir'
     parametersFormLayout.addRow("Output DICOM directory:", self.outputDirSelector)
     
     self.enableNrrdOutputCheckBox = qt.QCheckBox()
@@ -79,7 +79,7 @@ class DicomPatcherWidget(ScriptedLoadableModuleWidget):
     # Add vertical spacer
     self.layout.addStretch(1)
     
-    self.logic = DicomPatcherLogic()
+    self.logic = Philips4dUsDicomPatcherLogic()
     self.logic.logCallback = self.addLog
 
   def cleanup(self):
@@ -93,7 +93,6 @@ class DicomPatcherWidget(ScriptedLoadableModuleWidget):
       self.statusLabel.plainText = ''
       self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.enableNrrdOutputCheckBox.checked)
     except Exception as e:
-      import sys
       self.addLog("Unexpected error: {0}".format(e.message))
     slicer.app.restoreOverrideCursor();
   
@@ -104,10 +103,10 @@ class DicomPatcherWidget(ScriptedLoadableModuleWidget):
     slicer.app.processEvents() # force update
 
 #
-# DicomPatcherLogic
+# Philips4dUsDicomPatcherLogic
 #
 
-class DicomPatcherLogic(ScriptedLoadableModuleLogic):
+class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual
   computation done by your module.  The interface
   should be such that other python code can import
@@ -243,7 +242,7 @@ class DicomPatcherLogic(ScriptedLoadableModuleLogic):
     self.addLog('DICOM patching completed.')
 
 
-class DicomPatcherTest(ScriptedLoadableModuleTest):
+class Philips4dUsDicomPatcherTest(ScriptedLoadableModuleTest):
   """
   This is the test case for your scripted module.
   Uses ScriptedLoadableModuleTest base class, available at:
@@ -259,9 +258,9 @@ class DicomPatcherTest(ScriptedLoadableModuleTest):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_DicomPatcher1()
+    self.test_Philips4dUsDicomPatcher1()
 
-  def test_DicomPatcher1(self):
+  def test_Philips4dUsDicomPatcher1(self):
     """ Ideally you should have several levels of tests.  At the lowest level
     tests should exercise the functionality of the logic with different inputs
     (both valid and invalid).  At higher levels your tests should emulate the
@@ -293,6 +292,6 @@ class DicomPatcherTest(ScriptedLoadableModuleTest):
     self.delayDisplay('Finished with download and loading')
 
     volumeNode = slicer.util.getNode(pattern="FA")
-    logic = DicomPatcherLogic()
+    logic = Philips4dUsDicomPatcherLogic()
     self.assertTrue( logic.hasImageData(volumeNode) )
     self.delayDisplay('Test passed!')

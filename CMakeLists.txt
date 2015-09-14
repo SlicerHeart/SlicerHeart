@@ -4,12 +4,12 @@ project(HeartValves)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "https://github.com/SlicerHeart")
-set(EXTENSION_CATEGORY "Cardiac")
-set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts), Matthew Jolley (Children's Harvard)")
+set(EXTENSION_HOMEPAGE "http://www.slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/SlicerHeart")
+set(EXTENSION_CATEGORY "Heart")
+set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts), Matthew Jolley (CHOP)")
 set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention planning and guidance")
-set(EXTENSION_ICONURL "http://www.example.com/Slicer/Extensions/HeartValves.png")
-set(EXTENSION_SCREENSHOTURLS "http://www.example.com/Slicer/Extensions/HeartValves/Screenshots/1.png")
+set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
+set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
 
 #-----------------------------------------------------------------------------
 # Extension dependencies
@@ -19,7 +19,7 @@ include(${Slicer_USE_FILE})
 #-----------------------------------------------------------------------------
 # Extension modules
 add_subdirectory(ValveView)
-add_subdirectory(DicomPatcher)
+add_subdirectory(Philips4dUsDicomPatcher)
 add_subdirectory(DicomUltrasoundPlugin)
 ## NEXT_MODULE
 
