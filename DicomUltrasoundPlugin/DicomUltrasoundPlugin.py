@@ -149,22 +149,23 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     slicer.mrmlScene.AddNode(outputSequenceStorageNode)
     outputSequenceNode.SetAndObserveStorageNodeID(outputSequenceStorageNode.GetID())
 
-    # Add a browser node and show the volume in the slice viewer for user convenience
-    outputSequenceBrowserNode = slicer.modulemrml.vtkMRMLSequenceBrowserNode()
-    outputSequenceBrowserNode.SetName(slicer.mrmlScene.GenerateUniqueName(outputSequenceNode.GetName()+' browser'))
-    slicer.mrmlScene.AddNode(outputSequenceBrowserNode)
-    outputSequenceBrowserNode.SetAndObserveRootNodeID(outputSequenceNode.GetID())
-    masterOutputNode = outputSequenceBrowserNode.GetVirtualOutputDataNode(outputSequenceNode)
+    if not hasattr(loadable, 'createBrowserNode') or loadable.createBrowserNode:
+      # Add a browser node and show the volume in the slice viewer for user convenience
+      outputSequenceBrowserNode = slicer.modulemrml.vtkMRMLSequenceBrowserNode()
+      outputSequenceBrowserNode.SetName(slicer.mrmlScene.GenerateUniqueName(outputSequenceNode.GetName()+' browser'))
+      slicer.mrmlScene.AddNode(outputSequenceBrowserNode)
+      outputSequenceBrowserNode.SetAndObserveRootNodeID(outputSequenceNode.GetID())
+      masterOutputNode = outputSequenceBrowserNode.GetVirtualOutputDataNode(outputSequenceNode)
     
-    # Automatically select the volume to display
-    appLogic = slicer.app.applicationLogic()
-    selNode = appLogic.GetSelectionNode()
-    selNode.SetReferenceActiveVolumeID(masterOutputNode.GetID())
-    appLogic.PropagateVolumeSelection()
-    appLogic.FitSliceToAll()
+      # Automatically select the volume to display
+      appLogic = slicer.app.applicationLogic()
+      selNode = appLogic.GetSelectionNode()
+      selNode.SetReferenceActiveVolumeID(masterOutputNode.GetID())
+      appLogic.PropagateVolumeSelection()
+      appLogic.FitSliceToAll()
 
-    # create Subject hierarchy nodes for the loaded series
-    self.addSeriesInSubjectHierarchy(loadable, masterOutputNode)
+      # create Subject hierarchy nodes for the loaded series
+      self.addSeriesInSubjectHierarchy(loadable, masterOutputNode)
 
     return outputSequenceNode
     

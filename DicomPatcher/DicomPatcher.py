@@ -57,6 +57,11 @@ class DicomPatcherWidget(ScriptedLoadableModuleWidget):
     self.outputDirSelector.settingKey = 'DicomPatcherOutputDir'
     parametersFormLayout.addRow("Output DICOM directory:", self.outputDirSelector)
     
+    self.enableNrrdOutputCheckBox = qt.QCheckBox()
+    self.enableNrrdOutputCheckBox.checked = 0
+    self.enableNrrdOutputCheckBox.setToolTip("If checked, 4D US DICOM files will be also saved as NRRD files")
+    parametersFormLayout.addRow("Export to NRRD files", self.enableNrrdOutputCheckBox) 
+    
     #
     # Patch Button
     #
@@ -86,7 +91,7 @@ class DicomPatcherWidget(ScriptedLoadableModuleWidget):
       self.inputDirSelector.addCurrentPathToHistory()
       self.outputDirSelector.addCurrentPathToHistory()
       self.statusLabel.plainText = ''
-      self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath)
+      self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.enableNrrdOutputCheckBox.checked)
     except Exception as e:
       import sys
       self.addLog("Unexpected error: {0}".format(e.message))
@@ -120,8 +125,39 @@ class DicomPatcherLogic(ScriptedLoadableModuleLogic):
     logging.info(text)
     if self.logCallback:
       self.logCallback(text)
-  
-  def patchDicomDir(self, inputDirPath, outputDirPath):
+
+  def isDicomUltrasoundFile(self, inputDicomFilePath):
+    from DICOMLib import DICOMLoadable
+    dicomPlugin = slicer.modules.dicomPlugins['DicomUltrasoundPlugin']()    
+    files = [inputDicomFilePath]
+    loadables = dicomPlugin.examineFiles(files)
+    return len(loadables)>0
+      
+  def convertUltrasoundDicomToNrrd(self, inputDicomFilePath, outputNrrdFilePath):
+
+    # Load from DICOM
+    from DICOMLib import DICOMLoadable
+    loadable = DICOMLoadable()
+    loadable.files = [inputDicomFilePath]
+    loadable.name = os.path.basename(inputDicomFilePath)
+    loadable.tooltip = ''
+    loadable.selected = True
+    loadable.confidence = 1.
+    loadable.createBrowserNode = False # don't create browser nodes (it would clutter the scene when batch processing)
+    dicomPlugin = slicer.modules.dicomPlugins['DicomUltrasoundPlugin']()        
+    sequenceNode = dicomPlugin.load(loadable)
+    
+    # Write to NRRD
+    storageNode = sequenceNode.GetStorageNode()
+    storageNode.SetFileName(outputNrrdFilePath)
+    success = storageNode.WriteData(sequenceNode)
+    
+    # Clean up
+    slicer.mrmlScene.RemoveNode(sequenceNode)
+    
+    return success    
+      
+  def patchDicomDir(self, inputDirPath, outputDirPath, exportUltrasoundToNrrd):
     """
     Since CTK (rightly) requires certain basic information [1] before it can import
     data files that purport to be dicom, this code patches the files in a directory
@@ -194,7 +230,15 @@ class DicomPatcherLogic(ScriptedLoadableModuleLogic):
             os.makedirs(rootOutput)
         
         dicom.write_file(patchedFilePath, ds)
-        self.addLog('  Created patched file: %s' % patchedFilePath)
+        self.addLog('  Created patched DICOM file: %s' % patchedFilePath)
+        
+        if exportUltrasoundToNrrd and self.isDicomUltrasoundFile(patchedFilePath):
+          self.addLog('  Save as NRRD...')
+          nrrdFilePath = os.path.splitext(patchedFilePath)[0]+'.nrrd'
+          if self.convertUltrasoundDicomToNrrd(patchedFilePath, nrrdFilePath):
+            self.addLog('  Created NRRD file: %s' % nrrdFilePath)
+          else:
+            self.addLog('  NRRD file save failed')
         
     self.addLog('DICOM patching completed.')
 
