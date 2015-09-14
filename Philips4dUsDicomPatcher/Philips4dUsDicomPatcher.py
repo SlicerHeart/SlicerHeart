@@ -3,7 +3,6 @@ import unittest
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
-import dicom
 
 #
 # Philips4dUsDicomPatcher
@@ -18,7 +17,7 @@ class Philips4dUsDicomPatcher(ScriptedLoadableModule):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Philips 4D US DICOM patcher"
     self.parent.categories = ["Heart"]
-    self.parent.dependencies = []
+    self.parent.dependencies = ["DICOM"]
     self.parent.contributors = ["Andras Lasso (PerkLab), Steve Pieper (Isomics)"]
     self.parent.helpText = """Fix invalid 4D US DICOM files so that they can be imported into Slicer."""
     self.parent.acknowledgementText = """Funded by CHOP"""
@@ -173,6 +172,8 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     [1] https://github.com/commontk/CTK/blob/16aa09540dcb59c6eafde4d9a88dfee1f0948edc/Libs/DICOM/Core/ctkDICOMDatabase.cpp#L1283-L1287
     """
 
+    import dicom
+
     if not outputDirPath:
       outputDirPath = inputDirPath
     
@@ -272,26 +273,4 @@ class Philips4dUsDicomPatcherTest(ScriptedLoadableModuleTest):
     your test should break so they know that the feature is needed.
     """
 
-    self.delayDisplay("Starting the test")
-    #
-    # first, get some data
-    #
-    import urllib
-    downloads = (
-        ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),
-        )
-
-    for url,name,loader in downloads:
-      filePath = slicer.app.temporaryPath + '/' + name
-      if not os.path.exists(filePath) or os.stat(filePath).st_size == 0:
-        logging.info('Requesting download %s from %s...\n' % (name, url))
-        urllib.urlretrieve(url, filePath)
-      if loader:
-        logging.info('Loading %s...' % (name,))
-        loader(filePath)
-    self.delayDisplay('Finished with download and loading')
-
-    volumeNode = slicer.util.getNode(pattern="FA")
-    logic = Philips4dUsDicomPatcherLogic()
-    self.assertTrue( logic.hasImageData(volumeNode) )
-    self.delayDisplay('Test passed!')
+    self.delayDisplay("No tests are implemented")

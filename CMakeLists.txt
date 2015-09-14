@@ -10,6 +10,7 @@ set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam
 set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention planning and guidance")
 set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
+set(EXTENSION_DEPENDS "Sequences")
 
 #-----------------------------------------------------------------------------
 # Extension dependencies
