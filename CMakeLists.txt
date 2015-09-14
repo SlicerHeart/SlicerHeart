@@ -19,6 +19,8 @@ include(${Slicer_USE_FILE})
 #-----------------------------------------------------------------------------
 # Extension modules
 add_subdirectory(ValveView)
+add_subdirectory(DicomPatcher)
+add_subdirectory(DicomUltrasoundPlugin)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

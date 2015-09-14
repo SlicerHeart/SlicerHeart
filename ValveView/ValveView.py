@@ -16,12 +16,10 @@ class ValveView(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Valve View"
-    self.parent.categories = ["Heart Valves"]
+    self.parent.categories = ["Heart"]
     self.parent.dependencies = []
     self.parent.contributors = ["Andras Lasso (PerkLab)"]
     self.parent.helpText = """
-    This is an example of scripted loadable module bundled in an extension.
-    It performs a simple thresholding on the input volume and optionally captures a screenshot.
     """
     self.parent.acknowledgementText = """
     This file was originally developed by Andras Lasso, PerkLab.
