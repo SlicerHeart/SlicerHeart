@@ -51,16 +51,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     sopClassUID = slicer.dicomDatabase.fileValue(filePath,self.tags['sopClassUID'])
 
     if sopClassUID != '1.2.840.113543.6.6.1.3.10002':
-      # currently only this one (bogus, non-standard) format is supported
+      # currently only this one (bogus, non-standard) Philips 4D US format is supported
       return []
-
-    loadable = DICOMLoadable()
-    loadable.files = files
-    loadable.name = "Philips 4D Ultrasound"
-    loadable.tooltip = loadable.name
-    loadable.selected = True
-    loadable.confidence = 1.
-    loadables.append(loadable)
 
     ds = dicom.read_file(filePath, stop_before_pixels=True)
 
@@ -79,6 +71,24 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     if ds.SamplesPerPixel != 1:
       logging.warning('Warning: multiple samples per pixel')
       loadable.confidence = .4
+
+    name = ''
+    if hasattr(ds,'SeriesNumber') and ds.SeriesNumber:
+      name = '{0}:'.format(ds.SeriesNumber)
+    if hasattr(ds,'Modality') and ds.Modality:
+      name = '{0} {1}'.format(name, ds.Modality)
+    if hasattr(ds,'SeriesDescription') and ds.SeriesDescription:
+      name = '{0} {1}'.format(name, ds.SeriesDescription)
+    if hasattr(ds,'InstanceNumber') and ds.InstanceNumber:
+      name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+
+    loadable = DICOMLoadable()
+    loadable.files = files
+    loadable.name = name.strip() # remove leading and trailing spaces, if any
+    loadable.tooltip = "Philips 4D Ultrasound"
+    loadable.selected = True
+    loadable.confidence = 1.
+    loadables.append(loadable)
 
     return loadables
 
@@ -131,21 +141,30 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       timeStampSec = "{:.3f}".format(frame * frameTimeMsec * 0.001)
       outputSequenceNode.SetDataNodeAtValue(outputNode, timeStampSec)
 
+    outputSequenceNode.SetName(slicer.mrmlScene.GenerateUniqueName(loadable.name))
     slicer.mrmlScene.AddNode(outputSequenceNode)
+
+    # Create storage node that allows saving node as nrrd
+    outputSequenceStorageNode = slicer.modulemrml.vtkMRMLVolumeSequenceStorageNode()
+    slicer.mrmlScene.AddNode(outputSequenceStorageNode)
+    outputSequenceNode.SetAndObserveStorageNodeID(outputSequenceStorageNode.GetID())
 
     # Add a browser node and show the volume in the slice viewer for user convenience
     outputSequenceBrowserNode = slicer.modulemrml.vtkMRMLSequenceBrowserNode()
     outputSequenceBrowserNode.SetName(slicer.mrmlScene.GenerateUniqueName(outputSequenceNode.GetName()+' browser'))
     slicer.mrmlScene.AddNode(outputSequenceBrowserNode)
     outputSequenceBrowserNode.SetAndObserveRootNodeID(outputSequenceNode.GetID())
+    masterOutputNode = outputSequenceBrowserNode.GetVirtualOutputDataNode(outputSequenceNode)
     
     # Automatically select the volume to display
     appLogic = slicer.app.applicationLogic()
     selNode = appLogic.GetSelectionNode()
-    masterOutputNode = outputSequenceBrowserNode.GetVirtualOutputDataNode(outputSequenceNode)
     selNode.SetReferenceActiveVolumeID(masterOutputNode.GetID())
     appLogic.PropagateVolumeSelection()
     appLogic.FitSliceToAll()
+
+    # create Subject hierarchy nodes for the loaded series
+    self.addSeriesInSubjectHierarchy(loadable, masterOutputNode)
 
     return outputSequenceNode
     
