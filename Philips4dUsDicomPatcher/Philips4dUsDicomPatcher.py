@@ -243,6 +243,8 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
 
         if anonymize:
 
+          self.addLog('  Anonymizing...')
+
           ds.StudyDate = ''
           ds.StudyTime = ''
           ds.ContentDate = ''
@@ -267,18 +269,22 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           ds.SeriesInstanceUID = seriesUIDToRandomUIDMap[ds.SeriesInstanceUID]
 
         if inputDirPath==outputDirPath:
-          patchedFilePath = filePath + "-patched"
+          (name, ext) = os.path.splitext(filePath)
+          patchedFilePath = name + ('-anon' if anonymize else '') + '-patched' + ext
+          nrrdFilePath = name + '.nrrd'
         else:
           patchedFilePath = os.path.abspath(os.path.join(rootOutput,file))
+          nrrdFilePath = os.path.splitext(patchedFilePath)[0]+'.nrrd'
           if not os.path.exists(rootOutput):
             os.makedirs(rootOutput)
 
+        self.addLog('  Writing DICOM...')
         dicom.write_file(patchedFilePath, ds)
-        self.addLog('  Created patched DICOM file: %s' % patchedFilePath)
-        
+        self.addLog('  Created DICOM file: %s' % patchedFilePath)
+
         if exportUltrasoundToNrrd and self.isDicomUltrasoundFile(patchedFilePath):
-          self.addLog('  Save as NRRD...')
-          nrrdFilePath = os.path.splitext(patchedFilePath)[0]+'.nrrd'
+          self.addLog('  Writing NRRD...')
+
           if self.convertUltrasoundDicomToNrrd(patchedFilePath, nrrdFilePath):
             self.addLog('  Created NRRD file: %s' % nrrdFilePath)
           else:
