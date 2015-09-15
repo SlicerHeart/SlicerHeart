@@ -56,6 +56,11 @@ class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
     self.outputDirSelector.settingKey = 'Philips4dUsDicomPatcherOutputDir'
     parametersFormLayout.addRow("Output DICOM directory:", self.outputDirSelector)
     
+    self.anonymizeDicomCheckBox = qt.QCheckBox()
+    self.anonymizeDicomCheckBox.checked = 0
+    self.anonymizeDicomCheckBox.setToolTip("If checked, then patient identifiable information will be removed from the patched DICOM files")
+    parametersFormLayout.addRow("Anonymize DICOM files", self.anonymizeDicomCheckBox)
+
     self.enableNrrdOutputCheckBox = qt.QCheckBox()
     self.enableNrrdOutputCheckBox.checked = 0
     self.enableNrrdOutputCheckBox.setToolTip("If checked, 4D US DICOM files will be also saved as NRRD files")
@@ -90,7 +95,7 @@ class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
       self.inputDirSelector.addCurrentPathToHistory()
       self.outputDirSelector.addCurrentPathToHistory()
       self.statusLabel.plainText = ''
-      self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.enableNrrdOutputCheckBox.checked)
+      self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.anonymizeDicomCheckBox.checked, self.enableNrrdOutputCheckBox.checked)
     except Exception as e:
       self.addLog("Unexpected error: {0}".format(e.message))
     slicer.app.restoreOverrideCursor();
@@ -155,7 +160,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     
     return success    
       
-  def patchDicomDir(self, inputDirPath, outputDirPath, exportUltrasoundToNrrd):
+  def patchDicomDir(self, inputDirPath, outputDirPath, anonymize = False, exportUltrasoundToNrrd = False):
     """
     Since CTK (rightly) requires certain basic information [1] before it can import
     data files that purport to be dicom, this code patches the files in a directory
@@ -181,13 +186,15 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     logging.debug('DICOM patch input directory: '+inputDirPath)
     logging.debug('DICOM patch output directory: '+outputDirPath)
 
+    patientIDToRandomIDMap = {}
     studyUIDToRandomUIDMap = {}
     seriesUIDToRandomUIDMap = {}
-    
+    numberOfSeriesInStudyMap = {}
+
     # All files without a patient ID will be assigned to the same patient
     randomPatientID = dicom.UID.generate_uid(None)
     
-    requiredTags = ['PatientName', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID']
+    requiredTags = ['PatientName', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SeriesNumber']
     for root, subFolders, files in os.walk(inputDirPath):
     
       # Assume that all files in a directory belongs to the same study
@@ -202,8 +209,13 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
         try:
           ds = dicom.read_file(filePath)
         except (IOError, dicom.filereader.InvalidDicomError):
-          self.addLog('  Non-DICOM file. Skipped.'.format(file))
-          continue          
+          self.addLog('  Not DICOM file. Skipped.')
+          continue
+
+        if ds.SOPClassUID != '1.2.840.113543.6.6.1.3.10002':
+          self.addLog('  Not Philips 4D ultrasound DICOM file. Skipped.')
+          continue
+
         self.addLog('  Patching...')
 
         for tag in requiredTags:
@@ -221,6 +233,38 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           ds.StudyInstanceUID = randomStudyUID
         if ds.SeriesInstanceUID == '':
           ds.SeriesInstanceUID = dicom.UID.generate_uid(None)
+          
+        # Generate series number to make it easier to identify a sequence within a study
+        if ds.SeriesNumber == '':
+          if ds.StudyInstanceUID not in numberOfSeriesInStudyMap:
+            numberOfSeriesInStudyMap[ds.StudyInstanceUID] = 0
+          numberOfSeriesInStudyMap[ds.StudyInstanceUID] = numberOfSeriesInStudyMap[ds.StudyInstanceUID] + 1
+          ds.SeriesNumber = numberOfSeriesInStudyMap[ds.StudyInstanceUID]
+
+        if anonymize:
+
+          ds.StudyDate = ''
+          ds.StudyTime = ''
+          ds.ContentDate = ''
+          ds.ContentTime = ''
+          ds.AccessionNumber = ''
+          ds.ReferringPhysiciansName = ''
+          ds.PatientsBirthDate = ''
+          ds.PatientsSex = ''
+          ds.StudyID = ''
+          ds[(0x3001,0x1004)].value = '' # Some ID in a private tag - clear it, just in case
+          ds.PatientName = "Unspecified Patient"
+
+          # replace ids with random values - re-use if we have seen them before
+          if ds.PatientID not in patientIDToRandomIDMap:  
+            patientIDToRandomIDMap[ds.PatientID] = dicom.UID.generate_uid(None)
+          ds.PatientID = patientIDToRandomIDMap[ds.PatientID]
+          if ds.StudyInstanceUID not in studyUIDToRandomUIDMap:  
+            studyUIDToRandomUIDMap[ds.StudyInstanceUID] = dicom.UID.generate_uid(None)  
+          ds.StudyInstanceUID = studyUIDToRandomUIDMap[ds.StudyInstanceUID]  
+          if ds.SeriesInstanceUID not in studyUIDToRandomUIDMap:
+            seriesUIDToRandomUIDMap[ds.SeriesInstanceUID] = dicom.UID.generate_uid(None)  
+          ds.SeriesInstanceUID = seriesUIDToRandomUIDMap[ds.SeriesInstanceUID]
 
         if inputDirPath==outputDirPath:
           patchedFilePath = filePath + "-patched"
@@ -228,7 +272,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           patchedFilePath = os.path.abspath(os.path.join(rootOutput,file))
           if not os.path.exists(rootOutput):
             os.makedirs(rootOutput)
-        
+
         dicom.write_file(patchedFilePath, ds)
         self.addLog('  Created patched DICOM file: %s' % patchedFilePath)
         
@@ -239,7 +283,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
             self.addLog('  Created NRRD file: %s' % nrrdFilePath)
           else:
             self.addLog('  NRRD file save failed')
-        
+
     self.addLog('DICOM patching completed.')
 
 
