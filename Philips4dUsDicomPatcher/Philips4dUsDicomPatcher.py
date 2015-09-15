@@ -98,6 +98,8 @@ class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
       self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.anonymizeDicomCheckBox.checked, self.enableNrrdOutputCheckBox.checked)
     except Exception as e:
       self.addLog("Unexpected error: {0}".format(e.message))
+      import traceback
+      traceback.print_exc()
     slicer.app.restoreOverrideCursor();
   
   def addLog(self, text):
