@@ -142,6 +142,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
           
       outputNode = slicer.vtkMRMLScalarVolumeNode() 
       outputNode.SetAndObserveImageData(imgReader.GetOutput())
+      outputNode.SetSpacing(spacing)
 
       timeStampSec = "{:.3f}".format(frame * frameTimeMsec * 0.001)
       outputSequenceNode.SetDataNodeAtValue(outputNode, timeStampSec)
