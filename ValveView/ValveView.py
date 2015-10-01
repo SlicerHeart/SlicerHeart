@@ -16,7 +16,7 @@ class ValveView(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Valve View"
-    self.parent.categories = ["Heart"]
+    self.parent.categories = ["Cardiac"]
     self.parent.dependencies = []
     self.parent.contributors = ["Andras Lasso (PerkLab)"]
     self.parent.helpText = """

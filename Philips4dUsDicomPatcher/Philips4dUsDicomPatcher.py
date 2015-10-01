@@ -16,7 +16,7 @@ class Philips4dUsDicomPatcher(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Philips 4D US DICOM patcher"
-    self.parent.categories = ["Heart"]
+    self.parent.categories = ["Cardiac"]
     self.parent.dependencies = ["DICOM"]
     self.parent.contributors = ["Andras Lasso (PerkLab), Steve Pieper (Isomics)"]
     self.parent.helpText = """Fix invalid 4D US DICOM files so that they can be imported into Slicer."""
