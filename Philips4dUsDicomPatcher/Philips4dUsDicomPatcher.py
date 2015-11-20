@@ -55,16 +55,21 @@ class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
     self.outputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
     self.outputDirSelector.settingKey = 'Philips4dUsDicomPatcherOutputDir'
     parametersFormLayout.addRow("Output DICOM directory:", self.outputDirSelector)
-    
+
+    self.enableDicomOutputCheckBox = qt.QCheckBox()
+    self.enableDicomOutputCheckBox.checked = True
+    self.enableDicomOutputCheckBox.setToolTip("If checked, patched 4D US DICOM files will be saved as DICOM files")
+    parametersFormLayout.addRow("Export to DICOM files", self.enableDicomOutputCheckBox)
+
     self.anonymizeDicomCheckBox = qt.QCheckBox()
-    self.anonymizeDicomCheckBox.checked = 0
+    self.anonymizeDicomCheckBox.checked = False
     self.anonymizeDicomCheckBox.setToolTip("If checked, then patient identifiable information will be removed from the patched DICOM files")
-    parametersFormLayout.addRow("Anonymize DICOM files", self.anonymizeDicomCheckBox)
+    parametersFormLayout.addRow("     Anonymize DICOM files", self.anonymizeDicomCheckBox)
 
     self.enableNrrdOutputCheckBox = qt.QCheckBox()
-    self.enableNrrdOutputCheckBox.checked = 0
-    self.enableNrrdOutputCheckBox.setToolTip("If checked, 4D US DICOM files will be also saved as NRRD files")
-    parametersFormLayout.addRow("Export to NRRD files", self.enableNrrdOutputCheckBox) 
+    self.enableNrrdOutputCheckBox.checked = False
+    self.enableNrrdOutputCheckBox.setToolTip("If checked, 4D US DICOM files will be saved as NRRD files")
+    parametersFormLayout.addRow("Export to NRRD files", self.enableNrrdOutputCheckBox)
     
     #
     # Patch Button
@@ -95,7 +100,7 @@ class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
       self.inputDirSelector.addCurrentPathToHistory()
       self.outputDirSelector.addCurrentPathToHistory()
       self.statusLabel.plainText = ''
-      self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.anonymizeDicomCheckBox.checked, self.enableNrrdOutputCheckBox.checked)
+      self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.enableDicomOutputCheckBox.checked, self.anonymizeDicomCheckBox.checked, self.enableNrrdOutputCheckBox.checked)
     except Exception as e:
       self.addLog("Unexpected error: {0}".format(e.message))
       import traceback
@@ -162,7 +167,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     
     return success    
       
-  def patchDicomDir(self, inputDirPath, outputDirPath, anonymize = False, exportUltrasoundToNrrd = False):
+  def patchDicomDir(self, inputDirPath, outputDirPath, exportDicom = True, anonymizeDicom = False, exportUltrasoundToNrrd = False):
     """
     Since CTK (rightly) requires certain basic information [1] before it can import
     data files that purport to be dicom, this code patches the files in a directory
@@ -243,7 +248,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           numberOfSeriesInStudyMap[ds.StudyInstanceUID] = numberOfSeriesInStudyMap[ds.StudyInstanceUID] + 1
           ds.SeriesNumber = numberOfSeriesInStudyMap[ds.StudyInstanceUID]
 
-        if anonymize:
+        if anonymizeDicom:
 
           self.addLog('  Anonymizing...')
 
@@ -272,7 +277,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
 
         if inputDirPath==outputDirPath:
           (name, ext) = os.path.splitext(filePath)
-          patchedFilePath = name + ('-anon' if anonymize else '') + '-patched' + ext
+          patchedFilePath = name + ('-anon' if anonymizeDicom else '') + '-patched' + ext
           nrrdFilePath = name + '.nrrd'
         else:
           patchedFilePath = os.path.abspath(os.path.join(rootOutput,file))
@@ -291,6 +296,10 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
             self.addLog('  Created NRRD file: %s' % nrrdFilePath)
           else:
             self.addLog('  NRRD file save failed')
+
+        if not exportDicom:
+          os.remove(patchedFilePath)
+          self.addLog('  Deleted temporary DICOM file')
 
     self.addLog('DICOM patching completed.')
 
