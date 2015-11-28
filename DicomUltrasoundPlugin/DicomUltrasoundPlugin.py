@@ -160,7 +160,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       outputSequenceBrowserNode = slicer.modulemrml.vtkMRMLSequenceBrowserNode()
       outputSequenceBrowserNode.SetName(slicer.mrmlScene.GenerateUniqueName(outputSequenceNode.GetName()+' browser'))
       slicer.mrmlScene.AddNode(outputSequenceBrowserNode)
-      outputSequenceBrowserNode.SetAndObserveRootNodeID(outputSequenceNode.GetID())
+      outputSequenceBrowserNode.SetAndObserveMasterSequenceNodeID(outputSequenceNode.GetID())
       masterOutputNode = outputSequenceBrowserNode.GetVirtualOutputDataNode(outputSequenceNode)
     
       # Automatically select the volume to display
