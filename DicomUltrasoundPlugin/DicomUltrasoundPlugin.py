@@ -138,6 +138,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       imgReader.SetDataScalarTypeToUnsignedChar()
       imgReader.SetDataExtent(0,columns-1, 0,rows-1, 0,slices-1)
       imgReader.SetHeaderSize(headerSize+frame*slices*rows*columns)
+      imgReader.FileLowerLeftOn();
       imgReader.Update()
           
       outputNode = slicer.vtkMRMLScalarVolumeNode() 
