@@ -49,18 +49,31 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       return []
 
     filePath = files[0]
-    sopClassUID = slicer.dicomDatabase.fileValue(filePath,self.tags['sopClassUID'])
-
-    if sopClassUID != '1.2.840.113543.6.6.1.3.10002':
-      # currently only this one (bogus, non-standard) Philips 4D US format is supported
-      return []
-
+    
+    # currently only this one (bogus, non-standard) Philips 4D US format is supported
+    supportedSOPClassUID = '1.2.840.113543.6.6.1.3.10002'
+    
+    # Quick check of SOP class UID without parsing the file...
+    try:
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath,self.tags['sopClassUID'])
+      if sopClassUID != supportedSOPClassUID:
+        # Unsupported class
+        return []
+    except Exception as e:
+      # Quick check could not be completed (probably Slicer DICOM database is not initialized).
+      # No problem, we'll try to parse the file and check the SOP class UID then.
+      pass 
+    
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
       logging.debug("Failed to parse DICOM file: {0}".format(e.message))
       return [] 
 
+    if ds.SOPClassUID != supportedSOPClassUID:
+      # Unsupported class
+      return []
+      
     if ds.PhotometricInterpretation != 'MONOCHROME2':
       logging.warning('Warning: unsupported PhotometricInterpretation')
       loadable.confidence = .4
