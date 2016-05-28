@@ -140,7 +140,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     totalFileSize = os.path.getsize(filePath)
     headerSize = totalFileSize-pixelSize
     
-    outputSequenceNode = slicer.modulemrml.vtkMRMLSequenceNode()
+    outputSequenceNode = slicer.vtkMRMLSequenceNode()
     
     for frame in range(frames):
     
@@ -165,13 +165,13 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     slicer.mrmlScene.AddNode(outputSequenceNode)
 
     # Create storage node that allows saving node as nrrd
-    outputSequenceStorageNode = slicer.modulemrml.vtkMRMLVolumeSequenceStorageNode()
+    outputSequenceStorageNode = slicer.vtkMRMLVolumeSequenceStorageNode()
     slicer.mrmlScene.AddNode(outputSequenceStorageNode)
     outputSequenceNode.SetAndObserveStorageNodeID(outputSequenceStorageNode.GetID())
 
     if not hasattr(loadable, 'createBrowserNode') or loadable.createBrowserNode:
       # Add a browser node and show the volume in the slice viewer for user convenience
-      outputSequenceBrowserNode = slicer.modulemrml.vtkMRMLSequenceBrowserNode()
+      outputSequenceBrowserNode = slicer.vtkMRMLSequenceBrowserNode()
       outputSequenceBrowserNode.SetName(slicer.mrmlScene.GenerateUniqueName(outputSequenceNode.GetName()+' browser'))
       slicer.mrmlScene.AddNode(outputSequenceBrowserNode)
       outputSequenceBrowserNode.SetAndObserveMasterSequenceNodeID(outputSequenceNode.GetID())
