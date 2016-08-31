@@ -278,7 +278,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
         if inputDirPath==outputDirPath:
           (name, ext) = os.path.splitext(filePath)
           patchedFilePath = name + ('-anon' if anonymizeDicom else '') + '-patched' + ext
-          nrrdFilePath = name + '.nrrd'
+          nrrdFilePath = name + '.seq.nrrd'
         else:
           patchedFilePath = os.path.abspath(os.path.join(rootOutput,file))
           nrrdFilePath = os.path.splitext(patchedFilePath)[0]+'.nrrd'
