@@ -281,7 +281,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           nrrdFilePath = name + '.seq.nrrd'
         else:
           patchedFilePath = os.path.abspath(os.path.join(rootOutput,file))
-          nrrdFilePath = os.path.splitext(patchedFilePath)[0]+'.nrrd'
+          nrrdFilePath = os.path.splitext(patchedFilePath)[0]+'.seq.nrrd'
           if not os.path.exists(rootOutput):
             os.makedirs(rootOutput)
 
