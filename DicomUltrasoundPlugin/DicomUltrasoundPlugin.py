@@ -184,8 +184,6 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       appLogic.PropagateVolumeSelection()
       appLogic.FitSliceToAll()
 
-      outputSequenceBrowserNode.ScalarVolumeAutoWindowLevelOff() # for performance optimization
-
       # create Subject hierarchy nodes for the loaded series
       self.addSeriesInSubjectHierarchy(loadable, masterOutputNode)
 
