@@ -49,10 +49,10 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       return []
 
     filePath = files[0]
-    
+
     # currently only this one (bogus, non-standard) Philips 4D US format is supported
     supportedSOPClassUID = '1.2.840.113543.6.6.1.3.10002'
-    
+
     # Quick check of SOP class UID without parsing the file...
     try:
       sopClassUID = slicer.dicomDatabase.fileValue(filePath,self.tags['sopClassUID'])
@@ -62,18 +62,18 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
       # No problem, we'll try to parse the file and check the SOP class UID then.
-      pass 
-    
+      pass
+
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
       logging.debug("Failed to parse DICOM file: {0}".format(e.message))
-      return [] 
+      return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
       # Unsupported class
       return []
-      
+
     if ds.PhotometricInterpretation != 'MONOCHROME2':
       logging.warning('Warning: unsupported PhotometricInterpretation')
       loadable.confidence = .4
@@ -115,7 +115,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     """
     return self.loadAsSequence(loadable)
     #return self.loadAsMultiVolume(loadable)
-    
+
   def loadAsSequence(self,loadable):
     """Load the selection as an Ultrasound, store in a Sequence node
     """
@@ -139,11 +139,11 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     pixelSize = reduce(lambda x,y : x*y, pixelShape)
     totalFileSize = os.path.getsize(filePath)
     headerSize = totalFileSize-pixelSize
-    
+
     outputSequenceNode = slicer.vtkMRMLSequenceNode()
-    
+
     for frame in range(frames):
-    
+
       imgReader = vtk.vtkImageReader()
       imgReader.SetFileDimensionality(3)
       imgReader.SetFileName(filePath);
@@ -153,8 +153,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       imgReader.SetHeaderSize(headerSize+frame*slices*rows*columns)
       imgReader.FileLowerLeftOn();
       imgReader.Update()
-          
-      outputNode = slicer.vtkMRMLScalarVolumeNode() 
+
+      outputNode = slicer.vtkMRMLScalarVolumeNode()
       outputNode.SetAndObserveImageData(imgReader.GetOutput())
       outputNode.SetSpacing(spacing)
 
@@ -175,20 +175,21 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       outputSequenceBrowserNode.SetName(slicer.mrmlScene.GenerateUniqueName(outputSequenceNode.GetName()+' browser'))
       slicer.mrmlScene.AddNode(outputSequenceBrowserNode)
       outputSequenceBrowserNode.SetAndObserveMasterSequenceNodeID(outputSequenceNode.GetID())
-      masterOutputNode = outputSequenceBrowserNode.GetVirtualOutputDataNode(outputSequenceNode)
-    
+      masterOutputNode = outputSequenceBrowserNode.GetProxyNode(outputSequenceNode)
+
       # Automatically select the volume to display
       appLogic = slicer.app.applicationLogic()
       selNode = appLogic.GetSelectionNode()
       selNode.SetReferenceActiveVolumeID(masterOutputNode.GetID())
       appLogic.PropagateVolumeSelection()
       appLogic.FitSliceToAll()
+      slicer.modules.sequencebrowser.setToolBarActiveBrowserNode(outputSequenceBrowserNode)
 
       # create Subject hierarchy nodes for the loaded series
       self.addSeriesInSubjectHierarchy(loadable, masterOutputNode)
 
     return outputSequenceNode
-    
+
   def loadAsMultiVolume(self,loadable):
     """Load the selection as an Ultrasound, store in MultiVolume
     """
