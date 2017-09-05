@@ -2,7 +2,7 @@
 
   Copyright (c) Laboratory for Percutaneous Surgery (PerkLab)
   Queen's University, Kingston, ON, Canada. All Rights Reserved.
- 
+
   See COPYRIGHT.txt
   or http://www.slicer.org/copyright/copyright.txt for details.
 
@@ -22,15 +22,14 @@
 // VTK includes
 #include <vtkDoubleArray.h>
 #include <vtkImageData.h>
-//#include <vtkImageDataGeometryFilter.h>
 #include <vtkImageShiftScale.h>
 #include <vtkMatrix4x4.h>
 #include <vtkNew.h>
 #include <vtkObjectFactory.h>
 #include <vtkPointData.h>
-//#include <vtkProbeFilter.h>
 #include <vtkResampleToImage.h>
 #include <vtkStructuredGrid.h>
+#include <vtkStructuredGridWriter.h>
 #include <vtkUnsignedCharArray.h>
 
 // MRML includes
@@ -102,6 +101,14 @@ void vtkSlicerKretzFileReaderLogic::PrintSelf(ostream& os, vtkIndent indent)
   this->Superclass::PrintSelf(os, indent);
 }
 
+void writeTestOutput(const char* filename, vtkStructuredGrid* dataset)
+{
+  vtkNew<vtkStructuredGridWriter> writer;
+  writer->SetFileName(filename);
+  writer->SetInputData(dataset);
+  writer->Write();
+}
+
 //----------------------------------------------------------------------------
 vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/)
 {
@@ -125,7 +132,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
   vtkMRMLScalarVolumeNode* loadedVolumeNode = NULL;
   int volumeDimensions_Spherical[3] = { 0 };
-  
+
   std::vector<double> thetaAnglesDeg;
   std::vector<double> phiAnglesDeg;
   double startRadiusMm = 0;
@@ -182,7 +189,6 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
     {
       // Depth start/end radius in cm from a displayed string, for example " 3.9/11.2cm\0"
       // TODO: this was the only tag where we could find start/end radius
-      // We assume uniform spacing but it is not necessarily true.
       this->ReadKretzItemData(readFileStream, item);
       // Make sure the string is zero-terminated
       item.ItemData.push_back(0);
@@ -251,7 +257,6 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
         // TODO:
         double probeRadiusMm = 20.0; // 40.0;
-        double firstAxisScale = 1.0; // 0.833;
 
         double radialSpacingMm = (endRadiusMm-startRadiusMm)/double(numi-1);
         double radialSpacingStartMm = startRadiusMm + probeRadiusMm;
@@ -268,9 +273,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
             {
               double r = radialSpacingStartMm + i_Spherical * radialSpacingMm;
               points_Cartesian->InsertNextPoint(
-                r * sin(theta) * cos(phi) * firstAxisScale,
+                r * sin(theta) * cos(phi),
                 r * sin(theta) * sin(phi),
-                r * cos(theta));               
+                r * cos(theta));
             }
           }
         }
@@ -284,12 +289,16 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         voxelValues->SetNumberOfValues(numberOfPoints);
         if (!this->ReadKretzItemData(readFileStream, item, (char*)voxelValues->GetPointer(0)))
         {
-          // corrupted file
-          break;
+          vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
+            << "' failed to read voxel data");
+          return NULL;
         }
         voxelValues->SetName("VoxelIntensity");
         pointData->AddArray(voxelValues.GetPointer());
         structuredGrid->GetPointData()->SetActiveAttribute("VoxelIntensity", vtkDataSetAttributes::SCALARS);
+
+        // Writing of unstructured grid can be enabled for testing by uncommenting the following line
+        //writeTestOutput("C:\\tmp\\us.vtk", structuredGrid.GetPointer());
 
         double* bounds_Cartesian = structuredGrid->GetBounds();
 
@@ -306,7 +315,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         }
 
         int volumeDimensions_Spherical[3] =
-        { 
+        {
           int(ceil((bounds_Cartesian[1] - bounds_Cartesian[0]) / outputSpacing[0])),
           int(ceil((bounds_Cartesian[3] - bounds_Cartesian[2]) / outputSpacing[1])),
           int(ceil((bounds_Cartesian[5] - bounds_Cartesian[4]) / outputSpacing[2]))
@@ -323,7 +332,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         volumeNode->SetOrigin(volume_Cartesian->GetOrigin());
         volume_Cartesian->SetSpacing(1.0, 1.0, 1.0);
         volume_Cartesian->SetOrigin(0.0, 0.0, 0.0);
-        
+
         volumeNode->SetAndObserveImageData(volume_Cartesian);
       }
       else
@@ -335,8 +344,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         volume_Spherical->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
         if (!this->ReadKretzItemData(readFileStream, item, (char*)volume_Spherical->GetScalarPointer()))
         {
-          // corrupted file
-          break;
+          vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
+            << "' failed to read voxel data");
+          return NULL;
         }
         volumeNode->SetAndObserveImageData(volume_Spherical.GetPointer());
       }
