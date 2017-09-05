@@ -22,6 +22,7 @@ include(${Slicer_USE_FILE})
 add_subdirectory(ValveView)
 add_subdirectory(Philips4dUsDicomPatcher)
 add_subdirectory(DicomUltrasoundPlugin)
+add_subdirectory(KretzFileReader)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
