@@ -88,7 +88,7 @@ qSlicerIO::IOFileType qSlicerKretzFileReaderPlugin::fileType()const
 //-----------------------------------------------------------------------------
 QStringList qSlicerKretzFileReaderPlugin::extensions()const
 {
-  return QStringList() << "GE Kretz ultrasound volume (*.v00)";
+  return QStringList() << "GE Kretz ultrasound volume (*.vol *.v00 *.v01 *.v02 *.v03 *.v04 *.v05)";
 }
 
 //-----------------------------------------------------------------------------

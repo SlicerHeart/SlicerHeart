@@ -168,22 +168,39 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       name = '{0} {1}'.format(name, ds.SeriesDescription)
     if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
       name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+    name = name.strip() # remove leading and trailing spaces, if any
 
     loadable = DICOMLoadable()
     loadable.files = [filePath]
-    loadable.name = name.strip()  # remove leading and trailing spaces, if any
+    loadable.name = name
     loadable.tooltip = "GE Kretz 3D Ultrasound"
     loadable.warning = "Importing of this file format is experimental: images may be distorted, size measurements may be inaccurate."
     loadable.selected = True
     loadable.confidence = confidence
 
-    return [loadable]
+    loadableHighRes1 = DICOMLoadable()
+    loadableHighRes1.files = loadable.files
+    loadableHighRes1.name = loadable.name + " (HD)"
+    loadableHighRes1.tooltip = loadable.tooltip + " (high-resolution)"
+    loadableHighRes1.warning = loadable.warning
+    loadableHighRes1.selected = False
+    loadableHighRes1.confidence = confidence
+
+    loadableHighRes2 = DICOMLoadable()
+    loadableHighRes2.files = loadable.files
+    loadableHighRes2.name = loadable.name + " (XHD)"
+    loadableHighRes2.tooltip = loadable.tooltip + " (super-high-resolution)"
+    loadableHighRes2.warning = loadable.warning
+    loadableHighRes2.selected = False
+    loadableHighRes2.confidence = confidence
+
+    return [loadable, loadableHighRes1, loadableHighRes2]
 
 
   def load(self,loadable):
     """Load the selection as an Ultrasound
     """
-    if loadable.tooltip == "GE Kretz 3D Ultrasound":
+    if "GE Kretz 3D Ultrasound" in loadable.tooltip:
       return self.loadKretzUS(loadable)
     else:
       return self.loadPhilips4DUSAsSequence(loadable)
@@ -199,7 +216,19 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     kretzUsDataItem = ds.get(kretzUsDataTag)
     volFileOffset = kretzUsDataItem.file_tell # add 12 bytes for tag, VR, and length,
 
-    outputVolume = logic.LoadKretzFile(loadable.files[0], nodeName, True, None, volFileOffset)
+    # This can be a long operation - indicate it to the user
+    qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+
+    outputSpacing = None
+    if "(high-resolution)" in loadable.tooltip:
+      outputSpacing = [0.667, 0.667, 0.667]
+    elif "(super-high-resolution)" in loadable.tooltip:
+      outputSpacing = [0.333, 0.333, 0.333]
+
+    outputVolume = logic.LoadKretzFile(loadable.files[0], nodeName, True, outputSpacing, volFileOffset)
+    
+    qt.QApplication.restoreOverrideCursor()
 
     # Show in slice views
     selectionNode = slicer.app.applicationLogic().GetSelectionNode()

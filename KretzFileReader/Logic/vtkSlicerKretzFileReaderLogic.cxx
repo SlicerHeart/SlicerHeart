@@ -141,8 +141,10 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
   std::vector<double> thetaAnglesDeg;
   std::vector<double> phiAnglesDeg;
-  double startRadiusMm = 0;
-  double endRadiusMm = 0;
+  double startRadiusMm = 0.0;
+  double endRadiusMm = 0.0;
+  double factor1 = 0.0;
+  double factor2 = 0.0;
 
   while (!readFileStream.eof() && !readFileStream.fail())
   {
@@ -179,6 +181,16 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
           << "' invalid theta angles");
         return NULL;
       }
+    }
+    else if (item == KretzItem(0xC200, 0x0001))
+    {
+      this->ReadKretzItemData(readFileStream, item);
+      factor1 = item.GetData<vtkTypeFloat64>(0);
+    }
+    else if (item == KretzItem(0xC200, 0x0002))
+    {
+      this->ReadKretzItemData(readFileStream, item);
+      factor2 = item.GetData<vtkTypeFloat64>(0);
     }
     else if (item == KretzItem(0xC300, 0x0001))
     {
@@ -263,11 +275,15 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
           return NULL;
         }
 
-        // TODO:
-        double probeRadiusMm = 40.0;
+        // TODO: figure out how to get probe start radius properly
+        // from factor1 and factor2
+        double probeRadiusMm = 40;
+
+        startRadiusMm += probeRadiusMm;
+        endRadiusMm += probeRadiusMm;
 
         double radialSpacingMm = (endRadiusMm-startRadiusMm)/double(numi-1);
-        double radialSpacingStartMm = startRadiusMm + probeRadiusMm;
+        double radialSpacingStartMm = startRadiusMm;
 
         points_Cartesian->Allocate(numberOfPoints);
         const double transducerCenterPosition_Spherical[3] = { 0, double(numj) / 2.0, double(numk) / 2.0 };
@@ -338,6 +354,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         // Set image data in volume node
         volumeNode->SetSpacing(volume_Cartesian->GetSpacing());
         volumeNode->SetOrigin(volume_Cartesian->GetOrigin());
+        volumeNode->SetIToRASDirection( 1,  0,  0);
+        volumeNode->SetJToRASDirection( 0, -1,  0);
+        volumeNode->SetKToRASDirection( 0,  0,  1);
         volume_Cartesian->SetSpacing(1.0, 1.0, 1.0);
         volume_Cartesian->SetOrigin(0.0, 0.0, 0.0);
 
