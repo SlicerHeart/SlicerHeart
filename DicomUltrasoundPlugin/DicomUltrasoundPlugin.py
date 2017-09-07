@@ -50,12 +50,18 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     filePath = files[0]
 
+    loadables.extend(self.examinePhilips4DUS(filePath))
+    loadables.extend(self.examineGeKretzUS(filePath))
+
+    return loadables
+
+  def examinePhilips4DUS(self, filePath):
     # currently only this one (bogus, non-standard) Philips 4D US format is supported
     supportedSOPClassUID = '1.2.840.113543.6.6.1.3.10002'
 
     # Quick check of SOP class UID without parsing the file...
     try:
-      sopClassUID = slicer.dicomDatabase.fileValue(filePath,self.tags['sopClassUID'])
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if sopClassUID != supportedSOPClassUID:
         # Unsupported class
         return []
@@ -74,49 +80,135 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # Unsupported class
       return []
 
+    confidence = 0.9
+
     if ds.PhotometricInterpretation != 'MONOCHROME2':
       logging.warning('Warning: unsupported PhotometricInterpretation')
-      loadable.confidence = .4
+      confidence = .4
 
     if ds.BitsAllocated != 8 or ds.BitsStored != 8 or ds.HighBit != 7:
       logging.warning('Warning: Bad scalar type (not unsigned byte)')
-      loadable.confidence = .4
+      confidence = .4
 
     if ds.PhysicalUnitsXDirection != 3 or ds.PhysicalUnitsYDirection != 3:
       logging.warning('Warning: Units not in centimeters')
-      loadable.confidence = .4
+      confidence = .4
 
     if ds.SamplesPerPixel != 1:
       logging.warning('Warning: multiple samples per pixel')
-      loadable.confidence = .4
+      confidence = .4
 
     name = ''
-    if hasattr(ds,'SeriesNumber') and ds.SeriesNumber:
+    if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
       name = '{0}:'.format(ds.SeriesNumber)
-    if hasattr(ds,'Modality') and ds.Modality:
+    if hasattr(ds, 'Modality') and ds.Modality:
       name = '{0} {1}'.format(name, ds.Modality)
-    if hasattr(ds,'SeriesDescription') and ds.SeriesDescription:
+    if hasattr(ds, 'SeriesDescription') and ds.SeriesDescription:
       name = '{0} {1}'.format(name, ds.SeriesDescription)
-    if hasattr(ds,'InstanceNumber') and ds.InstanceNumber:
+    if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
       name = '{0} [{1}]'.format(name, ds.InstanceNumber)
 
     loadable = DICOMLoadable()
-    loadable.files = files
-    loadable.name = name.strip() # remove leading and trailing spaces, if any
+    loadable.files = [filePath]
+    loadable.name = name.strip()  # remove leading and trailing spaces, if any
     loadable.tooltip = "Philips 4D Ultrasound"
     loadable.selected = True
-    loadable.confidence = 1.
-    loadables.append(loadable)
+    loadable.confidence = confidence
 
-    return loadables
+    return [loadable]
+
+  def examineGeKretzUS(self, filePath):
+    # E Kretz uses 'Ultrasound Image Storage' SOP class UID
+    supportedSOPClassUID = '1.2.840.10008.5.1.4.1.1.6.1'
+
+    # Quick check of SOP class UID without parsing the file...
+    try:
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
+      if sopClassUID != supportedSOPClassUID:
+        # Unsupported class
+        return []
+    except Exception as e:
+      # Quick check could not be completed (probably Slicer DICOM database is not initialized).
+      # No problem, we'll try to parse the file and check the SOP class UID then.
+      pass
+
+    try:
+      ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
+    except Exception as e:
+      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      return []
+
+    if ds.SOPClassUID != supportedSOPClassUID:
+      # Unsupported class
+      return []
+
+    confidence = 0.9
+
+    if ds.Manufacturer != 'Kretztechnik':
+      logging.warning('Warning: unsupported manufacturer')
+      loadable.confidence = .4
+
+    # Check if these expected DICOM tags are available:
+    # (7fe1,0011) LO [KRETZ_US]                               #   8, 1 PrivateCreator
+    # (7fe1,1101) OB 4b\52\45\54\5a\46\49\4c\45\20\31\2e\30\20\20\20\00\00\01\00\02\00... # 3471038, 1 Unknown Tag & Data
+    kretzUsTag = dicom.tag.Tag('0x7fe1', '0x11')
+    kretzUsDataTag = dicom.tag.Tag('0x7fe1', '0x1101')
+
+    if kretzUsTag not in ds.keys():
+      return []
+    if kretzUsDataTag not in ds.keys():
+      return []
+
+    name = ''
+    if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
+      name = '{0}:'.format(ds.SeriesNumber)
+    if hasattr(ds, 'Modality') and ds.Modality:
+      name = '{0} {1}'.format(name, ds.Modality)
+    if hasattr(ds, 'SeriesDescription') and ds.SeriesDescription:
+      name = '{0} {1}'.format(name, ds.SeriesDescription)
+    if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
+      name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+
+    loadable = DICOMLoadable()
+    loadable.files = [filePath]
+    loadable.name = name.strip()  # remove leading and trailing spaces, if any
+    loadable.tooltip = "GE Kretz 3D Ultrasound"
+    loadable.warning = "Importing of this file format is experimental: images may be distorted, size measurements may be inaccurate."
+    loadable.selected = True
+    loadable.confidence = confidence
+
+    return [loadable]
+
 
   def load(self,loadable):
     """Load the selection as an Ultrasound
     """
-    return self.loadAsSequence(loadable)
-    #return self.loadAsMultiVolume(loadable)
+    if loadable.tooltip == "GE Kretz 3D Ultrasound":
+      return self.loadKretzUS(loadable)
+    else:
+      return self.loadPhilips4DUSAsSequence(loadable)
+      #return self.loadPhilips4DUSAsMultiVolume(loadable)
 
-  def loadAsSequence(self,loadable):
+  def loadKretzUS(self, loadable):
+    import vtkSlicerKretzFileReaderLogicPython
+    logic = slicer.modules.kretzfilereader.logic()
+    nodeName = slicer.mrmlScene.GenerateUniqueName(loadable.name)
+
+    ds = dicom.read_file(loadable.files[0], defer_size=30)  # use defer_size to not load large fields
+    kretzUsDataTag = dicom.tag.Tag('0x7fe1', '0x1101')
+    kretzUsDataItem = ds.get(kretzUsDataTag)
+    volFileOffset = kretzUsDataItem.file_tell # add 12 bytes for tag, VR, and length,
+
+    outputVolume = logic.LoadKretzFile(loadable.files[0], nodeName, True, None, volFileOffset)
+
+    # Show in slice views
+    selectionNode = slicer.app.applicationLogic().GetSelectionNode()
+    selectionNode.SetReferenceActiveVolumeID(outputVolume.GetID())
+    slicer.app.applicationLogic().PropagateVolumeSelection(1)
+
+    return outputVolume
+
+  def loadPhilips4DUSAsSequence(self,loadable):
     """Load the selection as an Ultrasound, store in a Sequence node
     """
 
@@ -190,7 +282,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     return outputSequenceNode
 
-  def loadAsMultiVolume(self,loadable):
+  def loadPhilips4DUSAsMultiVolume(self,loadable):
     """Load the selection as an Ultrasound, store in MultiVolume
     """
 
@@ -271,13 +363,13 @@ class DicomUltrasoundPlugin:
   def __init__(self, parent):
     parent.title = "DICOM Ultrasound Import Plugin"
     parent.categories = ["Developer Tools.DICOM Plugins"]
-    parent.contributors = ["Steve Pieper, Isomics Inc."]
+    parent.contributors = ["Andras Lasso (PerkLab), Steve Pieper (Isomics Inc.)"]
     parent.helpText = """
     Plugin to the DICOM Module to parse and load Ultrasound data from DICOM files.
-    No module interface here, only in the DICOM module
+    No module interface here, only in the DICOM module.
     """
     parent.acknowledgementText = """
-    This DICOM Plugin was developed by Steve Pieper, Isomics, Inc.
+    Philips 4D reader was developed by Steve Pieper, Isomics, Inc.
     based on MultiVolume example code by Andrey Fedorov, BWH.
     and was partially funded by NIH grants U01CA151261 and 3P41RR013218.
     """

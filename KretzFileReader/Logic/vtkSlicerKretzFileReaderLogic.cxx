@@ -50,6 +50,8 @@
 #include <cctype>
 #include <functional>
 
+#include <ctype.h> // For isspace
+
 //----------------------------------------------------------------------------
 vtkStandardNewMacro(vtkSlicerKretzFileReaderLogic);
 
@@ -110,10 +112,14 @@ void writeTestOutput(const char* filename, vtkStructuredGrid* dataset)
 }
 
 //----------------------------------------------------------------------------
-vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/)
+vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/, unsigned long int fileOffset /*=0*/)
 {
   ifstream readFileStream;
   readFileStream.open(filename, std::ios::binary);
+  
+  // Useful when the ultrasound file is embedded into a DICOM file
+  readFileStream.seekg(fileOffset);
+
   if (readFileStream.fail())
   {
     vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: failed to open file '" << (filename ? filename : "(null)") << "'");
@@ -194,7 +200,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
       item.ItemData.push_back(0);
       std::string depthString = (const char*)(&item.ItemData[0]);
       // remove all whitespaces from the string
-      depthString.erase(std::remove_if(depthString.begin(), depthString.end(), std::isspace), depthString.end());
+      depthString.erase(std::remove_if(depthString.begin(), depthString.end(), isspace), depthString.end());
 
       std::size_t unitFoundIndex = depthString.rfind("cm");
       if (unitFoundIndex == std::string::npos)
@@ -208,14 +214,16 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
       std::size_t sepIndex = depthString.find_first_of('/');
       if (sepIndex == std::string::npos)
       {
-        vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-          << "' depth string expected to contain two numbers: '" << depthString << "'");
-        return NULL;
+        startRadiusMm = 0;
+        endRadiusMm = atof(depthString.c_str()) * 10.0; // * 10 to convert from cm to mm
       }
-      std::string startDepthString = depthString.substr(0, sepIndex);
-      std::string endDepthString = depthString.substr(sepIndex + 1, depthString.size() - sepIndex - 1);
-      startRadiusMm = atof(startDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
-      endRadiusMm = atof(endDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
+      else
+      {
+        std::string startDepthString = depthString.substr(0, sepIndex);
+        std::string endDepthString = depthString.substr(sepIndex + 1, depthString.size() - sepIndex - 1);
+        startRadiusMm = atof(startDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
+        endRadiusMm = atof(endDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
+      }
     }
     else if (item == KretzItem(0xD000, 0x0001))
     {
@@ -256,7 +264,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         }
 
         // TODO:
-        double probeRadiusMm = 20.0; // 40.0;
+        double probeRadiusMm = 40.0;
 
         double radialSpacingMm = (endRadiusMm-startRadiusMm)/double(numi-1);
         double radialSpacingStartMm = startRadiusMm + probeRadiusMm;
@@ -316,9 +324,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
         int volumeDimensions_Spherical[3] =
         {
-          int(ceil((bounds_Cartesian[1] - bounds_Cartesian[0]) / outputSpacing[0])),
-          int(ceil((bounds_Cartesian[3] - bounds_Cartesian[2]) / outputSpacing[1])),
-          int(ceil((bounds_Cartesian[5] - bounds_Cartesian[4]) / outputSpacing[2]))
+          int(ceil((bounds_Cartesian[1] - bounds_Cartesian[0]) / volumeSpacing_Cartesian[0])),
+          int(ceil((bounds_Cartesian[3] - bounds_Cartesian[2]) / volumeSpacing_Cartesian[1])),
+          int(ceil((bounds_Cartesian[5] - bounds_Cartesian[4]) / volumeSpacing_Cartesian[2]))
         };
 
         vtkNew<vtkResampleToImage> imageResampler;
