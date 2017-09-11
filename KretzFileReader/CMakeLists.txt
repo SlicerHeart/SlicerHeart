@@ -1,12 +1,3 @@
-cmake_minimum_required(VERSION 2.8.9)
-
-# Fixing policy warning message, see https://www.assembla.com/spaces/slicerrt/tickets/484
-# Not sure why this file gives this warning message, as it is the same as all the other modules,
-# and INTERFACE_LINK_LIBRARIES is not used anywhere
-if(POLICY CMP0022)
-  cmake_policy(SET CMP0022 OLD)
-endif()
-
 #-----------------------------------------------------------------------------
 set(MODULE_NAME KretzFileReader)
 set(MODULE_TITLE "Kretz File Reader")
