@@ -50,6 +50,8 @@
 #include <cctype>
 #include <functional>
 
+#include <ctype.h> // For isspace
+
 //----------------------------------------------------------------------------
 vtkStandardNewMacro(vtkSlicerKretzFileReaderLogic);
 
@@ -110,10 +112,14 @@ void writeTestOutput(const char* filename, vtkStructuredGrid* dataset)
 }
 
 //----------------------------------------------------------------------------
-vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/)
+vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/, unsigned long int fileOffset /*=0*/)
 {
   ifstream readFileStream;
   readFileStream.open(filename, std::ios::binary);
+  
+  // Useful when the ultrasound file is embedded into a DICOM file
+  readFileStream.seekg(fileOffset);
+
   if (readFileStream.fail())
   {
     vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: failed to open file '" << (filename ? filename : "(null)") << "'");
@@ -135,8 +141,10 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
   std::vector<double> thetaAnglesDeg;
   std::vector<double> phiAnglesDeg;
-  double startRadiusMm = 0;
-  double endRadiusMm = 0;
+  double startRadiusMm = 0.0;
+  double endRadiusMm = 0.0;
+  double factor1 = 0.0;
+  double factor2 = 0.0;
 
   while (!readFileStream.eof() && !readFileStream.fail())
   {
@@ -174,6 +182,16 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         return NULL;
       }
     }
+    else if (item == KretzItem(0xC200, 0x0001))
+    {
+      this->ReadKretzItemData(readFileStream, item);
+      factor1 = item.GetData<vtkTypeFloat64>(0);
+    }
+    else if (item == KretzItem(0xC200, 0x0002))
+    {
+      this->ReadKretzItemData(readFileStream, item);
+      factor2 = item.GetData<vtkTypeFloat64>(0);
+    }
     else if (item == KretzItem(0xC300, 0x0001))
     {
       // Phi angles
@@ -194,7 +212,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
       item.ItemData.push_back(0);
       std::string depthString = (const char*)(&item.ItemData[0]);
       // remove all whitespaces from the string
-      depthString.erase(std::remove_if(depthString.begin(), depthString.end(), std::isspace), depthString.end());
+      depthString.erase(std::remove_if(depthString.begin(), depthString.end(), isspace), depthString.end());
 
       std::size_t unitFoundIndex = depthString.rfind("cm");
       if (unitFoundIndex == std::string::npos)
@@ -208,14 +226,16 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
       std::size_t sepIndex = depthString.find_first_of('/');
       if (sepIndex == std::string::npos)
       {
-        vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-          << "' depth string expected to contain two numbers: '" << depthString << "'");
-        return NULL;
+        startRadiusMm = 0;
+        endRadiusMm = atof(depthString.c_str()) * 10.0; // * 10 to convert from cm to mm
       }
-      std::string startDepthString = depthString.substr(0, sepIndex);
-      std::string endDepthString = depthString.substr(sepIndex + 1, depthString.size() - sepIndex - 1);
-      startRadiusMm = atof(startDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
-      endRadiusMm = atof(endDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
+      else
+      {
+        std::string startDepthString = depthString.substr(0, sepIndex);
+        std::string endDepthString = depthString.substr(sepIndex + 1, depthString.size() - sepIndex - 1);
+        startRadiusMm = atof(startDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
+        endRadiusMm = atof(endDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
+      }
     }
     else if (item == KretzItem(0xD000, 0x0001))
     {
@@ -255,11 +275,15 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
           return NULL;
         }
 
-        // TODO:
-        double probeRadiusMm = 20.0; // 40.0;
+        // TODO: figure out how to get probe start radius properly
+        // from factor1 and factor2
+        double probeRadiusMm = 40;
+
+        startRadiusMm += probeRadiusMm;
+        endRadiusMm += probeRadiusMm;
 
         double radialSpacingMm = (endRadiusMm-startRadiusMm)/double(numi-1);
-        double radialSpacingStartMm = startRadiusMm + probeRadiusMm;
+        double radialSpacingStartMm = startRadiusMm;
 
         points_Cartesian->Allocate(numberOfPoints);
         const double transducerCenterPosition_Spherical[3] = { 0, double(numj) / 2.0, double(numk) / 2.0 };
@@ -316,9 +340,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
         int volumeDimensions_Spherical[3] =
         {
-          int(ceil((bounds_Cartesian[1] - bounds_Cartesian[0]) / outputSpacing[0])),
-          int(ceil((bounds_Cartesian[3] - bounds_Cartesian[2]) / outputSpacing[1])),
-          int(ceil((bounds_Cartesian[5] - bounds_Cartesian[4]) / outputSpacing[2]))
+          int(ceil((bounds_Cartesian[1] - bounds_Cartesian[0]) / volumeSpacing_Cartesian[0])),
+          int(ceil((bounds_Cartesian[3] - bounds_Cartesian[2]) / volumeSpacing_Cartesian[1])),
+          int(ceil((bounds_Cartesian[5] - bounds_Cartesian[4]) / volumeSpacing_Cartesian[2]))
         };
 
         vtkNew<vtkResampleToImage> imageResampler;
@@ -330,6 +354,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         // Set image data in volume node
         volumeNode->SetSpacing(volume_Cartesian->GetSpacing());
         volumeNode->SetOrigin(volume_Cartesian->GetOrigin());
+        volumeNode->SetIToRASDirection( 1,  0,  0);
+        volumeNode->SetJToRASDirection( 0, -1,  0);
+        volumeNode->SetKToRASDirection( 0,  0,  1);
         volume_Cartesian->SetSpacing(1.0, 1.0, 1.0);
         volume_Cartesian->SetOrigin(0.0, 0.0, 0.0);
 
