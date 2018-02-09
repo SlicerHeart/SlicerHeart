@@ -16,9 +16,6 @@
 
 ==============================================================================*/
 
-// Qt includes
-#include <QtPlugin>
-
 // SlicerQt includes
 #include <qSlicerCoreApplication.h>
 #include <qSlicerIOManager.h>
@@ -34,7 +31,11 @@
 
 
 //-----------------------------------------------------------------------------
+
+#if (QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
+#include <QtPlugin>
 Q_EXPORT_PLUGIN2(qSlicerKretzFileReaderModule, qSlicerKretzFileReaderModule);
+#endif
 
 //-----------------------------------------------------------------------------
 /// \ingroup SlicerRt_QtModules_KretzFileReader

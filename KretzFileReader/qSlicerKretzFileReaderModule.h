@@ -32,6 +32,9 @@ class Q_SLICER_KRETZFILEREADER_EXPORT qSlicerKretzFileReaderModule:
   public qSlicerLoadableModule
 {
   Q_OBJECT
+#ifdef Slicer_HAVE_QT5
+  Q_PLUGIN_METADATA(IID "org.slicer.modules.loadable.qSlicerLoadableModule/1.0");
+#endif
   Q_INTERFACES(qSlicerLoadableModule);
 
 public:
