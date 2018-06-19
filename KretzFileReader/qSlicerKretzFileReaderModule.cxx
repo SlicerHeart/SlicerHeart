@@ -76,8 +76,9 @@ QString qSlicerKretzFileReaderModule::helpText()const
 //-----------------------------------------------------------------------------
 QString qSlicerKretzFileReaderModule::acknowledgementText()const
 {
+  // must not be empty
   QString acknowledgement = QString(
-    "");
+    "The module was originally developed by Andras Lasso (  Queen's)");
   return acknowledgement;
 }
 
@@ -92,7 +93,7 @@ QStringList qSlicerKretzFileReaderModule::contributors()const
 //-----------------------------------------------------------------------------
 QStringList qSlicerKretzFileReaderModule::categories()const
 {
-  return QStringList() << "";
+  return QStringList() << "Cardiac";
 }
 
 //-----------------------------------------------------------------------------
