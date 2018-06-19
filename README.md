@@ -21,3 +21,7 @@ Load data from .vol or .v00 file:
 - Drag-and-drop the file to the Slicer application window
 - Click OK to load the data
 - Wait for loading to complete (may take a few minutes)
+
+# Module documentation
+
+- [Philips4dUsDicomPatcher](ModulePhilips4dUsDicomPatcher.md)

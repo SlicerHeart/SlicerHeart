@@ -219,6 +219,10 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           self.addLog('  Not DICOM file. Skipped.')
           continue
 
+        if not hasattr(ds,'SOPClassUID'):
+          self.addLog('  No SOPClassUID tag found. Skipped.')
+          continue
+          
         if ds.SOPClassUID != '1.2.840.113543.6.6.1.3.10002':
           self.addLog('  Not Philips 4D ultrasound DICOM file. Skipped.')
           continue
