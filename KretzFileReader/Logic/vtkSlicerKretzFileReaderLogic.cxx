@@ -313,6 +313,14 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         imageResampler->Update();
         vtkImageData* volume_Cartesian = imageResampler->GetOutput();
 
+        if (volume_Cartesian
+          && volume_Cartesian->GetPointData()
+          && volume_Cartesian->GetPointData()->GetArray("vtkValidPointMask"))
+        {
+          // vtkValidPointMask would trigger error messages, which would slow down slice browsing
+          volume_Cartesian->GetPointData()->RemoveArray("vtkValidPointMask");
+        }
+
         // Set image data in volume node
         volumeNode->SetSpacing(volume_Cartesian->GetSpacing());
         volumeNode->SetOrigin(volume_Cartesian->GetOrigin());
