@@ -139,12 +139,12 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
   vtkMRMLScalarVolumeNode* loadedVolumeNode = NULL;
   int volumeDimensions_Spherical[3] = { 0 };
 
-  std::vector<double> thetaAnglesDeg;
-  std::vector<double> phiAnglesDeg;
-  double startRadiusMm = 0.0;
-  double endRadiusMm = 0.0;
-  double factor1 = 0.0;
-  double factor2 = 0.0;
+  std::vector<double> thetaAnglesRad;
+  std::vector<double> phiAnglesRad;
+  double offset1 = 0.0;
+  double offset2 = 0.0;
+  double resolution = 1.0;
+  bool foundVoxelData = false;
 
   while (!readFileStream.eof() && !readFileStream.fail())
   {
@@ -171,11 +171,17 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
       this->ReadKretzItemData(readFileStream, item);
       volumeDimensions_Spherical[2] = item.GetData<vtkTypeUInt16>(0);
     }
+    else if (item == KretzItem(0xC100, 0x0001))
+    {
+      // Radial resolution
+      this->ReadKretzItemData(readFileStream, item);
+      resolution = item.GetData<double>(0) * 1000.0;
+    }
     else if (item == KretzItem(0xC300, 0x0002))
     {
       // Theta angles
-      thetaAnglesDeg.resize(int(item.ItemDataSize / sizeof(double)));
-      if (!this->ReadKretzItemData(readFileStream, item, (char*)(&thetaAnglesDeg[0])))
+      thetaAnglesRad.resize(int(item.ItemDataSize / sizeof(double)));
+      if (!this->ReadKretzItemData(readFileStream, item, (char*)(&thetaAnglesRad[0])))
       {
         vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
           << "' invalid theta angles");
@@ -185,61 +191,28 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
     else if (item == KretzItem(0xC200, 0x0001))
     {
       this->ReadKretzItemData(readFileStream, item);
-      factor1 = item.GetData<vtkTypeFloat64>(0);
+      offset1 = item.GetData<vtkTypeFloat64>(0);
     }
     else if (item == KretzItem(0xC200, 0x0002))
     {
       this->ReadKretzItemData(readFileStream, item);
-      factor2 = item.GetData<vtkTypeFloat64>(0);
+      offset2 = item.GetData<vtkTypeFloat64>(0);
     }
     else if (item == KretzItem(0xC300, 0x0001))
     {
       // Phi angles
-      phiAnglesDeg.resize(int(item.ItemDataSize / sizeof(double)));
-      if (!this->ReadKretzItemData(readFileStream, item, (char*)(&phiAnglesDeg[0])))
+      phiAnglesRad.resize(int(item.ItemDataSize / sizeof(double)));
+      if (!this->ReadKretzItemData(readFileStream, item, (char*)(&phiAnglesRad[0])))
       {
         vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
           << "' invalid phi angles");
         return NULL;
       }
     }
-    else if (item == KretzItem(0x0150, 0x0018))
-    {
-      // Depth start/end radius in cm from a displayed string, for example " 3.9/11.2cm\0"
-      // TODO: this was the only tag where we could find start/end radius
-      this->ReadKretzItemData(readFileStream, item);
-      // Make sure the string is zero-terminated
-      item.ItemData.push_back(0);
-      std::string depthString = (const char*)(&item.ItemData[0]);
-      // remove all whitespaces from the string
-      depthString.erase(std::remove_if(depthString.begin(), depthString.end(), isspace), depthString.end());
-
-      std::size_t unitFoundIndex = depthString.rfind("cm");
-      if (unitFoundIndex == std::string::npos)
-      {
-        vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-          << "' depth string expected to finish with 'cm': '" << depthString << "'");
-        return NULL;
-      }
-      depthString = depthString.substr(0, unitFoundIndex);
-
-      std::size_t sepIndex = depthString.find_first_of('/');
-      if (sepIndex == std::string::npos)
-      {
-        startRadiusMm = 0;
-        endRadiusMm = atof(depthString.c_str()) * 10.0; // * 10 to convert from cm to mm
-      }
-      else
-      {
-        std::string startDepthString = depthString.substr(0, sepIndex);
-        std::string endDepthString = depthString.substr(sepIndex + 1, depthString.size() - sepIndex - 1);
-        startRadiusMm = atof(startDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
-        endRadiusMm = atof(endDepthString.c_str()) * 10.0; // * 10 to convert from cm to mm
-      }
-    }
     else if (item == KretzItem(0xD000, 0x0001))
-    {
+    {  
       // Voxel data
+      foundVoxelData = true;
       vtkNew<vtkMRMLScalarVolumeNode> volumeNode;
 
       if (scanConvert)
@@ -254,52 +227,41 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 
         const unsigned long numberOfPoints = numi * numj * numk;
 
-        if (phiAnglesDeg.size() != numk)
+        if (phiAnglesRad.size() != numk)
         {
           vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-            << "' phi angle array is invalid (expected " << numk << " elements, found " << phiAnglesDeg.size());
+            << "' phi angle array is invalid (expected " << numk << " elements, found " << phiAnglesRad.size());
           return NULL;
         }
 
-        if (thetaAnglesDeg.size() != numj)
+        if (thetaAnglesRad.size() != numj)
         {
           vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-            << "' theta angle array is invalid (expected " << numj << " elements, found " << thetaAnglesDeg.size());
+            << "' theta angle array is invalid (expected " << numj << " elements, found " << thetaAnglesRad.size());
           return NULL;
         }
 
-        if (startRadiusMm >= endRadiusMm)
-        {
-          vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-            << "' start/end radius is invalid");
-          return NULL;
-        }
-
-        // TODO: figure out how to get probe start radius properly
-        // from factor1 and factor2
-        double probeRadiusMm = 40;
-
-        startRadiusMm += probeRadiusMm;
-        endRadiusMm += probeRadiusMm;
-
-        double radialSpacingMm = (endRadiusMm-startRadiusMm)/double(numi-1);
-        double radialSpacingStartMm = startRadiusMm;
+        double radialSpacingMm = resolution;
+        double radialSpacingStartMm = offset1*resolution;
+        double bModeRadius = -offset2*resolution;
 
         points_Cartesian->Allocate(numberOfPoints);
+        double phiAnglesRadCentre = vtkMath::Pi() / 2.0;
+        double thetaAnglesRadCentre = vtkMath::Pi() / 2.0;
         const double transducerCenterPosition_Spherical[3] = { 0, double(numj) / 2.0, double(numk) / 2.0 };
         for (unsigned int k_Spherical = 0; k_Spherical < numk; k_Spherical++)
         {
-          double phi = phiAnglesDeg[k_Spherical];
+          double phi = phiAnglesRad[k_Spherical] - phiAnglesRadCentre;
           for (unsigned int j_Spherical = 0; j_Spherical < numj; j_Spherical++)
           {
-            double theta = thetaAnglesDeg[j_Spherical];
+            double theta = thetaAnglesRad[j_Spherical] - thetaAnglesRadCentre;
             for (unsigned int i_Spherical = 0; i_Spherical < numi; i_Spherical++)
             {
               double r = radialSpacingStartMm + i_Spherical * radialSpacingMm;
               points_Cartesian->InsertNextPoint(
-                r * sin(theta) * cos(phi),
-                r * sin(theta) * sin(phi),
-                r * cos(theta));
+                r * sin(theta),
+                -(r * cos(theta) - bModeRadius) * sin(phi),
+                bModeRadius*(1-cos(phi))+r*cos(theta)*cos(phi));
             }
           }
         }
@@ -354,9 +316,9 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         // Set image data in volume node
         volumeNode->SetSpacing(volume_Cartesian->GetSpacing());
         volumeNode->SetOrigin(volume_Cartesian->GetOrigin());
-        volumeNode->SetIToRASDirection( 1,  0,  0);
-        volumeNode->SetJToRASDirection( 0, -1,  0);
-        volumeNode->SetKToRASDirection( 0,  0,  1);
+        volumeNode->SetIToRASDirection( 1.0, 0.0, 0.0);
+        volumeNode->SetJToRASDirection( 0.0, 1.0, 0.0);
+        volumeNode->SetKToRASDirection( 0.0, 0.0, 1.0);
         volume_Cartesian->SetSpacing(1.0, 1.0, 1.0);
         volume_Cartesian->SetOrigin(0.0, 0.0, 0.0);
 
@@ -394,6 +356,12 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
   }
 
   readFileStream.close();
+
+  if (!foundVoxelData)
+  {
+    vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
+      << "' voxel data not found");
+  }
 
   return loadedVolumeNode;
 }
