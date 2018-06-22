@@ -145,6 +145,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
   double offset2 = 0.0;
   double resolution = 1.0;
   bool foundVoxelData = false;
+  double cartesianSpacing = 1.0;
 
   while (!readFileStream.eof() && !readFileStream.fail())
   {
@@ -209,11 +210,28 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         return NULL;
       }
     }
+    else if (item == KretzItem(0x0010, 0x0022))
+    {
+      // Spacing when reading a Cartesian volume.
+      // It is not confirmed that this spacing value can be used, but seems to work.
+      // Probably other spacing values should be read, too.
+      this->ReadKretzItemData(readFileStream, item);
+      cartesianSpacing = item.GetData<double>(0);
+    }
     else if (item == KretzItem(0xD000, 0x0001))
     {  
       // Voxel data
       foundVoxelData = true;
       vtkNew<vtkMRMLScalarVolumeNode> volumeNode;
+
+      if (scanConvert)
+      {
+        if (phiAnglesRad.size() == 0 || thetaAnglesRad.size() == 0)
+        {
+          // It is a Cartesian volume, no need for scan conversion
+          scanConvert = false;
+        }
+      }
 
       if (scanConvert)
       {
@@ -345,6 +363,8 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
             << "' failed to read voxel data");
           return NULL;
         }
+
+        volumeNode->SetSpacing(cartesianSpacing, cartesianSpacing, cartesianSpacing);
         volumeNode->SetAndObserveImageData(volume_Spherical.GetPointer());
       }
 
@@ -368,7 +388,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
   if (!foundVoxelData)
   {
     vtkErrorMacro("vtkSlicerKretzFileReaderLogic::LoadKretzFile failed: file '" << (filename ? filename : "(null)")
-      << "' voxel data not found");
+      << "' voxel data not found. Make sure the file contains uncompressed voxel data.");
   }
 
   return loadedVolumeNode;

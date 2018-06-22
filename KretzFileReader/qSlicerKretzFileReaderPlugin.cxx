@@ -114,13 +114,13 @@ bool qSlicerKretzFileReaderPlugin::load(const IOProperties& properties)
   bool scanConvert = true;
   if (properties.contains("scanConvert"))
   {
-    properties["scanConvert"].toBool();
+    scanConvert = properties["scanConvert"].toBool();
   }
 
   double outputSpacing = 0.5;
   if (properties.contains("outputSpacing"))
   {
-    properties["outputSpacing"].toDouble();
+    outputSpacing = properties["outputSpacing"].toDouble();
   }
 
   double outputSpacingVector[3] = { outputSpacing, outputSpacing, outputSpacing };
