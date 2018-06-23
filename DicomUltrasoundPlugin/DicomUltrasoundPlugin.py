@@ -30,10 +30,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     fileLists parameter.
     """
     loadables = []
-    allfiles = []
     for files in fileLists:
       loadables += self.examineFiles(files)
-      allfiles += files
 
     return loadables
 
@@ -44,14 +42,12 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     """
     loadables = []
 
-    if len(files) > 1:
-      # there should only be one instance per 4D volume
-      return []
+    for filePath in files:
+      # there should only be one instance per 4D volume, but on some Voluson systems
+      # all sequences get the same series ID, so try to load each file separately
 
-    filePath = files[0]
-
-    loadables.extend(self.examinePhilips4DUS(filePath))
-    loadables.extend(self.examineGeKretzUS(filePath))
+      loadables.extend(self.examinePhilips4DUS(filePath))
+      loadables.extend(self.examineGeKretzUS(filePath))
 
     return loadables
 
@@ -227,7 +223,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       outputSpacing = [0.333, 0.333, 0.333]
 
     outputVolume = logic.LoadKretzFile(loadable.files[0], nodeName, True, outputSpacing, volFileOffset)
-    
+
     qt.QApplication.restoreOverrideCursor()
 
     # Show in slice views
