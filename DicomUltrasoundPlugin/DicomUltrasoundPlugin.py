@@ -144,9 +144,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     confidence = 0.9
 
-    if ds.Manufacturer != 'Kretztechnik':
-      logging.warning('Warning: unsupported manufacturer')
-      loadable.confidence = .4
+    if (ds.Manufacturer != 'Kretztechnik') and (ds.Manufacturer != 'GE Healthcare'):
+      logging.warning('Warning: unsupported manufacturer: '+ds.Manufacturer)
+      confidence = .4
 
     # Check if these expected DICOM tags are available:
     # (7fe1,0011) LO [KRETZ_US]                               #   8, 1 PrivateCreator
@@ -180,16 +180,16 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     loadableHighRes1 = DICOMLoadable()
     loadableHighRes1.files = loadable.files
-    loadableHighRes1.name = loadable.name + " (HD)"
-    loadableHighRes1.tooltip = loadable.tooltip + " (high-resolution)"
+    loadableHighRes1.name = loadable.name + " (LR)"
+    loadableHighRes1.tooltip = loadable.tooltip + " (low-resolution)"
     loadableHighRes1.warning = loadable.warning
     loadableHighRes1.selected = False
     loadableHighRes1.confidence = confidence
 
     loadableHighRes2 = DICOMLoadable()
     loadableHighRes2.files = loadable.files
-    loadableHighRes2.name = loadable.name + " (XHD)"
-    loadableHighRes2.tooltip = loadable.tooltip + " (super-high-resolution)"
+    loadableHighRes2.name = loadable.name + " (HR)"
+    loadableHighRes2.tooltip = loadable.tooltip + " (high-resolution)"
     loadableHighRes2.warning = loadable.warning
     loadableHighRes2.selected = False
     loadableHighRes2.confidence = confidence
@@ -220,10 +220,10 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
 
-    outputSpacing = None
-    if "(high-resolution)" in loadable.tooltip:
-      outputSpacing = [0.667, 0.667, 0.667]
-    elif "(super-high-resolution)" in loadable.tooltip:
+    outputSpacing = [0.667, 0.667, 0.667]
+    if "(low-resolution)" in loadable.tooltip:
+      outputSpacing = [1.0, 1.0, 1.0]
+    elif "(high-resolution)" in loadable.tooltip:
       outputSpacing = [0.333, 0.333, 0.333]
 
     outputVolume = logic.LoadKretzFile(loadable.files[0], nodeName, True, outputSpacing, volFileOffset)
