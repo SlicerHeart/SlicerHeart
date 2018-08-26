@@ -14,11 +14,11 @@ While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be st
 
 Philips machines save 3D/4D ultrasound data in private fields. Method to extract volumetric images from these fields is not publicly disclosed. However, Philips QLAB cardiac analysis software can export images to a DICOM format variant, which stores volumetric images in standard fields, which can be interpreted without proprietary methods. Unfortunately, these DICOM files are not fully DICOM compliant (required fields, such as SOP instance UID, patient name, ID, study instance UID, and series instance UID fields are missing), therefore they need to be fixed up before they can be imported into a DICOM database.
 
-## Import Philips 4D cardiac images:
+### Import Philips 4D cardiac images:
 
 Get Philips QLAB cardiac analysis software with "Cartesian DICOM export" option. Your Philips representative can help you with this.
 
-### Export as Cartesian DICOM
+Export as Cartesian DICOM
 
 QLAB 10.x
 1. Load ultrasound volume into QLAB
@@ -35,7 +35,7 @@ QLAB 9.x
 
 Note: Cartesian export does not work on color 3D datasets.
 
-### Load Cartesian DICOM into Slicer
+Load Cartesian DICOM into Slicer
 
 1. Install the SlicerHeart extension and the Sequences extension in Slicer.
 1. Use [Philips DICOM patcher module](ModulePhilips4dUsDicomPatcher.md) in Slicer to make the DICOM file standard compliant and/or directly export to a 4D file in NRRD format.
