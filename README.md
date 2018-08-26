@@ -2,7 +2,7 @@
 
 Modules for importing and visualizing cardiac and other ultrasound data sets.
 
-# Installation and setup:
+# Installation and setup
 - Download&install "Nightly build" version of 3D Slicer from http://download.slicer.org/
 - Start Slicer, in the Extension manager install SlicerHeart extension (in Cardiac category), click Yes to install all dependencies, click Restart
 
