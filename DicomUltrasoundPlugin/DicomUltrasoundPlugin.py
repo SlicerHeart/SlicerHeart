@@ -129,7 +129,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       pass
 
     try:
-      ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
+      ds = dicom.read_file(filePath, defer_size=50) # use defer_size to not load large fields
     except Exception as e:
       logging.debug("Failed to parse DICOM file: {0}".format(e.message))
       return []
@@ -140,8 +140,12 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     confidence = 0.9
 
-    if (ds.Manufacturer != 'Kretztechnik') and (ds.Manufacturer != 'GE Healthcare'):
-      logging.warning('Warning: unsupported manufacturer: '+ds.Manufacturer)
+    # These manufacturers values have been found in successfully loadable files:
+    # - Kretztechnik
+    # - GE Healthcare
+    # - GE Healthcare Austria GmbH & Co OG
+    if (ds.Manufacturer != 'Kretztechnik') and (ds.Manufacturer.find('GE Healthcare')<0):
+      logging.warning('Warning: unknown manufacturer: '+ds.Manufacturer)
       confidence = .4
 
     # Check if these expected DICOM tags are available:
