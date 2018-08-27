@@ -224,7 +224,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
           continue
           
         if ds.SOPClassUID != '1.2.840.113543.6.6.1.3.10002':
-          self.addLog('  Not Philips 4D ultrasound DICOM file. Skipped.')
+          self.addLog('  Not recognized as Philips Cartesian 4D ultrasound DICOM file. Skipped.')
           continue
 
         self.addLog('  Patching...')
