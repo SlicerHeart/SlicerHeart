@@ -17,12 +17,15 @@ set(EXTENSION_DEPENDS "Sequences")
 find_package(Slicer REQUIRED)
 include(${Slicer_USE_FILE})
 
+find_package(Sequences REQUIRED)
+
 #-----------------------------------------------------------------------------
 # Extension modules
 add_subdirectory(ValveView)
 add_subdirectory(Philips4dUsDicomPatcher)
-add_subdirectory(DicomUltrasoundPlugin)
 add_subdirectory(KretzFileReader)
+add_subdirectory(GeUsMovieReader)
+add_subdirectory(DicomUltrasoundPlugin)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

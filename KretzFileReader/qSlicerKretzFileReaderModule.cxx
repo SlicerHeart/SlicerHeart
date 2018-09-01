@@ -78,7 +78,7 @@ QString qSlicerKretzFileReaderModule::acknowledgementText()const
 {
   // must not be empty
   QString acknowledgement = QString(
-    "The module was originally developed by Andras Lasso (  Queen's)");
+    "The module was originally developed by Andras Lasso (PerkLab, Queen's University)");
   return acknowledgement;
 }
 

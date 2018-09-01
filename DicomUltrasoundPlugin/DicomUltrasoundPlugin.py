@@ -48,6 +48,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
       loadables.extend(self.examinePhilips4DUS(filePath))
       loadables.extend(self.examineGeKretzUS(filePath))
+      loadables.extend(self.examineGeUSMovie(filePath))
 
     return loadables
 
@@ -196,15 +197,83 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     return [loadable, loadableHighRes1, loadableHighRes2]
 
+  def examineGeUSMovie(self, filePath):
+    supportedSOPClassUIDs = [
+      '1.2.840.10008.5.1.4.1.1.6.1' # UltrasoundImageStorage
+      ]
+
+    # Quick check of SOP class UID without parsing the file...
+    try:
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
+      if not sopClassUID in supportedSOPClassUIDs:
+        # Unsupported class
+        return []
+    except Exception as e:
+      # Quick check could not be completed (probably Slicer DICOM database is not initialized).
+      # No problem, we'll try to parse the file and check the SOP class UID then.
+      pass
+
+    try:
+      ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
+    except Exception as e:
+      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      return []
+
+    if not ds.SOPClassUID in supportedSOPClassUIDs:
+      # Unsupported class
+      return []
+
+    geUsMovieGroupRootTag = dicom.tag.Tag('0x7fe1', '0x0010')
+    geUsMovieGroupRootItem = ds.get(geUsMovieGroupRootTag)
+
+    if not geUsMovieGroupRootItem:
+      return []
+    if geUsMovieGroupRootItem.name != 'Private Creator':
+      return []
+    if geUsMovieGroupRootItem.value != 'GEMS_Ultrasound_MovieGroup_001':
+      return []
+
+    confidence = 0.8
+
+    name = ''
+    if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
+      name = '{0}:'.format(ds.SeriesNumber)
+    if hasattr(ds, 'Modality') and ds.Modality:
+      name = '{0} {1}'.format(name, ds.Modality)
+    if hasattr(ds, 'SeriesDescription') and ds.SeriesDescription:
+      name = '{0} {1}'.format(name, ds.SeriesDescription)
+    if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
+      name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+
+    loadable = DICOMLoadable()
+    loadable.files = [filePath]
+    loadable.name = name.strip()  # remove leading and trailing spaces, if any
+    loadable.tooltip = "GE ultrasound image sequence"
+    loadable.warning = "Importing of this file format is experimental: images may be distorted, size measurements may be inaccurate."
+    loadable.selected = True
+    loadable.confidence = confidence
+
+    return [loadable]
+
 
   def load(self,loadable):
     """Load the selection as an Ultrasound
     """
+    loadedNode = None
     if "GE Kretz 3D Ultrasound" in loadable.tooltip:
-      return self.loadKretzUS(loadable)
+      loadedNode = self.loadKretzUS(loadable)
+    elif "GE ultrasound image sequence" in loadable.tooltip:
+      loadedNode = self.loadGeUsMovie(loadable)
     else:
-      return self.loadPhilips4DUSAsSequence(loadable)
-      #return self.loadPhilips4DUSAsMultiVolume(loadable)
+      loadedNode = self.loadPhilips4DUSAsSequence(loadable)
+
+    # Show sequence browser toolbar if a sequence has been loaded
+    if loadedNode and loadedNode.IsA('vtkMRMLSequenceNode'):
+      sequenceBrowserNode = slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(loadedNode)
+      if sequenceBrowserNode:
+        slicer.modules.sequencebrowser.showSequenceBrowser(sequenceBrowserNode)
+
+    return loadedNode
 
   def loadKretzUS(self, loadable):
     import vtkSlicerKretzFileReaderLogicPython
@@ -379,6 +448,31 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     appLogic.PropagateVolumeSelection()
 
     return multiVolumeNode
+
+  def loadGeUsMovie(self, loadable):
+    #import vtkSlicerGeUsMovieReaderModuleLogicPython
+    logic = slicer.modules.geusmoviereader.logic()
+    nodeName = slicer.mrmlScene.GenerateUniqueName(loadable.name)
+
+    # This can be a long operation - indicate it to the user
+    qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+    loadedSequence = logic.LoadGeUsMovieFile(loadable.files[0], nodeName)
+
+    qt.QApplication.restoreOverrideCursor()
+
+    # Show in slice views
+    sequenceBrowserNode = slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(loadedSequence)
+    if sequenceBrowserNode:
+      imageProxyVolumeNode = sequenceBrowserNode.GetProxyNode(loadedSequence)
+    if imageProxyVolumeNode:
+      appLogic = slicer.app.applicationLogic()
+      selectionNode = appLogic.GetSelectionNode()
+      selectionNode.SetReferenceActiveVolumeID(imageProxyVolumeNode.GetID())
+      appLogic.PropagateVolumeSelection(0) 
+      appLogic.FitSliceToAll()
+
+    return loadedSequence
 
 #
 # DicomUltrasoundPlugin
