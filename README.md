@@ -62,3 +62,5 @@ Load data from .vol or .v00 file:
 - Drag-and-drop the file to the Slicer application window
 - Click OK to load the data
 - Wait for loading to complete (may take a few minutes)
+
+If the image fails to load then it may be compressed. You can try to load the image into [GE 4D View software](https://1drv.ms/u/s!Arm_AFxB9yqHtbJ9TqQUSLpRhTS39A) (choose "Free 60-day demo version" or "Full version" during install) and save it with "Wavelet compression" set to None.
