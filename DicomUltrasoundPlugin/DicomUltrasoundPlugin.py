@@ -139,16 +139,6 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # Unsupported class
       return []
 
-    confidence = 0.9
-
-    # These manufacturers values have been found in successfully loadable files:
-    # - Kretztechnik
-    # - GE Healthcare
-    # - GE Healthcare Austria GmbH & Co OG
-    if (ds.Manufacturer != 'Kretztechnik') and (ds.Manufacturer.find('GE Healthcare')<0):
-      logging.warning('Warning: unknown manufacturer: '+ds.Manufacturer)
-      confidence = .4
-
     # Check if these expected DICOM tags are available:
     # (7fe1,0011) LO [KRETZ_US]                               #   8, 1 PrivateCreator
     # (7fe1,1101) OB 4b\52\45\54\5a\46\49\4c\45\20\31\2e\30\20\20\20\00\00\01\00\02\00... # 3471038, 1 Unknown Tag & Data
@@ -159,6 +149,16 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       return []
     if kretzUsDataTag not in ds.keys():
       return []
+
+    confidence = 0.9
+
+    # These manufacturers values have been found in successfully loadable files:
+    # - Kretztechnik
+    # - GE Healthcare
+    # - GE Healthcare Austria GmbH & Co OG
+    if (ds.Manufacturer != 'Kretztechnik') and (ds.Manufacturer.find('GE Healthcare')<0):
+      logging.warning('Warning: unknown manufacturer: '+ds.Manufacturer)
+      confidence = .4
 
     name = ''
     if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
@@ -469,7 +469,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       appLogic = slicer.app.applicationLogic()
       selectionNode = appLogic.GetSelectionNode()
       selectionNode.SetReferenceActiveVolumeID(imageProxyVolumeNode.GetID())
-      appLogic.PropagateVolumeSelection(0) 
+      appLogic.PropagateVolumeSelection(0)
       appLogic.FitSliceToAll()
 
     return loadedSequence
