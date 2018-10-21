@@ -20,7 +20,7 @@
    <item>
     <widget class="QCheckBox" name="ScanConvertCheckBox">
      <property name="text">
-      <string>Scan convert. Output spacing:</string>
+      <string>Scan convert non-Cartesian images. Output spacing:</string>
      </property>
      <property name="checked">
       <bool>true</bool>
@@ -39,13 +39,13 @@
       <double>0.010000000000000</double>
      </property>
      <property name="maximum">
-      <double>99.989999999999995</double>
+      <double>10.0</double>
      </property>
      <property name="singleStep">
-      <double>0.500000000000000</double>
+      <double>0.05</double>
      </property>
      <property name="value">
-      <double>0.500000000000000</double>
+      <double>0.50</double>
      </property>
     </widget>
    </item>

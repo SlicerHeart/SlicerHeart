@@ -375,6 +375,14 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
       this->GetMRMLScene()->AddNode(volumeNode.GetPointer());
 
       volumeNode->CreateDefaultDisplayNodes();
+      vtkMRMLScalarVolumeDisplayNode* displayNode = vtkMRMLScalarVolumeDisplayNode::SafeDownCast(volumeNode->GetDisplayNode());
+      if (displayNode)
+      {
+        displayNode->SetAutoWindowLevel(false);
+        // Minimum = 15 to make dark noisy areas appear as clear black
+        // Maximum = 150 (instead of maximum range of 255) to increase the image contrast, without very noticeable saturation
+        displayNode->SetWindowLevelMinMax(15.0, 150.0);
+      }
       loadedVolumeNode = volumeNode.GetPointer();
     }
     else
