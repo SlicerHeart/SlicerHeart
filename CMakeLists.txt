@@ -26,6 +26,7 @@ add_subdirectory(Philips4dUsDicomPatcher)
 add_subdirectory(KretzFileReader)
 add_subdirectory(GeUsMovieReader)
 add_subdirectory(DicomUltrasoundPlugin)
+add_subdirectory(CardiacDeviceSimulator)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
