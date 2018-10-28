@@ -64,3 +64,15 @@ Load data from .vol or .v00 file:
 - Wait for loading to complete (may take a few minutes)
 
 If the image fails to load then it may be compressed. You can try to load the image into [GE 4D View software](https://1drv.ms/u/s!Arm_AFxB9yqHtbJ9TqQUSLpRhTS39A) (choose "Free 60-day demo version" or "Full version" during install) and save it with "Wavelet compression" set to None.
+
+## Loading ultrasound GE moviegroup DICOM files
+
+Ultrasound image sequences can be loaded from DICOM files that store data in GE moviegroup DICOM tags. A current limitation that no scan conversion is performed but raw scanlines are displayed in a rectangular shape. For linear probes, correct image size and aspect ratio can be restored for images that are acquired with linear probes by applying scaling using a linear transform (in Transforms module).
+
+Load data from DICOM folder:
+- Drag-and-drop your image folder to the Slicer application window
+- In the popup window click OK (to load directory into DICOM database)
+- Click Copy (to make a local copy of the folder into the Slicer database) or Add link (to not copy data files, data will not be available if the original folder is removed)
+- Wait for the import operation to complete, click OK
+- In the DICOM browser window, select data to load and click Load button
+- Click OK to accept warnings (the warning is displayed because the importer is still experimental and the images may be slightly distorted)
