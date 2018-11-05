@@ -1,9 +1,17 @@
 # SlicerHeart extension for 3D Slicer
 
-Modules for importing and visualizing cardiac and other ultrasound data sets.
+SlicerHeart extension contains tools for cardiac image import (3D/4D ultrasound, CT, MRI), quantification, and implant placement planning and assessment.
+
+The extension currently includes the following features (new features are added continuously):
+- Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes.
+- Cardiac Device Simulator: module for evaluating placement of cardiac implants. Contains models for Harmony device and a simple cylindrical device.
+- DICOM image importer plugins
+  - Fixing and importing of Philips 4D ultrasound images: Cartesian DICOM images exported by Philips QLAB are not valid DICOM files. This module fixes the files and makes them loadable into 3D Slicer.
+  - Importing of GE 3D images and 2D image sequences.
 
 # Installation and setup
-- Download&install "Nightly build" version of 3D Slicer from http://download.slicer.org/
+
+- Download and install 3D Slicer from http://download.slicer.org/
 - Start Slicer, in the Extension manager install SlicerHeart extension (in Cardiac category), click Yes to install all dependencies, click Restart
 
 # Importing DICOM files
@@ -76,3 +84,47 @@ Load data from DICOM folder:
 - Wait for the import operation to complete, click OK
 - In the DICOM browser window, select data to load and click Load button
 - Click OK to accept warnings (the warning is displayed because the importer is still experimental and the images may be slightly distorted)
+
+# Authors
+
+- Authors: Matthew Jolley (CHOP), Andras Lasso (PerkLab), Christian Herz (CHOP), Anna Ilina (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
+- Contacts:
+  - Matthew Jolley, <email>jolleym@email.chop.edu</email>
+  - Andras Lasso, <email>lasso@queensu.ca</email>
+- License: [Slicer license](http://www.slicer.org/pages/LicenseText)
+- Funding: 
+
+# How to cite
+
+Please cite the following paper when referring to SlicerHeart in your publication:
+
+Scanlan AB, Nguyen AV, Ilina A, Lasso A, Cripe L, Jegatheeswaran A, Silvestro E, McGowan FX, Mascio CE, Fuller S, Spray TL, Cohen MS, Fichtinger G, Jolley MA,
+["Comparison of 3D Echocardiogram-Derived 3D Printed Valve Models to Molded Models for Simulated Repair of Pediatric Atrioventricular Valves"](http://perk.cs.queensu.ca/sites/perkd7.cs.queensu.ca/files/Scanlan2017.pdf),
+Pediatr Cardiol. 2018 Mar; 39(3):538-547. doi: 10.1007/s00246-017-1785-4.
+
+<pre>
+@Article{ScanlanNguyenIlinaEtAl2018,
+  author =        {Scanlan, Adam B. and Nguyen, Alex V. and Ilina, Anna and Lasso, Andras and Cripe, Linnea and Jegatheeswaran, Anusha and Silvestro, Elizabeth and McGowan, Francis X. and Mascio, Christopher E. and Fuller, Stephanie and Spray, Thomas L. and Cohen, Meryl S. and Fichtinger, Gabor and Jolley, Matthew A.},
+  title =         {Comparison of 3D Echocardiogram-Derived 3D Printed Valve Models to Molded Models for Simulated Repair of Pediatric Atrioventricular Valves},
+  journal =       {Pediatric Cardiology},
+  year =          {2018},
+  volume =        {39},
+  number =        {3},
+  pages =         {538},
+  month =         mar,
+  abstract =      {Mastering the technical skills required to perform pediatric cardiac valve surgery is challenging in part due to limited opportunity for practice. Transformation of 3D echocardiographic (echo) images of congenitally abnormal heart valves to realistic physical models could allow patient-specific simulation of surgical valve repair. We compared materials, processes, and costs for 3D printing and molding of patient-specific models for visualization and surgical simulation of congenitally abnormal heart valves. Pediatric atrioventricular valves (mitral, tricuspid, and common atrioventricular valve) were modeled from transthoracic 3D echo images using semi-automated methods implemented as custom modules in 3D Slicer. Valve models were then both 3D printed in soft materials and molded in silicone using 3D printed “negative” molds. Using pre-defined assessment criteria, valve models were evaluated by congenital cardiac surgeons to determine suitability for simulation. Surgeon assessment indicated that the molded valves had superior material properties for the purposes of simulation compared to directly printed valves (p < 0.01). Patient-specific, 3D echo-derived molded valves are a step toward realistic simulation of complex valve repairs but require more time and labor to create than directly printed models. Patient-specific simulation of valve repair in children using such models may be useful for surgical training and simulation of complex congenital cases.},
+  date =          {2018-03-01},
+  doi =           {10.1007/s00246-017-1785-4},
+  issn =          {1432-1971},
+  publisher =     {Springer},
+  url =           {http://dx.doi.org/10.1007/s00246-017-1785-4}
+}
+</pre>
+
+# Acknowledgments
+
+This work was partially supported by:
+- Department of Anesthesia and Critical Care at The Children’s Hospital of Philadelphia
+- National Institute of Biomedical Imaging and Bioengineering (NIBIB) (P41 EB015902)
+- Cancer Care Ontario with funds provided by the Ontario Ministry of Health and Long-Term Care
+- Natural Sciences and Engineering Research Council of Canada
