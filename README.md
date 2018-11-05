@@ -100,7 +100,7 @@ Please cite the following paper when referring to SlicerHeart in your publicatio
 
 Scanlan AB, Nguyen AV, Ilina A, Lasso A, Cripe L, Jegatheeswaran A, Silvestro E, McGowan FX, Mascio CE, Fuller S, Spray TL, Cohen MS, Fichtinger G, Jolley MA,
 ["Comparison of 3D Echocardiogram-Derived 3D Printed Valve Models to Molded Models for Simulated Repair of Pediatric Atrioventricular Valves"](http://perk.cs.queensu.ca/sites/perkd7.cs.queensu.ca/files/Scanlan2017.pdf),
-Pediatr Cardiol. 2018 Mar; 39(3):538-547. doi: 10.1007/s00246-017-1785-4.
+Pediatr Cardiol. 2018 Mar; 39(3):538-547. [doi: 10.1007/s00246-017-1785-4](https://www.ncbi.nlm.nih.gov/pubmed/29181795).
 
 <pre>
 @Article{ScanlanNguyenIlinaEtAl2018,
