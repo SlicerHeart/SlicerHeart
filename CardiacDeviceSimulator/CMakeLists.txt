@@ -4,6 +4,9 @@ set(MODULE_NAME CardiacDeviceSimulator)
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
+  CardiacDeviceSimulatorUtils/__init__.py
+  CardiacDeviceSimulatorUtils/devices.py
+  CardiacDeviceSimulatorUtils/helpers.py
   )
 
 set(MODULE_PYTHON_RESOURCES
