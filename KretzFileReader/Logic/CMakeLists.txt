@@ -5,6 +5,7 @@ set(KIT ${PROJECT_NAME})
 set(${KIT}_EXPORT_DIRECTIVE "VTK_SLICER_${MODULE_NAME_UPPER}_LOGIC_EXPORT")
 
 set(${KIT}_INCLUDE_DIRECTORIES
+  ${Slicer_BINARY_DIR}/../ITK/Modules/ThirdParty/GDCM/src/gdcm/Utilities
   )
 
 set(${KIT}_SRCS
