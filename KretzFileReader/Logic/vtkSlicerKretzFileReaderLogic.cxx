@@ -494,19 +494,42 @@ struct hframe
       val2[1] == h.val2[1] &&
       imgsize == h.imgsize;
     }
+};
+
+struct hframe32
+{
+  uint32_t val0; // 800 increment ?
+  uint16_t val1[2];
+  uint16_t val2[2];
+  uint32_t val3;
+  uint32_t imgsize;
+  uint32_t val5;
+  uint32_t val6;
+  uint32_t val7;
+
+  bool operator==(const hframe &h) const
+  {
+    return val0 == h.val0 &&
+      val1[0] == h.val1[0] &&
+      val1[1] == h.val1[1] &&
+      val2[0] == h.val2[0] &&
+      val2[1] == h.val2[1] &&
+      imgsize == h.imgsize;
+  }
 
 };
 
-static bool ProcessDeflate( const char *outfilename, const int nslices, const
-  int buf_size, const char *buf, const std::streampos len,
+
+static bool ProcessDeflate( const char *outfilename, const int nslices, const int buf_size,
+  const char *buf, const uint32_t len,
   const char *crcbuf, const size_t crclen )
 {
-  std::vector< hframe > crcheaders;
+  std::vector< hframe32 > crcheaders;
   crcheaders.reserve( nslices );
     {
     std::istringstream is;
     is.str( std::string( crcbuf, crclen ) );
-    hframe header;
+    hframe32 header;
     for( int r = 0; r < nslices; ++r )
       {
       is.read( (char*)&header, sizeof( header ));
@@ -533,7 +556,7 @@ static bool ProcessDeflate( const char *outfilename, const int nslices, const
   is.read( (char*)&nframes, sizeof( nframes ));
   assert( nframes == (uint32_t)nslices );
 
-  std::vector< std::streamoff > offsets;
+  std::vector< uint32_t > offsets;
   offsets.reserve( nframes );
   for( uint32_t frame = 0; frame < nframes ; ++frame )
     {
@@ -542,70 +565,96 @@ static bool ProcessDeflate( const char *outfilename, const int nslices, const
     offsets.push_back( offset );
     }
 
-  std::vector<char> outbuf;
+  uLongf headerSize = 32;
 
   //const int size[2] = { 608, 427 }; // FIXME: where does it comes from ?
   //const int size[2] = { 960, 1280 }; // FIXME: where does it comes from ?
   std::stringstream ss;
   ss << outfilename;
   ss << '_';
+  ss << buf_size;
   //ss << crcheaders[0].imgsize; // FIXME: Assume all header are identical !
   /*ss << size[0];
   ss << '_';
-  ss << size[1];
-  ss << '_';*/
+  ss << size[1];*/
+  ss << '_';
   ss << nframes;
   ss << ".raw";
   std::ofstream os( ss.str().c_str(), std::ios::binary );
 
+  std::string headerFileName = ss.str() + "h";
+  std::ofstream osheader(headerFileName.c_str(), std::ios::binary);
+
   //assert( buf_size >= size[0] * size[1] );
-  outbuf.resize( buf_size );
+  std::vector<char> outbuf(buf_size, 0);
 
-  hframe header;
+  hframe32* header;
   //uint32_t prev = 0;
-  for( unsigned int r = 0; r < nframes; ++r )
+  //for( unsigned int r = 0; r < nframes; ++r )
+  for (unsigned int r = 0; r < 1; ++r)
     {
-    is.read( (char*)&header, sizeof( header ));
+    //is.read((char*)&header_buffer, sizeof(header_buffer));
+    header = (hframe32*)(buf + offsets[r]);
+    osheader.write((char*)header, 32);
+    //is.read( (char*)&header, sizeof( header ));
+    //is.read((char*)&header, sizeof(header)); // 32 byte header
 
-    assert( header == crcheaders[r] );
+    //assert( header == crcheaders[r] );
+    
     //assert( header.val1[0] == 2000 );
-    assert(header.val1[0] == 9660);
     //assert( header.val1[1] == 3 );
-    assert(header.val1[1] == 65027);
     //assert( header.val2[0] == 1 );
-    assert(header.val2[0] == 43);
     //assert( header.val2[1] == 1280 );
-    assert(header.val2[1] == 1280 || header.val2[1] == 1288);
+
+    //assert(header.val1[0] == 9660);
+    //assert(header.val1[1] == 65027);
+    //assert(header.val2[0] == 43);
+    //assert(header.val2[1] == 1280 || header.val2[1] == 1288);
+
+    /*
+    assert(header.val1[0] == 0);
+    assert(header.val1[1] == 0);
+    assert(header.val2[0] == 37082);   
+    assert(header.val2[1] == 234);
+    */
 
     uLongf destLen = buf_size; // >= 608,427
     Bytef *dest = (Bytef*)&outbuf[0];
-    assert( is.tellg() == offsets[r] + 16 );
-    const Bytef *source = (Bytef*)buf + offsets[r] + 16;
+    //assert( is.tellg() == offsets[r] + headerSize );
+    const Bytef *source = (Bytef*)buf + offsets[r] + headerSize;
     uLong sourceLen;
     if( r + 1 == nframes )
-      sourceLen = (uLong)totalsize - (uLong)offsets[r] - 16;
+      sourceLen = (uLong)totalsize - (uLong)offsets[r] - headerSize;
     else
-      sourceLen = (uLong)offsets[r+1] - (uLong)offsets[r] - 16;
+      sourceLen = (uLong)offsets[r+1] - (uLong)offsets[r] - headerSize;
     // FIXME: in-memory decompression:
     int ret = uncompress (dest, &destLen, source, sourceLen);
+
+    ZEXTERN int ZEXPORT uncompress2 OF((Bytef *dest, uLongf *destLen,
+      const Bytef *source, uLong *sourceLen));
+
     assert( ret == Z_OK ); (void)ret;
     //assert( destLen >= (uLongf)size[0] * size[1] ); // 16bytes padding ?
+    assert( destLen + headerSize == buf_size );
     //assert( header.imgsize == (uint32_t)size[0] * size[1] );
     //os.write( &outbuf[0], outbuf.size() );
    // os.write( &outbuf[0], size[0] * size[1] );
-    os.write(&outbuf[0], header.imgsize);
+    //os.write(&outbuf[0], header.imgsize);
+    //os.write(&outbuf[0], destLen);
+    os.write(&outbuf[0], buf_size);
 
     // skip data:
-    is.seekg( sourceLen, std::ios::cur );
+    //is.seekg( sourceLen, std::ios::cur );
     }
   os.close();
+  osheader.close();
   //assert( is.tellg() == totalsize );
 
   return true;
 }
 
 static bool ProcessNone( const char *outfilename, const int nslices, const
-  int buf_size, const char *buf, const std::streampos len,
+  int buf_size, const char *buf, const int len,
   const char *crcbuf, const size_t crclen )
 {
   std::vector< hframe > crcheaders;
@@ -678,7 +727,8 @@ static bool ProcessNone( const char *outfilename, const int nslices, const
     //assert( header == crcheaders[r] );
 
     is.read( buffer, buf_size - 16 );
-    os.write( buffer, header.imgsize );
+    //os.write( buffer, header.imgsize );
+    os.write(buffer, buf_size - 16);
     }
   //assert( is.tellg() == totalsize );
   os.close();
