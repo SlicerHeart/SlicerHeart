@@ -47,6 +47,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # all sequences get the same series ID, so try to load each file separately
 
       loadables.extend(self.examinePhilips4DUS(filePath))
+      loadables.extend(self.examinePhilipsAffinity3DUS(filePath))
       loadables.extend(self.examineGeKretzUS(filePath))
       loadables.extend(self.examineGeUSMovie(filePath))
 
@@ -109,6 +110,70 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     loadable.files = [filePath]
     loadable.name = name.strip()  # remove leading and trailing spaces, if any
     loadable.tooltip = "Philips 4D Ultrasound"
+    loadable.selected = True
+    loadable.confidence = confidence
+
+    return [loadable]
+
+  def examinePhilipsAffinity3DUS(self, filePath):
+    supportedSOPClassUID = '1.2.840.10008.5.1.4.1.1.2' # UltrasoundMultiframeImageStorage
+
+    # Quick check of SOP class UID without parsing the file...
+    try:
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
+      if sopClassUID != supportedSOPClassUID:
+        # Unsupported class
+        return []
+    except Exception as e:
+      # Quick check could not be completed (probably Slicer DICOM database is not initialized).
+      # No problem, we'll try to parse the file and check the SOP class UID then.
+      pass
+
+    try:
+      ds = dicom.read_file(filePath, stop_before_pixels=True)
+    except Exception as e:
+      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      return []
+
+    if ds.SOPClassUID != supportedSOPClassUID:
+      # Unsupported class
+      return []
+
+    voxelSpacingTag = findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")
+    if not voxelSpacingTag:
+      # this is most likely not a PhilipsAffinity image
+      return []
+    if voxelSpacingTag not in ds.keys():
+      return []
+
+    confidence = 0.9
+
+    if ds.PhotometricInterpretation != 'MONOCHROME2':
+      logging.warning('Warning: unsupported PhotometricInterpretation')
+      confidence = .4
+
+    if ds.BitsAllocated != 8 or ds.BitsStored != 8 or ds.HighBit != 7:
+      logging.warning('Warning: Bad scalar type (not unsigned byte)')
+      confidence = .4
+
+    if ds.SamplesPerPixel != 1:
+      logging.warning('Warning: multiple samples per pixel')
+      confidence = .4
+
+    name = ''
+    if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
+      name = '{0}:'.format(ds.SeriesNumber)
+    if hasattr(ds, 'Modality') and ds.Modality:
+      name = '{0} {1}'.format(name, ds.Modality)
+    if hasattr(ds, 'SeriesDescription') and ds.SeriesDescription:
+      name = '{0} {1}'.format(name, ds.SeriesDescription)
+    if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
+      name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+
+    loadable = DICOMLoadable()
+    loadable.files = [filePath]
+    loadable.name = name.strip()  # remove leading and trailing spaces, if any
+    loadable.tooltip = "Philips Affinity 3D ultrasound"
     loadable.selected = True
     loadable.confidence = confidence
 
@@ -264,6 +329,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       loadedNode = self.loadKretzUS(loadable)
     elif "GE ultrasound image sequence" in loadable.tooltip:
       loadedNode = self.loadGeUsMovie(loadable)
+    elif "Philips Affinity 3D ultrasound" in loadable.tooltip:
+      loadedNode = self.loadPhilipsAffinity3DUS(loadable)
     else:
       loadedNode = self.loadPhilips4DUSAsSequence(loadable)
 
@@ -303,6 +370,23 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     selectionNode = slicer.app.applicationLogic().GetSelectionNode()
     selectionNode.SetReferenceActiveVolumeID(outputVolume.GetID())
     slicer.app.applicationLogic().PropagateVolumeSelection(1)
+
+    return outputVolume
+
+  def loadPhilipsAffinity3DUS(self,loadable):
+    """Load files in the traditional Slicer manner
+    using the volume logic helper class
+    and the vtkITK archetype helper code
+    """
+    name = slicer.util.toVTKString(name)
+    fileList = vtk.vtkStringArray()
+    fileList.InsertNextValue(slicer.util.toVTKString(loadable.files[0]))
+    volumesLogic = slicer.modules.volumes.logic()
+    outputVolume = volumesLogic.AddArchetypeScalarVolume(files[0],name,0,fileList)
+
+    # Override spacing, as GDCM cannot retreive image spacing correctly for this type of image
+    outputSpacingStr = ds.[findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")]
+    outputVolume.SetSpacing(float(outputSpacingStr[0]), float(outputSpacingStr[1]), float(outputSpacingStr[2]))
 
     return outputVolume
 
@@ -508,3 +592,11 @@ class DicomUltrasoundPlugin:
     except AttributeError:
       slicer.modules.dicomPlugins = {}
     slicer.modules.dicomPlugins['DicomUltrasoundPlugin'] = DicomUltrasoundPluginClass
+
+def findPrivateTag(ds, group, element, privateCreator):
+  """Helper function to get private tag from private creator name"""
+  import dicom
+  for tag, data_element in ds.items():
+    if (tag.group == group) and (tag.element < 0x0100) and (data_element.value.rstrip() == privateCreator):
+      return dicom.tag.Tag(group, (tag.element << 8) + element)
+  return None
