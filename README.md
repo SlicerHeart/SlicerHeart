@@ -20,9 +20,9 @@ While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be st
 
 ## Philips
 
-Philips machines save 3D/4D ultrasound data in private fields. Method to extract volumetric images from these fields is not publicly disclosed. However, Philips QLAB cardiac analysis software can export images to a DICOM format variant, which stores volumetric images in standard fields, which can be interpreted without proprietary methods. Unfortunately, these DICOM files are not fully DICOM compliant (required fields, such as SOP instance UID, patient name, ID, study instance UID, and series instance UID fields are missing), therefore they need to be fixed up before they can be imported into a DICOM database.
-
 ### Import Philips 4D cardiac images:
+
+Philips machines save 3D/4D ultrasound data in private fields. Method to extract volumetric images from these fields is not publicly disclosed. However, Philips QLAB cardiac analysis software can export images to a DICOM format variant, which stores volumetric images in standard fields, which can be interpreted without proprietary methods. Unfortunately, these DICOM files are not fully DICOM compliant (required fields, such as SOP instance UID, patient name, ID, study instance UID, and series instance UID fields are missing), therefore they need to be fixed up before they can be imported into a DICOM database.
 
 Get Philips QLAB cardiac analysis software with "Cartesian DICOM export" option. Your Philips representative can help you with this.
 
@@ -50,6 +50,20 @@ Load Cartesian DICOM into Slicer
 
 The file in NRRD format can be directly loaded into Slicer by drag-and-dropping to the application window.
 The fixed DICOM file can be loaded into Slicer using the DICOM module (first need to be imported into Slicer's database and then it can be loaded into the scene).
+
+### Import Philips Affinity 3D images:
+
+Philips Affinity systems can export acquired 3D ultrasound volumes in DICOM format, but slice spacing is not stored in private DICOM fields (see more information [here](https://discourse.slicer.org/t/problem-importing-a-volumen-with-a-phillips-affinity-50/5065/8)). If SlicerHeart extension is installed and data is loaded using DICOM module (as described below) then Slicer will retrieve this information from these private fields and the volume will be loaded correctly.
+
+To export 3D volumes from your ultrasound system to DICOM, enable 3D export in application settings.
+
+Load data from DICOM folder:
+- Drag-and-drop your image folder to the Slicer application window
+- In the popup window click OK (to load directory into DICOM database)
+- Click Copy (to make a local copy of the folder into the Slicer database) or Add link (to not copy data files, data will not be available if the original folder is removed)
+- Wait for the import operation to complete, click OK
+- In the DICOM browser window, select data to load and click Load button
+- Wait for loading to complete (may take a few minutes)
 
 # GE
 
