@@ -116,13 +116,14 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     return [loadable]
 
   def examinePhilipsAffinity3DUS(self, filePath):
-    supportedSOPClassUID = '1.2.840.10008.5.1.4.1.1.2' # UltrasoundMultiframeImageStorage
+    supportedSOPClassUID = '1.2.840.10008.5.1.4.1.1.3.1' # UltrasoundMultiframeImageStorage
 
     # Quick check of SOP class UID without parsing the file...
     try:
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if sopClassUID != supportedSOPClassUID:
         # Unsupported class
+        logging.error("sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
         return []
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
@@ -137,6 +138,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     if ds.SOPClassUID != supportedSOPClassUID:
       # Unsupported class
+      logging.error("sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
       return []
 
     voxelSpacingTag = findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")
@@ -378,16 +380,24 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     using the volume logic helper class
     and the vtkITK archetype helper code
     """
-    name = slicer.util.toVTKString(name)
+    name = slicer.util.toVTKString(loadable.name)
+    filePath = loadable.files[0]
     fileList = vtk.vtkStringArray()
-    fileList.InsertNextValue(slicer.util.toVTKString(loadable.files[0]))
+    fileList.InsertNextValue(slicer.util.toVTKString(filePath))
     volumesLogic = slicer.modules.volumes.logic()
-    outputVolume = volumesLogic.AddArchetypeScalarVolume(files[0],name,0,fileList)
+    outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
 
     # Override spacing, as GDCM cannot retreive image spacing correctly for this type of image
-    outputSpacingStr = ds.[findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")]
+    ds = dicom.read_file(filePath, stop_before_pixels=True)
+    outputSpacingStr = ds[findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")]
     outputVolume.SetSpacing(float(outputSpacingStr[0]), float(outputSpacingStr[1]), float(outputSpacingStr[2]))
 
+    appLogic = slicer.app.applicationLogic()
+    selectionNode = appLogic.GetSelectionNode()
+    selectionNode.SetReferenceActiveVolumeID(outputVolume.GetID())
+    appLogic.PropagateVolumeSelection(0)
+    appLogic.FitSliceToAll()
+    
     return outputVolume
 
   def loadPhilips4DUSAsSequence(self,loadable):
