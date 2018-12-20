@@ -49,8 +49,6 @@ public:
   /// \param scanConvert Boolean flag which is set to true by default, to convert the volume to a Cartesian coordinate system
   vtkMRMLScalarVolumeNode* LoadKretzFile(char* filename, char* nodeName = NULL, bool scanConvert = true, double outputSpacing[3] = NULL, unsigned long int fileOffset=0);
 
-  vtkMRMLScalarVolumeNode* LoadPhilipsFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/);
-
 protected:
 
   bool ReadKretzItemHeader(ifstream &readFileStream, KretzItem& item);

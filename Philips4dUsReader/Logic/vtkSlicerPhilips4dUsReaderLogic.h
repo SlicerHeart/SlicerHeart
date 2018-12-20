@@ -49,6 +49,11 @@ public:
   vtkTypeMacro(vtkSlicerPhilips4dUsReaderLogic, vtkSlicerModuleLogic);
   void PrintSelf(ostream& os, vtkIndent indent);
 
+  /// Load native (non-Cartesian) Philips 4D US file
+  /// \param filename Path and filename of the input DICOM file
+  /// \param scanConvert Boolean flag which is set to true by default, to convert the volume to a Cartesian coordinate system
+  vtkMRMLScalarVolumeNode* LoadPhilipsFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/);
+
 protected:
   vtkSlicerPhilips4dUsReaderLogic();
   virtual ~vtkSlicerPhilips4dUsReaderLogic();
