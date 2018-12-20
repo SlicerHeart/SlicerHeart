@@ -23,6 +23,7 @@ find_package(Sequences REQUIRED)
 # Extension modules
 add_subdirectory(ValveView)
 add_subdirectory(Philips4dUsDicomPatcher)
+add_subdirectory(Philips4dUsReader)
 add_subdirectory(KretzFileReader)
 add_subdirectory(GeUsMovieReader)
 add_subdirectory(DicomUltrasoundPlugin)

@@ -21,60 +21,57 @@
 #include <qSlicerIOManager.h>
 #include <qSlicerNodeWriter.h>
 
-// KretzFileReader Logic includes
-#include <vtkSlicerKretzFileReaderLogic.h>
+// Philips4dUsReader Logic includes
+#include <vtkSlicerPhilips4dUsReaderLogic.h>
 
-// KretzFileReader QTModule includes
-#include "qSlicerKretzFileReaderPlugin.h"
-#include "qSlicerKretzFileReaderModule.h"
-#include "qSlicerKretzFileReaderPluginWidget.h"
-
+// Philips4dUsReader QTModule includes
+#include "qSlicerPhilips4dUsReaderModule.h"
 
 //-----------------------------------------------------------------------------
 
 #if (QT_VERSION < QT_VERSION_CHECK(5, 0, 0))
 #include <QtPlugin>
-Q_EXPORT_PLUGIN2(qSlicerKretzFileReaderModule, qSlicerKretzFileReaderModule);
+Q_EXPORT_PLUGIN2(qSlicerPhilips4dUsReaderModule, qSlicerPhilips4dUsReaderModule);
 #endif
 
 //-----------------------------------------------------------------------------
-/// \ingroup SlicerRt_QtModules_KretzFileReader
-class qSlicerKretzFileReaderModulePrivate
+/// \ingroup SlicerRt_QtModules_Philips4dUsReader
+class qSlicerPhilips4dUsReaderModulePrivate
 {
 public:
-  qSlicerKretzFileReaderModulePrivate();
+  qSlicerPhilips4dUsReaderModulePrivate();
 };
 
 //-----------------------------------------------------------------------------
-qSlicerKretzFileReaderModulePrivate::qSlicerKretzFileReaderModulePrivate()
+qSlicerPhilips4dUsReaderModulePrivate::qSlicerPhilips4dUsReaderModulePrivate()
 {
 }
 
 
 //-----------------------------------------------------------------------------
-qSlicerKretzFileReaderModule::qSlicerKretzFileReaderModule(QObject* _parent)
+qSlicerPhilips4dUsReaderModule::qSlicerPhilips4dUsReaderModule(QObject* _parent)
   : Superclass(_parent)
-  , d_ptr(new qSlicerKretzFileReaderModulePrivate)
+  , d_ptr(new qSlicerPhilips4dUsReaderModulePrivate)
 {
 }
 
 //-----------------------------------------------------------------------------
-qSlicerKretzFileReaderModule::~qSlicerKretzFileReaderModule()
+qSlicerPhilips4dUsReaderModule::~qSlicerPhilips4dUsReaderModule()
 {
 }
 
 //-----------------------------------------------------------------------------
-QString qSlicerKretzFileReaderModule::helpText()const
+QString qSlicerPhilips4dUsReaderModule::helpText()const
 {
   QString help = QString(
-    "The KretzFileReader module enables importing and loading GE/Kretz 3D ultrasound files into Slicer.<br>"
-    "The KretzFileReader module is hidden and therefore does not require a module widget.<br>"
+    "The Philips4dUsReader module enables importing and loading Philips 4D Ultrasound DICOM files into Slicer.<br>"
+    "The Philips4dUsReader module is hidden and therefore does not require a module widget.<br>"
     "More information: <a href=\"https://github.com/SlicerHeart/SlicerHeart\">SlicerHear extension website</a><br>");
   return help;
 }
 
 //-----------------------------------------------------------------------------
-QString qSlicerKretzFileReaderModule::acknowledgementText()const
+QString qSlicerPhilips4dUsReaderModule::acknowledgementText()const
 {
   // must not be empty
   QString acknowledgement = QString(
@@ -83,7 +80,7 @@ QString qSlicerKretzFileReaderModule::acknowledgementText()const
 }
 
 //-----------------------------------------------------------------------------
-QStringList qSlicerKretzFileReaderModule::contributors()const
+QStringList qSlicerPhilips4dUsReaderModule::contributors()const
 {
   QStringList moduleContributors;
   moduleContributors << QString("Andras Lasso (Queen's)");
@@ -91,34 +88,26 @@ QStringList qSlicerKretzFileReaderModule::contributors()const
 }
 
 //-----------------------------------------------------------------------------
-QStringList qSlicerKretzFileReaderModule::categories()const
+QStringList qSlicerPhilips4dUsReaderModule::categories()const
 {
   return QStringList() << "Cardiac";
 }
 
 //-----------------------------------------------------------------------------
-void qSlicerKretzFileReaderModule::setup()
+void qSlicerPhilips4dUsReaderModule::setup()
 {
   this->Superclass::setup();
-  
-  vtkSlicerKretzFileReaderLogic* kretzFileReaderLogic =  
-    vtkSlicerKretzFileReaderLogic::SafeDownCast(this->logic());
-
-  // Adds the module to the IO Manager
-  qSlicerCoreIOManager* ioManager =
-    qSlicerCoreApplication::application()->coreIOManager();
-  ioManager->registerIO(new qSlicerKretzFileReaderPlugin(kretzFileReaderLogic,this));
 }
 
 //-----------------------------------------------------------------------------
-qSlicerAbstractModuleRepresentation* qSlicerKretzFileReaderModule::createWidgetRepresentation()
+qSlicerAbstractModuleRepresentation* qSlicerPhilips4dUsReaderModule::createWidgetRepresentation()
 {
-  return new qSlicerKretzFileReaderPluginWidget;
+  // The module does not have GUI
+  return NULL;
 }
 
 //-----------------------------------------------------------------------------
-vtkMRMLAbstractLogic* qSlicerKretzFileReaderModule::createLogic()
+vtkMRMLAbstractLogic* qSlicerPhilips4dUsReaderModule::createLogic()
 {
-  return vtkSlicerKretzFileReaderLogic::New();
+  return vtkSlicerPhilips4dUsReaderLogic::New();
 }
-
