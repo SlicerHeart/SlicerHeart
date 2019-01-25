@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<executable>
+  <category>Filtering</category>
+  <title>Phase Symmetry Filter</title>
+  <description>Filter the input image on phase symmetry.</description>
+  <version>0.1.0</version>
+  <license>Apache 2.0</license>
+  <contributor>Matt McCormick (Kitware)</contributor>
+  <acknowledgements>This work is funded in part by a grant with InnerOptic/Kitware</acknowledgements>
+  <parameters>
+    <image>
+      <name>inputImage</name>
+      <label>Input Image</label>
+      <channel>input</channel>
+      <index>0</index>
+      <description>Input image filename.</description>
+    </image>
+    <image>
+      <name>outputImage</name>
+      <label>Output Image</label>
+      <channel>output</channel>
+      <index>1</index>
+      <description>Output image filename.</description>
+    </image>
+    <double-vector>
+      <name>wavelengths</name>
+      <longflag>--wavelengths</longflag>
+      <description><![CDATA[TODO.]]></description>
+      <label>Wavelengths</label>
+      <default>3,3,3,6,6,6,12,12,12</default>
+    </double-vector>
+    <double-vector>
+      <name>orientations</name>
+      <longflag>--orientations</longflag>
+      <description><![CDATA[TODO.]]></description>
+      <label>Orientations</label>
+      <default>1,0,0,0,1,0,0,0,1</default>
+    </double-vector>
+    <double>
+      <name>sigma</name>
+      <longflag>--sigma</longflag>
+      <description><![CDATA[TODO.]]></description>
+      <label>Sigma</label>
+      <default>0.55</default>
+    </double>
+    <double>
+      <name>angularBandwidth</name>
+      <longflag>--angularBandwidth</longflag>
+      <description><![CDATA[TODO.]]></description>
+      <label>Angular Bandwidth</label>
+      <default>3.14</default>
+    </double>
+    <integer>
+      <name>polarity</name>
+      <longflag>--polarity</longflag>
+      <description><![CDATA[TODO.]]></description>
+      <label>Polarity</label>
+      <default>0</default>
+    </integer>
+    <double>
+      <name>noiseThreshold</name>
+      <longflag>--noiseThreshold</longflag>
+      <description><![CDATA[TODO.]]></description>
+      <label>Noise Threshold</label>
+      <default>10.0</default>
+    </double>
+  </parameters>
+</executable>

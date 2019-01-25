@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(SlicerHeart)
+set(EXTENSION_NAME SlicerHeart)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
@@ -10,14 +10,29 @@ set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam
 set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention planning and guidance")
 set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
+set(EXTENSION_STATUS Beta)
 set(EXTENSION_DEPENDS "Sequences")
+set(EXTENSION_BUILD_SUBDIRECTORY inner-build)
+
+
+set(SUPERBUILD_TOPLEVEL_PROJECT inner)
 
 #-----------------------------------------------------------------------------
 # Extension dependencies
+find_package(Slicer COMPONENTS ConfigurePrerequisites REQUIRED)
+project(SlicerHeart)
 find_package(Slicer REQUIRED)
 include(${Slicer_USE_FILE})
-
+mark_as_superbuild(Slicer_DIR)
 find_package(Sequences REQUIRED)
+
+#-----------------------------------------------------------------------------
+option(${EXTENSION_NAME}_SUPERBUILD "Build ${EXTENSION_NAME} and the projects it depends on." ON)
+mark_as_advanced(${EXTENSION_NAME}_SUPERBUILD)
+if(${EXTENSION_NAME}_SUPERBUILD)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/SuperBuild.cmake")
+  return()
+endif()
 
 #-----------------------------------------------------------------------------
 # Extension modules
@@ -28,7 +43,11 @@ add_subdirectory(KretzFileReader)
 add_subdirectory(GeUsMovieReader)
 add_subdirectory(DicomUltrasoundPlugin)
 add_subdirectory(CardiacDeviceSimulator)
+add_subdirectory(PhaseSymmetryFilter)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
+set(CPACK_INSTALL_CMAKE_PROJECTS "${CPACK_INSTALL_CMAKE_PROJECTS};${ITKStrain_DIR};Strain;RuntimeLibraries;/")
+set(CPACK_INSTALL_CMAKE_PROJECTS "${CPACK_INSTALL_CMAKE_PROJECTS};${ITKPhaseSymmetry_DIR};PhaseSymmetry;RuntimeLibraries;/")
+include(${Slicer_EXTENSION_GENERATE_CONFIG})
 include(${Slicer_EXTENSION_CPACK})
