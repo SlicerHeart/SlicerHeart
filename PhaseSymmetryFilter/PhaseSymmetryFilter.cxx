@@ -16,9 +16,12 @@
  *
  *=========================================================================*/
 
+#include "itkFFTPadImageFilter.h"
 #include "itkImageFileReader.h"
-#include "itkPhaseSymmetryImageFilter.h"
 #include "itkImageFileWriter.h"
+#include "itkPeriodicBoundaryCondition.h"
+#include "itkPhaseSymmetryImageFilter.h"
+
 #include "PhaseSymmetryFilterCLP.h"
 
 template< unsigned int VDimension >
@@ -44,12 +47,19 @@ int PhaseSymmetryFilter( int argc, char * argv[] )
     }
 
   typename ImageType::Pointer readImage = reader->GetOutput();
-  // TODO: necessary?
   readImage->DisconnectPipeline();
+  
+  // FFT requires image size of multiple of 2
+  typedef itk::FFTPadImageFilter< ImageType > FFTPadType;
+  FFTPadType::Pointer fftpad = FFTPadType::New();
+  fftpad->SetInput(readImage);
+  fftpad->SetSizeGreatestPrimeFactor(2);
+  itk::PeriodicBoundaryCondition< ImageType > wrapCond;
+  fftpad->SetBoundaryCondition(&wrapCond);
 
   using PhaseSymmetryFilterType = itk::PhaseSymmetryImageFilter< ImageType, ImageType >;
   typename PhaseSymmetryFilterType::Pointer phaseSymmetryFilter = PhaseSymmetryFilterType::New();
-  phaseSymmetryFilter->SetInput( readImage );
+  phaseSymmetryFilter->SetInput(fftpad->GetOutput());
 
   using Array2DType = itk::Array2D< double >;
   const unsigned int scales = wavelengths.size() / Dimension;
