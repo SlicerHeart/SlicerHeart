@@ -106,7 +106,6 @@ Load data from DICOM folder:
   - Matthew Jolley, <email>jolleym@email.chop.edu</email>
   - Andras Lasso, <email>lasso@queensu.ca</email>
 - License: [Slicer license](http://www.slicer.org/pages/LicenseText)
-- Funding: 
 
 # How to cite
 
