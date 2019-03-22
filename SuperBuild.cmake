@@ -18,10 +18,13 @@ endforeach()
 set(proj ${SUPERBUILD_TOPLEVEL_PROJECT})
 
 # Project dependencies
-set(${proj}_DEPENDS
-  ITKPhaseSymmetry
-  ITKStrain
-  )
+set(${proj}_DEPENDS)
+if (SlicerHeart_BUILD_ITK_FILTERS)
+  list(APPEND ${proj}_DEPENDS
+    ITKPhaseSymmetry
+    ITKStrain
+    )
+endif()
 
 ExternalProject_Include_Dependencies(${proj}
   PROJECT_VAR proj

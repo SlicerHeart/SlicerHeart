@@ -14,7 +14,6 @@ set(EXTENSION_STATUS Beta)
 set(EXTENSION_DEPENDS "Sequences")
 set(EXTENSION_BUILD_SUBDIRECTORY inner-build)
 
-
 set(SUPERBUILD_TOPLEVEL_PROJECT inner)
 
 #-----------------------------------------------------------------------------
@@ -26,6 +25,14 @@ find_package(Sequences REQUIRED)
 
 find_package(Git REQUIRED)
 mark_as_superbuild(GIT_EXECUTABLE)
+
+# Only build ITK filters if ITK5 is available
+set(SlicerHeart_BUILD_ITK_FILTERS ON)
+message(STATUS "ITK version: ${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR}.${ITK_VERSION_PATCH}.")
+if(${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR} VERSION_LESS 5.0)
+  message(STATUS "ITK version: ${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR}.${ITK_VERSION_PATCH}. ITK filters are not built.")
+  set(SlicerHeart_BUILD_ITK_FILTERS OFF)
+endif()
 
 #-----------------------------------------------------------------------------
 # SuperBuild setup
@@ -45,13 +52,17 @@ add_subdirectory(KretzFileReader)
 add_subdirectory(GeUsMovieReader)
 add_subdirectory(DicomUltrasoundPlugin)
 add_subdirectory(CardiacDeviceSimulator)
-add_subdirectory(PhaseSymmetryFilter)
+if (SlicerHeart_BUILD_ITK_FILTERS)
+  add_subdirectory(PhaseSymmetryFilter)
+endif()
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
 set(EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS)
-list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKStrain_DIR};Strain;RuntimeLibraries;/")
-list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKPhaseSymmetry_DIR};PhaseSymmetry;RuntimeLibraries;/")
+if (SlicerHeart_BUILD_ITK_FILTERS)
+  list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKStrain_DIR};Strain;RuntimeLibraries;/")
+  list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKPhaseSymmetry_DIR};PhaseSymmetry;RuntimeLibraries;/")
+endif()
 set(${EXTENSION_NAME}_CPACK_INSTALL_CMAKE_PROJECTS "${EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS}" CACHE STRING "List of external projects to install" FORCE)
 #-----------------------------------------------------------------------------
 list(APPEND CPACK_INSTALL_CMAKE_PROJECTS "${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/")
