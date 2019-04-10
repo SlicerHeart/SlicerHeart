@@ -1,6 +1,7 @@
 import qt, ctk, vtk
 from .helpers import UIHelper
 
+import collections
 
 class CardiacDeviceWidget(ctk.ctkCollapsibleButton, UIHelper):
 
@@ -158,19 +159,26 @@ class CylinderDevice(CardiacDeviceBase):
 
   @classmethod
   def getParameters(cls):
-    return {
-      "radiusMm": cls._genParameters("Radius", "", 15, "mm", 0, 30, 0.1, 1),
-      "lengthMm": cls._genParameters("Length", "", 30, "mm", 0, 100, 0.1, 1)
-    }
+    # Use an OrderedDict to display sliders in the order we define them here
+    return collections.OrderedDict([
+      ("expansionPercent", cls._genParameters("Expansion", "100% means expanded, 0% means crimped", 100, "%", 0, 100, 1, 10)),
+      ("expandedDiameterMm", cls._genParameters("Expanded diameter", "", 22.4, "mm", 0, 60, 0.1, 1)),
+      ("expandedLengthMm", cls._genParameters("Expanded length", "", 24, "mm", 0, 100, 0.1, 1)),
+      ("crimpedDiameterMm", cls._genParameters("Crimped diameter", "", 7, "mm", 0, 60, 0.1, 1)),
+      ("crimpedLengthMm", cls._genParameters("Crimped length", "", 32, "mm", 0, 100, 0.1, 1)),
+      ("anchorPositionPercent", cls._genParameters("Anchor position", "Defines what point of the device remains in the same position as it expands/contracts", 0, "%", 0, 100, 1, 10))
+      ])
 
   @staticmethod
   def getProfilePoints(params, segment=None, openSegment=True):
-    lengthMm = params['lengthMm']
-    radiusMm = params['radiusMm']
+    lengthMm = params['crimpedLengthMm'] + params['expansionPercent'] * (params['expandedLengthMm']-params['crimpedLengthMm'])
+    radiusMm = (params['crimpedDiameterMm'] + params['expansionPercent'] * (params['expandedDiameterMm']-params['crimpedDiameterMm'])) / 2.0
+    print("Expansion = {0}, actual diameter = {1}, length = {2}".format(params['expansionPercent'], radiusMm * 2.0, lengthMm))
+    origin = -lengthMm * params['anchorPositionPercent']
     points = vtk.vtkPoints()
-    points.InsertNextPoint(radiusMm, 0, -lengthMm/2)
-    points.InsertNextPoint(radiusMm, 0, -lengthMm/4)
-    points.InsertNextPoint(radiusMm, 0, 0)
-    points.InsertNextPoint(radiusMm, 0, lengthMm/4)
-    points.InsertNextPoint(radiusMm, 0, lengthMm/2)
+    points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 0.00)
+    points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 0.25)
+    points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 0.50)
+    points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 0.75)
+    points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 1.00)
     return points

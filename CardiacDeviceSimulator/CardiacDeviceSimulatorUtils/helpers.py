@@ -13,7 +13,7 @@ class UIHelper(object):
     sliderWidget.suffix = attributes["unit"]
     sliderWidget.decimals = attributes["decimals"]
     sliderWidget.setToolTip(attributes["info"])
-    sliderWidget.tracking = False
+    sliderWidget.tracking = True
     sliderWidget.connect('valueChanged(double)', lambda val: valueChangedCallback())
     layout.addRow(attributes["name"], sliderWidget)
     return sliderWidget

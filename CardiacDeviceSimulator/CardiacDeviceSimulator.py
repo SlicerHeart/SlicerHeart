@@ -355,8 +355,17 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.processVesselSegmentButton.enabled = (self.vesselSegmentSelector.currentNode() is not None)
 
   def onCommonSectionToggled(self, index, toggled):
+
+    # Only allow update of deformed models when common section is active (not collapsed)
+    self.logic.parameterNode.SetParameter('UpdateDeformedModelsEnabled', "0" if toggled else "1")
+
+    if not toggled:
+      # While we are in general section, only the original model is updated.
+      # We are exiting the general section now, so make sure all the deformed models are updated.
+      self.logic.updateModel()
+
     if self.quantificationSection.checked:
-      # TODO: hie the expanding spacer if quantification section is open
+      # TODO: hide the expanding spacer if quantification section is open
       pass
 
   def onVesselLumenSegmentSelectionChanged(self):
@@ -541,6 +550,9 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       shNode.SetItemAttribute(parameterNodeShItem, "ModuleName", "CardiacDeviceAnalysis")
     else:
       parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
+
+    if not self.parameterNode.GetParameter('UpdateDeformedModelsEnabled'):
+      self.parameterNode.SetParameter('UpdateDeformedModelsEnabled', "0")
 
     if not self.parameterNode.GetParameter('ColorTableRangeMm'):
       self.parameterNode.SetParameter('ColorTableRangeMm', "10.0")
@@ -1100,18 +1112,20 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
 
     # Create whole (open) original and deformed models
     profilePoints = getProfilePointsMethod(modelParameters)
-
     modelProfilePoints = vtk.vtkPoints()
     self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), self.modelInfo[self.modelType]['interpolationSmoothness'])
+
     self.updateModelWithProfile(self.parameterNode.GetNodeReference('OriginalModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
-    self.updateModelWithProfile(self.parameterNode.GetNodeReference('DeformedModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
 
-    self.handleProfilePoints.Reset()
-    self.resampleCurve(modelProfilePoints, self.handleProfilePoints, self.getHandlesSpacingMm())
-    self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('OriginalHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
-    self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('DeformedHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
+    # If adjusting basic parameters then just update the original model
 
-    logging.debug("updating segment original and deformed models")
+    updateDeformedModelsEnabled = bool(int(self.parameterNode.GetParameter('UpdateDeformedModelsEnabled')))
+    if  updateDeformedModelsEnabled:
+      self.updateModelWithProfile(self.parameterNode.GetNodeReference('DeformedModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
+      self.handleProfilePoints.Reset()
+      self.resampleCurve(modelProfilePoints, self.handleProfilePoints, self.getHandlesSpacingMm())
+      self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('OriginalHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
+      self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('DeformedHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
 
   def createOriginalAndDeformedSegmentModels(self, volumetric=False):
     if volumetric:
@@ -1414,30 +1428,27 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     import HeartValveLib
     import numpy as np
 
-    # get the length of the device
-    modelParameters = self.modelInfo[self.modelType]['parameters']
-    if self.modelType == HarmonyDevice.NAME:
-      lengthMm = (modelParameters['distalStraightLengthMm'] + modelParameters['distalCurvedLengthMm']
-                  + modelParameters['midLengthMm']
-                  + modelParameters['proximalCurvedLengthMm'] + modelParameters['proximalStraightLengthMm'])
-    else:
-      lengthMm = modelParameters['lengthMm']
+    # Get the distance of the two endpoints of the device from the origin
+    originalModelNode = self.parameterNode.GetNodeReference('OriginalModel')
+    originalModelNodePoints = slicer.util.arrayFromModelPoints(originalModelNode)
+    originalModelNodePointsZMin = abs(originalModelNodePoints[:,2].min())
+    originalModelNodePointsZMax = abs(originalModelNodePoints[:,2].max())
 
     centerlinePoints = slicer.util.arrayFromModelPoints(self.getCenterlineModelNode())
 
-    # Find point index at half distance in both directions along the curve
+    # Find point index corresponding to device endpoints in both directions along the curve
     distanceFromCenterPoint = 0
     startPointIndex = 0
-    for startPointIndex in range(deviceCenterPointIndex-1, 0, -1):
+    for startPointIndex in range(deviceCenterPointIndex-1, -1, -1):
       distanceFromCenterPoint += np.linalg.norm(centerlinePoints[startPointIndex] - centerlinePoints[startPointIndex+1])
-      if distanceFromCenterPoint >= lengthMm / 2:
+      if distanceFromCenterPoint >= originalModelNodePointsZMax:
         break
 
     distanceFromCenterPoint = 0
     endPointIndex = len(centerlinePoints)-1
     for endPointIndex in range(deviceCenterPointIndex+1, len(centerlinePoints)):
       distanceFromCenterPoint += np.linalg.norm(centerlinePoints[endPointIndex-1] - centerlinePoints[endPointIndex])
-      if distanceFromCenterPoint >= lengthMm / 2:
+      if distanceFromCenterPoint >= originalModelNodePointsZMin:
         break
 
     centerlinePointsAlongDevice = centerlinePoints[startPointIndex:endPointIndex]
