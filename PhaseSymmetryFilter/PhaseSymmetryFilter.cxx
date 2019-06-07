@@ -50,12 +50,13 @@ int PhaseSymmetryFilter( int argc, char * argv[] )
   readImage->DisconnectPipeline();
   
   // FFT requires image size of multiple of 2
-  typename itk::FFTPadImageFilter< ImageType > FFTPadType;
+  using FFTPadType = itk::FFTPadImageFilter< ImageType >;
   FFTPadType::Pointer fftpad = FFTPadType::New();
   fftpad->SetInput(readImage);
   fftpad->SetSizeGreatestPrimeFactor(2);
   itk::PeriodicBoundaryCondition< ImageType > wrapCond;
   fftpad->SetBoundaryCondition(&wrapCond);
+  fftpad->Update();
 
   using PhaseSymmetryFilterType = itk::PhaseSymmetryImageFilter< ImageType, ImageType >;
   typename PhaseSymmetryFilterType::Pointer phaseSymmetryFilter = PhaseSymmetryFilterType::New();
