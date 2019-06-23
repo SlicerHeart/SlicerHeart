@@ -990,7 +990,7 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     compressionSliceAreaArray.SetName("Area compression [%]")
     compressionSliceAreaArray.SetNumberOfValues(numberOfSlices)
 
-    # Create a polygon for area computation    
+    # Create a polygon for area computation
     polygon = vtk.vtkPolygon()
     polygon.GetPointIds().SetNumberOfIds(numberOfPointsPerSlice)
     polygon.GetPoints().SetNumberOfPoints(numberOfPointsPerSlice)
@@ -1006,7 +1006,7 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       originalSliceRadiusArray.SetValue(sliceIndex, originalSliceRadius)
       originalSlicePerimeterArray.SetValue(sliceIndex, originalSlicePerimeter)
       originalSliceAreaArray.SetValue(sliceIndex, originalSliceArea)
-     
+
       # Initialize previous point to be the last point in the polygon
       # so that we don't miss the segment that connects the last and first point.
       averageRadius = 0
@@ -1028,7 +1028,7 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       compressionSliceRadiusArray.SetValue(sliceIndex, (originalSliceRadius-averageRadius)/originalSliceRadius*100.0)
       compressionSlicePerimeterArray.SetValue(sliceIndex, (originalSlicePerimeter-polygonPerimeter)/originalSlicePerimeter*100.0)
       compressionSliceAreaArray.SetValue(sliceIndex, (originalSliceArea-polygonArea)/originalSliceArea*100.0)
-      
+
     displacementTable.AddColumn(slicePositionArray)
     displacementTable.AddColumn(compressionSliceRadiusArray)
     displacementTable.AddColumn(compressionSlicePerimeterArray)
@@ -1618,40 +1618,3 @@ class CardiacDeviceSimulatorTest(ScriptedLoadableModuleTest):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_CardiacDeviceSimulator1()
-
-  def test_CardiacDeviceSimulator1(self):
-    """ Ideally you should have several levels of tests.  At the lowest level
-    tests should exercise the functionality of the logic with different inputs
-    (both valid and invalid).  At higher levels your tests should emulate the
-    way the user would interact with your code and confirm that it still works
-    the way you intended.
-    One of the most important features of the tests is that it should alert other
-    developers when their changes will have an impact on the behavior of your
-    module.  For example, if a developer removes a feature that you depend on,
-    your test should break so they know that the feature is needed.
-    """
-
-    self.delayDisplay("Starting the test")
-    #
-    # first, get some data
-    #
-    import urllib
-    downloads = (
-        ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),
-        )
-
-    for url,name,loader in downloads:
-      filePath = slicer.app.temporaryPath + '/' + name
-      if not os.path.exists(filePath) or os.stat(filePath).st_size == 0:
-        logging.info('Requesting download %s from %s...\n' % (name, url))
-        urllib.urlretrieve(url, filePath)
-      if loader:
-        logging.info('Loading %s...' % (name,))
-        loader(filePath)
-    self.delayDisplay('Finished with download and loading')
-
-    volumeNode = slicer.mrmlScene.GetFirstNodeByName("FA")
-    logic = CardiacDeviceSimulatorLogic()
-    self.assertIsNotNone( logic.hasImageData(volumeNode) )
-    self.delayDisplay('Test passed!')
