@@ -56,6 +56,9 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.logic = CardiacDeviceSimulatorLogic()
     self.updateMethod = None
 
+    self.moduleSectionButtonsGroup = qt.QButtonGroup()
+    self.moduleSectionButtonsGroup.connect("buttonToggled(QAbstractButton*,bool)", self.onModuleSectionToggled)
+
     self.addGeneralSection()
     self.addVesselCenterlineSection()
     self.addDevicePositionSection()
@@ -78,10 +81,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.updateButtonStates()
 
   def addGeneralSection(self):
-    self.commonButtonsGroup = qt.QButtonGroup()
-    self.commonButtonsGroup.connect("buttonToggled(int,bool)", self.onCommonSectionToggled)
-
-    [lay, self.generalSection] = UIHelper.addCommonSection("General", self.layout, self.commonButtonsGroup,
+    [lay, self.generalSection] = UIHelper.addCommonSection("General", self.layout, self.moduleSectionButtonsGroup,
                                                            collapsed=False)
 
     self.parameterNodeSelector = slicer.qMRMLNodeComboBox()
@@ -111,15 +111,15 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.addDeviceWidgets(lay)
 
   def addDeviceWidgets(self, lay):
-    self.collapsibleButtonsGroup = qt.QButtonGroup()
+    self.deviceWidgetGroup = qt.QButtonGroup()
     for deviceClass in self.registeredDeviceClasses:
       deviceWidget = CardiacDeviceWidget(deviceClass, self.logic, self.updateSliceSelectorWidget)
       lay.addWidget(deviceWidget)
-      self.collapsibleButtonsGroup.addButton(deviceWidget)
-      deviceWidget.connect('toggled(bool)', lambda toggle, name=deviceClass.NAME: self.onSwitchSection(name, toggle))
+      self.deviceWidgetGroup.addButton(deviceWidget)
+      deviceWidget.connect('toggled(bool)', lambda toggle, name=deviceClass.NAME: self.onSwitchDeviceSection(name, toggle))
 
   def addVesselCenterlineSection(self):
-    [lay, self.centerlineSection] = UIHelper.addCommonSection("Vessel centerline", self.layout, self.commonButtonsGroup,
+    [lay, self.centerlineSection] = UIHelper.addCommonSection("Vessel centerline", self.layout, self.moduleSectionButtonsGroup,
                                                               collapsed=True)
 
     self.vesselSegmentSelector = slicer.qMRMLSegmentSelectorWidget()
@@ -139,7 +139,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
 
   def addDevicePositionSection(self):
     [lay, self.devicePositionSection] = UIHelper.addCommonSection("Device position", self.layout,
-                                                                  self.commonButtonsGroup, collapsed=True)
+                                                                  self.moduleSectionButtonsGroup, collapsed=True)
     # Centerline model selector
     self.centerlineModelNodeSelector = slicer.qMRMLNodeComboBox()
     self.centerlineModelNodeSelector.nodeTypes = ["vtkMRMLModelNode"]
@@ -209,7 +209,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     # self.createClosedSegmentsForAlreadyFittedDeviceButton.connect('clicked(bool)', self.onCreateClosedSegmentsForAlreadyFittedHarmonyDevice)
 
     [lay, self.deviceDeformationSection] = UIHelper.addCommonSection("Device deformation", self.layout,
-                                                                     self.commonButtonsGroup, collapsed=True)
+                                                                     self.moduleSectionButtonsGroup, collapsed=True)
     # Vessel model selector
     self.vesselModelNodeSelector = slicer.qMRMLNodeComboBox()
     self.vesselModelNodeSelector.nodeTypes = ["vtkMRMLModelNode"]
@@ -260,7 +260,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
 
   def addQuantificationSection(self):
     [lay, self.quantificationSection] = UIHelper.addCommonSection("Quantification", self.layout,
-                                                                  self.commonButtonsGroup)
+                                                                  self.moduleSectionButtonsGroup)
     self.colorTableRangeMmSliderWidget = UIHelper.addSlider({
       "name": "Color table range:", "info": "Maximum compression represented in the color table", "value": 10,
       "unit": "mm", "minimum": 0, "maximum": 20, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay,
@@ -316,6 +316,11 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
 
     self.logic.setParameterNode(self.parameterNodeSelector.currentNode())
     if self.logic.parameterNode:
+
+      # Update model parameter sliders from parameter node
+      for deviceWidget in self.deviceWidgetGroup.buttons():
+        deviceWidget.updateGUIFromModelParameters()
+
       self.setupResliceDriver()
 
       self.colorTableRangeMmSliderWidget.value = float(self.logic.parameterNode.GetParameter("ColorTableRangeMm"))
@@ -354,15 +359,17 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       self.deformDeviceToVesselWallsButton.enabled = True
     self.processVesselSegmentButton.enabled = (self.vesselSegmentSelector.currentNode() is not None)
 
-  def onCommonSectionToggled(self, index, toggled):
+  def onModuleSectionToggled(self, button, toggled):
 
-    # Only allow update of deformed models when common section is active (not collapsed)
-    self.logic.parameterNode.SetParameter('UpdateDeformedModelsEnabled', "0" if toggled else "1")
+    if button == self.generalSection:
+      # Only allow update of deformed models when common section is active (not collapsed)
+      self.logic.updateDeformedModelsEnabled = not toggled
 
-    if not toggled:
-      # While we are in general section, only the original model is updated.
-      # We are exiting the general section now, so make sure all the deformed models are updated.
-      self.logic.updateModel()
+      if not toggled and self.logic.updateDeformedModelsPending:
+        # While we are in general section, only the original model is updated.
+        # We are exiting the general section now, so make sure all the deformed models are updated.
+        # Update of model resets deformation markers, so only do it if the model actually changed
+        self.logic.updateModel()
 
     if self.quantificationSection.checked:
       # TODO: hide the expanding spacer if quantification section is open
@@ -485,9 +492,11 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       resliceLogic.SetDriverForSlice(self.logic.parameterNode.GetNodeReference('PositioningTransform').GetID(), sliceNode)
       resliceLogic.SetModeForSlice(resliceMode, sliceNode)
 
-  def onSwitchSection(self, name, toggle):
+  def onSwitchDeviceSection(self, name, toggle):
     if not toggle:
       return
+    if self.parameterNodeSelector.currentNode() is None:
+      self.parameterNodeSelector.addNode()
     self.logic.setModelType(name)
     self.updateSliceSelectorWidget()
     self.sliceSelectorSliderWidget.value = 0
@@ -522,20 +531,16 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
 
   def __init__(self, parent=None):
     ScriptedLoadableModuleLogic.__init__(self, parent)
-
     self.interpolatorType = 'KochanekSpline' # Valid options: 'CardinalSpline', 'SCurveSpline', 'KochanekSpline'
-
     self.parameterNode = None
-
     self.deviceOrientationFlipped = False
-
     self.handleProfilePoints = vtk.vtkPoints()
-    self.handlesPerSlice = 4
-    self.handlesSpacingMm = 5
-
     self.modelInfo = {}
-
-    self.modelType = HarmonyDevice.NAME
+    # For performance reasons, we can temporarily disable deformed models update.
+    # If original model is updated while updateDeformedModelsEnabled is set to False
+    # then updateDeformedModelsPending flag is set.
+    self.updateDeformedModelsEnabled = True
+    self.updateDeformedModelsPending = False
 
   def setParameterNode(self, parameterNode):
     self.parameterNode = parameterNode
@@ -551,8 +556,9 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     else:
       parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
 
-    if not self.parameterNode.GetParameter('UpdateDeformedModelsEnabled'):
-      self.parameterNode.SetParameter('UpdateDeformedModelsEnabled', "0")
+    self.updateDeformedModelsEnabled = False
+    # Not using the parameter node for this anymore (but updateDeformedModelsEnabled member variable)
+    self.parameterNode.SetParameter('UpdateDeformedModelsEnabled', '')
 
     if not self.parameterNode.GetParameter('ColorTableRangeMm'):
       self.parameterNode.SetParameter('ColorTableRangeMm', "10.0")
@@ -650,17 +656,38 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     if not self.parameterNode.GetNodeReference('OriginalHandles'):
       n = self.createMarkupsNode('OriginalHandles', [1, 0, 0])
       n.GetDisplayNode().SetVisibility(0)
-      n.GetDisplayNode().SetTextScale(0)
+      try:
+        # Slicer-4.11
+        n.GetDisplayNode().SetPointLabelsVisibility(False)
+      except:
+        # Slicer-4.10
+        n.GetDisplayNode().SetTextScale(0)
       n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
       self.parameterNode.SetNodeReferenceID('OriginalHandles', n.GetID())
       shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
 
+    # Workaround for Slicer Preview Releases before 2019-10-30 (where invisible markups could be picked)
+    self.parameterNode.GetNodeReference('OriginalHandles').SetLocked(True)
+
     if not self.parameterNode.GetNodeReference('DeformedHandles'):
       n = self.createMarkupsNode('DeformedHandles', [0.5,0.5,1.0])
-      n.GetDisplayNode().SetTextScale(0)
+      try:
+        # Slicer-4.11
+        n.GetDisplayNode().SetPointLabelsVisibility(False)
+      except:
+        # Slicer-4.10
+        n.GetDisplayNode().SetTextScale(0)
       n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
       self.parameterNode.SetNodeReferenceID('DeformedHandles', n.GetID())
       shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+
+    # Workaround for Slicer Preview Releases before 2019-10-31 (where point labels could be still shown,
+    # even if text scale was set to 0)
+    try:
+      self.parameterNode.GetNodeReference('OriginalHandles').GetDisplayNode().SetPointLabelsVisibility(False)
+      self.parameterNode.GetNodeReference('DeformedHandles').GetDisplayNode().SetPointLabelsVisibility(False)
+    except:
+      pass
 
     if not self.parameterNode.GetNodeReference('FiducialRegistrationNode'):
       n = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLFiducialRegistrationWizardNode")
@@ -701,6 +728,17 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       manager = slicer.app.layoutManager()
       manager.resetSliceViews()
       manager.resetThreeDViews()
+
+    # Synchronize model parameters with parameter node
+    for deviceClass in CardiacDeviceSimulatorWidget.registeredDeviceClasses:
+      modelType = deviceClass.NAME
+      modelTypeId = modelType.replace(" ", "_")
+      for parameterName, attributes in deviceClass.getParameters().items():
+        newValue = self.parameterNode.GetParameter(modelTypeId + "_" + parameterName)
+        if newValue:
+          self.modelInfo[modelType]['parameters'][parameterName] = newValue
+        else:
+          self.parameterNode.SetParameter(modelTypeId + "_" + parameterName, str(self.modelInfo[modelType]['parameters'][parameterName]))
 
   def getQuantificationResultsFolderShItem(self, subfolderName=None):
     if not self.parameterNode:
@@ -771,8 +809,13 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     return self.parameterNode.GetNodeReference("VesselModel")
 
   def setModelType(self, modelType):
-    self.modelType = modelType
+    self.parameterNode.SetParameter("ModelType", modelType)
     self.updateModel()
+
+  def getModelType(self):
+    modelType = self.parameterNode.GetParameter("ModelType")
+    modelType = modelType.replace("_", " ")  # for legacy scenes
+    return modelType
 
   def setHandlesSettings(self, handlesPerSlice, handlesSpacingMm):
     if handlesPerSlice == self.getHandlesPerSlice() and handlesSpacingMm == self.getHandlesSpacingMm():
@@ -785,10 +828,12 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     self.modelInfo[modelType]['parameters'] = params
     if self.parameterNode:
       modelTypeId = modelType.replace(" ", "_")
-      self.parameterNode.SetParameter("ModelType", modelTypeId)
       for key in params.keys():
         self.parameterNode.SetParameter(modelTypeId+"_"+key, str(params[key]))
       self.updateModel()
+
+  def getModelParameters(self, modelType):
+    return self.modelInfo[modelType]['parameters']
 
   def computeMetrics(self):
 
@@ -824,7 +869,8 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
 
     col = tableNode.AddColumn()
     col.SetName("Metric")
-    modelSegments = ['whole'] + self.modelInfo[self.modelType]['segments']
+    modelType = self.getModelType()
+    modelSegments = ['whole'] + self.modelInfo[modelType]['segments']
     for seg in modelSegments:
       col = tableNode.AddColumn(vtk.vtkDoubleArray())
       col.SetName(seg.capitalize() + "Model")
@@ -1025,9 +1071,12 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       deformedSlicePerimeterArray.SetValue(sliceIndex, polygonPerimeter)
       deformedSliceAreaArray.SetValue(sliceIndex, polygonArea)
 
-      compressionSliceRadiusArray.SetValue(sliceIndex, (originalSliceRadius-averageRadius)/originalSliceRadius*100.0)
-      compressionSlicePerimeterArray.SetValue(sliceIndex, (originalSlicePerimeter-polygonPerimeter)/originalSlicePerimeter*100.0)
-      compressionSliceAreaArray.SetValue(sliceIndex, (originalSliceArea-polygonArea)/originalSliceArea*100.0)
+      compressionSliceRadiusArray.SetValue(sliceIndex, (originalSliceRadius-averageRadius)/originalSliceRadius*100.0
+                                           if originalSliceRadius != 0.0 else 0.0)
+      compressionSlicePerimeterArray.SetValue(sliceIndex, (originalSlicePerimeter-polygonPerimeter)/originalSlicePerimeter*100.0
+                                              if originalSlicePerimeter != 0.0 else 0.0)
+      compressionSliceAreaArray.SetValue(sliceIndex, (originalSliceArea-polygonArea)/originalSliceArea*100.0
+                                         if originalSliceArea != 0.0 else 0.0)
 
     displacementTable.AddColumn(slicePositionArray)
     displacementTable.AddColumn(compressionSliceRadiusArray)
@@ -1097,35 +1146,38 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       minDistanceArray.SetValue(sliceIndex, minDistance)
       maxDistanceArray.SetValue(sliceIndex, maxDistance)
       meanDistanceArray.SetValue(sliceIndex, meanDistance)
-      minDistancePercentArray.SetValue(sliceIndex, minDistance/radius*100)
-      maxDistancePercentArray.SetValue(sliceIndex, maxDistance/radius*100)
-      meanDistancePercentArray.SetValue(sliceIndex, meanDistance/radius*100)
+      minDistancePercentArray.SetValue(sliceIndex, minDistance/radius*100 if radius !=0.0 else 0.0)
+      maxDistancePercentArray.SetValue(sliceIndex, maxDistance/radius*100 if radius !=0.0 else 0.0)
+      meanDistancePercentArray.SetValue(sliceIndex, meanDistance/radius*100 if radius !=0.0 else 0.0)
 
   def updateModel(self):
 
     if not self.parameterNode:
       return
 
-    getProfilePointsMethod = self.modelInfo[self.modelType]['getProfilePointsMethod']
-    modelParameters = self.modelInfo[self.modelType]['parameters']
-    modelSegments = self.modelInfo[self.modelType]['segments'] # some models have distal/middle/proximal sections
+    modelType = self.getModelType()
+    getProfilePointsMethod = self.modelInfo[modelType]['getProfilePointsMethod']
+    modelParameters = self.modelInfo[modelType]['parameters']
+    modelSegments = self.modelInfo[modelType]['segments'] # some models have distal/middle/proximal sections
 
     # Create whole (open) original and deformed models
     profilePoints = getProfilePointsMethod(modelParameters)
     modelProfilePoints = vtk.vtkPoints()
-    self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), self.modelInfo[self.modelType]['interpolationSmoothness'])
+    self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), self.modelInfo[modelType]['interpolationSmoothness'])
 
     self.updateModelWithProfile(self.parameterNode.GetNodeReference('OriginalModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
 
     # If adjusting basic parameters then just update the original model
 
-    updateDeformedModelsEnabled = bool(int(self.parameterNode.GetParameter('UpdateDeformedModelsEnabled')))
-    if  updateDeformedModelsEnabled:
+    if self.updateDeformedModelsEnabled:
       self.updateModelWithProfile(self.parameterNode.GetNodeReference('DeformedModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
       self.handleProfilePoints.Reset()
       self.resampleCurve(modelProfilePoints, self.handleProfilePoints, self.getHandlesSpacingMm())
       self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('OriginalHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
       self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('DeformedHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
+      self.updateDeformedModelsPending = False
+    else:
+      self.updateDeformedModelsPending = True
 
   def createOriginalAndDeformedSegmentModels(self, volumetric=False):
     if volumetric:
@@ -1138,15 +1190,17 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     if volumetric:
       shNode.SetItemExpanded(resultsFolderShItem, False)
 
-    getProfilePointsMethod = self.modelInfo[self.modelType]['getProfilePointsMethod']
-    modelParameters = self.modelInfo[self.modelType]['parameters']
+    modelType = self.getModelType()
 
-    modelSegments = self.modelInfo[self.modelType]['segments'] # some models have distal/middle/proximal sections
+    getProfilePointsMethod = self.modelInfo[modelType]['getProfilePointsMethod']
+    modelParameters = self.modelInfo[modelType]['parameters']
+
+    modelSegments = self.modelInfo[modelType]['segments'] # some models have distal/middle/proximal sections
     for seg in modelSegments + ['whole']:
       profilePoints = getProfilePointsMethod(modelParameters, seg, not volumetric)
       modelProfilePoints = vtk.vtkPoints()
       self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(),
-      self.modelInfo[self.modelType]['interpolationSmoothness'])
+      self.modelInfo[modelType]['interpolationSmoothness'])
 
       originalSegmentName = seg.capitalize() + "Original" + typeName + "Model"
       originalModel = self.createModelNode(originalSegmentName, [1, 0, 0])

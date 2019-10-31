@@ -15,24 +15,46 @@ class CardiacDeviceWidget(ctk.ctkCollapsibleButton, UIHelper):
 
   def setup(self):
     self.setLayout(qt.QFormLayout(self))
-    for paramName, paramAttributes  in self.deviceClass.getParameters().items():
-      setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.ucb))
+    self._addSliders()
     self.text = self.deviceClass.NAME
     self.collapsed = True
+
     self.logic.modelInfo[self.deviceClass.NAME] = self.deviceClass.getModelInfo()
-    self.ucb()
+    self.updateModelParametersFromGUI()
 
   def _onAboutToBeDestroyed(self, obj):
     obj.destroyed.disconnect(self._onAboutToBeDestroyed)
 
-  def ucb(self):
-    self.logic.setModelParameters(self.deviceClass.NAME, {
+  def updateModelParametersFromGUI(self):
+    params = {
       parameter:getattr(self, "{}SliderWidget".format(parameter)).value*(0.01 if attributes["unit"]=="%" else 1)
         for parameter, attributes in self.deviceClass.getParameters().items()
-    })
+    }
+    self.logic.setModelParameters(self.deviceClass.NAME, params)
 
     if self._updateCB:
       self._updateCB()
+
+  def updateGUIFromModelParameters(self):
+    modelParameters = self.logic.getModelParameters(self.deviceClass.NAME)
+    self.setParameters(modelParameters)
+
+  def setParameters(self, modelParameters):
+    for paramName, paramAttributes in self.deviceClass.getParameters().items():
+      sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
+      paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+      if not hasattr(modelParameters, paramName):
+        continue
+      paramValue = modelParameters[paramName]
+      wasBlocked = sliderWidget.blockSignals(True)
+      sliderWidget.value = paramValue * paramScale
+      sliderWidget.blockSignals(wasBlocked)
+
+  def _addSliders(self):
+    for paramName, paramAttributes in self.deviceClass.getParameters().items():
+      setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.updateModelParametersFromGUI))
+
+
 
 
 class CardiacDeviceBase(object):
