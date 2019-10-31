@@ -184,7 +184,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     [1] https://github.com/commontk/CTK/blob/16aa09540dcb59c6eafde4d9a88dfee1f0948edc/Libs/DICOM/Core/ctkDICOMDatabase.cpp#L1283-L1287
     """
 
-    import dicom
+    import pydicom as dicom
 
     if not outputDirPath:
       outputDirPath = inputDirPath
@@ -199,13 +199,13 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     numberOfSeriesInStudyMap = {}
 
     # All files without a patient ID will be assigned to the same patient
-    randomPatientID = dicom.UID.generate_uid(None)
+    randomPatientID = dicom.uid.generate_uid(None)
     
     requiredTags = ['PatientName', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SeriesNumber']
     for root, subFolders, files in os.walk(inputDirPath):
     
       # Assume that all files in a directory belongs to the same study
-      randomStudyUID = dicom.UID.generate_uid(None)
+      randomStudyUID = dicom.uid.generate_uid(None)
       
       currentSubDir = os.path.relpath(root, inputDirPath)
       rootOutput = os.path.join(outputDirPath, currentSubDir)
@@ -234,7 +234,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
             setattr(ds,tag,'')
 
         # Generate a new SOPInstanceUID to avoid different files having the same SOPInstanceUID
-        ds.SOPInstanceUID = dicom.UID.generate_uid(None)
+        ds.SOPInstanceUID = dicom.uid.generate_uid(None)
             
         if ds.PatientName == '':
           ds.PatientName = "Unspecified Patient"
@@ -243,7 +243,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
         if ds.StudyInstanceUID == '':
           ds.StudyInstanceUID = randomStudyUID
         if ds.SeriesInstanceUID == '':
-          ds.SeriesInstanceUID = dicom.UID.generate_uid(None)
+          ds.SeriesInstanceUID = dicom.uid.generate_uid(None)
           
         # Generate series number to make it easier to identify a sequence within a study
         if ds.SeriesNumber == '':
@@ -270,13 +270,13 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
 
           # replace ids with random values - re-use if we have seen them before
           if ds.PatientID not in patientIDToRandomIDMap:  
-            patientIDToRandomIDMap[ds.PatientID] = dicom.UID.generate_uid(None)
+            patientIDToRandomIDMap[ds.PatientID] = dicom.uid.generate_uid(None)
           ds.PatientID = patientIDToRandomIDMap[ds.PatientID]
           if ds.StudyInstanceUID not in studyUIDToRandomUIDMap:  
-            studyUIDToRandomUIDMap[ds.StudyInstanceUID] = dicom.UID.generate_uid(None)  
+            studyUIDToRandomUIDMap[ds.StudyInstanceUID] = dicom.uid.generate_uid(None)  
           ds.StudyInstanceUID = studyUIDToRandomUIDMap[ds.StudyInstanceUID]  
           if ds.SeriesInstanceUID not in studyUIDToRandomUIDMap:
-            seriesUIDToRandomUIDMap[ds.SeriesInstanceUID] = dicom.UID.generate_uid(None)  
+            seriesUIDToRandomUIDMap[ds.SeriesInstanceUID] = dicom.uid.generate_uid(None)  
           ds.SeriesInstanceUID = seriesUIDToRandomUIDMap[ds.SeriesInstanceUID]
 
         if inputDirPath==outputDirPath:

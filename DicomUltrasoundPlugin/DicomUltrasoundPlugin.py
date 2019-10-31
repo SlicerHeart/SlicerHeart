@@ -3,7 +3,7 @@ import string
 from __main__ import vtk, qt, ctk, slicer
 import logging
 import numpy
-import dicom
+import pydicom as dicom
 from DICOMLib import DICOMPlugin
 from DICOMLib import DICOMLoadable
 
@@ -605,7 +605,7 @@ class DicomUltrasoundPlugin:
 
 def findPrivateTag(ds, group, element, privateCreator):
   """Helper function to get private tag from private creator name"""
-  import dicom
+  import pydicom as dicom
   for tag, data_element in ds.items():
     if (tag.group == group) and (tag.element < 0x0100) and (data_element.value.rstrip() == privateCreator):
       return dicom.tag.Tag(group, (tag.element << 8) + element)
