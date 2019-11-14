@@ -1,3 +1,4 @@
+from slicer.util import VTKObservationMixin 
 import os
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -59,6 +60,24 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.moduleSectionButtonsGroup = qt.QButtonGroup()
     self.moduleSectionButtonsGroup.connect("buttonToggled(QAbstractButton*,bool)", self.onModuleSectionToggled)
 
+    self.parameterNodeSelector = slicer.qMRMLNodeComboBox()
+    self.parameterNodeSelector.nodeTypes = ["vtkMRMLScriptedModuleNode"]
+    self.parameterNodeSelector.setNodeTypeLabel("CardiacDevice", "vtkMRMLScriptedModuleNode")
+    self.parameterNodeSelector.baseName = "CardiacDevice"
+    self.parameterNodeSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", "CardiacDeviceAnalysis")
+    self.parameterNodeSelector.addEnabled = True
+    self.parameterNodeSelector.removeEnabled = True
+    self.parameterNodeSelector.noneEnabled = True
+    self.parameterNodeSelector.showHidden = True  # scripted module nodes are hidden by default
+    self.parameterNodeSelector.renameEnabled = True
+    self.parameterNodeSelector.setMRMLScene(slicer.mrmlScene)
+    self.parameterNodeSelector.setToolTip("Node referencing to all generated nodes")
+    hbox = qt.QHBoxLayout()
+    hbox.addWidget(qt.QLabel("Parameter node: "))
+    hbox.addWidget(self.parameterNodeSelector)
+    self.layout.addLayout(hbox)
+    self.parameterNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onParameterNodeSelectionChanged)
+
     self.addGeneralSection()
     self.addVesselCenterlineSection()
     self.addDevicePositionSection()
@@ -84,21 +103,6 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     [lay, self.generalSection] = UIHelper.addCommonSection("General", self.layout, self.moduleSectionButtonsGroup,
                                                            collapsed=False)
 
-    self.parameterNodeSelector = slicer.qMRMLNodeComboBox()
-    self.parameterNodeSelector.nodeTypes = ["vtkMRMLScriptedModuleNode"]
-    self.parameterNodeSelector.setNodeTypeLabel("CardiacDevice", "vtkMRMLScriptedModuleNode")
-    self.parameterNodeSelector.baseName = "CardiacDevice"
-    self.parameterNodeSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", "CardiacDeviceAnalysis")
-    self.parameterNodeSelector.addEnabled = True
-    self.parameterNodeSelector.removeEnabled = True
-    self.parameterNodeSelector.noneEnabled = True
-    self.parameterNodeSelector.showHidden = True  # scripted module nodes are hidden by default
-    self.parameterNodeSelector.renameEnabled = True
-    self.parameterNodeSelector.setMRMLScene(slicer.mrmlScene)
-    self.parameterNodeSelector.setToolTip("Node referencing to all generated nodes")
-    lay.addRow("Parameter node: ", self.parameterNodeSelector)
-    self.parameterNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onParameterNodeSelectionChanged)
-
     self.handlesPerSliceSliderWidget = UIHelper.addSlider({
       "name": "Handles per slice:", "info": "Controls how many handles are generated for device deformation",
       "value": 8, "unit": "", "minimum": 4, "maximum": 12, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay,
@@ -108,15 +112,9 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       "name": "Handles spacing:", "info": "Controls distance between handles", "value": 5, "unit": "mm", "minimum": 3,
       "maximum": 15, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay, self.onHandlesSettingsChanged)
 
-    self.addDeviceWidgets(lay)
-
-  def addDeviceWidgets(self, lay):
-    self.deviceWidgetGroup = qt.QButtonGroup()
-    for deviceClass in self.registeredDeviceClasses:
-      deviceWidget = CardiacDeviceWidget(deviceClass, self.logic, self.updateSliceSelectorWidget)
-      lay.addWidget(deviceWidget)
-      self.deviceWidgetGroup.addButton(deviceWidget)
-      deviceWidget.connect('toggled(bool)', lambda toggle, name=deviceClass.NAME: self.onSwitchDeviceSection(name, toggle))
+    from CardiacDeviceSimulatorUtils.helpers import DeviceSelectorWidget
+    self.deviceSelectorWidget = DeviceSelectorWidget(CardiacDeviceSimulatorWidget.registeredDeviceClasses)
+    lay.addRow(self.deviceSelectorWidget)
 
   def addVesselCenterlineSection(self):
     [lay, self.centerlineSection] = UIHelper.addCommonSection("Vessel centerline", self.layout, self.moduleSectionButtonsGroup,
@@ -315,11 +313,12 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
   def onParameterNodeSelectionChanged(self):
 
     self.logic.setParameterNode(self.parameterNodeSelector.currentNode())
+    self.deviceSelectorWidget.setParameterNode(self.logic.parameterNode)
     if self.logic.parameterNode:
 
       # Update model parameter sliders from parameter node
-      for deviceWidget in self.deviceWidgetGroup.buttons():
-        deviceWidget.updateGUIFromModelParameters()
+      #for deviceWidget in self.deviceWidgetGroup.buttons():
+      #  deviceWidget.updateGUIFromModelParameters()
 
       self.setupResliceDriver()
 
@@ -350,7 +349,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
 
   def updateButtonStates(self):
     guiEnabled = self.logic.parameterNode is not None
-    for guiSection in [self.centerlineSection, self.devicePositionSection, self.deviceDeformationSection, self.quantificationSection]:
+    for guiSection in [self.generalSection, self.centerlineSection, self.devicePositionSection, self.deviceDeformationSection, self.quantificationSection]:
       guiSection.enabled = guiEnabled
     self.positionDeviceAtCenterlineButton.enabled = self.centerlineModelNodeSelector.currentNode() is not None
     self.flipDeviceOrientationButton.enabled = self.centerlineModelNodeSelector.currentNode() is not None
@@ -497,7 +496,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       return
     if self.parameterNodeSelector.currentNode() is None:
       self.parameterNodeSelector.addNode()
-    self.logic.setModelType(name)
+    self.logic.setDeviceClassId(name)
     self.updateSliceSelectorWidget()
     self.sliceSelectorSliderWidget.value = 0
     self.onSliceSelected() # force update, even if value is already 0
@@ -522,7 +521,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
 # CardiacDeviceSimulatorLogic
 #
 
-class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
+class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLogic):
   """This class should implement all the actual computation done by your module. The interface should be such that
   other python code can import this class and make use of the functionality without requiring an instance of the Widget.
   Uses ScriptedLoadableModuleLogic base class, available at:
@@ -530,19 +529,29 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
   """
 
   def __init__(self, parent=None):
+    VTKObservationMixin.__init__(self)
     ScriptedLoadableModuleLogic.__init__(self, parent)
     self.interpolatorType = 'KochanekSpline' # Valid options: 'CardinalSpline', 'SCurveSpline', 'KochanekSpline'
     self.parameterNode = None
     self.deviceOrientationFlipped = False
     self.handleProfilePoints = vtk.vtkPoints()
-    self.modelInfo = {}
     # For performance reasons, we can temporarily disable deformed models update.
     # If original model is updated while updateDeformedModelsEnabled is set to False
     # then updateDeformedModelsPending flag is set.
     self.updateDeformedModelsEnabled = True
     self.updateDeformedModelsPending = False
 
+  def cleanup(self):
+    # TODO: check if it is called
+    self.removeObservers()
+
   def setParameterNode(self, parameterNode):
+    from CardiacDeviceSimulatorUtils.devices import DeviceImplantWidget
+
+    if self.parameterNode:
+      self.removeObserver(self.parameterNode, DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
+      self.removeObserver(self.parameterNode, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
+
     self.parameterNode = parameterNode
     if not self.parameterNode:
       return
@@ -729,16 +738,16 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
       manager.resetSliceViews()
       manager.resetThreeDViews()
 
-    # Synchronize model parameters with parameter node
-    for deviceClass in CardiacDeviceSimulatorWidget.registeredDeviceClasses:
-      modelType = deviceClass.NAME
-      modelTypeId = modelType.replace(" ", "_")
-      for parameterName, attributes in deviceClass.getParameters().items():
-        newValue = self.parameterNode.GetParameter(modelTypeId + "_" + parameterName)
-        if newValue:
-          self.modelInfo[modelType]['parameters'][parameterName] = newValue
-        else:
-          self.parameterNode.SetParameter(modelTypeId + "_" + parameterName, str(self.modelInfo[modelType]['parameters'][parameterName]))
+    from CardiacDeviceSimulatorUtils.devices import DeviceImplantWidget
+    self.addObserver(self.parameterNode, DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
+    self.addObserver(self.parameterNode, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
+
+
+  def onDeviceClassModified(self, caller=None, event=None):
+    self.updateModel()
+
+  def onDeviceParameterValueModified(self, caller=None, event=None):
+    self.updateModel()
 
   def getQuantificationResultsFolderShItem(self, subfolderName=None):
     if not self.parameterNode:
@@ -808,14 +817,20 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
   def getVesselModelNode(self):
     return self.parameterNode.GetNodeReference("VesselModel")
 
-  def setModelType(self, modelType):
-    self.parameterNode.SetParameter("ModelType", modelType)
+  def setDeviceClassId(self, deviceClassId):
+    self.parameterNode.SetParameter("DeviceClassId", deviceClassId)
     self.updateModel()
 
-  def getModelType(self):
-    modelType = self.parameterNode.GetParameter("ModelType")
-    modelType = modelType.replace("_", " ")  # for legacy scenes
-    return modelType
+  def getDeviceClassId(self):
+    deviceClassId = self.parameterNode.GetParameter("DeviceClassId")
+    return deviceClassId
+
+  def getDeviceClass(self):
+    deviceClassId = self.parameterNode.GetParameter("DeviceClassId")
+    for deviceClass in CardiacDeviceSimulatorWidget.registeredDeviceClasses:
+      if deviceClass.ID == deviceClassId:
+        return deviceClass
+    return None
 
   def setHandlesSettings(self, handlesPerSlice, handlesSpacingMm):
     if handlesPerSlice == self.getHandlesPerSlice() and handlesSpacingMm == self.getHandlesSpacingMm():
@@ -824,16 +839,15 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     self.setHandlesSpacingMm(handlesSpacingMm)
     self.updateModel()
 
-  def setModelParameters(self, modelType, params):
-    self.modelInfo[modelType]['parameters'] = params
-    if self.parameterNode:
-      modelTypeId = modelType.replace(" ", "_")
-      for key in params.keys():
-        self.parameterNode.SetParameter(modelTypeId+"_"+key, str(params[key]))
-      self.updateModel()
+  # def setModelParameters(self, deviceClassId, params):
+  #   self.modelInfo[deviceClassId]['parameters'] = params
+  #   if self.parameterNode:
+  #     for key in params.keys():
+  #       self.parameterNode.SetParameter(deviceClassId+"_"+key, str(params[key]))
+  #     self.updateModel()
 
-  def getModelParameters(self, modelType):
-    return self.modelInfo[modelType]['parameters']
+  # def getModelParameters(self, deviceClassId):
+  #   return self.modelInfo[deviceClassId]['parameters']
 
   def computeMetrics(self):
 
@@ -869,8 +883,7 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
 
     col = tableNode.AddColumn()
     col.SetName("Metric")
-    modelType = self.getModelType()
-    modelSegments = ['whole'] + self.modelInfo[modelType]['segments']
+    modelSegments = ['whole'] + self.getDeviceClass().getSegments()
     for seg in modelSegments:
       col = tableNode.AddColumn(vtk.vtkDoubleArray())
       col.SetName(seg.capitalize() + "Model")
@@ -1155,15 +1168,14 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     if not self.parameterNode:
       return
 
-    modelType = self.getModelType()
-    getProfilePointsMethod = self.modelInfo[modelType]['getProfilePointsMethod']
-    modelParameters = self.modelInfo[modelType]['parameters']
-    modelSegments = self.modelInfo[modelType]['segments'] # some models have distal/middle/proximal sections
+    deviceClass = self.getDeviceClass()
+    modelParameters = deviceClass.getParameterValuesFromNode(self.parameterNode)
+    modelSegments = deviceClass.getSegments() # some models have distal/middle/proximal sections
 
     # Create whole (open) original and deformed models
-    profilePoints = getProfilePointsMethod(modelParameters)
+    profilePoints = deviceClass.getProfilePoints(modelParameters)
     modelProfilePoints = vtk.vtkPoints()
-    self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), self.modelInfo[modelType]['interpolationSmoothness'])
+    self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), deviceClass.getInternalParameters()['interpolationSmoothness'])
 
     self.updateModelWithProfile(self.parameterNode.GetNodeReference('OriginalModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
 
@@ -1190,17 +1202,14 @@ class CardiacDeviceSimulatorLogic(ScriptedLoadableModuleLogic):
     if volumetric:
       shNode.SetItemExpanded(resultsFolderShItem, False)
 
-    modelType = self.getModelType()
+    deviceClass = self.getDeviceClass()
+    modelParameters = deviceClass.getParameterValuesFromNode(self.parameterNode)
+    modelSegments = ['whole'] + self.getDeviceClass().getSegments()
 
-    getProfilePointsMethod = self.modelInfo[modelType]['getProfilePointsMethod']
-    modelParameters = self.modelInfo[modelType]['parameters']
-
-    modelSegments = self.modelInfo[modelType]['segments'] # some models have distal/middle/proximal sections
-    for seg in modelSegments + ['whole']:
-      profilePoints = getProfilePointsMethod(modelParameters, seg, not volumetric)
+    for seg in modelSegments:
+      profilePoints = deviceClass.getProfilePoints(modelParameters, seg, not volumetric)
       modelProfilePoints = vtk.vtkPoints()
-      self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(),
-      self.modelInfo[modelType]['interpolationSmoothness'])
+      self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), deviceClass.getInternalParameters()['interpolationSmoothness'])
 
       originalSegmentName = seg.capitalize() + "Original" + typeName + "Model"
       originalModel = self.createModelNode(originalSegmentName, [1, 0, 0])

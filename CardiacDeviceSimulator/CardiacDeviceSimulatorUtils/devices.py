@@ -1,74 +1,172 @@
+import os
 import qt, ctk, vtk
 from .helpers import UIHelper
 
 import collections
+from collections import OrderedDict
 
-class CardiacDeviceWidget(ctk.ctkCollapsibleButton, UIHelper):
+class DeviceImplantWidget(qt.QFrame, UIHelper):
 
-  def __init__(self, deviceClass, logic, updateCallback=None, parent=None):
-    ctk.ctkCollapsibleButton.__init__(self, parent)
+  DEVICE_CLASS_MODIFIED_EVENT = 20000
+  DEVICE_PARAMETER_VALUE_MODIFIED_EVENT = 20001
+
+  def __init__(self, deviceClass, parent=None):
+    super(DeviceImplantWidget, self).__init__(parent)
     self.deviceClass = deviceClass
-    self.logic = logic
-    self._updateCB = updateCallback
+    self.parameterNode = None
     self.setup()
     self.destroyed.connect(self._onAboutToBeDestroyed)
 
+  def setParameterNode(self, parameterNode):
+    self.parameterNode = parameterNode
+    self.updateGUIFromMRML()
+
+  def reset(self):
+    wasBlocked = self._presetCombo.blockSignals(True)
+    self._presetCombo.setCurrentIndex(0)
+    self._presetCombo.blockSignals(wasBlocked)
+
   def setup(self):
     self.setLayout(qt.QFormLayout(self))
+    self._addDeviceLabel()
+    self._addPresetsCombo()
     self._addSliders()
-    self.text = self.deviceClass.NAME
-    self.collapsed = True
-
-    self.logic.modelInfo[self.deviceClass.NAME] = self.deviceClass.getModelInfo()
-    self.updateModelParametersFromGUI()
 
   def _onAboutToBeDestroyed(self, obj):
     obj.destroyed.disconnect(self._onAboutToBeDestroyed)
 
-  def updateModelParametersFromGUI(self):
-    params = {
-      parameter:getattr(self, "{}SliderWidget".format(parameter)).value*(0.01 if attributes["unit"]=="%" else 1)
-        for parameter, attributes in self.deviceClass.getParameters().items()
-    }
-    self.logic.setModelParameters(self.deviceClass.NAME, params)
+  def updateGUIFromMRML(self):
+    if not self.parameterNode:
+      return
+    presetName = self.parameterNode.GetParameter(self.deviceClass.ID + "_preset")
+    wasBlocked = self._presetCombo.blockSignals(True)
+    if presetName:
+      self._presetCombo.setCurrentText(presetName)
+    else:
+      self._presetCombo.setCurrentIndex(-1)
+    self._presetCombo.blockSignals(wasBlocked)
 
-    if self._updateCB:
-      self._updateCB()
-
-  def updateGUIFromModelParameters(self):
-    modelParameters = self.logic.getModelParameters(self.deviceClass.NAME)
-    self.setParameters(modelParameters)
-
-  def setParameters(self, modelParameters):
     for paramName, paramAttributes in self.deviceClass.getParameters().items():
+      paramValue = self.parameterNode.GetParameter(self.deviceClass.ID+"_"+paramName)
+      if not paramValue:
+        continue
+      paramValue = float(paramValue)
       sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
       paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-      if not hasattr(modelParameters, paramName):
-        continue
-      paramValue = modelParameters[paramName]
       wasBlocked = sliderWidget.blockSignals(True)
-      sliderWidget.value = paramValue * paramScale
+      sliderWidget.value = paramValue / paramScale
       sliderWidget.blockSignals(wasBlocked)
+
+  # def updateMRMLFromGUI(self, parameterNode):
+  #   if not parameterNode:
+  #     return
+  #   valuesChanged = False
+  #   for paramName, paramAttributes in self.deviceClass.getParameters().items():
+  #     sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
+  #     paramValue = sliderWidget.value
+  #     paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+  #     newParamValue = str(paramValue * paramScale)
+  #     oldParamValue = parameterNode.GetParameter(self.deviceClass.ID+"_"+paramName)
+  #     if newParamValue != oldParamValue:
+  #       parameterNode.SetParameter(self.deviceClass.ID+"_"+paramName, newParamValue)
+  #       valuesChanged = True
+  #   if valuesChanged:
+  #     self._presetCombo.setCurrentIndex(-1)
+
+  # def setParameters(self, params):
+  #   for paramName, paramAttributes in self.deviceClass.getParameters().items():
+  #     sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
+  #     paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+  #     if not hasattr(modelParameters, paramName):
+  #       continue
+  #     paramValue = modelParameters[paramName]
+  #     wasBlocked = sliderWidget.blockSignals(True)
+  #     sliderWidget.value = paramValue * paramScale
+  #     sliderWidget.blockSignals(wasBlocked)
 
   def _addSliders(self):
     for paramName, paramAttributes in self.deviceClass.getParameters().items():
-      setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.updateModelParametersFromGUI))
+      setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.onSliderMoved))
 
+  def _addDeviceLabel(self):
+    self._widgetLabel = qt.QLabel(self.deviceClass.NAME)
+    self._widgetLabel.setStyleSheet('font: italic "Times New Roman"; font-size: 15px')
+    self.layout().addRow("Device Name:", self._widgetLabel)
 
+  def _addPresetsCombo(self):
+    self._presets = self.deviceClass.getPresets()
+    self._presetCombo = qt.QComboBox()
+    if self._presets:
+      for model, properties in self._presets.items():
+        values = "; ".join([properties[parameter] for parameter, attributes in self.deviceClass.getParameters().items()])
+        self._presetCombo.addItem("{} | {{ {} }}".format(model, values))
+      self._presetCombo.connect("currentIndexChanged(const QString)", self.onPresetSelected)
+      self.layout().addRow("Presets:", self._presetCombo)
+
+  def onSliderMoved(self):
+    for paramName, paramAttributes in self.deviceClass.getParameters().items():
+      sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
+      paramValue = sliderWidget.value
+      paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+      newParamValue = str(paramValue * paramScale)
+      self.parameterNode.SetParameter(self.deviceClass.ID+"_"+paramName, newParamValue)
+    self._presetCombo.setCurrentIndex(-1)
+    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
+
+  def onPresetSelected(self, text):
+    presetName = text.split(' | ')[0] if text else ""
+    self.parameterNode.SetParameter(self.deviceClass.ID + "_preset", presetName)
+    if not presetName:
+      # preset is not selected (custom settings)
+      return
+    params = self._presets[presetName]
+    for parameter, attributes in self.deviceClass.getParameters().items():
+      self.parameterNode.SetParameter(self.deviceClass.ID + "_" + parameter, str(params[parameter]))
+    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
+
+class DeviceImplantPresets(OrderedDict):
+
+  def __init__(self, csvfile, defaultParameters):
+    super(DeviceImplantPresets, self).__init__()
+    self._presetCSVFile = csvfile
+    if self._presetCSVFile and os.path.exists(self._presetCSVFile):
+      self._readPresets()
+    else:
+      # If preset file is not available then create a default preset from  the parameter info
+      presets = OrderedDict()
+      defaultPreset = {}
+      for paramName, paramAttributes in defaultParameters.items():
+        paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+        value = paramAttributes["value"] * paramScale
+        defaultPreset[paramName] = str(value)
+      presets["Default"] = defaultPreset
+      self.update(presets)
+
+  def _readPresets(self):
+    import csv
+    presets = OrderedDict()
+    with open(self._presetCSVFile, mode='r') as csv_file:
+      for row in csv.DictReader(csv_file):
+        presets[row["Model"]] = {key:row[key] for key in row.keys() if key.lower() != "model"}
+    self.update(presets)
 
 
 class CardiacDeviceBase(object):
 
   NAME=None
+  ID=None
 
   @classmethod
   def getParameters(cls):
     raise NotImplementedError
 
   @classmethod
-  def getModelInfo(cls):
-    return {'getProfilePointsMethod': cls.getProfilePoints,
-            'segments': [], 'interpolationSmoothness': 0, 'parameters': {}}
+  def getInternalParameters(cls):
+    return {'interpolationSmoothness': 0.0}
+
+  @classmethod
+  def getSegments(cls):
+    return []
 
   @staticmethod
   def _genParameters(name, info, value, unit, minimum, maximum, singleStep, pageStep, decimals=2):
@@ -79,10 +177,40 @@ class CardiacDeviceBase(object):
   def getProfilePoints(params, segment=None, openSegment=True): #segment: one of 'distal', 'middle', 'proximal', 'whole'
     raise NotImplementedError
 
+  @classmethod
+  def getPresets(cls):
+    csvFile = os.path.join(cls.RESOURCES_PATH, "Presets", cls.ID + ".csv")
+    #if os.path.exists(csvFile):
+    return DeviceImplantPresets(csvFile, cls.getParameters())
+
+  @classmethod
+  def getIcon(cls):
+    if cls.ID:
+      pngFile = os.path.join(cls.RESOURCES_PATH, "Icons", cls.ID + ".png")
+      if os.path.exists(pngFile):
+        return qt.QIcon(qt.QPixmap(pngFile))
+    return None
+
+  @classmethod
+  def getParameterValuesFromNode(cls, parameterNode):
+    parameterValues = {}
+    parameters = cls.getParameters()
+    for paramName, paramAttributes in parameters.items():
+      paramValueStr = parameterNode.GetParameter(cls.ID + "_" + paramName)
+      if paramValueStr:
+        parameterValues[paramName] = float(parameterNode.GetParameter(cls.ID+"_"+paramName))
+      else:
+        # value not defined in parameter node, use the default
+        paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+        value = paramAttributes["value"] * paramScale
+        parameterValues[paramName] = value
+    return parameterValues
 
 class HarmonyDevice(CardiacDeviceBase):
 
   NAME="Harmony TCPV"
+  ID="Harmony"
+  RESOURCES_PATH = os.path.join(os.path.dirname(__file__), "..",  "Resources")
 
   @classmethod
   def getParameters(cls):
@@ -103,10 +231,12 @@ class HarmonyDevice(CardiacDeviceBase):
     }
 
   @classmethod
-  def getModelInfo(cls):
-    return {'getProfilePointsMethod': cls.getProfilePoints,
-            'segments': ['distal', 'middle', 'proximal'],
-            'interpolationSmoothness': -1.0, 'parameters': {}}
+  def getInternalParameters(cls):
+    return {'interpolationSmoothness': -1.0}
+
+  @classmethod
+  def getSegments(cls):
+    return ['distal', 'middle', 'proximal']
 
   @staticmethod
   def getProfilePoints(params, segment=None, openSegment=True):
@@ -178,6 +308,8 @@ class HarmonyDevice(CardiacDeviceBase):
 class CylinderDevice(CardiacDeviceBase):
 
   NAME = "Cylinder valve/stent"
+  ID = "Cylinder"
+  RESOURCES_PATH = os.path.join(os.path.dirname(__file__), "..",  "Resources")
 
   @classmethod
   def getParameters(cls):
