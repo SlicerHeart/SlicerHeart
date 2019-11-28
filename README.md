@@ -99,6 +99,10 @@ Load data from DICOM folder:
 - In the DICOM browser window, select data to load and click Load button
 - Click OK to accept warnings (the warning is displayed because the importer is still experimental and the images may be slightly distorted)
 
+# Samsung
+
+Some Samsung ultrasound machines store 3D ultrasound images in proprietary .mvl files. Exact format of these files are not reverse-engineered yet, but since image data is stored uncompressed, [RawImageGuess extension](https://github.com/acetylsalicyl/SlicerRawImageGuess) can be used to read these files with some manual tuning as described in this [forum topic](https://discourse.slicer.org/t/could-not-load-ultrasound-from-mvl-medison-file-format/3928/22?u=lassoan).
+
 # Authors
 
 - Authors: Matthew Jolley (CHOP), Andras Lasso (PerkLab), Christian Herz (CHOP), Anna Ilina (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
