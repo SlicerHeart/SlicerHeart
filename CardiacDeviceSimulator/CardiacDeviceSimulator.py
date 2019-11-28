@@ -4,12 +4,16 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 from CardiacDeviceSimulatorUtils.devices import *
-from CardiacDeviceSimulatorUtils.helpers import UIHelper
+from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
+from CardiacDeviceSimulatorUtils.DeviceCompressionQuantificationWidget import DeviceCompressionQuantificationWidget
+from CardiacDeviceSimulatorUtils.DeviceDataTreeWidget import DeviceDataTreeWidget
+from CardiacDeviceSimulatorUtils.DeviceDeformationWidget import DeviceDeformationWidget
+from CardiacDeviceSimulatorUtils.DevicePositioningWidget import DevicePositioningWidget
+from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceSelectorWidget
 
 #
 # CardiacDeviceSimulator
 #
-
 
 class CardiacDeviceSimulator(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
@@ -33,7 +37,6 @@ class CardiacDeviceSimulator(ScriptedLoadableModule):
 # CardiacDeviceSimulatorWidget
 #
 
-
 class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
   """Uses ScriptedLoadableModuleWidget base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
@@ -49,13 +52,22 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     if not deviceClass in CardiacDeviceSimulatorWidget.registeredDeviceClasses:
       CardiacDeviceSimulatorWidget.registeredDeviceClasses.append(deviceClass)
 
+  def __init__(self, parent=None):
+    ScriptedLoadableModuleWidget.__init__(self, parent)
+    self.deviceWidgets = []
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
-    self.sliceSelectorSliderWidget = None
+    if not hasattr(slicer.modules, 'volumereslicedriver'):
+      slicer.util.messageBox("This modules requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
+      return
+
+    if not hasattr(slicer.modules, 'markupstomodel'):
+      slicer.util.messageBox("This modules requires MarkupsToModel extension. Install MarkupsToModel and restart Slicer.")
+      return
 
     self.logic = CardiacDeviceSimulatorLogic()
-    self.updateMethod = None
 
     self.moduleSectionButtonsGroup = qt.QButtonGroup()
     self.moduleSectionButtonsGroup.connect("buttonToggled(QAbstractButton*,bool)", self.onModuleSectionToggled)
@@ -78,443 +90,83 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.layout.addLayout(hbox)
     self.parameterNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onParameterNodeSelectionChanged)
 
-    self.addGeneralSection()
-    self.addVesselCenterlineSection()
-    self.addDevicePositionSection()
-    self.addDeviceDeformationSection()
-    self.addQuantificationSection()
+    self.deviceSelectorWidget = DeviceSelectorWidget(CardiacDeviceSimulatorWidget.registeredDeviceClasses)
+    [lay, self.deviceSelectionSection] = UIHelper.addCommonSection("Device Selection", self.layout, self.moduleSectionButtonsGroup,
+      collapsed=True, widget=self.deviceSelectorWidget)
+    
+    self.devicePositioningWidget = DevicePositioningWidget()
+    [lay, self.devicePositioningSection] = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
+      collapsed=True, widget=self.devicePositioningWidget)
+    
+    self.deviceDeformationWidget = DeviceDeformationWidget()
+    [lay, self.deviceDeformationSection] = UIHelper.addCommonSection("Device Deformation", self.layout, self.moduleSectionButtonsGroup,
+      collapsed=True, widget=self.deviceDeformationWidget)
 
-    if not hasattr(slicer.modules, 'volumereslicedriver'):
-      slicer.util.messageBox("This modules requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
-      self.parameterNodeSelector.setEnabled(False)
+    self.deviceQuantificationWidget = DeviceCompressionQuantificationWidget()
+    [lay, self.quantificationSection] = UIHelper.addCommonSection("Quantification", self.layout, self.moduleSectionButtonsGroup,
+      collapsed=True, widget=self.deviceQuantificationWidget)
 
-    if not hasattr(slicer.modules, 'markupstomodel'):
-      slicer.util.messageBox("This modules requires MarkupsToModel extension. Install MarkupsToModel and restart Slicer.")
-      self.parameterNodeSelector.setEnabled(False)
+    self.dataTreeWidget = DeviceDataTreeWidget()
+    self.layout.addWidget(self.dataTreeWidget)
+
+    self.deviceWidgets = [self.deviceSelectorWidget, self.devicePositioningWidget, self.deviceDeformationWidget, self.deviceQuantificationWidget, self.dataTreeWidget]
+
+    for deviceWidget in self.deviceWidgets:
+      deviceWidget.logic = self.logic
 
     defaultNode = slicer.mrmlScene.GetFirstNodeByName("CardiacDevice")
     if defaultNode:
       self.parameterNodeSelector.setCurrentNode(defaultNode)
 
-    self.updateSliceSelectorWidget()
     self.updateButtonStates()
-
-  def addGeneralSection(self):
-    [lay, self.generalSection] = UIHelper.addCommonSection("General", self.layout, self.moduleSectionButtonsGroup,
-                                                           collapsed=False)
-
-    self.handlesPerSliceSliderWidget = UIHelper.addSlider({
-      "name": "Handles per slice:", "info": "Controls how many handles are generated for device deformation",
-      "value": 8, "unit": "", "minimum": 4, "maximum": 12, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay,
-      self.onHandlesSettingsChanged)
-
-    self.handlesSpacingSliderWidget = UIHelper.addSlider({
-      "name": "Handles spacing:", "info": "Controls distance between handles", "value": 5, "unit": "mm", "minimum": 3,
-      "maximum": 15, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay, self.onHandlesSettingsChanged)
-
-    from CardiacDeviceSimulatorUtils.helpers import DeviceSelectorWidget
-    self.deviceSelectorWidget = DeviceSelectorWidget(CardiacDeviceSimulatorWidget.registeredDeviceClasses)
-    lay.addRow(self.deviceSelectorWidget)
-
-  def addVesselCenterlineSection(self):
-    [lay, self.centerlineSection] = UIHelper.addCommonSection("Vessel centerline", self.layout, self.moduleSectionButtonsGroup,
-                                                              collapsed=True)
-
-    self.vesselSegmentSelector = slicer.qMRMLSegmentSelectorWidget()
-    self.vesselSegmentSelector.setMRMLScene(slicer.mrmlScene)
-    self.vesselSegmentSelector.setToolTip("Select vessel lumen (blood) segment. The segment must be a solid, filled "
-                                          "model of the blood (not a shell).")
-    lay.addRow("Vessel lumen: ", self.vesselSegmentSelector)
-    self.vesselSegmentSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onVesselLumenSegmentSelectionChanged)
-    self.vesselSegmentSelector.connect("currentSegmentChanged(QString)", self.onVesselLumenSegmentSelectionChanged)
-
-    # Button to position device at closest centerline point
-    self.processVesselSegmentButton = qt.QPushButton("Detect vessel centerline")
-    self.processVesselSegmentButton.setToolTip("Extract centerline and lumen surface from vessel segment")
-    lay.addRow(self.processVesselSegmentButton)
-    self.processVesselSegmentButton.connect('clicked(bool)', self.onProcessVesselSegmentClicked)
-    self.processVesselSegmentButton.enabled = False
-
-  def addDevicePositionSection(self):
-    [lay, self.devicePositionSection] = UIHelper.addCommonSection("Device position", self.layout,
-                                                                  self.moduleSectionButtonsGroup, collapsed=True)
-    # Centerline model selector
-    self.centerlineModelNodeSelector = slicer.qMRMLNodeComboBox()
-    self.centerlineModelNodeSelector.nodeTypes = ["vtkMRMLModelNode"]
-    self.centerlineModelNodeSelector.setNodeTypeLabel("Centerline", "vtkMRMLModelNode")
-    self.centerlineModelNodeSelector.baseName = "Centerline"
-    self.centerlineModelNodeSelector.selectNodeUponCreation = False
-    self.centerlineModelNodeSelector.addEnabled = False
-    self.centerlineModelNodeSelector.removeEnabled = False
-    self.centerlineModelNodeSelector.noneEnabled = True
-    self.centerlineModelNodeSelector.showHidden = True
-    self.centerlineModelNodeSelector.renameEnabled = True
-    self.centerlineModelNodeSelector.setMRMLScene(slicer.mrmlScene)
-    self.centerlineModelNodeSelector.setToolTip( "select the extracted centerline model to be used for positioning "
-                                                 "the device")
-    lay.addRow("Centerline model node: ", self.centerlineModelNodeSelector)
-    self.centerlineModelNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)",
-                                             self.onCenterlineModelNodeSelectionChanged)
-
-    # Button to position device at closest centerline point
-    self.positionDeviceAtCenterlineButton = qt.QPushButton("Position device at centerline")
-    lay.addRow(self.positionDeviceAtCenterlineButton)
-    self.positionDeviceAtCenterlineButton.connect('clicked(bool)', self.onPositionDeviceAtCenterlineClicked)
-    self.positionDeviceAtCenterlineButton.enabled = False
-
-    # Button to flip device orientation
-    self.flipDeviceOrientationButton = qt.QPushButton("Flip device orientation")
-    lay.addRow(self.flipDeviceOrientationButton)
-    self.flipDeviceOrientationButton.connect('clicked(bool)', self.onFlipDeviceOrientationClicked)
-    self.flipDeviceOrientationButton.enabled = False
-
-    # Pick centerline model
-    self.moveDeviceAlongCenterlineSliderWidget = UIHelper.addSlider({
-      "name": "Move device along centerline:", "info": "Moves the device along extracted centerline", "value": 0,
-      "unit": "", "minimum": 0, "maximum": 100, "singleStep": 0.1, "pageStep": 1, "decimals": 1}, lay,
-      self.onMoveDeviceAlongCenterlineSliderChanged)
-    self.moveDeviceAlongCenterlineSliderWidget.enabled = False
-
-    # Position
-    self.devicePositioningPositionSliderWidget = slicer.qMRMLTransformSliders()
-    self.devicePositioningPositionSliderWidget.Title = 'Device position'
-    self.devicePositioningPositionSliderWidget.TypeOfTransform = slicer.qMRMLTransformSliders.TRANSLATION
-    self.devicePositioningPositionSliderWidget.CoordinateReference = slicer.qMRMLTransformSliders.LOCAL
-    self.devicePositioningPositionSliderWidget.setMRMLScene(slicer.mrmlScene)
-    self.devicePositioningPositionSliderWidget.setMRMLTransformNode(None)
-    self.devicePositioningPositionSliderWidget.findChildren(ctk.ctkCollapsibleGroupBox)[0].setChecked(False)
-    lay.addRow(self.devicePositioningPositionSliderWidget)
-
-    # Orientation
-    self.devicePositioningOrientationSliderWidget = slicer.qMRMLTransformSliders()
-    self.devicePositioningOrientationSliderWidget.Title = 'Device orientation'
-    self.devicePositioningOrientationSliderWidget.setMRMLScene(slicer.mrmlScene)
-    # Setting of qMRMLTransformSliders.TypeOfTransform is not robust: it has to be set after setMRMLScene and
-    # has to be set twice (with setting the type to something else in between).
-    # Therefore the following 3 lines are needed, and needed here:
-    self.devicePositioningOrientationSliderWidget.TypeOfTransform = slicer.qMRMLTransformSliders.ROTATION
-    self.devicePositioningOrientationSliderWidget.TypeOfTransform = slicer.qMRMLTransformSliders.TRANSLATION
-    self.devicePositioningOrientationSliderWidget.TypeOfTransform = slicer.qMRMLTransformSliders.ROTATION
-    self.devicePositioningOrientationSliderWidget.CoordinateReference = slicer.qMRMLTransformSliders.LOCAL
-    self.devicePositioningOrientationSliderWidget.minMaxVisible = False
-    self.devicePositioningOrientationSliderWidget.setMRMLTransformNode(None)
-    self.devicePositioningOrientationSliderWidget.findChildren(ctk.ctkCollapsibleGroupBox)[0].setChecked(False)
-    lay.addRow(self.devicePositioningOrientationSliderWidget)
-
-  def addDeviceDeformationSection(self):
-    # self.createClosedSegmentsForAlreadyFittedDeviceButton = qt.QPushButton("Create closed segments for already fitted Harmony TCPV valve (temporary?)")
-    # #lay.addRow(self.createClosedSegmentsForAlreadyFittedDeviceButton)
-    # self.createClosedSegmentsForAlreadyFittedDeviceButton.connect('clicked(bool)', self.onCreateClosedSegmentsForAlreadyFittedHarmonyDevice)
-
-    [lay, self.deviceDeformationSection] = UIHelper.addCommonSection("Device deformation", self.layout,
-                                                                     self.moduleSectionButtonsGroup, collapsed=True)
-    # Vessel model selector
-    self.vesselModelNodeSelector = slicer.qMRMLNodeComboBox()
-    self.vesselModelNodeSelector.nodeTypes = ["vtkMRMLModelNode"]
-    self.vesselModelNodeSelector.setNodeTypeLabel("Vessel", "vtkMRMLModelNode")
-    self.vesselModelNodeSelector.baseName = "Vessel"
-    self.vesselModelNodeSelector.selectNodeUponCreation = False
-    self.vesselModelNodeSelector.addEnabled = False
-    self.vesselModelNodeSelector.removeEnabled = False
-    self.vesselModelNodeSelector.noneEnabled = True
-    self.vesselModelNodeSelector.showHidden = True
-    self.vesselModelNodeSelector.renameEnabled = True
-    self.vesselModelNodeSelector.setMRMLScene(slicer.mrmlScene)
-    self.vesselModelNodeSelector.setToolTip("select the extracted centerline model to be used for positioning the device")
-    lay.addRow("Vessel model node: ", self.vesselModelNodeSelector)
-    self.vesselModelNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onVesselModelNodeSelectionChanged)
-
-    # Radio button to choose whether to allow device expansion to fit vessel walls (some devices cannot be expanded beyond their native size, they can only be compressed
-    self.allowDeviceExpansionToVesselWallsCheckbox = qt.QCheckBox()
-    self.allowDeviceExpansionToVesselWallsCheckbox.setToolTip(
-      "Some devices cannot be expanded beyond their native size in the vessel; they can only be compressed.")
-    self.allowDeviceExpansionToVesselWallsCheckbox.setChecked(False)
-    lay.addRow("Allow device to expand to vessel walls", self.allowDeviceExpansionToVesselWallsCheckbox)
-
-    # Button to deform device to vessel walls
-    self.deformDeviceToVesselWallsButton = qt.QPushButton("Fit device to vessel wall")
-    lay.addRow(self.deformDeviceToVesselWallsButton)
-
-    self.deformDeviceToVesselWallsButton.connect('clicked(bool)', self.onDeformDeviceToVesselWallsClicked)
-    self.deformDeviceToVesselWallsButton.enabled = False
-    self.sliceSelectorSliderWidget = UIHelper.addSlider({
-      "name": "Slice:", "info": "Jumps to a slice containing handles", "value": 0,
-      "unit": "", "minimum": 0, "maximum": 0, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay,
-      self.onSliceSelected)
-
-    orthogonalSlicerRotationBox = qt.QHBoxLayout()
-    lay.addRow(orthogonalSlicerRotationBox)
-    self.previousSliceButton = qt.QPushButton()
-    self.previousSliceButton.text = "<"
-    self.previousSliceButton.setToolTip("Jump to previous slice. Keyboard shortcut: 'z'")
-    orthogonalSlicerRotationBox.addWidget(self.previousSliceButton)
-    self.previousSliceButton.connect('clicked(bool)', self.onPreviousSlice)
-
-    self.nextSliceButton = qt.QPushButton()
-    self.nextSliceButton.text = ">"
-    self.nextSliceButton.setToolTip("Jump to next slice. Keyboard shortcut: 'x'")
-    orthogonalSlicerRotationBox.addWidget(self.nextSliceButton)
-    self.nextSliceButton.connect('clicked(bool)', self.onNextSlice)
-
-  def addQuantificationSection(self):
-    [lay, self.quantificationSection] = UIHelper.addCommonSection("Quantification", self.layout,
-                                                                  self.moduleSectionButtonsGroup)
-    self.colorTableRangeMmSliderWidget = UIHelper.addSlider({
-      "name": "Color table range:", "info": "Maximum compression represented in the color table", "value": 10,
-      "unit": "mm", "minimum": 0, "maximum": 20, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay,
-      self.onColorTableRangeChanged)
-    self.computeMetricsButton = qt.QPushButton("Compute metrics")
-    lay.addRow(self.computeMetricsButton)
-    self.computeMetricsButton.connect('clicked(bool)', self.onComputeMetrics)
-    self.measurementTree = slicer.qMRMLSubjectHierarchyTreeView()
-    self.measurementTree.setMRMLScene(slicer.mrmlScene)
-    qSize = qt.QSizePolicy()
-    qSize.setHorizontalPolicy(qt.QSizePolicy.Expanding)
-    qSize.setVerticalPolicy(qt.QSizePolicy.MinimumExpanding)
-    qSize.setVerticalStretch(1)
-    self.measurementTree.setSizePolicy(qSize)
-    # self.measurementTree.editMenuActionVisible = True
-    self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
-    self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
-    # lay.addRow(self.measurementTree)
-    self.layout.addWidget(self.measurementTree)
+    self.enter()
 
   def cleanup(self):
-    pass
+    for deviceWidget in self.deviceWidgets:
+      deviceWidget.cleanup()
 
   def enter(self):
     """Runs whenever the module is reopened
     """
-    self.installShortcutKeys()
+    for deviceWidget in self.deviceWidgets:
+      deviceWidget.enter()
 
   def exit(self):
-    self.removeShortcutKeys()
-
-  def installShortcutKeys(self):
-    logging.debug('installShortcutKeys')
-    self.shortcuts = []
-    keysAndCallbacks = (
-      ('z', self.onPreviousSlice),
-      ('x', self.onNextSlice)
-      )
-    for key,callback in keysAndCallbacks:
-      shortcut = qt.QShortcut(slicer.util.mainWindow())
-      shortcut.setKey( qt.QKeySequence(key) )
-      shortcut.connect( 'activated()', callback )
-      self.shortcuts.append(shortcut)
-
-  def removeShortcutKeys(self):
-    logging.debug('removeShortcutKeys')
-    for shortcut in self.shortcuts:
-      shortcut.disconnect('activated()')
-      shortcut.setParent(None)
-    self.shortcuts = []
+    for deviceWidget in self.deviceWidgets:
+      deviceWidget.exit()
 
   def onParameterNodeSelectionChanged(self):
-
     self.logic.setParameterNode(self.parameterNodeSelector.currentNode())
-    self.deviceSelectorWidget.setParameterNode(self.logic.parameterNode)
-    if self.logic.parameterNode:
-
-      # Update model parameter sliders from parameter node
-      #for deviceWidget in self.deviceWidgetGroup.buttons():
-      #  deviceWidget.updateGUIFromModelParameters()
-
-      self.setupResliceDriver()
-
-      self.colorTableRangeMmSliderWidget.value = float(self.logic.parameterNode.GetParameter("ColorTableRangeMm"))
-
-      positioningTransform = self.logic.parameterNode.GetNodeReference('PositioningTransform')
-      self.devicePositioningPositionSliderWidget.setMRMLTransformNode(positioningTransform)
-      self.devicePositioningOrientationSliderWidget.setMRMLTransformNode(positioningTransform)
-      self.vesselModelNodeSelector.setCurrentNode(self.logic.getVesselModelNode())
-      self.centerlineModelNodeSelector.setCurrentNode(self.logic.getCenterlineModelNode())
-
-      [vesselLumenSegmentationNode, vesselLumenSegmentId] = self.logic.getVesselLumenSegment()
-      self.vesselSegmentSelector.setCurrentNode(vesselLumenSegmentationNode)
-      self.vesselSegmentSelector.setCurrentSegmentID(vesselLumenSegmentId)
-
-      wasBlocked = self.handlesPerSliceSliderWidget.blockSignals(True)
-      self.handlesPerSliceSliderWidget.value = self.logic.getHandlesPerSlice()
-      self.handlesPerSliceSliderWidget.blockSignals(wasBlocked)
-      wasBlocked = self.handlesSpacingSliderWidget.blockSignals(True)
-      self.handlesSpacingSliderWidget.value = self.logic.getHandlesSpacingMm()
-      self.handlesSpacingSliderWidget.blockSignals(wasBlocked)
-
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      parameterNodeShItem = shNode.GetItemByDataNode(self.logic.parameterNode)
-      self.measurementTree.setRootItem(parameterNodeShItem)
-
+    for deviceWidget in self.deviceWidgets:
+      deviceWidget.setParameterNode(self.logic.parameterNode)
     self.updateButtonStates()
 
   def updateButtonStates(self):
     guiEnabled = self.logic.parameterNode is not None
-    for guiSection in [self.generalSection, self.centerlineSection, self.devicePositionSection, self.deviceDeformationSection, self.quantificationSection]:
+    # self.deviceSelectionSection is always enabled, it creates a parameter node
+    for guiSection in [self.devicePositioningSection, self.deviceDeformationSection, self.quantificationSection]:
       guiSection.enabled = guiEnabled
-    self.positionDeviceAtCenterlineButton.enabled = self.centerlineModelNodeSelector.currentNode() is not None
-    self.flipDeviceOrientationButton.enabled = self.centerlineModelNodeSelector.currentNode() is not None
-    self.moveDeviceAlongCenterlineSliderWidget.enabled = self.centerlineModelNodeSelector.currentNode() is not None
-    if self.vesselModelNodeSelector.currentNode():
-      self.deformDeviceToVesselWallsButton.enabled = True
-    self.processVesselSegmentButton.enabled = (self.vesselSegmentSelector.currentNode() is not None)
 
   def onModuleSectionToggled(self, button, toggled):
 
-    if button == self.generalSection:
+    if button == self.deviceSelectionSection:
+
+      if self.parameterNodeSelector.currentNode() is None:
+        self.parameterNodeSelector.addNode()
+      #self.logic.setDeviceClassId(name)
+
       # Only allow update of deformed models when common section is active (not collapsed)
       self.logic.updateDeformedModelsEnabled = not toggled
 
       if not toggled and self.logic.updateDeformedModelsPending:
-        # While we are in general section, only the original model is updated.
-        # We are exiting the general section now, so make sure all the deformed models are updated.
+        # While we are in device selection section, only the original model is updated.
+        # We are exiting the device selection section now, so make sure all the deformed models are updated.
         # Update of model resets deformation markers, so only do it if the model actually changed
         self.logic.updateModel()
 
     if self.quantificationSection.checked:
       # TODO: hide the expanding spacer if quantification section is open
       pass
-
-  def onVesselLumenSegmentSelectionChanged(self):
-    self.logic.setVesselLumenSegment(self.vesselSegmentSelector.currentNode(), self.vesselSegmentSelector.currentSegmentID())
-    self.updateButtonStates()
-
-  def onCenterlineModelNodeSelectionChanged(self):
-    self.logic.setCenterlineModelNode(self.centerlineModelNodeSelector.currentNode())
-    self.updateButtonStates()
-
-  def onVesselModelNodeSelectionChanged(self):
-    self.logic.setVesselModelNode(self.vesselModelNodeSelector.currentNode())
-    self.updateButtonStates()
-
-  def onProcessVesselSegmentClicked(self):
-    if slicer.app.majorVersion == 4 and slicer.app.minorVersion <= 8:
-      slicer.util.messageBox("Vessel centerline extraction requires Slicer 4.9 or later.")
-      return
-    self.logic.processVesselSegment()
-    self.vesselModelNodeSelector.setCurrentNode(self.logic.getVesselModelNode())
-    self.centerlineModelNodeSelector.setCurrentNode(self.logic.getCenterlineModelNode())
-    [vesselLumenSegmentationNode, vesselLumenSegmentId] = self.logic.getVesselLumenSegment()
-    # hide segment to make the semi-transparent vessel surface visible instead
-    vesselLumenSegmentationNode.GetDisplayNode().SetVisibility(0)
-
-  def onPositionDeviceAtCenterlineClicked(self):
-    self.moveDeviceAlongCenterlineSliderWidget.enabled = self.centerlineModelNodeSelector.currentNode()
-
-    logging.debug("positioning device at centerline endpoint")
-    deviceCenter = self.logic.getDeviceCenter()
-    closestPointID = self.logic.getClosestPointIDOnCenterline(deviceCenter)
-
-    # calculate and adjust slider value
-    centerlinePolyData = self.logic.getCenterlineModelNode().GetPolyData()
-    centerlineVtkPoints = centerlinePolyData.GetPoints()
-    numCenterlineVtkPoints = centerlineVtkPoints.GetNumberOfPoints()
-    sliderValue = int(round((closestPointID * 100.0) / numCenterlineVtkPoints))
-    self.moveDeviceAlongCenterlineSliderWidget.setValue(sliderValue)
-
-    # position device at closest centerline point (based on current centre of device)
-    self.logic.alignDeviceWithCenterlineDirection(closestPointID)
-
-  def onFlipDeviceOrientationClicked(self):
-    logging.debug("flipped device orientation")
-    if not self.logic.deviceOrientationFlipped:
-      self.logic.deviceOrientationFlipped = True
-    else:
-      self.logic.deviceOrientationFlipped = False
-
-    # adjust device position
-    self.onPositionDeviceAtCenterlineClicked()
-
-  def onDeformDeviceToVesselWallsClicked(self):
-    logging.debug("moving device handles to deform to vessel walls...")
-    self.logic.deformHandlesToVesselWalls(self.allowDeviceExpansionToVesselWallsCheckbox.isChecked())
-
-  def onMoveDeviceAlongCenterlineSliderChanged(self):
-
-    sliderValue = self.moveDeviceAlongCenterlineSliderWidget.value
-    self.logic.moveDeviceBasedOnSlider(sliderValue)
-
-  def onComputeMetrics(self):
-    if not self.logic.parameterNode:
-      return
-
-    qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
-    tableNode = self.logic.computeMetrics()
-    qt.QApplication.restoreOverrideCursor()
-
-    # Show table
-    #slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpTableView)
-    #slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveTableID(tableNode.GetID())
-    #slicer.app.applicationLogic().PropagateTableSelection()
-
-    # Show deformed surface model
-    resultModel = self.logic.parameterNode.GetNodeReference("WholeDeformedSurfaceModel")
-    resultModel.GetDisplayNode().SetVisibility(True)
-
-    # Not sure why but it seems that the initial hiding of columns has no effect and we have to
-    # repeat it here.
-    self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
-    self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
-
-  def onColorTableRangeChanged(self):
-    if self.logic.parameterNode:
-      self.logic.parameterNode.SetParameter("ColorTableRangeMm", str(self.colorTableRangeMmSliderWidget.value))
-
-  def onSliceSelected(self):
-    if not self.logic.parameterNode:
-      return
-    sliceNumber = int(self.sliceSelectorSliderWidget.value)
-    fiducialNumber = sliceNumber
-    handleMarkupsNodeId = self.logic.parameterNode.GetNodeReference('DeformedHandles').GetID()
-    centered = False
-    slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(handleMarkupsNodeId, fiducialNumber, centered)
-
-  def onPreviousSlice(self):
-    sliceNumber = int(self.sliceSelectorSliderWidget.value)-1
-    if sliceNumber >= self.sliceSelectorSliderWidget.minimum:
-      self.sliceSelectorSliderWidget.value = sliceNumber
-
-  def onNextSlice(self):
-    sliceNumber = int(self.sliceSelectorSliderWidget.value) + 1
-    if sliceNumber <= self.sliceSelectorSliderWidget.maximum:
-      self.sliceSelectorSliderWidget.value = sliceNumber
-
-  def setupResliceDriver(self):
-    if not self.logic.parameterNode:
-      return
-    resliceLogic = slicer.modules.volumereslicedriver.logic()
-    resliceConfig = [
-      ('vtkMRMLSliceNodeRed', resliceLogic.MODE_TRANSVERSE),
-      ('vtkMRMLSliceNodeGreen', resliceLogic.MODE_INPLANE),
-      ('vtkMRMLSliceNodeYellow', resliceLogic.MODE_INPLANE90)]
-    for nodeName, resliceMode in resliceConfig:
-      sliceNode = slicer.mrmlScene.GetNodeByID(nodeName)
-      resliceLogic.SetDriverForSlice(self.logic.parameterNode.GetNodeReference('PositioningTransform').GetID(), sliceNode)
-      resliceLogic.SetModeForSlice(resliceMode, sliceNode)
-
-  def onSwitchDeviceSection(self, name, toggle):
-    if not toggle:
-      return
-    if self.parameterNodeSelector.currentNode() is None:
-      self.parameterNodeSelector.addNode()
-    self.logic.setDeviceClassId(name)
-    self.updateSliceSelectorWidget()
-    self.sliceSelectorSliderWidget.value = 0
-    self.onSliceSelected() # force update, even if value is already 0
-
-  def updateSliceSelectorWidget(self):
-    if self.sliceSelectorSliderWidget is None:
-      return
-    numberOfSlices = self.logic.handleProfilePoints.GetNumberOfPoints()-1
-    if numberOfSlices>0:
-      self.sliceSelectorSliderWidget.maximum = numberOfSlices
-      self.sliceSelectorSliderWidget.setEnabled(True)
-    else:
-      self.sliceSelectorSliderWidget.maximum = 0
-      self.sliceSelectorSliderWidget.setEnabled(False)
-
-  def onHandlesSettingsChanged(self):
-    self.logic.setHandlesSettings(int(self.handlesPerSliceSliderWidget.value), self.handlesSpacingSliderWidget.value)
-    self.updateSliceSelectorWidget()
 
 
 #
@@ -533,7 +185,6 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     ScriptedLoadableModuleLogic.__init__(self, parent)
     self.interpolatorType = 'KochanekSpline' # Valid options: 'CardinalSpline', 'SCurveSpline', 'KochanekSpline'
     self.parameterNode = None
-    self.deviceOrientationFlipped = False
     self.handleProfilePoints = vtk.vtkPoints()
     # For performance reasons, we can temporarily disable deformed models update.
     # If original model is updated while updateDeformedModelsEnabled is set to False
@@ -546,7 +197,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     self.removeObservers()
 
   def setParameterNode(self, parameterNode):
-    from CardiacDeviceSimulatorUtils.devices import DeviceImplantWidget
+    from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceImplantWidget
 
     if self.parameterNode:
       self.removeObserver(self.parameterNode, DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
@@ -738,7 +389,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       manager.resetSliceViews()
       manager.resetThreeDViews()
 
-    from CardiacDeviceSimulatorUtils.devices import DeviceImplantWidget
+    from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceImplantWidget
     self.addObserver(self.parameterNode, DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
     self.addObserver(self.parameterNode, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
 
@@ -788,13 +439,19 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
   def setHandlesSpacingMm(self, n):
     self.parameterNode.SetParameter('HandlesSpacingMm', str(n))
 
-  def setCenterlineModelNode(self, centerlineModelNode):
+  def setCenterlineNode(self, centerlineModelNode):
     if not self.parameterNode:
       return
     self.parameterNode.SetNodeReferenceID("CenterlineModel", centerlineModelNode.GetID() if centerlineModelNode else None)
 
-  def getCenterlineModelNode(self):
+  def getCenterlineNode(self):
     return self.parameterNode.GetNodeReference("CenterlineModel")
+
+  def setDeviceOrientationFlippedOnCenterline(self, flipped):
+    self.parameterNode.SetParameter('DeviceOrientationFlippedOnCenterline', 'true' if flipped else 'false'))
+
+  def getDeviceOrientationFlippedOnCenterline(self):
+    return self.parameterNode.GetParameter('DeviceOrientationFlippedOnCenterline') == 'true'
 
   def setVesselLumenSegment(self, vesselLumenSegmentationNode, vesselLumenSegmentId):
     if not self.parameterNode:
@@ -1443,9 +1100,11 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       fidIndex = markupsNode.AddFiducial(pos[0], pos[1], pos[2])
     markupsNode.EndModify(wasModifying)
 
-  def moveDeviceBasedOnSlider(self, sliderValue):
+  def setDeviceNormalizedPositionAlongCenterline(self, normalizedPosition):
+    """normalizedPosition is between 0..1
+    """
     #center of device is the translation part of the PositioningTransformMatrix
-    centerlinePolyData = self.getCenterlineModelNode().GetPolyData()
+    centerlinePolyData = self.getCenterlineNode().GetPolyData()
     centerlineVtkPoints = centerlinePolyData.GetPoints()
     numCenterlineVtkPoints = centerlineVtkPoints.GetNumberOfPoints()
 
@@ -1455,23 +1114,17 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       deviceCenterPointIndex -= 1 #otherwise point index will be out of range
 
     self.alignDeviceWithCenterlineDirection(deviceCenterPointIndex)
-    return
 
-  def getClosestPointIDOnCenterline(self, point):
-    centerlinePolyData = self.getCenterlineModelNode().GetPolyData()
-    curvePointsLocator = vtk.vtkPointLocator() # could try using vtk.vtkStaticPointLocator() if need to optimize
-    curvePointsLocator.SetDataSet(centerlinePolyData)
-    curvePointsLocator.BuildLocator()
-    closestPointId = curvePointsLocator.FindClosestPoint(point)
-    return closestPointId
+  def getNormalizedPositionAlongCenterline(self, point):
+    """Returns normalized position (0->1) along the line
+    """
+    curvePointIndex = self.getCenterlineNode().GetClosestCurvePointIndexToPositionWorld(point)
+    numberOfCurvePoints = self.getCenterlineNode().GetCurvePointsWorld().GetNumberOfPoints()
+    return float(curvePointIndex)/float(numberOfCurvePoints)
 
   def getClosestPointCoordinatesOnCenterline(self, point):
-    centerlinePolyData = self.getCenterlineModelNode().GetPolyData()
-    curvePointsLocator = vtk.vtkPointLocator() # could try using vtk.vtkStaticPointLocator() if need to optimize
-    curvePointsLocator.SetDataSet(centerlinePolyData)
-    curvePointsLocator.BuildLocator()
-    closestPointId = curvePointsLocator.FindClosestPoint(point)
-    closestPoint = centerlinePolyData.GetPoints().GetPoint(closestPointId)
+    closestPoint = [0,0,0]
+    self.getCenterlineNode().GetClosestPointPositionAlongCurveWorld(point,closestPoint)
     return closestPoint
 
   def getDeviceCenter(self):
@@ -1497,7 +1150,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     originalModelNodePointsZMin = abs(originalModelNodePoints[:,2].min())
     originalModelNodePointsZMax = abs(originalModelNodePoints[:,2].max())
 
-    centerlinePoints = slicer.util.arrayFromModelPoints(self.getCenterlineModelNode())
+    centerlinePoints = slicer.util.arrayFromMarkupsCurvePoints(self.getCenterlineNode(), world=True)
 
     # Find point index corresponding to device endpoints in both directions along the curve
     distanceFromCenterPoint = 0
@@ -1517,7 +1170,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     centerlinePointsAlongDevice = centerlinePoints[startPointIndex:endPointIndex]
     [linePosition, lineDirectionVector] = HeartValveLib.lineFit(centerlinePointsAlongDevice)
 
-    if self.deviceOrientationFlipped:
+    if self.getDeviceOrientationFlippedOnCenterline():
       deviceZAxisInRas = lineDirectionVector
     else:
       deviceZAxisInRas = -lineDirectionVector
@@ -1530,11 +1183,6 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     deviceToCenterlineTransform = self.parameterNode.GetNodeReference('PositioningTransform')
     rotateDeviceToAlignWithCenterlineTransform = HeartValveLib.getVtkTransformPlaneToWorld(deviceCenterPoint, deviceZAxisInRasUnitVector)
     deviceToCenterlineTransform.SetAndObserveTransformToParent(rotateDeviceToAlignWithCenterlineTransform)
-
-    #for nodeId in ['DeformingTransform', 'OriginalModel', 'OriginalModelDist', 'DeformedModelDist', 'DeformedModelContactSurface']:
-    #  #\ + segmentDistNames + segmentContactSurfaceNames:
-    #  n = self.parameterNode.GetNodeReference(nodeId)
-    #  n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
 
   def deformHandlesToVesselWalls(self, allowDeviceExpansionToVesselWalls):
     import numpy as np
@@ -1644,14 +1292,14 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     # Create centerline curve
     slicer.util.showStatusMessage("Creating centerline curve...", 3000)
     markupsToModelLogic = slicer.modules.markupstomodel.logic()
-    centerlineModelNode = self.getCenterlineModelNode()
+    centerlineModelNode = self.getCenterlineNode()
     if not centerlineModelNode:
       centerlineModelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'VesselCenterlineModel')
       centerlineModelNode.CreateDefaultDisplayNodes()
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
       shNode.SetItemParent(shNode.GetItemByDataNode(centerlineModelNode), centerlineFolderShItem)
-      self.setCenterlineModelNode(centerlineModelNode)
-    markupsToModelLogic.UpdateOutputCurveModel(vesselCenterlineMarkupsNode, self.getCenterlineModelNode(),
+      self.setCenterlineNode(centerlineModelNode)
+    markupsToModelLogic.UpdateOutputCurveModel(vesselCenterlineMarkupsNode, self.getCenterlineNode(),
                                                slicer.vtkMRMLMarkupsToModelNode.Linear,  # interpolation
                                                False,  # loop
                                                0.0  # radius = 0 means no tube will be generated, just a line

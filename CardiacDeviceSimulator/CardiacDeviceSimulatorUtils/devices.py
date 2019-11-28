@@ -1,154 +1,8 @@
 import os
 import qt, ctk, vtk
-from .helpers import UIHelper
 
 import collections
 from collections import OrderedDict
-
-class DeviceImplantWidget(qt.QFrame, UIHelper):
-
-  DEVICE_CLASS_MODIFIED_EVENT = 20000
-  DEVICE_PARAMETER_VALUE_MODIFIED_EVENT = 20001
-
-  def __init__(self, deviceClass, parent=None):
-    super(DeviceImplantWidget, self).__init__(parent)
-    self.deviceClass = deviceClass
-    self.parameterNode = None
-    self.setup()
-    self.destroyed.connect(self._onAboutToBeDestroyed)
-
-  def setParameterNode(self, parameterNode):
-    self.parameterNode = parameterNode
-    self.updateGUIFromMRML()
-
-  def reset(self):
-    wasBlocked = self._presetCombo.blockSignals(True)
-    self._presetCombo.setCurrentIndex(0)
-    self._presetCombo.blockSignals(wasBlocked)
-
-  def setup(self):
-    self.setLayout(qt.QFormLayout(self))
-    self._addDeviceLabel()
-    self._addPresetsCombo()
-    self._addSliders()
-
-  def _onAboutToBeDestroyed(self, obj):
-    obj.destroyed.disconnect(self._onAboutToBeDestroyed)
-
-  def updateGUIFromMRML(self):
-    if not self.parameterNode:
-      return
-    presetName = self.parameterNode.GetParameter(self.deviceClass.ID + "_preset")
-    wasBlocked = self._presetCombo.blockSignals(True)
-    if presetName:
-      self._presetCombo.setCurrentText(presetName)
-    else:
-      self._presetCombo.setCurrentIndex(-1)
-    self._presetCombo.blockSignals(wasBlocked)
-
-    for paramName, paramAttributes in self.deviceClass.getParameters().items():
-      paramValue = self.parameterNode.GetParameter(self.deviceClass.ID+"_"+paramName)
-      if not paramValue:
-        continue
-      paramValue = float(paramValue)
-      sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
-      paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-      wasBlocked = sliderWidget.blockSignals(True)
-      sliderWidget.value = paramValue / paramScale
-      sliderWidget.blockSignals(wasBlocked)
-
-  # def updateMRMLFromGUI(self, parameterNode):
-  #   if not parameterNode:
-  #     return
-  #   valuesChanged = False
-  #   for paramName, paramAttributes in self.deviceClass.getParameters().items():
-  #     sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
-  #     paramValue = sliderWidget.value
-  #     paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-  #     newParamValue = str(paramValue * paramScale)
-  #     oldParamValue = parameterNode.GetParameter(self.deviceClass.ID+"_"+paramName)
-  #     if newParamValue != oldParamValue:
-  #       parameterNode.SetParameter(self.deviceClass.ID+"_"+paramName, newParamValue)
-  #       valuesChanged = True
-  #   if valuesChanged:
-  #     self._presetCombo.setCurrentIndex(-1)
-
-  # def setParameters(self, params):
-  #   for paramName, paramAttributes in self.deviceClass.getParameters().items():
-  #     sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
-  #     paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-  #     if not hasattr(modelParameters, paramName):
-  #       continue
-  #     paramValue = modelParameters[paramName]
-  #     wasBlocked = sliderWidget.blockSignals(True)
-  #     sliderWidget.value = paramValue * paramScale
-  #     sliderWidget.blockSignals(wasBlocked)
-
-  def _addSliders(self):
-    for paramName, paramAttributes in self.deviceClass.getParameters().items():
-      setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.onSliderMoved))
-
-  def _addDeviceLabel(self):
-    self._widgetLabel = qt.QLabel(self.deviceClass.NAME)
-    self._widgetLabel.setStyleSheet('font: italic "Times New Roman"; font-size: 15px')
-    self.layout().addRow("Device Name:", self._widgetLabel)
-
-  def _addPresetsCombo(self):
-    self._presets = self.deviceClass.getPresets()
-    self._presetCombo = qt.QComboBox()
-    if self._presets:
-      for model, properties in self._presets.items():
-        values = "; ".join([properties[parameter] for parameter, attributes in self.deviceClass.getParameters().items()])
-        self._presetCombo.addItem("{} | {{ {} }}".format(model, values))
-      self._presetCombo.connect("currentIndexChanged(const QString)", self.onPresetSelected)
-      self.layout().addRow("Presets:", self._presetCombo)
-
-  def onSliderMoved(self):
-    for paramName, paramAttributes in self.deviceClass.getParameters().items():
-      sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
-      paramValue = sliderWidget.value
-      paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-      newParamValue = str(paramValue * paramScale)
-      self.parameterNode.SetParameter(self.deviceClass.ID+"_"+paramName, newParamValue)
-    self._presetCombo.setCurrentIndex(-1)
-    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
-
-  def onPresetSelected(self, text):
-    presetName = text.split(' | ')[0] if text else ""
-    self.parameterNode.SetParameter(self.deviceClass.ID + "_preset", presetName)
-    if not presetName:
-      # preset is not selected (custom settings)
-      return
-    params = self._presets[presetName]
-    for parameter, attributes in self.deviceClass.getParameters().items():
-      self.parameterNode.SetParameter(self.deviceClass.ID + "_" + parameter, str(params[parameter]))
-    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
-
-class DeviceImplantPresets(OrderedDict):
-
-  def __init__(self, csvfile, defaultParameters):
-    super(DeviceImplantPresets, self).__init__()
-    self._presetCSVFile = csvfile
-    if self._presetCSVFile and os.path.exists(self._presetCSVFile):
-      self._readPresets()
-    else:
-      # If preset file is not available then create a default preset from  the parameter info
-      presets = OrderedDict()
-      defaultPreset = {}
-      for paramName, paramAttributes in defaultParameters.items():
-        paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-        value = paramAttributes["value"] * paramScale
-        defaultPreset[paramName] = str(value)
-      presets["Default"] = defaultPreset
-      self.update(presets)
-
-  def _readPresets(self):
-    import csv
-    presets = OrderedDict()
-    with open(self._presetCSVFile, mode='r') as csv_file:
-      for row in csv.DictReader(csv_file):
-        presets[row["Model"]] = {key:row[key] for key in row.keys() if key.lower() != "model"}
-    self.update(presets)
 
 
 class CardiacDeviceBase(object):
@@ -205,6 +59,34 @@ class CardiacDeviceBase(object):
         value = paramAttributes["value"] * paramScale
         parameterValues[paramName] = value
     return parameterValues
+
+
+class DeviceImplantPresets(OrderedDict):
+
+  def __init__(self, csvfile, defaultParameters):
+    super(DeviceImplantPresets, self).__init__()
+    self._presetCSVFile = csvfile
+    if self._presetCSVFile and os.path.exists(self._presetCSVFile):
+      self._readPresets()
+    else:
+      # If preset file is not available then create a default preset from  the parameter info
+      presets = OrderedDict()
+      defaultPreset = {}
+      for paramName, paramAttributes in defaultParameters.items():
+        paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
+        value = paramAttributes["value"] * paramScale
+        defaultPreset[paramName] = str(value)
+      presets["Default"] = defaultPreset
+      self.update(presets)
+
+  def _readPresets(self):
+    import csv
+    presets = OrderedDict()
+    with open(self._presetCSVFile, mode='r') as csv_file:
+      for row in csv.DictReader(csv_file):
+        presets[row["Model"]] = {key:row[key] for key in row.keys() if key.lower() != "model"}
+    self.update(presets)
+
 
 class HarmonyDevice(CardiacDeviceBase):
 
