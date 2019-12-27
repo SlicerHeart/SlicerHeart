@@ -137,7 +137,7 @@ class DevicePositioningWidget(DeviceWidget):
 
   def onFlipDeviceOrientationClicked(self):
     logging.debug("flipped device orientation")
-    self.logic.setDeviceOrientationFlippedOnCenterline(not self.logic.getDeviceOrientationFlippedOnCenterline()))
+    self.logic.setDeviceOrientationFlippedOnCenterline(not self.logic.getDeviceOrientationFlippedOnCenterline())
 
   def onMoveDeviceAlongCenterlineSliderChanged(self):
     sliderValue = self.moveDeviceAlongCenterlineSliderWidget.value

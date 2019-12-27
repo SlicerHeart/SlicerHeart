@@ -448,7 +448,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     return self.parameterNode.GetNodeReference("CenterlineModel")
 
   def setDeviceOrientationFlippedOnCenterline(self, flipped):
-    self.parameterNode.SetParameter('DeviceOrientationFlippedOnCenterline', 'true' if flipped else 'false'))
+    self.parameterNode.SetParameter('DeviceOrientationFlippedOnCenterline', 'true' if flipped else 'false')
 
   def getDeviceOrientationFlippedOnCenterline(self):
     return self.parameterNode.GetParameter('DeviceOrientationFlippedOnCenterline') == 'true'
