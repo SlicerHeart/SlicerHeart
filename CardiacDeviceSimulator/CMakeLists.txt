@@ -5,8 +5,14 @@ set(MODULE_NAME CardiacDeviceSimulator)
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
   CardiacDeviceSimulatorUtils/__init__.py
+  CardiacDeviceSimulatorUtils/DeviceCompressionQuantificationWidget.py
+  CardiacDeviceSimulatorUtils/DeviceCompressionQuantificationWidget.py
+  CardiacDeviceSimulatorUtils/DeviceDataTreeWidget.py
+  CardiacDeviceSimulatorUtils/DeviceDeformationWidget.py
+  CardiacDeviceSimulatorUtils/DevicePositioningWidget.py
   CardiacDeviceSimulatorUtils/devices.py
-  CardiacDeviceSimulatorUtils/widgets.py
+  CardiacDeviceSimulatorUtils/DeviceSelectorWidget.py
+  CardiacDeviceSimulatorUtils/widgethelper.py
   )
 
 set(MODULE_PYTHON_RESOURCES
