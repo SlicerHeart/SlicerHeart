@@ -44,8 +44,7 @@ class DeviceWidget(VTKObservationMixin, qt.QWidget):
       self.updateGUIFromMRML()
       for eventId in self.observedParameterNodeEvents:
         self.addObserver(self.parameterNode, eventId, self.updateGUIFromMRML)
-    else:
-      self.setEnabled(False)
+    self.setEnabled(self.parameterNode is not None)
 
   def updateGUIFromMRML(self):
     """Update all GUI after node changed"""

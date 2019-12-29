@@ -33,6 +33,9 @@ class CardiacDeviceSimulator(ScriptedLoadableModule):
     This file was originally developed by Andras Lasso, PerkLab.
     """
 
+    for deviceClass in [HarmonyDevice, CylinderDevice]:
+      CardiacDeviceSimulatorWidget.registerDevice(deviceClass)
+
 #
 # CardiacDeviceSimulatorWidget
 #
@@ -42,7 +45,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  registeredDeviceClasses = [HarmonyDevice, CylinderDevice]
+  registeredDeviceClasses = []
 
   @staticmethod
   def registerDevice(deviceClass):
@@ -52,9 +55,15 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     if not deviceClass in CardiacDeviceSimulatorWidget.registeredDeviceClasses:
       CardiacDeviceSimulatorWidget.registeredDeviceClasses.append(deviceClass)
 
-  def __init__(self, parent=None):
+  def __init__(self, parent=None, deviceClasses=None):
     ScriptedLoadableModuleWidget.__init__(self, parent)
+    if deviceClasses:
+      self.deviceClasses = deviceClasses
+    else:
+      self.deviceClasses = CardiacDeviceSimulatorWidget.registeredDeviceClasses
     self.deviceWidgets = []
+    self.logic = CardiacDeviceSimulatorLogic()
+    self.setupSuccessful = False
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -67,16 +76,16 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       slicer.util.messageBox("This modules requires MarkupsToModel extension. Install MarkupsToModel and restart Slicer.")
       return
 
-    self.logic = CardiacDeviceSimulatorLogic()
+    self.setupSuccessful = True
 
     self.moduleSectionButtonsGroup = qt.QButtonGroup()
     self.moduleSectionButtonsGroup.connect("buttonToggled(QAbstractButton*,bool)", self.onModuleSectionToggled)
 
     self.parameterNodeSelector = slicer.qMRMLNodeComboBox()
     self.parameterNodeSelector.nodeTypes = ["vtkMRMLScriptedModuleNode"]
-    self.parameterNodeSelector.setNodeTypeLabel("CardiacDevice", "vtkMRMLScriptedModuleNode")
-    self.parameterNodeSelector.baseName = "CardiacDevice"
-    self.parameterNodeSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", "CardiacDeviceAnalysis")
+    self.parameterNodeSelector.setNodeTypeLabel(self.logic.moduleName, "vtkMRMLScriptedModuleNode")
+    self.parameterNodeSelector.baseName = self.logic.moduleName
+    self.parameterNodeSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", self.logic.moduleName)
     self.parameterNodeSelector.addEnabled = True
     self.parameterNodeSelector.removeEnabled = True
     self.parameterNodeSelector.noneEnabled = True
@@ -90,9 +99,9 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.layout.addLayout(hbox)
     self.parameterNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onParameterNodeSelectionChanged)
 
-    self.deviceSelectorWidget = DeviceSelectorWidget(CardiacDeviceSimulatorWidget.registeredDeviceClasses)
+    self.deviceSelectorWidget = DeviceSelectorWidget(self.deviceClasses)
     [lay, self.deviceSelectionSection] = UIHelper.addCommonSection("Device Selection", self.layout, self.moduleSectionButtonsGroup,
-      collapsed=True, widget=self.deviceSelectorWidget)
+      collapsed=False, widget=self.deviceSelectorWidget)
     
     self.devicePositioningWidget = DevicePositioningWidget()
     [lay, self.devicePositioningSection] = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
@@ -114,12 +123,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     for deviceWidget in self.deviceWidgets:
       deviceWidget.logic = self.logic
 
-    defaultNode = slicer.mrmlScene.GetFirstNodeByName("CardiacDevice")
-    if defaultNode:
-      self.parameterNodeSelector.setCurrentNode(defaultNode)
-
     self.updateButtonStates()
-    self.enter()
 
   def cleanup(self):
     for deviceWidget in self.deviceWidgets:
@@ -128,6 +132,9 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
   def enter(self):
     """Runs whenever the module is reopened
     """
+    defaultNode = self.logic.getParameterNode()
+    self.parameterNodeSelector.setCurrentNode(defaultNode)
+
     for deviceWidget in self.deviceWidgets:
       deviceWidget.enter()
 
@@ -191,10 +198,21 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     # then updateDeformedModelsPending flag is set.
     self.updateDeformedModelsEnabled = True
     self.updateDeformedModelsPending = False
+    # Set NodeAboutToBeRemovedEvent observation priority to higher than default to ensure it is called
+    # before subject hierarchy's observer (that would remove the subject hierarchy item and so we 
+    # would not have a chance to delete children nodes)
+    self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAboutToBeRemovedEvent, self.onNodeAboutToBeRemoved, priority = 10.0)
 
   def cleanup(self):
     # TODO: check if it is called
     self.removeObservers()
+
+  @vtk.calldata_type(vtk.VTK_OBJECT)
+  def onNodeAboutToBeRemoved(self, caller, event, node):
+    if isinstance(node, slicer.vtkMRMLScriptedModuleNode) and node.GetAttribute('ModuleName') == self.moduleName:
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      shItem = shNode.GetItemByDataNode(node)
+      shNode.RemoveItemChildren(shItem)
 
   def setParameterNode(self, parameterNode):
     from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceImplantWidget
@@ -212,7 +230,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       self.parameterNode.SetHideFromEditors(False)
       shNode.RequestOwnerPluginSearch(self.parameterNode)
       parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
-      shNode.SetItemAttribute(parameterNodeShItem, "ModuleName", "CardiacDeviceAnalysis")
+      shNode.SetItemAttribute(parameterNodeShItem, "ModuleName", self.moduleName)
     else:
       parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
 
@@ -495,16 +513,6 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     self.setHandlesPerSlice(handlesPerSlice)
     self.setHandlesSpacingMm(handlesSpacingMm)
     self.updateModel()
-
-  # def setModelParameters(self, deviceClassId, params):
-  #   self.modelInfo[deviceClassId]['parameters'] = params
-  #   if self.parameterNode:
-  #     for key in params.keys():
-  #       self.parameterNode.SetParameter(deviceClassId+"_"+key, str(params[key]))
-  #     self.updateModel()
-
-  # def getModelParameters(self, deviceClassId):
-  #   return self.modelInfo[deviceClassId]['parameters']
 
   def computeMetrics(self):
 

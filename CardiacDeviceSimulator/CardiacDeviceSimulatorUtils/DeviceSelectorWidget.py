@@ -1,5 +1,6 @@
 import ctk, qt, vtk
 import slicer
+from slicer.util import VTKObservationMixin
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 
@@ -10,6 +11,7 @@ class DeviceSelectorWidget(DeviceWidget):
   def __init__(self, registeredDeviceClasses, parent=None):
     DeviceWidget.__init__(self, parent)
     self.registeredDeviceClasses = registeredDeviceClasses
+    self.observedParameterNodeEvents = [DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT]
     self.deviceWidgetFrames = dict()
     self.deviceWidgetFrame = None
     self.inUpdateGUIFromMRML = False
@@ -22,12 +24,14 @@ class DeviceSelectorWidget(DeviceWidget):
     self.deviceButtonGroup.setExclusive(True)
 
     vBoxDeviceButtonGroup = qt.QWidget()
-    vBoxDeviceButtonGroup.setLayout(qt.QHBoxLayout())
-    for deviceClass in self.registeredDeviceClasses:
+    vBoxDeviceButtonGroup.setLayout(qt.QGridLayout())
+    numberOfColumns = 4 if len(self.registeredDeviceClasses) < 5 or len(self.registeredDeviceClasses) > 6 else 3
+    for currentWidgetIndex, deviceClass in enumerate(self.registeredDeviceClasses):
       deviceWidgetButton = self.createDeviceButton(deviceClass)
       self.deviceWidgetFrames[deviceClass.ID] = DeviceImplantWidget(deviceClass)
       self.deviceButtonGroup.addButton(deviceWidgetButton)
-      vBoxDeviceButtonGroup.layout().addWidget(deviceWidgetButton)
+      vBoxDeviceButtonGroup.layout().addWidget(deviceWidgetButton,
+        int(currentWidgetIndex/numberOfColumns), currentWidgetIndex % numberOfColumns)
 
     self.deviceButtonGroup.connect('buttonClicked(QAbstractButton*)', self.onSwitchDevice)
     self.layout().addWidget(vBoxDeviceButtonGroup)
@@ -51,7 +55,6 @@ class DeviceSelectorWidget(DeviceWidget):
     if self.parameterNode:
       for deviceClass in self.registeredDeviceClasses:
         self.deviceWidgetFrames[deviceClass.ID].setParameterNode(self.parameterNode)
-
 
   def updateMRMLFromGUI(self):
     if self.inUpdateGUIFromMRML:
@@ -155,33 +158,6 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
       sliderWidget.value = paramValue / paramScale
       sliderWidget.blockSignals(wasBlocked)
 
-  # def updateMRMLFromGUI(self, parameterNode):
-  #   if not parameterNode:
-  #     return
-  #   valuesChanged = False
-  #   for paramName, paramAttributes in self.deviceClass.getParameters().items():
-  #     sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
-  #     paramValue = sliderWidget.value
-  #     paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-  #     newParamValue = str(paramValue * paramScale)
-  #     oldParamValue = parameterNode.GetParameter(self.deviceClass.ID+"_"+paramName)
-  #     if newParamValue != oldParamValue:
-  #       parameterNode.SetParameter(self.deviceClass.ID+"_"+paramName, newParamValue)
-  #       valuesChanged = True
-  #   if valuesChanged:
-  #     self._presetCombo.setCurrentIndex(-1)
-
-  # def setParameters(self, params):
-  #   for paramName, paramAttributes in self.deviceClass.getParameters().items():
-  #     sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
-  #     paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
-  #     if not hasattr(modelParameters, paramName):
-  #       continue
-  #     paramValue = modelParameters[paramName]
-  #     wasBlocked = sliderWidget.blockSignals(True)
-  #     sliderWidget.value = paramValue * paramScale
-  #     sliderWidget.blockSignals(wasBlocked)
-
   def _addSliders(self):
     for paramName, paramAttributes in self.deviceClass.getParameters().items():
       setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.onSliderMoved))
@@ -198,7 +174,7 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
       for model, properties in self._presets.items():
         values = "; ".join([properties[parameter] for parameter, attributes in self.deviceClass.getParameters().items()])
         self._presetCombo.addItem("{} | {{ {} }}".format(model, values))
-      self._presetCombo.connect("currentIndexChanged(const QString)", self.onPresetSelected)
+      self._presetCombo.connect("currentIndexChanged(QString)", self.onPresetSelected)
       self.layout().addRow("Presets:", self._presetCombo)
 
   def onSliderMoved(self):
