@@ -2,6 +2,7 @@ import ctk, qt, vtk
 import slicer
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
+from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
 
 class DeviceCompressionQuantificationWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets
@@ -28,7 +29,7 @@ class DeviceCompressionQuantificationWidget(DeviceWidget):
 
   def updateGUIFromMRML(self, caller=None, event=None):
     wasBlocked = self.colorTableRangeMmSliderWidget.blockSignals(True)
-    self.colorTableRangeMmSliderWidget.value = float(self.parameterNode.GetParameter("ColorTableRangeMm"))
+    self.colorTableRangeMmSliderWidget.value = float(self.parameterNode.GetParameter("ColorTableRangeMm")) if self.parameterNode else 0.0
     self.colorTableRangeMmSliderWidget.blockSignals(wasBlocked)
 
   def onComputeMetrics(self):
@@ -48,10 +49,7 @@ class DeviceCompressionQuantificationWidget(DeviceWidget):
     resultModel = self.logic.parameterNode.GetNodeReference("WholeDeformedSurfaceModel")
     resultModel.GetDisplayNode().SetVisibility(True)
 
-    # Not sure why but it seems that the initial hiding of columns has no effect and we have to
-    # repeat it here.
-    self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
-    self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
+    self.logic.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.QUANTIFICATION_RESULT_UPDATED_EVENT)
 
   def onColorTableRangeChanged(self):
     if self.logic.parameterNode:

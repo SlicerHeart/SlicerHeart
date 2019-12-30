@@ -4,6 +4,7 @@ import slicer
 from collections import OrderedDict
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
+from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
 
 class DeviceDeformationWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets
@@ -11,7 +12,7 @@ class DeviceDeformationWidget(DeviceWidget):
 
   def __init__(self, parent=None):
     DeviceWidget.__init__(self, parent)
-    self.observedParameterNodeEvents = [vtk.vtkCommand.ModifiedEvent]
+    self.observedParameterNodeEvents = [vtk.vtkCommand.ModifiedEvent, CardiacDeviceBase.DEVICE_PROFILE_MODIFIED_EVENT]
     self.setup()
 
   def setup(self):
@@ -61,7 +62,6 @@ class DeviceDeformationWidget(DeviceWidget):
     self.vesselModelNodeSelector.connect('currentNodeChanged(bool)', self.deformDeviceToVesselWallsButton, 'setEnabled(bool)')
 
     self.deformDeviceToVesselWallsButton.connect('clicked(bool)', self.onDeformDeviceToVesselWallsClicked)
-    self.deformDeviceToVesselWallsButton.enabled = False
     self.sliceSelectorSliderWidget = UIHelper.addSlider({
       "name": "Slice:", "info": "Jumps to a slice containing handles", "value": 0,
       "unit": "", "minimum": 0, "maximum": 0, "singleStep": 1, "pageStep": 1, "decimals": 0}, lay,
@@ -116,16 +116,29 @@ class DeviceDeformationWidget(DeviceWidget):
     wasBlocked = self.vesselModelNodeSelector.blockSignals(True)
     self.vesselModelNodeSelector.setCurrentNode(self.logic.getVesselModelNode())
     self.vesselModelNodeSelector.blockSignals(wasBlocked)
-    wasBlocked = self.handlesPerSliceSliderWidget.blockSignals(True)
-    self.handlesPerSliceSliderWidget.value = self.logic.getHandlesPerSlice()
-    self.handlesPerSliceSliderWidget.blockSignals(wasBlocked)
-    wasBlocked = self.handlesSpacingSliderWidget.blockSignals(True)
-    self.handlesSpacingSliderWidget.value = self.logic.getHandlesSpacingMm()
-    self.handlesSpacingSliderWidget.blockSignals(wasBlocked)
+    if self.logic.parameterNode:
+      wasBlocked = self.handlesPerSliceSliderWidget.blockSignals(True)
+      self.handlesPerSliceSliderWidget.value = self.logic.getHandlesPerSlice()
+      self.handlesPerSliceSliderWidget.blockSignals(wasBlocked)
+      wasBlocked = self.handlesSpacingSliderWidget.blockSignals(True)
+      self.handlesSpacingSliderWidget.value = self.logic.getHandlesSpacingMm()
+      self.handlesSpacingSliderWidget.blockSignals(wasBlocked)
+      numberOfSlices = self.logic.handleProfilePoints.GetNumberOfPoints()-1
+    else:
+      numberOfSlices = 0
+    wasBlocked = self.sliceSelectorSliderWidget.blockSignals(True)
+    if numberOfSlices>0:
+      self.sliceSelectorSliderWidget.maximum = numberOfSlices
+      self.sliceSelectorSliderWidget.setEnabled(True)
+    else:
+      self.sliceSelectorSliderWidget.maximum = 0
+      self.sliceSelectorSliderWidget.setEnabled(False)
+    self.sliceSelectorSliderWidget.blockSignals(wasBlocked)
+    self.deformDeviceToVesselWallsButton.enabled = (self.vesselModelNodeSelector.currentNode() is not None)
 
   def onVesselModelNodeSelectionChanged(self):
     self.logic.setVesselModelNode(self.vesselModelNodeSelector.currentNode())
-    self.updateButtonStates()
+    #self.updateButtonStates()
 
   def onSliceSelected(self):
     if not self.logic.parameterNode:
@@ -159,20 +172,8 @@ class DeviceDeformationWidget(DeviceWidget):
       resliceLogic.SetDriverForSlice(self.logic.parameterNode.GetNodeReference('PositioningTransform').GetID(), sliceNode)
       resliceLogic.SetModeForSlice(resliceMode, sliceNode)
 
-  def updateSliceSelectorWidget(self):
-    if self.sliceSelectorSliderWidget is None:
-      return
-    numberOfSlices = self.logic.handleProfilePoints.GetNumberOfPoints()-1
-    if numberOfSlices>0:
-      self.sliceSelectorSliderWidget.maximum = numberOfSlices
-      self.sliceSelectorSliderWidget.setEnabled(True)
-    else:
-      self.sliceSelectorSliderWidget.maximum = 0
-      self.sliceSelectorSliderWidget.setEnabled(False)
-
   def onHandlesSettingsChanged(self):
     self.logic.setHandlesSettings(int(self.handlesPerSliceSliderWidget.value), self.handlesSpacingSliderWidget.value)
-    self.updateSliceSelectorWidget()
 
   def onDeformDeviceToVesselWallsClicked(self):
     logging.debug("moving device handles to deform to vessel walls...")

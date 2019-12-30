@@ -72,10 +72,6 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       slicer.util.messageBox("This modules requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
       return
 
-    if not hasattr(slicer.modules, 'markupstomodel'):
-      slicer.util.messageBox("This modules requires MarkupsToModel extension. Install MarkupsToModel and restart Slicer.")
-      return
-
     self.setupSuccessful = True
 
     self.moduleSectionButtonsGroup = qt.QButtonGroup()
@@ -121,7 +117,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.deviceWidgets = [self.deviceSelectorWidget, self.devicePositioningWidget, self.deviceDeformationWidget, self.deviceQuantificationWidget, self.dataTreeWidget]
 
     for deviceWidget in self.deviceWidgets:
-      deviceWidget.logic = self.logic
+      deviceWidget.setLogic(self.logic)
 
     self.updateButtonStates()
 
@@ -218,8 +214,8 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceImplantWidget
 
     if self.parameterNode:
-      self.removeObserver(self.parameterNode, DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
-      self.removeObserver(self.parameterNode, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
+      self.removeObserver(self.parameterNode, CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
+      self.removeObserver(self.parameterNode, CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
 
     self.parameterNode = parameterNode
     if not self.parameterNode:
@@ -408,8 +404,8 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       manager.resetThreeDViews()
 
     from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceImplantWidget
-    self.addObserver(self.parameterNode, DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
-    self.addObserver(self.parameterNode, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
+    self.addObserver(self.parameterNode, CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
+    self.addObserver(self.parameterNode, CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
 
 
   def onDeviceClassModified(self, caller=None, event=None):
@@ -457,13 +453,13 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
   def setHandlesSpacingMm(self, n):
     self.parameterNode.SetParameter('HandlesSpacingMm', str(n))
 
-  def setCenterlineNode(self, centerlineModelNode):
+  def setCenterlineNode(self, centerlineCurveNode):
     if not self.parameterNode:
       return
-    self.parameterNode.SetNodeReferenceID("CenterlineModel", centerlineModelNode.GetID() if centerlineModelNode else None)
+    self.parameterNode.SetNodeReferenceID("CenterlineCurve", centerlineCurveNode.GetID() if centerlineCurveNode else None)
 
   def getCenterlineNode(self):
-    return self.parameterNode.GetNodeReference("CenterlineModel")
+    return self.parameterNode.GetNodeReference("CenterlineCurve") if self.parameterNode else None
 
   def setDeviceOrientationFlippedOnCenterline(self, flipped):
     self.parameterNode.SetParameter('DeviceOrientationFlippedOnCenterline', 'true' if flipped else 'false')
@@ -490,7 +486,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     self.parameterNode.SetNodeReferenceID("VesselModel", vesselModelNode.GetID() if vesselModelNode else None)
 
   def getVesselModelNode(self):
-    return self.parameterNode.GetNodeReference("VesselModel")
+    return self.parameterNode.GetNodeReference("VesselModel") if self.parameterNode else None
 
   def setDeviceClassId(self, deviceClassId):
     self.parameterNode.SetParameter("DeviceClassId", deviceClassId)
@@ -853,6 +849,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('OriginalHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
       self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('DeformedHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
       self.updateDeformedModelsPending = False
+      self.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.DEVICE_PROFILE_MODIFIED_EVENT)
     else:
       self.updateDeformedModelsPending = True
 
@@ -1111,24 +1108,17 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
   def setDeviceNormalizedPositionAlongCenterline(self, normalizedPosition):
     """normalizedPosition is between 0..1
     """
-    #center of device is the translation part of the PositioningTransformMatrix
-    centerlinePolyData = self.getCenterlineNode().GetPolyData()
-    centerlineVtkPoints = centerlinePolyData.GetPoints()
-    numCenterlineVtkPoints = centerlineVtkPoints.GetNumberOfPoints()
-
-    #position model to corresponding point along centerline
-    deviceCenterPointIndex = int(round(((numCenterlineVtkPoints / 100.0) * sliderValue)))
-    if deviceCenterPointIndex == numCenterlineVtkPoints:
-      deviceCenterPointIndex -= 1 #otherwise point index will be out of range
-
-    self.alignDeviceWithCenterlineDirection(deviceCenterPointIndex)
+    positionOffset = self.getCenterlineNode().GetCurveLengthWorld() * normalizedPosition
+    self.alignDeviceWithCenterlineDirection(positionOffset)
 
   def getNormalizedPositionAlongCenterline(self, point):
     """Returns normalized position (0->1) along the line
     """
-    curvePointIndex = self.getCenterlineNode().GetClosestCurvePointIndexToPositionWorld(point)
-    numberOfCurvePoints = self.getCenterlineNode().GetCurvePointsWorld().GetNumberOfPoints()
-    return float(curvePointIndex)/float(numberOfCurvePoints)
+    centerlineNode = self.getCenterlineNode()
+    curvePointIndex = centerlineNode.GetClosestCurvePointIndexToPositionWorld(point)
+    lengthToUntilPointPosition = centerlineNode.GetCurveLengthWorld(0, curvePointIndex)
+    totalLength = centerlineNode.GetCurveLengthWorld()
+    return lengthToUntilPointPosition/totalLength
 
   def getClosestPointCoordinatesOnCenterline(self, point):
     closestPoint = [0,0,0]
@@ -1148,35 +1138,25 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
 
     return deviceCenter
 
-  def alignDeviceWithCenterlineDirection(self, deviceCenterPointIndex):
-    import HeartValveLib
+  def alignDeviceWithCenterlineDirection(self, deviceCenterOffset):
+
     import numpy as np
 
     # Get the distance of the two endpoints of the device from the origin
     originalModelNode = self.parameterNode.GetNodeReference('OriginalModel')
     originalModelNodePoints = slicer.util.arrayFromModelPoints(originalModelNode)
-    originalModelNodePointsZMin = abs(originalModelNodePoints[:,2].min())
-    originalModelNodePointsZMax = abs(originalModelNodePoints[:,2].max())
+    originalModelNodePointsZMin = originalModelNodePoints[:,2].min()
+    originalModelNodePointsZMax = originalModelNodePoints[:,2].max()
 
-    centerlinePoints = slicer.util.arrayFromMarkupsCurvePoints(self.getCenterlineNode(), world=True)
+    centerlineCurveNode = self.getCenterlineNode()
 
     # Find point index corresponding to device endpoints in both directions along the curve
-    distanceFromCenterPoint = 0
-    startPointIndex = 0
-    for startPointIndex in range(deviceCenterPointIndex-1, -1, -1):
-      distanceFromCenterPoint += np.linalg.norm(centerlinePoints[startPointIndex] - centerlinePoints[startPointIndex+1])
-      if distanceFromCenterPoint >= originalModelNodePointsZMax:
-        break
+    startPointIndex = centerlineCurveNode.GetCurvePointIndexAlongCurveWorld(0, deviceCenterOffset + originalModelNodePointsZMin)
+    endPointIndex = centerlineCurveNode.GetCurvePointIndexAlongCurveWorld(0, deviceCenterOffset + originalModelNodePointsZMax)
 
-    distanceFromCenterPoint = 0
-    endPointIndex = len(centerlinePoints)-1
-    for endPointIndex in range(deviceCenterPointIndex+1, len(centerlinePoints)):
-      distanceFromCenterPoint += np.linalg.norm(centerlinePoints[endPointIndex-1] - centerlinePoints[endPointIndex])
-      if distanceFromCenterPoint >= originalModelNodePointsZMin:
-        break
-
+    centerlinePoints = slicer.util.arrayFromMarkupsCurvePoints(centerlineCurveNode, world=True)
     centerlinePointsAlongDevice = centerlinePoints[startPointIndex:endPointIndex]
-    [linePosition, lineDirectionVector] = HeartValveLib.lineFit(centerlinePointsAlongDevice)
+    [linePosition, lineDirectionVector] = lineFit(centerlinePointsAlongDevice)
 
     if self.getDeviceOrientationFlippedOnCenterline():
       deviceZAxisInRas = lineDirectionVector
@@ -1189,7 +1169,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
 
     # "PositioningTransform" is initially identity matrix; then changed by using the positioning sliders
     deviceToCenterlineTransform = self.parameterNode.GetNodeReference('PositioningTransform')
-    rotateDeviceToAlignWithCenterlineTransform = HeartValveLib.getVtkTransformPlaneToWorld(deviceCenterPoint, deviceZAxisInRasUnitVector)
+    rotateDeviceToAlignWithCenterlineTransform = getVtkTransformPlaneToWorld(deviceCenterPoint, deviceZAxisInRasUnitVector)
     deviceToCenterlineTransform.SetAndObserveTransformToParent(rotateDeviceToAlignWithCenterlineTransform)
 
   def deformHandlesToVesselWalls(self, allowDeviceExpansionToVesselWalls):
@@ -1278,10 +1258,20 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       vesselLumenModelNode.CreateDefaultDisplayNodes()
       vesselLumenModelNode.SetAndObserveTransformNodeID(vesselLumenSegmentationNode.GetTransformNodeID())
       vesselLumenModelNode.GetDisplayNode().SetOpacity(0.5)
+      vesselLumenModelNode.GetDisplayNode().SliceIntersectionVisibilityOn()
       shNode.SetItemParent(shNode.GetItemByDataNode(vesselLumenModelNode), centerlineFolderShItem)
       self.setVesselModelNode(vesselLumenModelNode)
     slicer.modules.segmentations.logic().ExportSegmentToRepresentationNode(
       vesselLumenSegmentationNode.GetSegmentation().GetSegment(vesselLumenSegmentId), vesselLumenModelNode)
+
+    # Create centerline curve
+    centerlineCurveNode = self.getCenterlineNode()
+    if not centerlineCurveNode:
+      centerlineCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode', 'VesselCenterlineCurve')
+      centerlineCurveNode.CreateDefaultDisplayNodes()
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      shNode.SetItemParent(shNode.GetItemByDataNode(centerlineCurveNode), centerlineFolderShItem)
+      self.setCenterlineNode(centerlineCurveNode)
 
     # Extract skeleton
     slicer.util.showStatusMessage("Extracting centerline, this may take a few minutes...", 3000)
@@ -1289,33 +1279,19 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     parameters["InputImageFileName"] = vesselLumenLabelMapNode.GetID()
     vesselCenterlineOutputLabelMapNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'VesselCenterlineLabelMapTemp')
     parameters["OutputImageFileName"] = vesselCenterlineOutputLabelMapNode.GetID()
-    vesselCenterlineMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode', 'VesselCenterlineMarkupsTemp')
-    parameters["OutputFiducialsFileName"] = vesselCenterlineMarkupsNode.GetID()
-    parameters["NumberOfPoints"] = 300
+    parameters["OutputFiducialsFileName"] = centerlineCurveNode.GetID()
+    parameters["NumberOfPoints"] = 100
     centerlineExtractor = slicer.modules.extractskeleton
     qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
     cliNode = slicer.cli.runSync(centerlineExtractor, None, parameters)
     qt.QApplication.restoreOverrideCursor()
 
-    # Create centerline curve
-    slicer.util.showStatusMessage("Creating centerline curve...", 3000)
-    markupsToModelLogic = slicer.modules.markupstomodel.logic()
-    centerlineModelNode = self.getCenterlineNode()
-    if not centerlineModelNode:
-      centerlineModelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'VesselCenterlineModel')
-      centerlineModelNode.CreateDefaultDisplayNodes()
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      shNode.SetItemParent(shNode.GetItemByDataNode(centerlineModelNode), centerlineFolderShItem)
-      self.setCenterlineNode(centerlineModelNode)
-    markupsToModelLogic.UpdateOutputCurveModel(vesselCenterlineMarkupsNode, self.getCenterlineNode(),
-                                               slicer.vtkMRMLMarkupsToModelNode.Linear,  # interpolation
-                                               False,  # loop
-                                               0.0  # radius = 0 means no tube will be generated, just a line
-                                               )
+    # Hide control points
+    for i in range(centerlineCurveNode.GetNumberOfControlPoints()):
+      centerlineCurveNode.SetNthControlPointVisibility(i, False)
 
     # Delete temporary nodes
     slicer.mrmlScene.RemoveNode(vesselLumenLabelMapNode)
-    slicer.mrmlScene.RemoveNode(vesselCenterlineMarkupsNode)
     slicer.mrmlScene.RemoveNode(vesselCenterlineOutputLabelMapNode)
     slicer.mrmlScene.RemoveNode(cliNode)
     slicer.util.showStatusMessage("Vessel centerline creation completed", 3000)
@@ -1337,3 +1313,97 @@ class CardiacDeviceSimulatorTest(ScriptedLoadableModuleTest):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
+
+
+#
+# Utility functions copied from HeartValveLib to avoid dependencies.
+# These functions can be removed when HeartValveLib is publicly released.
+#
+
+def lineFit(points):
+  """
+  Given an array, points, of shape (...,3)
+  representing points in 3-dimensional space,
+  fit a line to the points.
+  Return a point on the plane (the point-cloud centroid),
+  and the direction vector.
+
+  :param points:
+  :return: point on line, direction vector
+  """
+
+  import numpy as np
+
+  #points = np.concatenate((x[:, np.newaxis],
+  #                       y[:, np.newaxis],
+  #                       z[:, np.newaxis]),
+  #                      axis=1)
+
+  # Calculate the mean of the points, i.e. the 'center' of the cloud
+  pointsmean = points.mean(axis=0)
+
+  # Do an SVD on the mean-centered data.
+  uu, dd, vv = np.linalg.svd(points - pointsmean)
+
+  # Now vv[0] contains the first principal component, i.e. the direction
+  # vector of the 'best fit' line in the least squares sense.
+
+  # Normalize direction vector to point towards end point
+  approximateForwardDirection = points[-1] - points[0]
+  approximateForwardDirection = approximateForwardDirection / np.linalg.norm(approximateForwardDirection)
+  if np.dot(vv[0], approximateForwardDirection) >= 0:
+    lineDirectionVector = vv[0]
+  else:
+    lineDirectionVector = -vv[0]
+
+  return pointsmean, lineDirectionVector 
+
+def getVtkTransformPlaneToWorld(planePosition, planeNormal):
+  import numpy as np
+  transformPlaneToWorldVtk = vtk.vtkTransform()
+  transformWorldToPlaneMatrix = getTransformToPlane(planePosition, planeNormal)
+  transformPlaneToWorldMatrix = np.linalg.inv(transformWorldToPlaneMatrix)
+  transformWorldToPlaneMatrixVtk = slicer.util.vtkMatrixFromArray(transformPlaneToWorldMatrix)
+  transformPlaneToWorldVtk.SetMatrix(transformWorldToPlaneMatrixVtk)
+  return transformPlaneToWorldVtk 
+
+def getTransformToPlane(planePosition, planeNormal):
+  """Returns transform matrix from World to Plane coordinate systems.
+  Plane is defined in the World coordinate system by planePosition and planeNormal.
+  Plane coordinate system: origin is planePosition, z axis is planeNormal, x and y axes are orthogonal to z.
+  """
+  import numpy as np
+  import math
+
+  # Determine the plane coordinate system axes.
+  planeZ_World = planeNormal/np.linalg.norm(planeNormal)
+
+  # Generate a plane Y axis by generating an orthogonal vector to
+  # plane Z axis vector by cross product plane Z axis vector with
+  # an arbitrarily chosen vector (that is not parallel to the plane Z axis).
+  unitX_World = np.array([0,0,1])
+  angle = math.acos(np.dot(planeZ_World,unitX_World))
+  # Normalize between -pi/2 .. +pi/2
+  if angle>math.pi/2:
+    angle -= math.pi
+  elif angle<-math.pi/2:
+    angle += math.pi
+  if abs(angle)*180.0/math.pi>20.0:
+    # unitX is not parallel to planeZ, we can use it
+    planeY_World = np.cross(planeZ_World, unitX_World)
+  else:
+    # unitX is parallel to planeZ, use unitY instead
+    unitY_World = np.array([0,1,0])
+    planeY_World = np.cross(planeZ_World, unitY_World)
+
+  planeY_World = planeY_World/np.linalg.norm(planeY_World)
+
+  # X axis: orthogonal to tool's Y axis and Z axis
+  planeX_World = np.cross(planeY_World, planeZ_World)
+  planeX_World = planeX_World/np.linalg.norm(planeX_World)
+
+  transformPlaneToWorld = np.row_stack((np.column_stack((planeX_World, planeY_World, planeZ_World, planePosition)),
+                                        (0, 0, 0, 1)))
+  transformWorldToPlane = np.linalg.inv(transformPlaneToWorld)
+
+  return transformWorldToPlane

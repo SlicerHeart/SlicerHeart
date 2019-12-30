@@ -1,6 +1,7 @@
 import ctk, qt, vtk
 import slicer
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
+from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
 
 class DeviceDataTreeWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets
@@ -8,6 +9,7 @@ class DeviceDataTreeWidget(DeviceWidget):
 
   def __init__(self, parent=None):
     DeviceWidget.__init__(self, parent)
+    self.observedParameterNodeEvents = [CardiacDeviceBase.QUANTIFICATION_RESULT_UPDATED_EVENT]
     self.setup()
 
   def setup(self):
@@ -24,6 +26,11 @@ class DeviceDataTreeWidget(DeviceWidget):
     self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
     self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
     self.layout().addWidget(self.measurementTree)
+
+  def updateGUIFromMRML(self, caller=None, event=None):
+    # Columns can be only hidden when they exist
+    self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
+    self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
 
   def setParameterNode(self, parameterNode):
     DeviceWidget.setParameterNode(self, parameterNode)

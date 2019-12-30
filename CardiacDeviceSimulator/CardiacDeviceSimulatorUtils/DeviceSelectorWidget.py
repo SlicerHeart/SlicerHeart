@@ -3,6 +3,7 @@ import slicer
 from slicer.util import VTKObservationMixin
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
+from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
 
 class DeviceSelectorWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets
@@ -11,7 +12,7 @@ class DeviceSelectorWidget(DeviceWidget):
   def __init__(self, registeredDeviceClasses, parent=None):
     DeviceWidget.__init__(self, parent)
     self.registeredDeviceClasses = registeredDeviceClasses
-    self.observedParameterNodeEvents = [DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT, DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT]
+    self.observedParameterNodeEvents = [CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT]
     self.deviceWidgetFrames = dict()
     self.deviceWidgetFrame = None
     self.inUpdateGUIFromMRML = False
@@ -70,7 +71,7 @@ class DeviceSelectorWidget(DeviceWidget):
     for button in self.deviceButtonGroup.buttons():
       button.setEnabled(self.parameterNode is not None)
 
-    deviceClassId = self.parameterNode.GetParameter('DeviceClassId')
+    deviceClassId = self.parameterNode.GetParameter('DeviceClassId') if self.parameterNode else ""
     previousDeviceClassId = self.deviceButtonGroup.checkedButton().name if self.deviceButtonGroup.checkedButton() else ''
     if previousDeviceClassId != deviceClassId:
       # Model type has changed: update device selector button and parameter frame
@@ -98,7 +99,7 @@ class DeviceSelectorWidget(DeviceWidget):
       self.layout().addWidget(self.deviceWidgetFrames[button.name])
       self.deviceWidgetFrames[button.name].updateGUIFromMRML()
       self.deviceWidgetFrame.show()
-    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_CLASS_MODIFIED_EVENT)
+    self.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT)
 
   def removeDeviceWidgetFrame(self):
     if self.deviceWidgetFrame:
@@ -107,9 +108,6 @@ class DeviceSelectorWidget(DeviceWidget):
 
 
 class DeviceImplantWidget(qt.QFrame, UIHelper):
-
-  DEVICE_CLASS_MODIFIED_EVENT = 20000
-  DEVICE_PARAMETER_VALUE_MODIFIED_EVENT = 20001
 
   def __init__(self, deviceClass, parent=None):
     super(DeviceImplantWidget, self).__init__(parent)
@@ -185,7 +183,7 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
       newParamValue = str(paramValue * paramScale)
       self.parameterNode.SetParameter(self.deviceClass.ID+"_"+paramName, newParamValue)
     self._presetCombo.setCurrentIndex(-1)
-    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
+    self.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
 
   def onPresetSelected(self, text):
     presetName = text.split(' | ')[0] if text else ""
@@ -196,4 +194,4 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
     params = self._presets[presetName]
     for parameter, attributes in self.deviceClass.getParameters().items():
       self.parameterNode.SetParameter(self.deviceClass.ID + "_" + parameter, str(params[parameter]))
-    self.parameterNode.InvokeCustomModifiedEvent(DeviceImplantWidget.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)
+    self.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT)

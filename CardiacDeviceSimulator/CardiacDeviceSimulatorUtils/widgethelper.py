@@ -33,6 +33,12 @@ class DeviceWidget(VTKObservationMixin, qt.QWidget):
     """
     pass
 
+  def setLogic(self, logic):
+    if self.logic == logic:
+      return
+    self.logic = logic
+    self.updateGUIFromMRML()
+
   def setParameterNode(self, parameterNode):
     """Set and observe parameter node
     """
