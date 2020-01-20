@@ -3,7 +3,12 @@ import string
 from __main__ import vtk, qt, ctk, slicer
 import logging
 import numpy
-import pydicom as dicom
+try:
+  import pydicom as dicom
+except:
+  # Slicer-4.10 backward compatibility
+  import dicom
+
 from DICOMLib import DICOMPlugin
 from DICOMLib import DICOMLoadable
 
@@ -71,7 +76,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -133,7 +138,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -199,7 +204,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=50) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -283,7 +288,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.message))
+      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
       return []
 
     if not ds.SOPClassUID in supportedSOPClassUIDs:
@@ -420,7 +425,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     frameTimeMsec = ds.FrameTime
 
     pixelShape = (frames, slices, rows, columns)
-    pixelSize = reduce(lambda x,y : x*y, pixelShape)
+    pixelSize = pixelShape[0] * pixelShape[1] * pixelShape[2] * pixelShape[3]
     totalFileSize = os.path.getsize(filePath)
     headerSize = totalFileSize-pixelSize
 
@@ -430,12 +435,12 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
       imgReader = vtk.vtkImageReader()
       imgReader.SetFileDimensionality(3)
-      imgReader.SetFileName(filePath);
+      imgReader.SetFileName(filePath)
       imgReader.SetNumberOfScalarComponents(1)
       imgReader.SetDataScalarTypeToUnsignedChar()
       imgReader.SetDataExtent(0,columns-1, 0,rows-1, 0,slices-1)
       imgReader.SetHeaderSize(headerSize+frame*slices*rows*columns)
-      imgReader.FileLowerLeftOn();
+      imgReader.FileLowerLeftOn()
       imgReader.Update()
 
       outputNode = slicer.vtkMRMLScalarVolumeNode()
@@ -504,7 +509,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     # -- we need to read the file as raw bytes
     pixelShape = (frames, slices, rows, columns)
     pixels = numpy.fromfile(filePath, dtype=numpy.uint8)
-    pixelSize = reduce(lambda x,y : x*y, pixelShape)
+    pixelSize = pixelShape[0] * pixelShape[1] * pixelShape[2] * pixelShape[3]
     headerSize = len(pixels)-pixelSize
     pixels = pixels[headerSize:]
     pixels = pixels.reshape(pixelShape)
@@ -605,7 +610,6 @@ class DicomUltrasoundPlugin:
 
 def findPrivateTag(ds, group, element, privateCreator):
   """Helper function to get private tag from private creator name"""
-  import pydicom as dicom
   for tag, data_element in ds.items():
     if (tag.group == group) and (tag.element < 0x0100) and (data_element.value.rstrip() == privateCreator):
       return dicom.tag.Tag(group, (tag.element << 8) + element)
