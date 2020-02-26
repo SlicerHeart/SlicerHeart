@@ -1155,7 +1155,13 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     endPointIndex = centerlineCurveNode.GetCurvePointIndexAlongCurveWorld(0, deviceCenterOffset + originalModelNodePointsZMax)
 
     centerlinePoints = slicer.util.arrayFromMarkupsCurvePoints(centerlineCurveNode, world=True)
-    centerlinePointsAlongDevice = centerlinePoints[startPointIndex:endPointIndex]
+    # Ensure that there are at least two curve points (to determine line orientation)
+    if startPointIndex == endPointIndex:
+      if startPointIndex>0:
+        startPointIndex -= 1
+      else:
+        endPointIndex += 1
+    centerlinePointsAlongDevice = centerlinePoints[startPointIndex:endPointIndex+1]
     [linePosition, lineDirectionVector] = lineFit(centerlinePointsAlongDevice)
 
     if self.getDeviceOrientationFlippedOnCenterline():
