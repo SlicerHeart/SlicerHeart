@@ -28,6 +28,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     self.loadType = "Ultrasound"
 
     self.tags['sopClassUID'] = "0008,0016"
+    self.tags['manufacturer'] = "0008,0070"
+    self.tags['manufacturerModelName'] = "0008,1090"
 
   def examine(self,fileLists):
     """ Returns a list of DICOMLoadable instances
@@ -55,6 +57,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       loadables.extend(self.examinePhilipsAffinity3DUS(filePath))
       loadables.extend(self.examineGeKretzUS(filePath))
       loadables.extend(self.examineGeUSMovie(filePath))
+      loadables.extend(self.examineEigenArtemis3DUS(filePath))
 
     return loadables
 
@@ -327,6 +330,78 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     return [loadable]
 
+  def examineEigenArtemis3DUS(self, filePath):
+    supportedSOPClassUID = '1.2.840.10008.5.1.4.1.1.3.1' # UltrasoundMultiframeImageStorage
+
+    # Quick check of SOP class UID without parsing the file...
+    try:
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
+      if sopClassUID != supportedSOPClassUID:
+        # Unsupported class
+        logging.error("sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+        return []
+    except Exception as e:
+      # Quick check could not be completed (probably Slicer DICOM database is not initialized).
+      # No problem, we'll try to parse the file and check the SOP class UID then.
+      pass
+
+    try:
+      ds = dicom.read_file(filePath, stop_before_pixels=True)
+    except Exception as e:
+      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
+      return []
+
+    if ds.SOPClassUID != supportedSOPClassUID:
+      # Unsupported class
+      logging.error("sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+      return []
+
+    if not (ds.Manufacturer == "Eigen" and ds.ManufacturerModelName == "Artemis"):
+      return []
+
+    '''
+    voxelSpacingTag = findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")
+    if not voxelSpacingTag:
+      # this is most likely not a PhilipsAffinity image
+      return []
+    if voxelSpacingTag not in ds.keys():
+      return []
+    '''
+
+    confidence = 0.9
+
+    if ds.PhotometricInterpretation != 'MONOCHROME2':
+      logging.warning('Warning: unsupported PhotometricInterpretation')
+      confidence = .4
+
+    if ds.BitsAllocated != 8 or ds.BitsStored != 8 or ds.HighBit != 7:
+      logging.warning('Warning: Bad scalar type (not unsigned byte)')
+      confidence = .4
+
+    if ds.SamplesPerPixel != 1:
+      logging.warning('Warning: multiple samples per pixel')
+      confidence = .4
+
+    name = ''
+    if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
+      name = '{0}:'.format(ds.SeriesNumber)
+    if hasattr(ds, 'Modality') and ds.Modality:
+      name = '{0} {1}'.format(name, ds.Modality)
+    if hasattr(ds, 'SeriesDescription') and ds.SeriesDescription:
+      name = '{0} {1}'.format(name, ds.SeriesDescription)
+    else:
+      name = name+" Eigen Artemis 3D US"
+    if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
+      name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+
+    loadable = DICOMLoadable()
+    loadable.files = [filePath]
+    loadable.name = name.strip()  # remove leading and trailing spaces, if any
+    loadable.tooltip = "Eigen Artemis 3D ultrasound"
+    loadable.selected = True
+    loadable.confidence = confidence
+
+    return [loadable]
 
   def load(self,loadable):
     """Load the selection as an Ultrasound
@@ -338,6 +413,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       loadedNode = self.loadGeUsMovie(loadable)
     elif "Philips Affinity 3D ultrasound" in loadable.tooltip:
       loadedNode = self.loadPhilipsAffinity3DUS(loadable)
+    elif "Eigen Artemis 3D ultrasound" in loadable.tooltip:
+      loadedNode = self.loadEigenArtemis3DUS(loadable)
     else:
       loadedNode = self.loadPhilips4DUSAsSequence(loadable)
 
@@ -402,7 +479,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     selectionNode.SetReferenceActiveVolumeID(outputVolume.GetID())
     appLogic.PropagateVolumeSelection(0)
     appLogic.FitSliceToAll()
-    
+
     return outputVolume
 
   def loadPhilips4DUSAsSequence(self,loadable):
@@ -572,6 +649,59 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       appLogic.FitSliceToAll()
 
     return loadedSequence
+
+  def loadEigenArtemis3DUS(self,loadable):
+    """Use manufacturer-specific conventions, per communication
+    from Rajesh Venkataraman (email to Andrey Fedorov et al on Feb 10, 2020):
+
+    > begin quote
+
+    please take the PixelAspectRatio tag divide by 1000 and that would be your isotropic resolution for display in all 3 dimensions.
+
+    Image Patient Orientation would be [1 0 0; 0 1 0] for each frame
+
+    The origin of the volume is the center of the 3D cube and the span would be
+
+    For X: [-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]
+
+    For Y: [-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]
+
+    For Z: [-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]
+
+    < end quote
+
+    TODO:
+     * consider checking consistency with the private tags?
+
+    """
+
+    name = slicer.util.toVTKString(loadable.name)
+    filePath = loadable.files[0]
+    fileList = vtk.vtkStringArray()
+    fileList.InsertNextValue(slicer.util.toVTKString(filePath))
+    volumesLogic = slicer.modules.volumes.logic()
+    outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
+
+    ds = dicom.read_file(filePath, stop_before_pixels=True)
+
+    if ds.PixelAspectRatio[0] != ds.PixelAspectRatio[1]:
+      logging.warning("Eigen Artemis 3DUS: PixelAspectRatio items are not equal!")
+
+    outputSpacing = float(ds.PixelAspectRatio[0])/1000.
+    outputOrigin = [-0.5*float(ds.Rows)*outputSpacing,
+                    -0.5*float(ds.Columns)*outputSpacing,
+                    -0.5*float(ds.NumberOfSlices)*outputSpacing]
+    logging.debug("loadEigenArtemis3DUS: assumed pixel spacing: %s" % str(outputSpacing))
+    outputVolume.SetSpacing(outputSpacing, outputSpacing, outputSpacing)
+    outputVolume.SetOrigin(outputOrigin[0], outputOrigin[1], outputOrigin[2])
+
+    appLogic = slicer.app.applicationLogic()
+    selectionNode = appLogic.GetSelectionNode()
+    selectionNode.SetReferenceActiveVolumeID(outputVolume.GetID())
+    appLogic.PropagateVolumeSelection(0)
+    appLogic.FitSliceToAll()
+
+    return outputVolume
 
 #
 # DicomUltrasoundPlugin

@@ -16,7 +16,7 @@ The extension currently includes the following features (new features are added 
 
 # Importing DICOM files
 
-While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be stored in standard fields, most ultrasound manufacturers do not follow this standard. Typically, only 2D screenshots or 2D+t screen capture videos are stored in standard fields. 3D information is stored in private fields and proprietary algorithms are needed to intepret them. Most vendors do not make publicly available these proprietary algorithms.
+While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be stored in standard fields, most ultrasound manufacturers do not follow this standard. Typically, only 2D screenshots or 2D+t screen capture videos are stored in standard fields. 3D information is stored in private fields and proprietary algorithms are needed to interpret them. Most vendors do not make publicly available these proprietary algorithms.
 
 ## Philips
 
@@ -65,11 +65,11 @@ Load data from DICOM folder:
 - In the DICOM browser window, select data to load and click Load button
 - Wait for loading to complete (may take a few minutes)
 
-# GE
+## GE
 
 GE machines save 3D/4D ultrasound data in private fields. Method to extract volumetric images from these fields is not publicly disclosed. However, some older versions of GE systems, typically used for obstetrics, used a simple file format (KretzFile) which was reverse-engineered and a publicly available importer was created.
 
-## Loading GE Kretz ultrasound images
+### Loading GE Kretz ultrasound images
 
 Load data from DICOM folder:
 - Drag-and-drop your image folder to the Slicer application window
@@ -87,7 +87,7 @@ Load data from .vol or .v00 file:
 
 If the image fails to load then it may be compressed. You can try to load the image into [GE 4D View software](https://1drv.ms/u/s!Arm_AFxB9yqHtbJ9TqQUSLpRhTS39A) (choose "Free 60-day demo version" or "Full version" during install) and save it with "Wavelet compression" set to None.
 
-## Loading ultrasound GE moviegroup DICOM files
+### Loading ultrasound GE moviegroup DICOM files
 
 Ultrasound image sequences can be loaded from DICOM files that store data in GE moviegroup DICOM tags. A current limitation that no scan conversion is performed but raw scanlines are displayed in a rectangular shape. For linear probes, correct image size and aspect ratio can be restored for images that are acquired with linear probes by applying scaling using a linear transform (in Transforms module).
 
@@ -99,9 +99,45 @@ Load data from DICOM folder:
 - In the DICOM browser window, select data to load and click Load button
 - Click OK to accept warnings (the warning is displayed because the importer is still experimental and the images may be slightly distorted)
 
-# Samsung
+## Samsung
 
 Some Samsung ultrasound machines store 3D ultrasound images in proprietary .mvl files. Exact format of these files are not reverse-engineered yet, but since image data is stored uncompressed, [RawImageGuess extension](https://github.com/acetylsalicyl/SlicerRawImageGuess) can be used to read these files with some manual tuning as described in this [forum topic](https://discourse.slicer.org/t/could-not-load-ultrasound-from-mvl-medison-file-format/3928/22?u=lassoan).
+
+## Eigen Artemis
+
+Eigen Artemis is using Ultrasound Multi-frame Image IOD, which does not encode image geometry information. Below is the commentary of David Clunie (@dclunie) on Eigen Artemis approach to data encoding.
+
+>  the reason there is no geometry information is that the US image is just an instance of the (ancient) Ultrasound Multi-frame Image IOD [1], and not an Enhanced US Volume IOD [2].
+>
+>Remember that the original US image storage SOP Classes were defined in the era of video capture, and further, it was (and still is) common to include multiple types of data in the same screen (frame) (not necessarily with the same geometry).
+>
+>FYI, any 2D spatial information, if there is any (and it isn't often) should be in Region Calibration [3], not in Pixel Spacing, etc., and there is no (standard) way to communicate geometric orientation or position between frames (or relative to any 3D frame of reference).
+>
+>The use of the ancient SOP Class is also the reason why dciodvfy does not complain much, since there is not much to complain about.
+>
+>It would obviously be far preferable (for us) if the submitter did created an Enhanced US Volume instance, but then probably nobody would be able to display it, so in a clinical product they would have to be able to create both, depending on what the user could cope with. They could stuff the Enhanced US Volume attributes (esp. the spatial macros) in the old SOP Class (as a Standard Extended SOP Class), which would probably be a good compromise.
+>
+>References
+>
+>http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_A.7.html
+>
+>http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_A.59.html
+>
+>http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.8.5.5.html
+
+Instructions on reconstructing 3D volume using manufacturer-specific conventions were provided
+by Rajesh Venkataraman from Eigen on Feb 10, 2020 and are listed below. Those instructions are implemented
+in the Eigen Artemis 3D US plugin of SlicerHeart.
+
+> please take the PixelAspectRatio tag divide by 1000 and that would be your isotropic resolution for display in all 3 dimensions.
+>
+> Image Patient Orientation would be [1 0 0; 0 1 0] for each frame
+>
+>The origin of the volume is the center of the 3D cube and the span would be
+>
+> * For X: `[-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]`
+> * For Y: `[-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]``
+> * For Z: `[-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]``
 
 # Authors
 
@@ -147,3 +183,4 @@ This work was partially supported by:
 - Natural Sciences and Engineering Research Council of Canada
 - Big Hearts to Little Hearts
 - Children’s Hospital of Philadelphia Cardiac Center Innovation Fund
+- the contract number 19X037Q from Leidos Biomedical Research under Task Order HHSN26100071 from NCI, funding development of NCI [Imaging Data Commons](https://imagingdatacommons.github.io/)
