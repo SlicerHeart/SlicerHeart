@@ -162,11 +162,12 @@ class DeviceDeformationWidget(DeviceWidget):
   def setupResliceDriver(self):
     if not self.logic.parameterNode:
       return
+    # VolumeResliceDriver module is provided by SlierIGT extension
     resliceLogic = slicer.modules.volumereslicedriver.logic()
     resliceConfig = [
       ('vtkMRMLSliceNodeRed', resliceLogic.MODE_TRANSVERSE),
-      ('vtkMRMLSliceNodeGreen', resliceLogic.MODE_INPLANE),
-      ('vtkMRMLSliceNodeYellow', resliceLogic.MODE_INPLANE90)]
+      ('vtkMRMLSliceNodeGreen', resliceLogic.MODE_CORONAL),
+      ('vtkMRMLSliceNodeYellow', resliceLogic.MODE_SAGITTAL)]
     for nodeName, resliceMode in resliceConfig:
       sliceNode = slicer.mrmlScene.GetNodeByID(nodeName)
       resliceLogic.SetDriverForSlice(self.logic.parameterNode.GetNodeReference('PositioningTransform').GetID(), sliceNode)
@@ -178,4 +179,3 @@ class DeviceDeformationWidget(DeviceWidget):
   def onDeformDeviceToVesselWallsClicked(self):
     logging.debug("moving device handles to deform to vessel walls...")
     self.logic.deformHandlesToVesselWalls(self.allowDeviceExpansionToVesselWallsCheckbox.isChecked())
-

@@ -1,4 +1,4 @@
-from slicer.util import VTKObservationMixin 
+from slicer.util import VTKObservationMixin
 import os
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -98,11 +98,11 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.deviceSelectorWidget = DeviceSelectorWidget(self.deviceClasses)
     [lay, self.deviceSelectionSection] = UIHelper.addCommonSection("Device Selection", self.layout, self.moduleSectionButtonsGroup,
       collapsed=False, widget=self.deviceSelectorWidget)
-    
+
     self.devicePositioningWidget = DevicePositioningWidget()
     [lay, self.devicePositioningSection] = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
       collapsed=True, widget=self.devicePositioningWidget)
-    
+
     self.deviceDeformationWidget = DeviceDeformationWidget()
     [lay, self.deviceDeformationSection] = UIHelper.addCommonSection("Device Deformation", self.layout, self.moduleSectionButtonsGroup,
       collapsed=True, widget=self.deviceDeformationWidget)
@@ -167,6 +167,11 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
         # Update of model resets deformation markers, so only do it if the model actually changed
         self.logic.updateModel()
 
+    if toggled:
+      self.logic.showDeformedModel(button != self.deviceSelectionSection)
+      self.logic.setCenterlineEditingEnabled(button == self.devicePositioningSection)
+      self.logic.showDeformationHandles(button == self.deviceDeformationSection)
+
     if self.quantificationSection.checked:
       # TODO: hide the expanding spacer if quantification section is open
       pass
@@ -195,7 +200,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     self.updateDeformedModelsEnabled = True
     self.updateDeformedModelsPending = False
     # Set NodeAboutToBeRemovedEvent observation priority to higher than default to ensure it is called
-    # before subject hierarchy's observer (that would remove the subject hierarchy item and so we 
+    # before subject hierarchy's observer (that would remove the subject hierarchy item and so we
     # would not have a chance to delete children nodes)
     self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAboutToBeRemovedEvent, self.onNodeAboutToBeRemoved, priority = 10.0)
 
@@ -457,6 +462,9 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     if not self.parameterNode:
       return
     self.parameterNode.SetNodeReferenceID("CenterlineCurve", centerlineCurveNode.GetID() if centerlineCurveNode else None)
+    if centerlineCurveNode:
+      centerlineCurveNode.CreateDefaultDisplayNodes()
+      centerlineCurveNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
 
   def getCenterlineNode(self):
     return self.parameterNode.GetNodeReference("CenterlineCurve") if self.parameterNode else None
@@ -853,6 +861,27 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     else:
       self.updateDeformedModelsPending = True
 
+  def showDeformedModel(self, show):
+      deformedModel = self.parameterNode.GetNodeReference('DeformedModel')
+      if deformedModel:
+        deformedModel.GetDisplayNode().SetVisibility(show)
+
+  def showDeformationHandles(self, show):
+      deformedHandles = self.parameterNode.GetNodeReference('DeformedHandles')
+      if deformedHandles:
+        deformedHandles.GetDisplayNode().SetVisibility(show)
+
+  def setCenterlineEditingEnabled(self, enable):
+    centerlineNode = self.getCenterlineNode()
+    if not centerlineNode:
+      return
+    centerlineNode.SetLocked(not enable)
+    numberOfcontrolPoints = centerlineNode.GetNumberOfControlPoints()
+    wasModify = centerlineNode.StartModify()
+    for i in range(numberOfcontrolPoints):
+      centerlineNode.SetNthControlPointVisibility(i, enable)
+    centerlineNode.EndModify(wasModify)
+
   def createOriginalAndDeformedSegmentModels(self, volumetric=False):
     if volumetric:
       typeName = "Volume"
@@ -969,6 +998,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     markupsNode = slicer.mrmlScene.GetNodeByID(markupsNodeId)
     markupsNode.GetDisplayNode().SetColor(color)
     markupsNode.GetDisplayNode().SetSelectedColor(color)
+    markupsNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     shNode.SetItemParent(shNode.GetItemByDataNode(markupsNode), shNode.GetItemByDataNode(self.parameterNode))
     return markupsNode
@@ -1362,7 +1392,7 @@ def lineFit(points):
   else:
     lineDirectionVector = -vv[0]
 
-  return pointsmean, lineDirectionVector 
+  return pointsmean, lineDirectionVector
 
 def getVtkTransformPlaneToWorld(planePosition, planeNormal):
   import numpy as np
@@ -1371,7 +1401,7 @@ def getVtkTransformPlaneToWorld(planePosition, planeNormal):
   transformPlaneToWorldMatrix = np.linalg.inv(transformWorldToPlaneMatrix)
   transformWorldToPlaneMatrixVtk = slicer.util.vtkMatrixFromArray(transformPlaneToWorldMatrix)
   transformPlaneToWorldVtk.SetMatrix(transformWorldToPlaneMatrixVtk)
-  return transformPlaneToWorldVtk 
+  return transformPlaneToWorldVtk
 
 def getTransformToPlane(planePosition, planeNormal):
   """Returns transform matrix from World to Plane coordinate systems.

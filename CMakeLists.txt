@@ -11,7 +11,7 @@ set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention plannin
 set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
 set(EXTENSION_STATUS Beta)
-set(EXTENSION_DEPENDS "Sequences")
+set(EXTENSION_DEPENDS "Sequences SlicerIGT")
 set(EXTENSION_BUILD_SUBDIRECTORY inner-build)
 
 set(SUPERBUILD_TOPLEVEL_PROJECT inner)
