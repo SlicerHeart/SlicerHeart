@@ -186,4 +186,4 @@ This work was partially supported by:
 - Natural Sciences and Engineering Research Council of Canada
 - Big Hearts to Little Hearts
 - Children’s Hospital of Philadelphia Cardiac Center Innovation Fund
-- the contract number 19X037Q from Leidos Biomedical Research under Task Order HHSN26100071 from NCI, funding development of NCI [Imaging Data Commons](https://imagingdatacommons.github.io/)
+- National Cancer Institute (NCI) (contract number 19X037Q from Leidos Biomedical Research under Task Order HHSN26100071 from NCI, funding development of NCI [Imaging Data Commons](https://imagingdatacommons.github.io/))

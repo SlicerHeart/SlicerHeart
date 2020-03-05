@@ -359,15 +359,6 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     if not (ds.Manufacturer == "Eigen" and ds.ManufacturerModelName == "Artemis"):
       return []
 
-    '''
-    voxelSpacingTag = findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")
-    if not voxelSpacingTag:
-      # this is most likely not a PhilipsAffinity image
-      return []
-    if voxelSpacingTag not in ds.keys():
-      return []
-    '''
-
     confidence = 0.9
 
     if ds.PhotometricInterpretation != 'MONOCHROME2':
@@ -381,6 +372,55 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     if ds.SamplesPerPixel != 1:
       logging.warning('Warning: multiple samples per pixel')
       confidence = .4
+
+    """Use manufacturer-specific conventions, per communication
+    from Rajesh Venkateraman (email to Andrey Fedorov et al on Feb 10, 2020):
+
+    > please take the PixelAspectRatio tag divide by 1000 and that would be your isotropic resolution for display in all 3 dimensions.
+    >
+    > Image Patient Orientation would be [1 0 0; 0 1 0] for each frame
+    >
+    > The origin of the volume is the center of the 3D cube and the span would be
+    >
+    > For X: [-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]
+    >
+    > For Y: [-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]
+    >
+    > For Z: [-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]
+
+    Also, cross-check with the private attributes, if those are available.
+    """
+
+    pixelSpacingPrivate = None
+    pixelSpacingPublic = None
+
+    try:
+      pixelSpacingPrivateTag = findPrivateTag(ds, 0x1129, 0x16, "Eigen, Inc")
+      if pixelSpacingPrivateTag == None:
+        pixelSpacingPrivateTag = findPrivateTag(ds, 0x1129, 0x16, "Eigen Artemis")
+      if pixelSpacingPrivateTag is not None:
+        pixelSpacingPrivate = float(pixelSpacingPrivateTag.value)
+    except KeyError:
+      logging.warning("examineEigenArtemis3DUS: spacing not available in private tag")
+
+    if hasattr(ds, "PixelAspectRatio"):
+      if ds.PixelAspectRatio[0] != ds.PixelAspectRatio[1]:
+        logging.warning("examineEigenArtemis3DUS: PixelAspectRatio items are not equal!")
+      pixelSpacingPublic = float(ds.PixelAspectRatio[0])/1000.
+      if pixelSpacingPrivate is not None and pixelSpacingPrivate != pixelSpacingPublic:
+        logging.warning("examineEigenArtemis3DUS: private tag based spacing does not match computed spacing")
+    else:
+      if pixelSpacingPrivate is None:
+        logging.debug("examineEigenArtemis3DUS: unable to find spacing information")
+        return []
+
+    # prefer private, if available
+    outputSpacing = pixelSpacingPrivate if pixelSpacingPrivate is not None else pixelSpacingPublic
+    outputOrigin = [-0.5*float(ds.Rows)*outputSpacing,
+                    -0.5*float(ds.Columns)*outputSpacing,
+                    -0.5*float(ds.NumberOfSlices)*outputSpacing]
+
+    logging.debug("loadEigenArtemis3DUS: assumed pixel spacing: %s" % str(outputSpacing))
 
     name = ''
     if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
@@ -400,6 +440,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     loadable.tooltip = "Eigen Artemis 3D ultrasound"
     loadable.selected = True
     loadable.confidence = confidence
+    loadable.spacing = outputSpacing
+    loadable.origin = outputOrigin
 
     return [loadable]
 
@@ -651,29 +693,6 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     return loadedSequence
 
   def loadEigenArtemis3DUS(self,loadable):
-    """Use manufacturer-specific conventions, per communication
-    from Rajesh Venkataraman (email to Andrey Fedorov et al on Feb 10, 2020):
-
-    > begin quote
-
-    please take the PixelAspectRatio tag divide by 1000 and that would be your isotropic resolution for display in all 3 dimensions.
-
-    Image Patient Orientation would be [1 0 0; 0 1 0] for each frame
-
-    The origin of the volume is the center of the 3D cube and the span would be
-
-    For X: [-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]
-
-    For Y: [-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]
-
-    For Z: [-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]
-
-    < end quote
-
-    TODO:
-     * consider checking consistency with the private tags?
-
-    """
 
     name = slicer.util.toVTKString(loadable.name)
     filePath = loadable.files[0]
@@ -682,18 +701,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     volumesLogic = slicer.modules.volumes.logic()
     outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
 
-    ds = dicom.read_file(filePath, stop_before_pixels=True)
-
-    if ds.PixelAspectRatio[0] != ds.PixelAspectRatio[1]:
-      logging.warning("Eigen Artemis 3DUS: PixelAspectRatio items are not equal!")
-
-    outputSpacing = float(ds.PixelAspectRatio[0])/1000.
-    outputOrigin = [-0.5*float(ds.Rows)*outputSpacing,
-                    -0.5*float(ds.Columns)*outputSpacing,
-                    -0.5*float(ds.NumberOfSlices)*outputSpacing]
-    logging.debug("loadEigenArtemis3DUS: assumed pixel spacing: %s" % str(outputSpacing))
-    outputVolume.SetSpacing(outputSpacing, outputSpacing, outputSpacing)
-    outputVolume.SetOrigin(outputOrigin[0], outputOrigin[1], outputOrigin[2])
+    outputVolume.SetSpacing(loadable.spacing, loadable.spacing, loadable.spacing)
+    outputVolume.SetOrigin(loadable.origin[0], loadable.origin[1], loadable.origin[2])
 
     appLogic = slicer.app.applicationLogic()
     selectionNode = appLogic.GetSelectionNode()
