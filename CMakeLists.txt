@@ -11,7 +11,7 @@ set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention plannin
 set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
 set(EXTENSION_STATUS Beta)
-set(EXTENSION_DEPENDS "Sequences SlicerIGT")
+set(EXTENSION_DEPENDS Sequences SlicerIGT)
 set(EXTENSION_BUILD_SUBDIRECTORY inner-build)
 
 set(SUPERBUILD_TOPLEVEL_PROJECT inner)
@@ -21,7 +21,6 @@ set(SUPERBUILD_TOPLEVEL_PROJECT inner)
 find_package(Slicer REQUIRED)
 include(${Slicer_USE_FILE})
 mark_as_superbuild(Slicer_DIR)
-find_package(Sequences REQUIRED)
 
 find_package(Git REQUIRED)
 mark_as_superbuild(GIT_EXECUTABLE)
@@ -42,6 +41,12 @@ if(${EXTENSION_NAME}_SUPERBUILD)
   include("${CMAKE_CURRENT_SOURCE_DIR}/SuperBuild.cmake")
   return()
 endif()
+
+# We do not have compile-time dependency on Sequences and SlicerIGT
+# therefore there is no need for find_package. Uncomment the following lines
+# if compile-time dependency is added.
+# find_package(Sequences REQUIRED)
+# find_package(SlicerIGT REQUIRED)
 
 #-----------------------------------------------------------------------------
 # Extension modules
