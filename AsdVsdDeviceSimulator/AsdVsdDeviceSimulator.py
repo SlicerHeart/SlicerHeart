@@ -2,6 +2,7 @@ import os
 import qt
 import logging
 import vtk
+import ctk
 
 import slicer
 from slicer.ScriptedLoadableModule import *
@@ -68,5 +69,13 @@ class AsdVsdDeviceSimulatorWidget(CardiacDeviceSimulatorWidget):
     CardiacDeviceSimulatorWidget.setup(self)
     if not self.setupSuccessful:
       return
+
+    # Customize device positioning section
+    self.devicePositioningWidget.vesselGroupBox.hide()
+    self.devicePositioningWidget.centerlineGroupBox.hide()
+    # Expand translate and rotate sections
+    self.devicePositioningWidget.devicePositioningPositionSliderWidget.findChildren(ctk.ctkCollapsibleGroupBox)[0].setChecked(True)
+    self.devicePositioningWidget.devicePositioningOrientationSliderWidget.findChildren(ctk.ctkCollapsibleGroupBox)[0].setChecked(True)
+
     self.deviceDeformationSection.hide()
     self.quantificationSection.hide()

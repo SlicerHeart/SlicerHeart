@@ -330,7 +330,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       n.SetHideFromEditors(False)
       slicer.mrmlScene.AddNode(n)
       self.parameterNode.SetNodeReferenceID('DisplacementToColorNode', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), parameterNodeShItem)
+      # color node does not show up in subject hierarchy, so there is no need to set its parent
 
     if not self.parameterNode.GetNodeReference('OriginalHandles'):
       n = self.createMarkupsNode('OriginalHandles', [1, 0, 0])
@@ -381,7 +381,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       n.SetAndObserveToFiducialListNodeId(self.parameterNode.GetNodeReference('DeformedHandles').GetID())
       n.SetOutputTransformNodeId(self.parameterNode.GetNodeReference('DeformingTransform').GetID())
       self.parameterNode.SetNodeReferenceID('FiducialRegistrationNode', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+      # registration node does not show up in subject hierarchy, so there is no need to set its parent
 
     # if probeToRasTransform is set, set to identity matrix (probeToRas matrix is not needed for RVOT positioning)
     positioningTransformNode = self.parameterNode.GetNodeReference('PositioningTransform')
@@ -988,7 +988,10 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     displayNode.SetColor(color)
     displayNode.SetBackfaceCulling(False)
     displayNode.SetEdgeVisibility(True)
-    displayNode.SetSliceIntersectionVisibility(True)
+    if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+      displayNode.SetSliceIntersectionVisibility(True)
+    else:
+      displayNode.SetVisibility2D(True)
     displayNode.SetSliceIntersectionThickness(2)
     return modelNode
 
@@ -1104,7 +1107,10 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       displayNode.SetBackfaceCulling(False)
       displayNode.SetEdgeVisibility(True)
       displayNode.SetColor(0.5,0.5,1.0)
-      displayNode.SetSliceIntersectionVisibility(True)
+      if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+        displayNode.SetSliceIntersectionVisibility(True)
+      else:
+        displayNode.SetVisibility2D(True)
       displayNode.SetSliceIntersectionThickness(2)
 
   def updateHandlesWithProfile(self, markupsNode, points, resolution=4):
@@ -1294,7 +1300,11 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       vesselLumenModelNode.CreateDefaultDisplayNodes()
       vesselLumenModelNode.SetAndObserveTransformNodeID(vesselLumenSegmentationNode.GetTransformNodeID())
       vesselLumenModelNode.GetDisplayNode().SetOpacity(0.5)
-      vesselLumenModelNode.GetDisplayNode().SliceIntersectionVisibilityOn()
+
+      if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+        vesselLumenModelNode.GetDisplayNode().SliceIntersectionVisibilityOn()
+      else:
+        vesselLumenModelNode.GetDisplayNode().SetVisibility2DOn()
       shNode.SetItemParent(shNode.GetItemByDataNode(vesselLumenModelNode), centerlineFolderShItem)
       self.setVesselModelNode(vesselLumenModelNode)
     slicer.modules.segmentations.logic().ExportSegmentToRepresentationNode(

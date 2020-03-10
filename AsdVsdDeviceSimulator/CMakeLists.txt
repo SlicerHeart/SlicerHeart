@@ -10,6 +10,7 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/Icons/CustomDevice.png
   Resources/Icons/DuctOccluder.png
   Resources/Icons/DuctOccluder2.png
   Resources/Icons/MultiFenestratedSeptalOccluder.png
