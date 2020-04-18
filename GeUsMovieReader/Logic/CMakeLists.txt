@@ -5,11 +5,16 @@ set(KIT ${PROJECT_NAME})
 set(${KIT}_EXPORT_DIRECTIVE "VTK_SLICER_${MODULE_NAME_UPPER}_MODULE_LOGIC_EXPORT")
 
 set(${KIT}_INCLUDE_DIRECTORIES
-  ${vtkSlicerSequencesModuleMRML_INCLUDE_DIRS}  
-  ${vtkSlicerSequenceBrowserModuleMRML_INCLUDE_DIRS}
-  ${vtkSlicerSequencesModuleLogic_INCLUDE_DIRS}  
-  ${vtkSlicerSequenceBrowserModuleLogic_INCLUDE_DIRS}
+  ${vtkSlicerSequencesModuleMRML_INCLUDE_DIRS}
+  ${vtkSlicerSequencesModuleLogic_INCLUDE_DIRS}
   )
+
+if(${Slicer_VERSION_MAJOR}.${Slicer_VERSION_MINOR} VERSION_LESS 4.11)
+  list(APPEND ${KIT}_INCLUDE_DIRECTORIES
+    ${vtkSlicerSequenceBrowserModuleMRML_INCLUDE_DIRS}
+    ${vtkSlicerSequenceBrowserModuleLogic_INCLUDE_DIRS}
+    )
+endif()
 
 set(${KIT}_SRCS
   vtkSlicer${MODULE_NAME}Logic.cxx
@@ -19,10 +24,15 @@ set(${KIT}_SRCS
 set(${KIT}_TARGET_LIBRARIES
   ${ITK_LIBRARIES}
   vtkSlicerSequencesModuleMRML
-  vtkSlicerSequenceBrowserModuleMRML
   vtkSlicerSequencesModuleLogic
-  vtkSlicerSequenceBrowserModuleLogic
   )
+
+if(${Slicer_VERSION_MAJOR}.${Slicer_VERSION_MINOR} VERSION_LESS 4.11)
+  list(APPEND ${KIT}_TARGET_LIBRARIES
+    vtkSlicerSequenceBrowserModuleMRML
+    vtkSlicerSequenceBrowserModuleLogic
+    )
+endif()
 
 #-----------------------------------------------------------------------------
 SlicerMacroBuildModuleLogic(

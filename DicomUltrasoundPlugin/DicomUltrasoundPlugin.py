@@ -462,9 +462,13 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     # Show sequence browser toolbar if a sequence has been loaded
     if loadedNode and loadedNode.IsA('vtkMRMLSequenceNode'):
-      sequenceBrowserNode = slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(loadedNode)
+      if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+        sequencesModule = slicer.modules.sequencebrowser
+      else:
+        sequencesModule = slicer.modules.sequences
+      sequenceBrowserNode = sequencesModule.logic().GetFirstBrowserNodeForSequenceNode(loadedNode)
       if sequenceBrowserNode:
-        slicer.modules.sequencebrowser.showSequenceBrowser(sequenceBrowserNode)
+        sequencesModule.showSequenceBrowser(sequenceBrowserNode)
 
     return loadedNode
 
@@ -591,7 +595,11 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       selNode.SetReferenceActiveVolumeID(masterOutputNode.GetID())
       appLogic.PropagateVolumeSelection()
       appLogic.FitSliceToAll()
-      slicer.modules.sequencebrowser.setToolBarActiveBrowserNode(outputSequenceBrowserNode)
+      if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+        sequencesModule = slicer.modules.sequencebrowser
+      else:
+        sequencesModule = slicer.modules.sequences
+      sequencesModule.setToolBarActiveBrowserNode(outputSequenceBrowserNode)
 
       # create Subject hierarchy nodes for the loaded series
       self.addSeriesInSubjectHierarchy(loadable, masterOutputNode)
@@ -680,7 +688,11 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     qt.QApplication.restoreOverrideCursor()
 
     # Show in slice views
-    sequenceBrowserNode = slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(loadedSequence)
+    if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+      sequencesModule = slicer.modules.sequencebrowser
+    else:
+      sequencesModule = slicer.modules.sequences
+    sequenceBrowserNode = sequencesModule.logic().GetFirstBrowserNodeForSequenceNode(loadedSequence)
     if sequenceBrowserNode:
       imageProxyVolumeNode = sequenceBrowserNode.GetProxyNode(loadedSequence)
     if imageProxyVolumeNode:

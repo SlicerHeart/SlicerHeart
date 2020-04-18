@@ -35,7 +35,6 @@
 #include "vtkSlicerGeUsMovieReaderModuleLogicExport.h"
 
 class vtkMRMLSequenceNode;
-class vtkMRMLSequenceBrowserNode;
 
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class VTK_SLICER_GEUSMOVIEREADER_MODULE_LOGIC_EXPORT vtkSlicerGeUsMovieReaderLogic :
