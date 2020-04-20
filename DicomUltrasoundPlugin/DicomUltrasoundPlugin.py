@@ -416,8 +416,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     # prefer private, if available
     outputSpacing = pixelSpacingPrivate if pixelSpacingPrivate is not None else pixelSpacingPublic
-    outputOrigin = [-0.5*float(ds.Rows)*outputSpacing,
-                    -0.5*float(ds.Columns)*outputSpacing,
+    outputOrigin = [0.5*float(ds.Rows)*outputSpacing,
+                    0.5*float(ds.Columns)*outputSpacing,
                     -0.5*float(ds.NumberOfSlices)*outputSpacing]
 
     logging.debug("examineEigenArtemis3DUS: assumed pixel spacing: %s" % str(outputSpacing))
@@ -701,14 +701,21 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     volumesLogic = slicer.modules.volumes.logic()
     outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
 
-    ijk2ras = vtk.vtkMatrix4x4()
-    outputVolume.GetIJKToRASDirectionMatrix(ijk2ras)
-    ijk2ras.SetElement(0,0,1)
-    ijk2ras.SetElement(1,1,1)
-    outputVolume.SetIJKToRASDirectionMatrix(ijk2ras)
-
     outputVolume.SetSpacing(loadable.spacing, loadable.spacing, loadable.spacing)
     outputVolume.SetOrigin(loadable.origin[0], loadable.origin[1], loadable.origin[2])
+
+    ijk2ras = vtk.vtkMatrix4x4()
+    outputVolume.GetIJKToRASMatrix(ijk2ras)
+
+    rot = vtk.vtkMatrix4x4()
+    rot.DeepCopy((0, 1, 0, 0,
+                  0, 0, 1, 0,
+                  1, 0, 0, 0,
+                  0, 0, 0, 1))
+
+    ijk2ras_updated = vtk.vtkMatrix4x4()
+    ijk2ras.Multiply4x4(rot, ijk2ras, ijk2ras_updated)
+    outputVolume.SetIJKToRASMatrix(ijk2ras_updated)
 
     appLogic = slicer.app.applicationLogic()
     selectionNode = appLogic.GetSelectionNode()
