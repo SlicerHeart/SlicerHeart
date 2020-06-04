@@ -1,6 +1,6 @@
-import ctk, qt, vtk
-import slicer
+import ctk, qt
 from slicer.util import VTKObservationMixin
+
 
 class DeviceWidget(VTKObservationMixin, qt.QWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets

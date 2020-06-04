@@ -4,6 +4,7 @@ import logging
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 
+
 class DevicePositioningWidget(DeviceWidget):
   """
   """

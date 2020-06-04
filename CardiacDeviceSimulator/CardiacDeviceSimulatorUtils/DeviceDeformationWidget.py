@@ -1,10 +1,10 @@
-import ctk, qt, vtk
+import qt, vtk
 import logging
 import slicer
-from collections import OrderedDict
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
+
 
 class DeviceDeformationWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets

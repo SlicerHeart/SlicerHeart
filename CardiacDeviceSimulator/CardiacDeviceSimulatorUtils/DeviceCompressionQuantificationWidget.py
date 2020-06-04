@@ -1,8 +1,8 @@
-import ctk, qt, vtk
-import slicer
+import qt, vtk
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
+
 
 class DeviceCompressionQuantificationWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets

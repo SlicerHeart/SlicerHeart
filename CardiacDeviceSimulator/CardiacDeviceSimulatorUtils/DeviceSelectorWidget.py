@@ -1,9 +1,8 @@
-import ctk, qt, vtk
-import slicer
-from slicer.util import VTKObservationMixin
+import qt
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
+
 
 class DeviceSelectorWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets

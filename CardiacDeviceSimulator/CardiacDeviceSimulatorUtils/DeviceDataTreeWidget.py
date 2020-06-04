@@ -1,7 +1,8 @@
-import ctk, qt, vtk
+import qt
 import slicer
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
+
 
 class DeviceDataTreeWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets

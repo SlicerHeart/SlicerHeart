@@ -1,5 +1,5 @@
 import os
-import qt, ctk, vtk
+import qt, vtk
 
 import collections
 from collections import OrderedDict
