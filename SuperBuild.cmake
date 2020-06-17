@@ -23,6 +23,7 @@ if (SlicerHeart_BUILD_ITK_FILTERS)
   list(APPEND ${proj}_DEPENDS
     ITKPhaseSymmetry
     ITKStrain
+    lscm
     )
 endif()
 
