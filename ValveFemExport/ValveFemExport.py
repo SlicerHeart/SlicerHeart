@@ -316,7 +316,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.outputPathLineEdit.addCurrentPathToHistory()
     slicer.app.setOverrideCursor(qt.Qt.WaitCursor)
     try:
-      self.logic.exportModel(self._parameterNode, self.ui.outputPathLineEdit.currentPath)
+      currentPath = self.ui.outputPathLineEdit.currentPath
+      if not currentPath:
+        raise ValueError("No output directory defined. Please select an output directory.")
+      self.logic.exportModel(self._parameterNode, currentPath)
     except Exception as e:
       import traceback
       traceback.print_exc()
@@ -444,7 +447,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     storageNode.SetFileName(outputFolder+"/"+filename)
     storageNode.SetCoordinateSystem(slicer.vtkMRMLStorageNode.CoordinateSystemLPS)
     if not storageNode.WriteData(node):
-      raise("Failed to save node: " + node.GetName())
+      raise RuntimeError("Failed to save node: " + node.GetName())
 
   def deleteTemporaryStorageNodes(self):
     if self.modelStorageNode:
