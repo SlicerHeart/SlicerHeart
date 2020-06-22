@@ -17,7 +17,7 @@ class TomTecUcdPluginFileReader(object):
     return "TomTecUCD"
 
   def extensions(self):
-    return ["TomTec UCD mesh (*.UCD.data.zip)"]
+    return ["TomTec UCD mesh (*.UCD.data.zip *.UCD.datazip)"]
 
   def parseHeader(self, headerFilePath):
     with open(headerFilePath) as f:
