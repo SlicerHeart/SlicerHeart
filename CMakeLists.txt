@@ -6,7 +6,7 @@ project(SlicerHeart)
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "http://www.slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/SlicerHeart")
 set(EXTENSION_CATEGORY "Cardiac")
-set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts), Matthew Jolley (CHOP)")
+set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts), Csaba Pinter (Pixel Medical / Ebatinca), Matthew Jolley (CHOP)")
 set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention planning and guidance")
 set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
@@ -42,10 +42,9 @@ if(${EXTENSION_NAME}_SUPERBUILD)
   return()
 endif()
 
-# We do not have compile-time dependency on Sequences and SlicerIGT
-# therefore there is no need for find_package. Uncomment the following lines
+# We do not have compile-time dependency on SlicerIGT therefore
+# there is no need for find_package. Uncomment the following lines
 # if compile-time dependency is added.
-# find_package(Sequences REQUIRED)
 # find_package(SlicerIGT REQUIRED)
 
 #-----------------------------------------------------------------------------
@@ -62,6 +61,7 @@ add_subdirectory(TomTecUcdPlugin)
 if (SlicerHeart_BUILD_ITK_FILTERS)
   add_subdirectory(PhaseSymmetryFilter)
 endif()
+add_subdirectory(ConformalTextureMapping)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
@@ -69,6 +69,7 @@ set(EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS)
 if (SlicerHeart_BUILD_ITK_FILTERS)
   list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKStrain_DIR};Strain;RuntimeLibraries;/")
   list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKPhaseSymmetry_DIR};PhaseSymmetry;RuntimeLibraries;/")
+  list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${lscm_DIR};PhaseSymmetry;RuntimeLibraries;/")
 endif()
 set(${EXTENSION_NAME}_CPACK_INSTALL_CMAKE_PROJECTS "${EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS}" CACHE STRING "List of external projects to install" FORCE)
 #-----------------------------------------------------------------------------

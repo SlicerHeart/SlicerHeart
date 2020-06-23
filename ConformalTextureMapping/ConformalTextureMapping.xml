@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<executable>
+  <category>Filtering</category>
+  <title>Conformal Texture Mapping</title>
+  <description>Flatten open surfaces to planes using least squares conformal mapping</description>
+  <version>0.1.0</version>
+  <license/>
+  <contributor>Csaba Pinter (Pixel Medical)</contributor>
+  <acknowledgements>This work is funded and owned by the Children's Hospital of Philadelphia</acknowledgements>
+  <parameters>
+    <geometry type="model" fileExtensions=".obj">
+      <name>inputModel</name>
+      <label>Input model</label>
+      <description><![CDATA[Input model to be flattened]]></description>
+      <channel>input</channel>
+      <index>0</index>
+    </geometry>
+    <point multiple="true" coordinateSystem="lps">
+      <name>fixedPoints</name>
+      <label>Fixed points</label>
+      <description><![CDATA[List of fixed points in the input model]]></description>
+      <channel>input</channel>
+      <flag>-p</flag>
+      <longflag>fixedPoint</longflag>
+    </point>
+    <double-vector>
+      <name>fixedPointTextureCoords</name>
+      <label>Texture coordinates</label>
+      <description><![CDATA[Ordered list of texture coordinate pairs for each input fixed point]]></description>
+      <channel>input</channel>
+      <flag>-c</flag>
+      <longflag>fixedTextureCoords</longflag>
+    </double-vector>
+    <geometry type="model" reference="inputModel" fileExtensions=".obj">
+      <name>outputModel</name>
+      <label>Output model</label>
+      <channel>output</channel>
+      <index>1</index>
+      <description><![CDATA[Output flattened model]]></description>
+    </geometry>
+  </parameters>
+</executable>
