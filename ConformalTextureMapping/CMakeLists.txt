@@ -35,35 +35,29 @@ set(MODULE_TARGET_LIBRARIES
   # )
 
 #-----------------------------------------------------------------------------
-if(EXISTS "${CMAKE_BINARY_DIR}/../bin/Debug")
-  set(LSCM_EXECUTABLE_PATH ${CMAKE_BINARY_DIR}/../bin/Debug/lscm.exe)
-  set(ConformalTextureMapping_CLI_EXECUTABLE_PATH ${CMAKE_BINARY_DIR}/${Slicer_CLIMODULES_BIN_DIR}/Debug/${MODULE_NAME}.exe)
-  set(ConformalTextureMapping_CLI_XML_PATH ${CMAKE_BINARY_DIR}/${Slicer_CLIMODULES_BIN_DIR}/Debug/${MODULE_NAME}.xml)
-elseif(EXISTS "${CMAKE_BINARY_DIR}/../bin/Release")
-  set(LSCM_EXECUTABLE_PATH ${CMAKE_BINARY_DIR}/../bin/Release/lscm.exe)
-  set(ConformalTextureMapping_CLI_EXECUTABLE_PATH ${CMAKE_BINARY_DIR}/${Slicer_CLIMODULES_BIN_DIR}/Release/${MODULE_NAME}.exe)
-  set(ConformalTextureMapping_CLI_XML_PATH ${CMAKE_BINARY_DIR}/${Slicer_CLIMODULES_BIN_DIR}/Release/${MODULE_NAME}.xml)
-else()
-  set(LSCM_EXECUTABLE_PATH ${CMAKE_BINARY_DIR}/../bin/lscm)
-  set(ConformalTextureMapping_CLI_EXECUTABLE_PATH ${CMAKE_BINARY_DIR}/${Slicer_CLIMODULES_BIN_DIR}/${MODULE_NAME})
-  set(ConformalTextureMapping_CLI_XML_PATH ${CMAKE_BINARY_DIR}/${Slicer_CLIMODULES_BIN_DIR}/${MODULE_NAME}.xml)
-endif()
+add_custom_target(${MODULE_NAME} ALL
+                  # COMMAND ${CMAKE_COMMAND} -E make_directory ${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}
+                  COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml" "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+                  DEPENDS lscm
+                  VERBATIM
+                  )
 
-configure_file(
-  ${LSCM_EXECUTABLE_PATH}
-  ${ConformalTextureMapping_CLI_EXECUTABLE_PATH}
-  COPYONLY)
-configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml
-  ${ConformalTextureMapping_CLI_XML_PATH}
-  COPYONLY)
+add_custom_command(TARGET ${MODULE_NAME} POST_BUILD
+                   COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml" "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+                   # COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml ${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/Debug
+                   # COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml ${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/Release
+                   COMMENT "Copying ${MODULE_NAME}.xml file to ${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}" 
+                   DEPENDS lscm
+                   VERBATIM
+                   )
 
 install(
-  FILES ${ConformalTextureMapping_CLI_EXECUTABLE_PATH}
-  DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR} COMPONENT Runtime)
-install(
-  FILES ${ConformalTextureMapping_CLI_XML_PATH}
-  DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR} COMPONENT Runtime)
+  FILES
+    ${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml
+  DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR}
+  COMPONENT Runtime
+  )
 
 #-----------------------------------------------------------------------------
 if(BUILD_TESTING)
