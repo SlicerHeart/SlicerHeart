@@ -18,7 +18,7 @@ if(NOT DEFINED ${proj}_DIR AND NOT ${SUPERBUILD_TOPLEVEL_PROJECT}_USE_SYSTEM_${p
 
   ExternalProject_SetIfNotDefined(
     ${SUPERBUILD_TOPLEVEL_PROJECT}_${proj}_GIT_REPOSITORY
-    "${EP_GIT_PROTOCOL}://github.com/JolleyLabCHOP/lscm.git"
+    "${EP_GIT_PROTOCOL}://github.com/SlicerHeart/lscm.git"
     QUIET
     )
 
