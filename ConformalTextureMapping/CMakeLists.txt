@@ -1,36 +1,40 @@
 set(MODULE_NAME ConformalTextureMapping)
 
 #-----------------------------------------------------------------------------
-set(MODULE_INCLUDE_DIRECTORIES
-  )
-
-set(MODULE_SRCS
-  )
-
-set(MODULE_TARGET_LIBRARIES
-  )
-
-#-----------------------------------------------------------------------------
-add_custom_target(${MODULE_NAME} ALL
-                  COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml" "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
-                  DEPENDS lscm
-                  VERBATIM
-                  )
-
-add_custom_command(TARGET ${MODULE_NAME} POST_BUILD
-                   COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml" "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
-                   COMMENT "Copying ${MODULE_NAME}.xml file to ${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}" 
-                   DEPENDS lscm
-                   VERBATIM
-                   )
-
-install(
-  FILES
-    "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
-    ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml
-  DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR}
-  COMPONENT Runtime
-  )
+# On non-Windows platforms, do not use $<CONFIG> subfolder
+if (WIN32)
+  # Copy module XML file to module directory
+  add_custom_target(${MODULE_NAME} ALL
+    COMMAND "${CMAKE_COMMAND}" -E copy
+      "${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml"
+      "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/${MODULE_NAME}.xml"
+      VERBATIM
+    )
+# Add ConformalTextureMapping executable and xml to the install package
+  install(
+    FILES
+      "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml
+    DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR}
+    COMPONENT Runtime
+    )
+else()
+  # Copy module XML file to module directory
+  add_custom_target(${MODULE_NAME} ALL
+    COMMAND "${CMAKE_COMMAND}" -E copy
+      "${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml"
+      "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/${MODULE_NAME}.xml"
+      VERBATIM
+    )
+  # Add ConformalTextureMapping executable and xml to the install package
+  install(
+    FILES
+      "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml
+    DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR}
+    COMPONENT Runtime
+    )
+endif()
 
 #-----------------------------------------------------------------------------
 if(BUILD_TESTING)

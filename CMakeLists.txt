@@ -69,7 +69,7 @@ set(EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS)
 if (SlicerHeart_BUILD_ITK_FILTERS)
   list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKStrain_DIR};Strain;RuntimeLibraries;/")
   list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${ITKPhaseSymmetry_DIR};PhaseSymmetry;RuntimeLibraries;/")
-  list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${lscm_DIR};PhaseSymmetry;RuntimeLibraries;/")
+  # Note: no need to install lscm (executable will be installed by the ConformalTextureMapping module)
 endif()
 set(${EXTENSION_NAME}_CPACK_INSTALL_CMAKE_PROJECTS "${EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS}" CACHE STRING "List of external projects to install" FORCE)
 #-----------------------------------------------------------------------------
