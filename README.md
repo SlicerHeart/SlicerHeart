@@ -22,7 +22,7 @@ The extension currently includes the following features (new features are added 
 
 While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be stored in standard fields, most ultrasound manufacturers do not follow this standard. Typically, only 2D screenshots or 2D+t screen capture videos are stored in standard fields. 3D information is stored in private fields and proprietary algorithms are needed to interpret them.
 
-[Image3D API](https://github.com/MedicalUltrasound/Image3dAPI) can be used to read 3D ultrasound images from GE, Canon, Hitachi, Siemens, and Philips scanners. This API is only avaialble on Windows and a reader library must be obtained from the scanner's manufacturer and installed on the system (by registering the reader by running `regsvr32 (loaderlibraryname).dll)` as an administrator). This API can provide access to all kinds of image data and ECG signal. File can be read by drag-and-dropping the *.dcm file to the Slicer application window and selecting "3D ultrasound image" in "Description" column.
+[Image3D API](https://github.com/MedicalUltrasound/Image3dAPI) can be used to read 3D ultrasound images from GE, Canon, Hitachi, Siemens, and Philips scanners. This API is only avaialble on Windows and a reader library must be obtained from the scanner's manufacturer and installed on the system (by registering the reader by running `regsvr32 (loaderlibraryname).dll` as an administrator). This API can provide access to all kinds of image data and ECG signal. File can be read by drag-and-dropping the *.dcm file to the Slicer application window and selecting "3D ultrasound image" in "Description" column.
 
 Additional vendor-specific file reading options are described below.
 
