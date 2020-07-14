@@ -62,6 +62,10 @@ if (SlicerHeart_BUILD_ITK_FILTERS)
   add_subdirectory(PhaseSymmetryFilter)
 endif()
 add_subdirectory(ConformalTextureMapping)
+if (WIN32)
+  # Image3D only works on Windows
+  add_subdirectory(Image3dReader)
+endif()
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
