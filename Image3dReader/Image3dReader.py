@@ -96,12 +96,6 @@ class Image3dReaderFileReader(object):
 
       errorType = 0
       errorMessage = None
-                      <ComboBoxItem>GEHC_CARD_US.Image3dFileLoader</ComboBoxItem>
-                <ComboBoxItem>CanonLoader.Image3dFileLoader</ComboBoxItem>
-                <ComboBoxItem>HitCV3DLoader.Image3dFileLoader</ComboBoxItem>
-                <ComboBoxItem>SiemensLoader.Image3dFileLoader</ComboBoxItem>
-                <ComboBoxItem>PhilipsLoader.Image3dFileLoader</ComboBoxItem>
-                <ComboBoxItem>KretzLoader.KretzImage3dFileLoader</ComboBoxItem>
       loaderProgIds = [
         "GEHC_CARD_US.Image3dFileLoader",
         "CanonLoader.Image3dFileLoader",
