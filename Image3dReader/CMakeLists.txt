@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-set(MODULE_NAME Image3dPlugin)
+set(MODULE_NAME Image3dReader)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
@@ -7,7 +7,6 @@ set(MODULE_PYTHON_SCRIPTS
   )
 
 set(MODULE_PYTHON_RESOURCES
-  Resources/lib2to3.zip
   )
 
 #-----------------------------------------------------------------------------

@@ -76,13 +76,8 @@ class Image3dReaderFileReader(object):
       try:
         import comtypes
       except ModuleNotFoundError:
-        lib2to3zip = os.path.join(os.path.dirname(__file__), "Resources", "lib2to3.zip")
-        # find builtin python libs location
-        import json
-        lib2to3dir = os.path.abspath(os.path.join(os.path.dirname(json.__file__),".."))
-        if not slicer.util.extractArchive(lib2to3zip, lib2to3dir):
-          logging.warning("Failed to extract {0} file to {1}".format(lib2to3zip, lib2to3dir))
         slicer.util.showStatusMessage("Installing comtypes Python package...")
+        slicer.app.processEvents()
         slicer.util.pip_install('comtypes')
         import comtypes
 
