@@ -838,28 +838,35 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       return
 
     deviceClass = self.getDeviceClass()
-    modelParameters = deviceClass.getParameterValuesFromNode(self.parameterNode)
-    modelSegments = deviceClass.getSegments() # some models have distal/middle/proximal sections
 
-    # Create whole (open) original and deformed models
-    profilePoints = deviceClass.getProfilePoints(modelParameters)
-    modelProfilePoints = vtk.vtkPoints()
-    self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), deviceClass.getInternalParameters()['interpolationSmoothness'])
+    try:
+      # Use device's updateModel method if implemented
+      deviceClass.updateModel(self.parameterNode.GetNodeReference('OriginalModel'), self.parameterNode)
 
-    self.updateModelWithProfile(self.parameterNode.GetNodeReference('OriginalModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
+    except NotImplementedError:
+      # Create whole (open) original and deformed models from profile
+      modelParameters = deviceClass.getParameterValuesFromNode(self.parameterNode)
 
-    # If adjusting basic parameters then just update the original model
+      # Get profile
+      profilePoints = deviceClass.getProfilePoints(modelParameters)
+      modelProfilePoints = vtk.vtkPoints()
+      self.fitCurve(profilePoints, modelProfilePoints, self.getNumberOfProfilePoints(), deviceClass.getInternalParameters()['interpolationSmoothness'])
 
-    if self.updateDeformedModelsEnabled:
-      self.updateModelWithProfile(self.parameterNode.GetNodeReference('DeformedModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
-      self.handleProfilePoints.Reset()
-      self.resampleCurve(modelProfilePoints, self.handleProfilePoints, self.getHandlesSpacingMm())
-      self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('OriginalHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
-      self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('DeformedHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
-      self.updateDeformedModelsPending = False
-      self.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.DEVICE_PROFILE_MODIFIED_EVENT)
-    else:
-      self.updateDeformedModelsPending = True
+      # Update original model
+      self.updateModelWithProfile(self.parameterNode.GetNodeReference('OriginalModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
+
+      # Update deformed model
+      # (if adjusting basic parameters then just update the original model)
+      if self.updateDeformedModelsEnabled:
+        self.updateModelWithProfile(self.parameterNode.GetNodeReference('DeformedModel'), modelProfilePoints, self.getNumberOfModelPointsPerSlice())
+        self.handleProfilePoints.Reset()
+        self.resampleCurve(modelProfilePoints, self.handleProfilePoints, self.getHandlesSpacingMm())
+        self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('OriginalHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
+        self.updateHandlesWithProfile(self.parameterNode.GetNodeReference('DeformedHandles'), self.handleProfilePoints, self.getHandlesPerSlice())
+        self.updateDeformedModelsPending = False
+        self.parameterNode.InvokeCustomModifiedEvent(CardiacDeviceBase.DEVICE_PROFILE_MODIFIED_EVENT)
+      else:
+        self.updateDeformedModelsPending = True
 
   def showDeformedModel(self, show):
       deformedModel = self.parameterNode.GetNodeReference('DeformedModel')
@@ -1152,7 +1159,8 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     """
     centerlineNode = self.getCenterlineNode()
     curvePointIndex = centerlineNode.GetClosestCurvePointIndexToPositionWorld(point)
-    lengthToUntilPointPosition = centerlineNode.GetCurveLengthWorld(0, curvePointIndex)
+    # curvePointIndex+1 is needed because this parameter is the number of curve points (not the curve point index)
+    lengthToUntilPointPosition = centerlineNode.GetCurveLengthWorld(0, curvePointIndex + 1)
     totalLength = centerlineNode.GetCurveLengthWorld()
     return lengthToUntilPointPosition/totalLength
 
@@ -1199,6 +1207,10 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
         endPointIndex += 1
     centerlinePointsAlongDevice = centerlinePoints[startPointIndex:endPointIndex+1]
     [linePosition, lineDirectionVector] = lineFit(centerlinePointsAlongDevice)
+    # linePosition is set to center of gravity of fitted points,
+    # which is not in the center of the model when we are at the start or end
+    # of the curve, therefore we now get a more accurate position directly from the curve
+    self.getCenterlineNode().GetPositionAlongCurveWorld(linePosition, 0, deviceCenterOffset)
 
     if self.getDeviceOrientationFlippedOnCenterline():
       deviceZAxisInRas = lineDirectionVector
