@@ -87,9 +87,6 @@ class DeviceSelectorWidget(DeviceWidget):
     self.inUpdateGUIFromMRML = False
 
   def onSwitchDevice(self, button=None):
-    if self.deviceWidgetFrame == self.deviceWidgetFrames[button.name]:
-      # required frame is already visible
-      return
     self.removeDeviceWidgetFrame()
     self.deviceWidgetFrame = self.deviceWidgetFrames[button.name]
     self.parameterNode.SetParameter('DeviceClassId', button.name)
