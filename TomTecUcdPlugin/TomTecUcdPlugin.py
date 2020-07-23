@@ -121,13 +121,6 @@ class TomTecUcdPluginFileReader(object):
       return False
     return True
 
-
-class TomTecUcdPluginFileWriter(object):
-
-  def __init__(self, parent):
-    self.Parent = parent
-    print("TomTecUcdPluginFileWriter - __init__")
-
 #
 # TomTecUcdPlugin
 #

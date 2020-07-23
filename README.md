@@ -24,7 +24,7 @@ While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be st
 
 ## Open Image3D API
 
-[Image3D API](https://github.com/MedicalUltrasound/Image3dAPI) can be used to read 3D ultrasound images from GE, Canon, Hitachi, Siemens, and Philips scanners. This API is only avaialble on Windows and a reader library must be obtained from the scanner's manufacturer and installed on the system (by registering the reader by running `regsvr32 (loaderlibraryname).dll` as an administrator). This API can provide access to all kinds of image data and ECG signal. File can be read by drag-and-dropping the *.dcm file to the Slicer application window and selecting "3D ultrasound image" in "Description" column.
+[Image3D API](https://github.com/MedicalUltrasound/Image3dAPI) can be used to read 3D ultrasound images from GE, Canon, Hitachi, Siemens, and Philips scanners. This API is only avaialble on Windows and a reader library must be obtained from the scanner's manufacturer and installed on the system (by registering the reader by running `regsvr32 (loaderlibraryname).dll` as an administrator). This API can provide access to all kinds of image data and ECG signal. File can be read by renaming it so that it ends with `.3dus` and drag-and-dropping to the Slicer application window. GE 3D ultrasound images can be also loaded using the DICOM module (then the files do not have to be renamed).
 
 Additional vendor-specific file reading options are described below.
 
@@ -77,7 +77,11 @@ Load data from DICOM folder:
 
 ## GE
 
-GE machines save 3D/4D ultrasound data in private fields. Method to extract volumetric images from these fields is not publicly disclosed. However, some older versions of GE systems, typically used for obstetrics, used a simple file format (KretzFile) which was reverse-engineered and a publicly available importer was created.
+GE machines save 3D/4D ultrasound data in private fields. They can be decoded using Image3dAPI DLL obtained from GE. Some older versions of GE systems, typically used for obstetrics, used a simple file format (KretzFile) which was reverse-engineered and a publicly available importer was created and made available in SlicerHeart.
+
+### Loading various 3D/4D ultrasound images using Image3dAPI
+
+Obtain Image3dAPI package from GE, unzip its content to a folder, and run `regsvr32 Image3dLoaderGe.dll` command as an administrator to install it. After that, GE 3D/4D ultrasound files can be loaded using DICOM module (alternatively, individual 3D/4D ultrasound file can be loaded by renaming it to end with `.3dus` and drag-and-drop to the Slicer application window, and click OK).
 
 ### Loading GE Kretz ultrasound images
 

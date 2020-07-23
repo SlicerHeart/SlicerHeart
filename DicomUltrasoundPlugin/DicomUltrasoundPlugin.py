@@ -57,6 +57,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       loadables.extend(self.examinePhilipsAffinity3DUS(filePath))
       loadables.extend(self.examineGeKretzUS(filePath))
       loadables.extend(self.examineGeUSMovie(filePath))
+      loadables.extend(self.examineGeImage3dApi(filePath))
       loadables.extend(self.examineEigenArtemis3DUS(filePath))
 
     return loadables
@@ -79,7 +80,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
+      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -131,7 +132,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if sopClassUID != supportedSOPClassUID:
         # Unsupported class
-        logging.error("sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+        # logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
         return []
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
@@ -141,12 +142,12 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
+      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
       # Unsupported class
-      logging.error("sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+      logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
       return []
 
     voxelSpacingTag = findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")
@@ -207,7 +208,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=50) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
+      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -291,7 +292,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
+      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if not ds.SOPClassUID in supportedSOPClassUIDs:
@@ -330,6 +331,94 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     return [loadable]
 
+  def examineGeImage3dApi(self, filePath):
+    if not hasattr(slicer.modules, 'ultrasoundimage3dreader'):
+      return []
+
+    supportedSOPClassUIDs = [
+      '1.2.840.10008.5.1.4.1.1.3.1'  # Ultrasound Multi-frame Image Storage
+      ]
+
+    # Quick check of SOP class UID without parsing the file...
+    try:
+      sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
+      if not sopClassUID in supportedSOPClassUIDs:
+        # Unsupported class
+        return []
+    except Exception as e:
+      # Quick check could not be completed (probably Slicer DICOM database is not initialized).
+      # No problem, we'll try to parse the file and check the SOP class UID then.
+      pass
+
+    try:
+      ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
+    except Exception as e:
+      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      return []
+
+    if not ds.SOPClassUID in supportedSOPClassUIDs:
+      # Unsupported class
+      return []
+
+    try:
+      # Check if '3D' data type is present (for example "Trace+3D")
+      #
+      # (7fe1,0010) LO [GEMS_Ultrasound_MovieGroup_001]         #  30, 1 PrivateCreator
+      # (7fe1,1001) SQ (Sequence with explicit length #=1)      # 76006288, 1 Unknown Tag & Data
+      #   (fffe,e000) na (Item with explicit length #=6)          # 76006280, 1 Item
+      #     (7fe1,0010) LO [GEMS_Ultrasound_MovieGroup_001]         #  30, 1 PrivateCreator
+      #     (7fe1,1002) LO [Trace+3D]                               #   8, 1 Unknown Tag & Data
+
+      # Get private tags
+      movieGroupTag = findPrivateTag(ds, 0x7fe1, 0x01, 'GEMS_Ultrasound_MovieGroup_001')
+      imageTypeTag = findPrivateTag(ds, 0x7fe1, 0x02, 'GEMS_Ultrasound_MovieGroup_001')
+      contains3D = False
+      movieGroup = ds[movieGroupTag].value
+      for movieGroupItem in movieGroup:
+          if imageTypeTag in movieGroupItem:
+              if '3D' in movieGroupItem[imageTypeTag].value:
+                  contains3D = True
+                  break
+      if not contains3D:
+        # Probably 2D file
+        return []
+    except:
+      # Not a GE MovieGroup file
+      return []
+
+    # It looks like a GE 3D ultrasound file
+    import UltrasoundImage3dReader
+    reader = UltrasoundImage3dReader.UltrasoundImage3dReaderFileReader(None)
+    try:
+      reader.getLoader(filePath)
+    except Exception as e:
+      logging.debug("3D ultrasound loader not found error: {0}".format(str(e)))
+      logging.info("File {0} looks like a GE 3D ultrasound file. Installing Image3dAPI reader may make the file loadable (https://github.com/MedicalUltrasound/Image3dAPI).")
+      return []
+
+    # GE generic moviegroup reader has confidence=0.8
+    # this one is much better than that, so use much higher value
+    confidence = 0.90
+
+    name = ''
+    if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
+      name = '{0}:'.format(ds.SeriesNumber)
+    if hasattr(ds, 'Modality') and ds.Modality:
+      name = '{0} {1}'.format(name, ds.Modality)
+    if hasattr(ds, 'SeriesDescription') and ds.SeriesDescription:
+      name = '{0} {1}'.format(name, ds.SeriesDescription)
+    if hasattr(ds, 'InstanceNumber') and ds.InstanceNumber:
+      name = '{0} [{1}]'.format(name, ds.InstanceNumber)
+
+    loadable = DICOMLoadable()
+    loadable.files = [filePath]
+    loadable.name = name.strip()  # remove leading and trailing spaces, if any
+    loadable.tooltip = "GE 3D ultrasound image sequence (using Image3dAPI)"
+    loadable.selected = True
+    loadable.confidence = confidence
+
+    return [loadable]
+
   def examineEigenArtemis3DUS(self, filePath):
     supportedSOPClassUID = '1.2.840.10008.5.1.4.1.1.3.1' # UltrasoundMultiframeImageStorage
 
@@ -338,7 +427,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if sopClassUID != supportedSOPClassUID:
         # Unsupported class
-        logging.error("sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+        #logging.debug("Not EigenArtemis3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
         return []
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
@@ -348,12 +437,12 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(e.msg))
+      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
       # Unsupported class
-      logging.error("sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+      logging.debug("Not EigenArtemis3DUS: sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
       return []
 
     if not (ds.Manufacturer == "Eigen" and ds.ManufacturerModelName == "Artemis"):
@@ -453,6 +542,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       loadedNode = self.loadKretzUS(loadable)
     elif "GE ultrasound image sequence" in loadable.tooltip:
       loadedNode = self.loadGeUsMovie(loadable)
+    elif "Image3dAPI" in loadable.tooltip:
+      loadedNode = self.loadImage3dAPI(loadable)
     elif "Philips Affinity 3D ultrasound" in loadable.tooltip:
       loadedNode = self.loadPhilipsAffinity3DUS(loadable)
     elif "Eigen Artemis 3D ultrasound" in loadable.tooltip:
@@ -725,6 +816,11 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     return outputVolume
 
+  def loadImage3dAPI(self, loadable):
+    filePath = loadable.files[0]
+    loadedNode = slicer.util.loadNodeFromFile(filePath, "Image3DUS", properties={'name': loadable.name})
+    return loadedNode[0] if type(loadedNode) == list else loadedNode
+
 #
 # DicomUltrasoundPlugin
 #
@@ -763,6 +859,10 @@ class DicomUltrasoundPlugin:
 def findPrivateTag(ds, group, element, privateCreator):
   """Helper function to get private tag from private creator name"""
   for tag, data_element in ds.items():
-    if (tag.group == group) and (tag.element < 0x0100) and (data_element.value.rstrip() == privateCreator):
-      return dicom.tag.Tag(group, (tag.element << 8) + element)
+    if (tag.group == group) and (tag.element < 0x0100):
+      data_element_value = data_element.value
+      if type(data_element.value) == bytes:
+        data_element_value = data_element_value.decode()
+      if data_element_value.rstrip() == privateCreator:
+        return dicom.tag.Tag(group, (tag.element << 8) + element)
   return None

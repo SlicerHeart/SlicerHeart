@@ -5,7 +5,7 @@ import logging
 import numpy as np
 
 
-class Image3dReaderFileReader(object):
+class UltrasoundImage3dReaderFileReader(object):
 
   def __init__(self, parent):
     self.Parent = parent
@@ -17,7 +17,7 @@ class Image3dReaderFileReader(object):
     return "Image3DUS"
 
   def extensions(self):
-    return ["3D ultrasound image (*.dcm)"]
+    return ["3D ultrasound image (*.3dus)"]
 
   def typeLibFromProgId(self, progId):
     """Loads the type library from progId"""
@@ -66,76 +66,122 @@ class Image3dReaderFileReader(object):
     arr_1d = self.safeArrayToNumpy(frame.data, copy=False)
     assert(arr_1d.dtype == np.uint8) # only tested with 1byte/elm
     arr_3d = np.lib.stride_tricks.as_strided(arr_1d, shape=frame.dims, strides=(1, frame.stride0, frame.stride1))
-    return np.copy(arr_3d) 
+    return np.copy(arr_3d)
+
+  def getLoader(self, filePath):
+    try:
+      import comtypes
+    except ModuleNotFoundError:
+      slicer.util.showStatusMessage("Installing comtypes Python package...")
+      slicer.app.processEvents()
+      slicer.util.pip_install('comtypes')
+      import comtypes
+
+    import platform
+    import comtypes
+    import comtypes.client
+
+    errorType = -1
+    errorMessage = None
+    loaderProgIds = [
+      "GEHC_CARD_US.Image3dFileLoader",
+      "CanonLoader.Image3dFileLoader",
+      "HitCV3DLoader.Image3dFileLoader",
+      "SiemensLoader.Image3dFileLoader",
+      "PhilipsLoader.Image3dFileLoader",
+      "KretzLoader.KretzImage3dFileLoader"
+      ]
+    for loaderProgId in loaderProgIds:
+      # create loader object
+      try:
+        image3dAPI = self.typeLibFromProgId(loaderProgId)
+      except:
+        logging.debug("Ultrasound image reader not installed: "+loaderProgId)
+        continue
+
+      try:
+        loaderObj = comtypes.client.CreateObject(loaderProgId)
+        loader = loaderObj.QueryInterface(image3dAPI.IImage3dFileLoader)
+      except:
+        logging.debug("Error instantiating image reader: "+loaderProgId)
+        continue
+
+      # load file
+      try:
+        errorType, errorMessage = loader.LoadFile(filePath)
+        logging.debug("Reader {0} image reading result for {1}: {2} ({3})".format(loaderProgId, filePath, errorType, errorMessage))
+        if errorType == 0:
+          # success
+          break
+      except:
+        logging.debug("Reader {0} cannot read image {1}".format(loaderProgId, filePath))
+        continue
+
+    if errorType != 0:
+      raise ValueError("Failed to read {0} as ultrasound image".format(filePath))
+
+    return loader
+
+  def canLoadFile(self, filePath):
+    # importing comtypes makes the application crash on exit, so we don't want
+    # it to be called, unless it is necessary, so we don't use this deep check:
+    #
+    # # Any file extension is possible, check if we can find a reader for this
+    # try:
+    #   loader = self.getLoader(filePath)
+    # except:
+    #   return False
+    # return loader is not None
+    #
+    # We don't use canLoadFile's default implementation either, because that would
+    # prevent programmatically loading data from files that do not have 3dus file extension
+    # (e.g., from DICOM files, which can have any extension).
+    return True
 
   def load(self, properties):
-    maxDimension = 200
+    sequenceNode = None
+    tableNode = None
+    colorTableNode = None
+    tempVolumeNode = None
+    sequenceBrowserNode = None
+
     try:
       filePath = properties["fileName"]
 
-      try:
-        import comtypes
-      except ModuleNotFoundError:
-        slicer.util.showStatusMessage("Installing comtypes Python package...")
-        slicer.app.processEvents()
-        slicer.util.pip_install('comtypes')
-        import comtypes
+      maxDimension = 200
+      if maxDimension in properties.keys():
+        maxDimension = int(properties["maxDimension"])
 
-      import platform
-      import comtypes
-      import comtypes.client
+      loader = self.getLoader(filePath)
+      source = loader.GetImageSource()
+      numberOfFrames = source.GetFrameCount()
 
       # Get node base name from filename
-      baseName = os.path.splitext(os.path.basename(filePath))[0]
-      baseName = slicer.mrmlScene.GenerateUniqueName(baseName)
+      if 'name' in properties.keys():
+        baseName = properties['name']
+      else:
+        baseName = os.path.splitext(os.path.basename(filePath))[0]
+        baseName = slicer.mrmlScene.GenerateUniqueName(baseName)
 
-      errorType = 0
-      errorMessage = None
-      loaderProgIds = [
-        "GEHC_CARD_US.Image3dFileLoader",
-        "CanonLoader.Image3dFileLoader",
-        "HitCV3DLoader.Image3dFileLoader",
-        "SiemensLoader.Image3dFileLoader",
-        "PhilipsLoader.Image3dFileLoader",
-        "KretzLoader.KretzImage3dFileLoader"
-        ]
-      for loaderProgId in loaderProgIds:
-        # create loader object
-        try:
-          image3dAPI = self.typeLibFromProgId(loaderProgId)
-        except:
-          logging.debug("Ultrasound image reader not installed: "+loaderProgId)
-
-        try:
-          loaderObj = comtypes.client.CreateObject(loaderProgId)
-          loader = loaderObj.QueryInterface(image3dAPI.IImage3dFileLoader)
-        except:
-          logging.debug("Error instantiating image reader: "+loaderProgId)
-
-        # load file
-        try:
-          errorType, errorMessage = loader.LoadFile(filePath)
-          logging.debug("Reader {0} image reading result for {1}: {2} ({3})".format(loaderProgId, filePath, errorType, errorMessage))
-          if errorType == 0:
-            # success
-            break
-        except:
-          logging.debug("Reader {0} cannot read image {1}".format(loaderProgId, filePath))
-
-      if errorType != 0:
-        raise ValueError("Failed to read {0} as ultrasound image".format(filePath))
-
-      source = loader.GetImageSource()
-
-      sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", baseName)
-      sequenceNode.SetIndexName("time")
-      sequenceNode.SetIndexUnit("ms")
-      sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+      # We only create a volume sequence node (and later sequence browser node) if there are
+      # more than 1 frames, to keep the scene as simple as possible.
+      if numberOfFrames > 1:
+        # Temporary volume node to construct volume sequence
+        tempVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", baseName+" temp")
+        # Create sequence node
+        sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", baseName)
+        sequenceNode.SetIndexName("time")
+        sequenceNode.SetIndexUnit("ms")
+        sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+        nodeForStoringMetadata = sequenceNode
+      else:
+        tempVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", baseName)
+        nodeForStoringMetadata = tempVolumeNode
 
       # retrieve probe info
       probe = source.GetProbeInfo()
-      sequenceNode.SetAttribute("SlicerHeart.ProbeName", probe.name)
-      sequenceNode.SetAttribute("SlicerHeart.ProbeType", str(probe.type))
+      nodeForStoringMetadata.SetAttribute("SlicerHeart.ProbeName", probe.name)
+      nodeForStoringMetadata.SetAttribute("SlicerHeart.ProbeType", str(probe.type))
 
       # retrieve ECG info
       ecg = source.GetECG()
@@ -171,10 +217,6 @@ class Image3dReaderFileReader(object):
         success=colorTableNode.SetColor(colorIndex, "US{0:3d}".format(colorIndex), r, g, b, a)
       colorTableNode.EndModify(wasModified)
 
-      # Temporary volume node to construct volume sequence
-      tempVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", baseName+" temp")
-
-      numberOfFrames = source.GetFrameCount()
       for frameIndex in range(numberOfFrames):
         maxRes = np.ctypeslib.as_ctypes(np.array([maxDimension, maxDimension, maxDimension], dtype=np.ushort))
 
@@ -195,50 +237,74 @@ class Image3dReaderFileReader(object):
         tempVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
 
         # Save in sequence node
-        addedNode = sequenceNode.SetDataNodeAtValue(tempVolumeNode, str(frame.time))
+        if numberOfFrames > 1:
+          addedNode = sequenceNode.SetDataNodeAtValue(tempVolumeNode, str(frame.time))
+        else:
+          nodeForStoringMetadata.SetAttribute("SlicerHeart.FrameTime", str(frame.time))
 
-      slicer.mrmlScene.RemoveNode(tempVolumeNode)
-      sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", baseName+" browser")
-      sequenceBrowserNode.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
+      if numberOfFrames > 1:
+        slicer.mrmlScene.RemoveNode(tempVolumeNode)
+        tempVolumeNode = None
+        sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", baseName+" browser")
+        sequenceBrowserNode.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
+        # Save ECG reference to browser node (we may want to show it in the future in sequence browser widget, too)
+        sequenceBrowserNode.SetNodeReferenceID('SlicerHeart.ECG', tableNode.GetID())
+        # Save ECG reference to sequence node (just in case it is dissociated from the browser node)
+        sequenceNode.SetNodeReferenceID('SlicerHeart.ECG', tableNode.GetID())
+        proxyVolumeNode = sequenceBrowserNode.GetProxyNode(sequenceNode)
+      else:
+        tempVolumeNode.CreateDefaultDisplayNodes()
+        proxyVolumeNode = tempVolumeNode
 
-      # Disable scalar visibility by default (there is not really anything useful to show)
-      proxyVolumeNode = sequenceBrowserNode.GetProxyNode(sequenceNode)
+      # Set color table
       proxyVolumeNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+      # Set ECG table reference (it is visible in subject hierarchy)
+      proxyVolumeNode.SetNodeReferenceID('SlicerHeart.ECG', tableNode.GetID())
 
       # Show in slice views
       selectionNode = slicer.app.applicationLogic().GetSelectionNode()
       selectionNode.SetReferenceActiveVolumeID(proxyVolumeNode.GetID())
       slicer.app.applicationLogic().PropagateVolumeSelection(1) 
 
-      # Show sequence browser toolbar if a sequence has been loaded
-      slicer.modules.sequences.showSequenceBrowser(sequenceBrowserNode)
+      if numberOfFrames > 1:
+        # Show sequence browser toolbar if a sequence has been loaded
+        slicer.modules.sequences.showSequenceBrowser(sequenceBrowserNode)
 
     except Exception as e:
       logging.error("Failed to load 3D ultrasound file: "+str(e))
       import traceback
       traceback.print_exc()
+      # Remove partially initialized nodes
+      for node in [tempVolumeNode, sequenceBrowserNode, tableNode, colorTableNode, sequenceNode]:
+        if node:
+          slicer.mrmlScene.RemoveNode(node)
       return False
+
+    if numberOfFrames > 1:
+      self.Parent.loadedNodes = [proxyVolumeNode.GetID()]
+    else:
+      self.Parent.loadedNodes = [sequenceNode.GetID(), sequenceBrowserNode.GetID()]
     return True
 
 
-# class Image3dReaderFileWriter(object):
+# class UltrasoundImage3dReaderFileWriter(object):
 
 #   def __init__(self, parent):
 #     self.Parent = parent
-#     print("Image3dReaderFileWriter - __init__")
+#     print("UltrasoundImage3dReaderFileWriter - __init__")
 
 
 #
-# Image3dReader
+# UltrasoundImage3dReader
 #
 
-class Image3dReader:
+class UltrasoundImage3dReader:
   """
   This class is the 'hook' for slicer to detect and recognize the plugin
   as a loadable scripted module
   """
   def __init__(self, parent):
-    parent.title = "Image3D API Plugin"
+    parent.title = "Ultrasound Image3D API Plugin"
     parent.categories = ["Developer Tools"]
     parent.contributors = ["Andras Lasso (PerkLab)"]
     parent.helpText = """

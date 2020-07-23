@@ -63,8 +63,9 @@ if (SlicerHeart_BUILD_ITK_FILTERS)
 endif()
 add_subdirectory(ConformalTextureMapping)
 if (WIN32)
-  # Image3D only works on Windows
-  add_subdirectory(Image3dReader)
+  # Image3dAPI only works on Windows
+  # (see https://github.com/MedicalUltrasound/Image3dAPI)
+  add_subdirectory(UltrasoundImage3dReader)
 endif()
 ## NEXT_MODULE
 

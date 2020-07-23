@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-set(MODULE_NAME Image3dReader)
+set(MODULE_NAME UltrasoundImage3dReader)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
