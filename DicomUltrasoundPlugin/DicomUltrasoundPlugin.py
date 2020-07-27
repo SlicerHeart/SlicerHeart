@@ -336,7 +336,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       return []
 
     supportedSOPClassUIDs = [
-      '1.2.840.10008.5.1.4.1.1.3.1'  # Ultrasound Multi-frame Image Storage
+      '1.2.840.10008.5.1.4.1.1.3.1',  # Ultrasound Multi-frame Image IOD
+      '1.2.840.10008.5.1.4.1.1.6.1',  # Ultrasound Image IOD
       ]
 
     # Quick check of SOP class UID without parsing the file...

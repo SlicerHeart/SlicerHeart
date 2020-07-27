@@ -230,8 +230,9 @@ class UltrasoundImage3dReaderFileReader(object):
           # all units from Image3dAPI are in meters according to https://github.com/MedicalUltrasound/Image3dAPI/wiki#image-geometry
           voxelToPhysicalAxis = dirs[axisIndex] / frame.dims[axisIndex] * 1000.0
           origin = origins[axisIndex] * 1000.0
-          ijkToLps[0:3, axisIndex] = voxelToPhysicalAxis
-          ijkToLps[3, axisIndex]
+          # we need to use 2-axisIndex because numpy uses KJI index order instead of IJK
+          ijkToLps[0:3, 2-axisIndex] = voxelToPhysicalAxis
+          ijkToLps[3, 2-axisIndex] = origin
         ijkToRas = np.dot(lpsToRas, ijkToLps)
         ijkToRasMatrix = slicer.util.vtkMatrixFromArray(ijkToRas)
         tempVolumeNode.SetIJKToRASMatrix(ijkToRasMatrix)
@@ -281,9 +282,9 @@ class UltrasoundImage3dReaderFileReader(object):
       return False
 
     if numberOfFrames > 1:
-      self.Parent.loadedNodes = [proxyVolumeNode.GetID()]
-    else:
       self.Parent.loadedNodes = [sequenceNode.GetID(), sequenceBrowserNode.GetID()]
+    else:
+      self.Parent.loadedNodes = [proxyVolumeNode.GetID()]
     return True
 
 
