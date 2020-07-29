@@ -37,7 +37,7 @@ class CardiacDeviceBase(object):
     raise NotImplementedError
 
   @classmethod
-  def updateModel(modelNode, parameterNode):
+  def updateModel(cls, modelNode, parameterNode):
     """Most devices provides only a profile (via getProfilePoints) and model is computed from rotational sweep
     of these points. However, a device can generate a model of arbitrary shape by overriding this method."""
     raise NotImplementedError

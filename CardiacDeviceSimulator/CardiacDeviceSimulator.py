@@ -412,7 +412,6 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     self.addObserver(self.parameterNode, CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
     self.addObserver(self.parameterNode, CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
 
-
   def onDeviceClassModified(self, caller=None, event=None):
     self.updateModel()
 
