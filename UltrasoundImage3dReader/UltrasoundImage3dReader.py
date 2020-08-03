@@ -113,8 +113,11 @@ class UltrasoundImage3dReaderFileReader(object):
         if errorType == 0:
           # success
           break
-      except:
+      except Exception as e:
         logging.debug("Reader {0} cannot read image {1}".format(loaderProgId, filePath))
+        logging.error("Failed to load 3D ultrasound file: " + str(e))
+        import traceback
+        traceback.print_exc()
         continue
 
     if errorType != 0:
