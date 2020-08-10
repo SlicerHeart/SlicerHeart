@@ -192,7 +192,7 @@ Pediatr Cardiol. 2018 Mar; 39(3):538-547. [doi: 10.1007/s00246-017-1785-4](https
 
 This work was partially supported by:
 - Department of Anesthesia and Critical Care at The Children’s Hospital of Philadelphia
-- National Heart, Blood, and Lung Institute (NIH NHLBI) R01 HL153166
+- National Heart, Blood, and Lung Institute (NHLBI) (R01 HL153166)
 - National Institute of Biomedical Imaging and Bioengineering (NIBIB) (P41 EB015902)
 - Cancer Care Ontario with funds provided by the Ontario Ministry of Health and Long-Term Care
 - Natural Sciences and Engineering Research Council of Canada
