@@ -51,7 +51,7 @@ endif()
 # Extension modules
 add_subdirectory(ValveView)
 add_subdirectory(Philips4dUsDicomPatcher)
-add_subdirectory(Philips4dUsReader)
+# add_subdirectory(Philips4dUsReader) # Disabled until fixing the gdcm build errors
 add_subdirectory(KretzFileReader)
 add_subdirectory(GeUsMovieReader)
 add_subdirectory(DicomUltrasoundPlugin)
