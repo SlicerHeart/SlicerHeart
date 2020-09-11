@@ -26,6 +26,10 @@ While DICOM standard specifies how 3D and 4D (3D+t) ultrasound volumes can be st
 
 [Image3D API](https://github.com/MedicalUltrasound/Image3dAPI) can be used to read 3D ultrasound images from GE, Canon, Hitachi, Siemens, and Philips scanners. This API is only avaialble on Windows and a reader library must be obtained from the scanner's manufacturer and installed on the system (by registering the reader by running `regsvr32 (loaderlibraryname).dll` as an administrator). This API can provide access to all kinds of image data and ECG signal. File can be read by renaming it so that it ends with `.3dus` and drag-and-dropping to the Slicer application window. GE 3D ultrasound images can be also loaded using the DICOM module (then the files do not have to be renamed).
 
+Example import of 4D ultrasound sequence and ECG imported from GE system:
+
+![](Image3dApiExample.png)
+
 Additional vendor-specific file reading options are described below.
 
 ## Philips
