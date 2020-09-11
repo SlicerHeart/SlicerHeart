@@ -81,7 +81,7 @@ GE machines save 3D/4D ultrasound data in private fields. They can be decoded us
 
 ### Loading various 3D/4D ultrasound images using Image3dAPI
 
-Obtain Image3dAPI package from GE, unzip its content to a folder, and run `regsvr32 Image3dLoaderGe.dll` command as an administrator to install it. After that, GE 3D/4D ultrasound files can be loaded using DICOM module (alternatively, individual 3D/4D ultrasound file can be loaded by renaming it to end with `.3dus` and drag-and-drop to the Slicer application window, and click OK).
+Obtain Image3dAPI package from GE: sign up to the [Edison Developer Program](https://t.co/byhzk1seTc?amp=1) (just filling out a short  web form), wait for GE's response, and download the API files from https://github.com/GEUltrasound/GE_CVUS_Loader/releases/. Unzip the API package content to a folder, and run `regsvr32 Image3dLoaderGe.dll` command as an administrator to install it. After that, GE 3D/4D ultrasound files can be loaded using DICOM module (alternatively, individual 3D/4D ultrasound file can be loaded by renaming it to end with `.3dus` and drag-and-drop to the Slicer application window, and click OK).
 
 ### Loading GE Kretz ultrasound images
 
