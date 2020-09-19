@@ -14,6 +14,12 @@ class DeviceDeformationWidget(DeviceWidget):
     DeviceWidget.__init__(self, parent)
     self.observedParameterNodeEvents = [vtk.vtkCommand.ModifiedEvent, CardiacDeviceBase.DEVICE_PROFILE_MODIFIED_EVENT]
     self.setup()
+    resliceLogic = slicer.modules.volumereslicedriver.logic()
+    self.resliceConfig = [
+      ('vtkMRMLSliceNodeRed', resliceLogic.MODE_TRANSVERSE),
+      ('vtkMRMLSliceNodeGreen', resliceLogic.MODE_CORONAL),
+      ('vtkMRMLSliceNodeYellow', resliceLogic.MODE_SAGITTAL)]
+
 
   def setup(self):
     self.setLayout(qt.QFormLayout())
@@ -164,11 +170,7 @@ class DeviceDeformationWidget(DeviceWidget):
       return
     # VolumeResliceDriver module is provided by SlierIGT extension
     resliceLogic = slicer.modules.volumereslicedriver.logic()
-    resliceConfig = [
-      ('vtkMRMLSliceNodeRed', resliceLogic.MODE_TRANSVERSE),
-      ('vtkMRMLSliceNodeGreen', resliceLogic.MODE_CORONAL),
-      ('vtkMRMLSliceNodeYellow', resliceLogic.MODE_SAGITTAL)]
-    for nodeName, resliceMode in resliceConfig:
+    for nodeName, resliceMode in self.resliceConfig:
       sliceNode = slicer.mrmlScene.GetNodeByID(nodeName)
       resliceLogic.SetDriverForSlice(self.logic.parameterNode.GetNodeReference('PositioningTransform').GetID(), sliceNode)
       resliceLogic.SetModeForSlice(resliceMode, sliceNode)
