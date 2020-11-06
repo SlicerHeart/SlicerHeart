@@ -29,8 +29,14 @@ else()
   # Add ConformalTextureMapping executable and xml to the install package
   install(
     FILES
-      "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
       ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME}.xml
+    DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR}
+    COMPONENT Runtime
+    )
+
+  install(
+    PROGRAMS
+      "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
     DESTINATION ${Slicer_INSTALL_CLIMODULES_BIN_DIR}
     COMPONENT Runtime
     )
