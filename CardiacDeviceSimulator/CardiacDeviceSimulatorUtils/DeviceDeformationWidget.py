@@ -20,7 +20,6 @@ class DeviceDeformationWidget(DeviceWidget):
       ('vtkMRMLSliceNodeGreen', resliceLogic.MODE_CORONAL),
       ('vtkMRMLSliceNodeYellow', resliceLogic.MODE_SAGITTAL)]
 
-
   def setup(self):
     self.setLayout(qt.QFormLayout())
 

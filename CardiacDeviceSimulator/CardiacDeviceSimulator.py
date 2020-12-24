@@ -47,6 +47,10 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
 
   registeredDeviceClasses = []
 
+  DEVICE_POSITIONING_NEEDED = True
+  DEVICE_DEFORMATION_NEEDED = True
+  DEVICE_QUANTIFICATION_NEEDED = True
+
   @staticmethod
   def registerDevice(deviceClass):
     """Register a subclass of CardiacDeviceBase for additional measurements cardiac device models"""
@@ -96,25 +100,35 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.parameterNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onParameterNodeSelectionChanged)
 
     self.deviceSelectorWidget = DeviceSelectorWidget(self.deviceClasses)
-    [lay, self.deviceSelectionSection] = UIHelper.addCommonSection("Device Selection", self.layout, self.moduleSectionButtonsGroup,
+    _, self.deviceSelectionSection = UIHelper.addCommonSection("Device Selection", self.layout, self.moduleSectionButtonsGroup,
       collapsed=False, widget=self.deviceSelectorWidget)
 
-    self.devicePositioningWidget = DevicePositioningWidget()
-    [lay, self.devicePositioningSection] = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
-      collapsed=True, widget=self.devicePositioningWidget)
+    self.deviceWidgets = [self.deviceSelectorWidget]
 
-    self.deviceDeformationWidget = DeviceDeformationWidget()
-    [lay, self.deviceDeformationSection] = UIHelper.addCommonSection("Device Deformation", self.layout, self.moduleSectionButtonsGroup,
-      collapsed=True, widget=self.deviceDeformationWidget)
+    self.devicePositioningSection = None
+    if self.DEVICE_POSITIONING_NEEDED:
+      self.devicePositioningWidget = DevicePositioningWidget()
+      _, self.devicePositioningSection = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
+        collapsed=True, widget=self.devicePositioningWidget)
+      self.deviceWidgets.append(self.devicePositioningWidget)
 
-    self.deviceQuantificationWidget = DeviceCompressionQuantificationWidget()
-    [lay, self.quantificationSection] = UIHelper.addCommonSection("Quantification", self.layout, self.moduleSectionButtonsGroup,
-      collapsed=True, widget=self.deviceQuantificationWidget)
+    self.deviceDeformationSection = None
+    if self.DEVICE_DEFORMATION_NEEDED:
+      self.deviceDeformationWidget = DeviceDeformationWidget()
+      _, self.deviceDeformationSection = UIHelper.addCommonSection("Device Deformation", self.layout, self.moduleSectionButtonsGroup,
+        collapsed=True, widget=self.deviceDeformationWidget)
+      self.deviceWidgets.append(self.deviceDeformationWidget)
+
+    self.quantificationSection = None
+    if self.DEVICE_QUANTIFICATION_NEEDED:
+      self.deviceQuantificationWidget = DeviceCompressionQuantificationWidget()
+      _, self.quantificationSection = UIHelper.addCommonSection("Quantification", self.layout, self.moduleSectionButtonsGroup,
+        collapsed=True, widget=self.deviceQuantificationWidget)
+      self.deviceWidgets.append(self.deviceQuantificationWidget)
 
     self.dataTreeWidget = DeviceDataTreeWidget()
     self.layout.addWidget(self.dataTreeWidget)
-
-    self.deviceWidgets = [self.deviceSelectorWidget, self.devicePositioningWidget, self.deviceDeformationWidget, self.deviceQuantificationWidget, self.dataTreeWidget]
+    self.deviceWidgets.append(self.dataTreeWidget)
 
     for deviceWidget in self.deviceWidgets:
       deviceWidget.setLogic(self.logic)
@@ -147,7 +161,9 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
   def updateButtonStates(self):
     guiEnabled = self.logic.parameterNode is not None
     # self.deviceSelectionSection is always enabled, it creates a parameter node
-    for guiSection in [self.devicePositioningSection, self.deviceDeformationSection, self.quantificationSection]:
+    for guiSection in self.deviceWidgets:
+      if guiSection is self.deviceSelectorWidget:
+        continue
       guiSection.enabled = guiEnabled
 
   def onModuleSectionToggled(self, button, toggled):
@@ -174,10 +190,6 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       self.logic.showDeformedModel(button != self.deviceSelectionSection)
       self.logic.setCenterlineEditingEnabled(button == self.devicePositioningSection)
       self.logic.showDeformationHandles(button == self.deviceDeformationSection)
-
-    if self.quantificationSection.checked:
-      # TODO: hide the expanding spacer if quantification section is open
-      pass
 
 
 #

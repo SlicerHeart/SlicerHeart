@@ -1,22 +1,9 @@
-import os
-import qt
-import logging
-import vtk
 import ctk
 
 import slicer
 from slicer.ScriptedLoadableModule import *
 
 from CardiacDeviceSimulator import CardiacDeviceSimulatorWidget
-#from CardiacDeviceSimulator import CardiacDeviceSimulatorLogic
-
-#from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
-#from CardiacDeviceSimulatorUtils.DeviceCompressionQuantificationWidget import DeviceCompressionQuantificationWidget
-#from CardiacDeviceSimulatorUtils.DeviceDataTreeWidget import DeviceDataTreeWidget
-#from CardiacDeviceSimulatorUtils.DeviceDeformationWidget import DeviceDeformationWidget
-#from CardiacDeviceSimulatorUtils.DevicePositioningWidget import DevicePositioningWidget
-#from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceSelectorWidget
-
 from AsdVsdDevices.devices import *
 
 
@@ -30,7 +17,7 @@ class AsdVsdDeviceSimulator(ScriptedLoadableModule):
   """
 
   deviceClasses = [SeptalOccluder, MultiFenestratedSeptalOccluder,
-      DuctOccluder, DuctOccluderII, MuscularVSDOccluder, CustomDevice]
+                   DuctOccluder, DuctOccluderII, MuscularVSDOccluder, CustomDevice]
 
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
@@ -61,6 +48,10 @@ class AsdVsdDeviceSimulatorWidget(CardiacDeviceSimulatorWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
+  DEVICE_POSITIONING_NEEDED = True
+  DEVICE_DEFORMATION_NEEDED = False
+  DEVICE_QUANTIFICATION_NEEDED = False
+
   def __init__(self, parent=None, deviceClasses=None):
     CardiacDeviceSimulatorWidget.__init__(self, parent, AsdVsdDeviceSimulator.deviceClasses)
     self.logic.moduleName = "AsdVsdDeviceSimulator"
@@ -76,6 +67,3 @@ class AsdVsdDeviceSimulatorWidget(CardiacDeviceSimulatorWidget):
     # Expand translate and rotate sections
     self.devicePositioningWidget.devicePositioningPositionSliderWidget.findChildren(ctk.ctkCollapsibleGroupBox)[0].setChecked(True)
     self.devicePositioningWidget.devicePositioningOrientationSliderWidget.findChildren(ctk.ctkCollapsibleGroupBox)[0].setChecked(True)
-
-    self.deviceDeformationSection.hide()
-    self.quantificationSection.hide()
