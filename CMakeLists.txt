@@ -26,7 +26,8 @@ find_package(Git REQUIRED)
 mark_as_superbuild(GIT_EXECUTABLE)
 
 # Only build ITK filters if ITK5 is available
-set(SlicerHeart_BUILD_ITK_FILTERS ON)
+# Disable by default, as it is currently not used and may break the build
+set(SlicerHeart_BUILD_ITK_FILTERS OFF)
 message(STATUS "ITK version: ${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR}.${ITK_VERSION_PATCH}.")
 if(${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR} VERSION_LESS 5.0)
   message(STATUS "ITK version: ${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR}.${ITK_VERSION_PATCH}. ITK filters are not built.")
