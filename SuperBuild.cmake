@@ -18,12 +18,13 @@ endforeach()
 set(proj ${SUPERBUILD_TOPLEVEL_PROJECT})
 
 # Project dependencies
-set(${proj}_DEPENDS)
+set(${proj}_DEPENDS
+  lscm
+  )
 if (SlicerHeart_BUILD_ITK_FILTERS)
   list(APPEND ${proj}_DEPENDS
     ITKPhaseSymmetry
     ITKStrain
-    lscm
     )
 endif()
 
