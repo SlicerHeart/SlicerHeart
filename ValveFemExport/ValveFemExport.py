@@ -575,7 +575,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
   @staticmethod
   def fitNurbsSurfaceToModel(medialSurfaceNodeInput, boundaryCurveNodeInput,
                            size_u = 8, size_v = 8, degree_u = 2, degree_v = 2, resolution=0.05,
-                           trim_curve=None, pointMergeTolerance=0.01, xDirection=None):
+                           trim_curve=None, xDirection=None):
 
     # Remove all parent transforms to simplify further steps
     medialSurfaceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "_tmp_MedialSurface")
@@ -625,7 +625,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     tri.Update()
 
     warpedSurfaceLocalizer = vtk.vtkModifiedBSPTree()
-    #warpedSurfaceLocalizer.SetDataSet(warpedRectangleModelNode.GetPolyData())
     warpedSurfaceLocalizer.SetDataSet(tri.GetOutput())
     warpedSurfaceLocalizer.BuildLocator()
 
@@ -647,19 +646,16 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
                 intersectingLineStart[0],
                 intersectingLineStart[1],
                 bounds[5]+margin]
-            #print(f"{intersectingLineStart} -> {intersectingLineEnd}")
             intersectionPoints.Reset()
             medialSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
             if intersectionPoints.GetNumberOfPoints() > 0:
                 closestPoint = intersectionPoints.GetPoint(0)
-                #print(f"Medial surface: {intersectionPoints.GetPoint(0)}")
             else:
                 # no intersection point, take it from the warped rectangular surface
                 intersectionPoints.Reset()
                 warpedSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
                 if intersectionPoints.GetNumberOfPoints() > 0:
                     closestPoint = intersectionPoints.GetPoint(0)
-                    #print(f"Rectangular surface: {intersectionPoints.GetPoint(0)}")
                 else:
                     #raise ValueError(f"No intersection found with warped surface at {uindex}, {vindex}. Increase rectangle margin or decrease nurbs margin.")
                     closestPoint = np.array([0.0, 0.0, 0.0])
@@ -669,12 +665,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
                     dist2 = vtk.mutable(0.0)
                     targetLocation = [intersectingLineStart[0], intersectingLineStart[1], 0]
                     warpedSurfaceClosestPointLocalizer.FindClosestPoint(targetLocation, closestPoint, cellObj, cellId, subId, dist2)
-
-#             foundClosestCurvePosition=np.zeros(3)
-#             boundaryCurveNode.GetClosestPointPositionAlongCurveWorld(closestPoint, foundClosestCurvePosition)
-#             if np.linalg.norm(closestPoint-foundClosestCurvePosition) < 1.0:
-#                 # snap point to curve if close to curve
-#                 closestPoint = points.append(foundClosestCurvePosition)
 
             points.append(closestPoint)
 
@@ -724,29 +714,40 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     timestampStr = qt.QDateTime().currentDateTime().toString("yyyy-MM-dd_hh+mm+ss.zzz")
     tempSurfaceFilePath =  f"{tempDir}/_tessellate_{timestampStr}.vtk"
     exchange_vtk.export_polydata(surf, tempSurfaceFilePath, tessellate=True)
+    # Write the NURBS grid:
     #exchange_vtk.export_polydata(surf, "surf.vtk", point_type="ctrlpts", tessellate=False)
 
     tessellatedModelNode = slicer.util.loadNodeFromFile(tempSurfaceFilePath, 'ModelFile', {"coordinateSystem": "RAS"})
     tessellatedModelNode.SetName(medialSurfaceNodeInput.GetName()+'-fit')
 
-#     smoothFilter = vtk.vtkSmoothPolyDataFilter()
-#     smoothFilter.SetInputData(0, tessellatedModelNode.GetPolyData())
-#     smoothFilter.SetInputData(1, tessellatedModelNode.GetPolyData())  # constrain smoothed points to the surface
-#     smoothFilter.SetNumberOfIterations(120)
-#     smoothFilter.SetRelaxationFactor(0.5)
-#     smoothFilter.Update()
-#     #tessellatedModelNode.SetAndObservePolyData(smoothFilter.GetOutput())
+    mesh = tessellatedModelNode.GetPolyData()
 
-    eventTimes.append(('postprocess', time.time()))
+    smoothing = False
+    cleaning = True
+
+    # Smooth
+    if smoothing:
+      eventTimes.append(('smoothing', time.time()))
+      smoothFilter = vtk.vtkSmoothPolyDataFilter()
+      smoothFilter.SetInputData(0, mesh)
+      smoothFilter.SetInputData(1, mesh)  # constrain smoothed points to the surface
+      smoothFilter.SetNumberOfIterations(120)
+      smoothFilter.SetRelaxationFactor(0.5)
+      smoothFilter.Update()
+      mesh = smoothFilter.GetOutput()
 
     # Merge points
-    cleaner = vtk.vtkCleanPolyData()
-    cleaner.SetInputData(tessellatedModelNode.GetPolyData())
-    #cleaner.SetInputData(smoothFilter.GetOutput())
-    cleaner.SetAbsoluteTolerance(pointMergeTolerance)
-    cleaner.ToleranceIsAbsoluteOn()
-    cleaner.Update()
-    tessellatedModelNode.SetAndObservePolyData(cleaner.GetOutput())
+    if cleaning:
+      eventTimes.append(('cleaning', time.time()))
+      cleaner = vtk.vtkCleanPolyData()
+      cleaner.SetInputData(mesh)
+      #cleaner.SetInputData(smoothFilter.GetOutput())
+      #cleaner.SetAbsoluteTolerance(pointMergeTolerance)
+      #cleaner.ToleranceIsAbsoluteOn()
+      cleaner.Update()
+      mesh = cleaner.GetOutput()
+
+    tessellatedModelNode.SetAndObservePolyData(mesh)
 
     # Transform back results to original position
     leafletToXYPlaneTransformNode.Inverse()
@@ -755,20 +756,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     tessellatedModelNode.HardenTransform()
     warpedRectangleModelNode.HardenTransform()
 
-    # # Put results under the same transform as input medialSurfaceNode (keeping their current position)
-    # medialSurfaceTransformNode = medialSurfaceNodeInput.GetParentTransformNode()
-    # if medialSurfaceTransformNode:
-    #   for modelNode in [tessellatedModelNode, warpedRectangleModelNode]:
-    #     modelNode.SetAndObservePolyData(
-    #       ValveFemExportLogic.transformPolydata(modelNode.GetPolyData(), medialSurfaceTransformNode.GetTransformFromWorld()))
-    #     modelNode.SetAndObserveTransformNodeID(medialSurfaceTransformNode.GetID())
-    #
-    # # Transform results back to leaflet coordinate system
-    # xyPlaneToMedialSurfaceTransform = medialSurfaceToXYPlaneTransform.GetInverse()
-    # tessellatedModelNode.SetAndObservePolyData(
-    #   ValveFemExportLogic.transformPolydata(tessellatedModelNode.GetPolyData(), xyPlaneToMedialSurfaceTransform))
-    # warpedRectangleModelNode.SetAndObservePolyData(
-    #   ValveFemExportLogic.transformPolydata(warpedRectangleModelNode.GetPolyData(), xyPlaneToMedialSurfaceTransform))
+    # Put results under the same transform as input medialSurfaceNode (keeping their current position)
+    medialSurfaceTransformNode = medialSurfaceNodeInput.GetParentTransformNode()
+    if medialSurfaceTransformNode:
+      transformWorldToMedialSurface = vtk.vtkGeneralTransform()
+      medialSurfaceTransformNode.GetTransformFromWorld(transformWorldToMedialSurface)
+      for modelNode in [tessellatedModelNode, warpedRectangleModelNode]:
+        modelNode.SetAndObservePolyData(
+          ValveFemExportLogic.transformPolydata(modelNode.GetPolyData(), transformWorldToMedialSurface))
+        modelNode.SetAndObserveTransformNodeID(medialSurfaceTransformNode.GetID())
 
     warpedRectangleModelNode.GetDisplayNode().SetVisibility(False)
     tessellatedModelNode.GetDisplayNode().EdgeVisibilityOn()
@@ -777,6 +773,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.RemoveNode(medialSurfaceNode)
     slicer.mrmlScene.RemoveNode(boundaryCurveNode)
     slicer.mrmlScene.RemoveNode(leafletToXYPlaneTransformNode)
+    # Comment out the next line for debugging
+    slicer.mrmlScene.RemoveNode(warpedRectangleModelNode)
 
     # Print processing times
     eventTimes.append(('end', time.time()))
