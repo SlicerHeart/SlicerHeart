@@ -4,6 +4,7 @@ import logging
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
+import numpy as np
 
 #
 # ValveFemExport
@@ -79,22 +80,33 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       (self.ui.annulusCurveNodeSelector, "AnnulusCurve"),
       (self.ui.annulusModelNodeSelector, "AnnulusModel"),
       (self.ui.papillaryMuscleTipsNodeSelector, "PapillaryMuscleTips"),
+
       (self.ui.leafletModelNodeComboBox1, "LeafletModel1"),
+      (self.ui.leafletBoundaryMarkupsNodeComboBox1, "LeafletBoundaryMarkups1"),
       (self.ui.marginCurveNodeComboBox1, "MarginCurve1"),
       (self.ui.secondaryCurveNodeComboBox1, "SecondaryCurve1"),
+
       (self.ui.leafletModelNodeComboBox2, "LeafletModel2"),
+      (self.ui.leafletBoundaryMarkupsNodeComboBox2, "LeafletBoundaryMarkups2"),
       (self.ui.marginCurveNodeComboBox2, "MarginCurve2"),
       (self.ui.secondaryCurveNodeComboBox2, "SecondaryCurve2"),
+
       (self.ui.leafletModelNodeComboBox3, "LeafletModel3"),
+      (self.ui.leafletBoundaryMarkupsNodeComboBox3, "LeafletBoundaryMarkups3"),
       (self.ui.marginCurveNodeComboBox3, "MarginCurve3"),
       (self.ui.secondaryCurveNodeComboBox3, "SecondaryCurve3")
       ]
 
     curvePlaceWidgets = [
       self.ui.papillaryMuscleTipsPlaceWidget,
-      self.ui.marginCurvePlaceWidget1, self.ui.secondaryCurvePlaceWidget1,
-      self.ui.marginCurvePlaceWidget2, self.ui.secondaryCurvePlaceWidget2,
-      self.ui.marginCurvePlaceWidget3, self.ui.secondaryCurvePlaceWidget3
+      self.ui.leafletBoundaryMarkupsNodePlaceWidget1, self.ui.marginCurvePlaceWidget1, self.ui.secondaryCurvePlaceWidget1,
+      self.ui.leafletBoundaryMarkupsNodePlaceWidget2, self.ui.marginCurvePlaceWidget2, self.ui.secondaryCurvePlaceWidget2,
+      self.ui.leafletBoundaryMarkupsNodePlaceWidget3, self.ui.marginCurvePlaceWidget3, self.ui.secondaryCurvePlaceWidget3
+      ]
+
+    self.parameterEditWidgets = [
+      (self.ui.leafletSurfaceNurbsResolution, "LeafletSurfaceNurbsResolution"),
+      (self.ui.leafletSurfaceMeshResolution, "LeafletSurfaceMeshResolution"),
       ]
 
     # Create a new parameterNode
@@ -118,7 +130,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.parameterNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setParameterNode)
     self.ui.heartValveImportButton.connect('clicked(bool)', self.onHeartValveImport)
     self.ui.createChordsButton.connect('clicked(bool)', self.onCreateChords)
+    self.ui.createLeafletSurfacesButton.connect('clicked(bool)', self.onCreateLeafletSurfaces)
     self.ui.exportButton.connect('clicked(bool)', self.onExport)
+    slicer.util.addParameterEditWidgetConnections(self.parameterEditWidgets, self.updateParameterNodeFromGUI)
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
@@ -178,14 +192,15 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self._parameterNode is None:
       return
 
+    self.updatingGUIFromParameterNode = True
+
     # Update each widget from parameter node
     # Need to temporarily block signals to prevent infinite recursion (MRML node update triggers
     # GUI update, which triggers MRML node update, which triggers GUI update, ...)
 
     for nodeSelector, nodeReferenceRole in self.nodeSelectors:
-      wasBlocked = nodeSelector.blockSignals(True)
+      # Signals are not blocked so that place widgets are updated
       nodeSelector.setCurrentNode(self._parameterNode.GetNodeReference(nodeReferenceRole))
-      nodeSelector.blockSignals(wasBlocked)
 
     self.ui.chordBundleNameEdit1.text = self._parameterNode.GetParameter("ChordName1")
     self.ui.chordBundleNameEdit2.text = self._parameterNode.GetParameter("ChordName2")
@@ -213,7 +228,6 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       markupsSelector.setStyleSheet("QLineEdit {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
       #markupsSelector.setStyleSheet("ctkCollapsibleGroupBox {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
       #markupsSelector.setStyleSheet("qMRMLNodeComboBox {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
-      
 
     # # Update buttons states and tooltips
     # if self._parameterNode.GetNodeReference("InputVolume") and self._parameterNode.GetNodeReference("OutputVolume"):
@@ -223,6 +237,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     #   self.ui.applyButton.toolTip = "Select input and output volume nodes"
     #   self.ui.applyButton.enabled = False
 
+    slicer.util.updateParameterEditWidgetsFromNode(self.parameterEditWidgets, self._parameterNode)
+
+    self.updatingGUIFromParameterNode = False
+
   def updateParameterNodeFromGUI(self, caller=None, event=None):
     """
     This method is called when the user makes any change in the GUI.
@@ -231,6 +249,11 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     if self._parameterNode is None:
       return
+
+    if self.updatingGUIFromParameterNode:
+      return
+
+    wasModified = self._parameterNode.StartModify()  # Modify all properties in a single batch
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
@@ -251,12 +274,16 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter("ChordName2", self.ui.chordBundleNameEdit2.text)
     self._parameterNode.SetParameter("ChordName3", self.ui.chordBundleNameEdit3.text)
 
+    slicer.util.updateNodeFromParameterEditWidgets(self.parameterEditWidgets, self._parameterNode)
+
+    self._parameterNode.EndModify(wasModified)
+
   def onHeartValveImport(self):
     heartValveNode = self._parameterNode.GetNodeReference("HeartValve")
     import HeartValveLib
     valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
     wasModified = self._parameterNode.StartModify()
-    
+
     self._parameterNode.SetNodeReferenceID("AnnulusCurve", valveModel.getAnnulusContourMarkupNode().GetID())
     self._parameterNode.SetNodeReferenceID("AnnulusModel", valveModel.getAnnulusContourModelNode().GetID())
 
@@ -276,8 +303,8 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       leafletModelsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflet models")
     slicer.modules.segmentations.logic().ExportAllSegmentsToModels(valveModel.getLeafletSegmentationNode(), leafletModelsFolderItemId)
     # Delete annulus mask model
-    annulusMaskModeId = shNode.GetItemChildWithName(leafletModelsFolderItemId, "Annulus mask")
-    annulusMaskModeNode = shNode.GetItemDataNode(annulusMaskModeId)
+    annulusMaskModelId = shNode.GetItemChildWithName(leafletModelsFolderItemId, "Annulus mask")
+    annulusMaskModeNode = shNode.GetItemDataNode(annulusMaskModelId)
     if annulusMaskModeNode:
       slicer.mrmlScene.RemoveNode(annulusMaskModeNode)
     # Put back folder under export folder
@@ -291,9 +318,12 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         chordName = result.groups()[0]
         self._parameterNode.SetParameter("ChordName"+str(leafletIndex+1), chordName)
 
-      leafletModeId = shNode.GetItemChildWithName(leafletModelsFolderItemId, leafletModel.getLeafletSegment().GetName())
-      leafletModeNode = shNode.GetItemDataNode(leafletModeId)
-      self._parameterNode.SetNodeReferenceID("LeafletModel"+str(leafletIndex+1), leafletModeNode.GetID())
+      leafletBoundaryMarkupNode = leafletModel.getSurfaceBoundaryMarkupNode()
+      self._parameterNode.SetNodeReferenceID("LeafletBoundaryMarkups"+str(leafletIndex+1), leafletBoundaryMarkupNode.GetID())
+
+      leafletModelId = shNode.GetItemChildWithName(leafletModelsFolderItemId, leafletModel.getLeafletSegment().GetName())
+      leafletModelNode = shNode.GetItemDataNode(leafletModelId)
+      self._parameterNode.SetNodeReferenceID("LeafletModel"+str(leafletIndex+1), leafletModelNode.GetID())
 
     self._parameterNode.Modified()
     self._parameterNode.EndModify(wasModified)
@@ -308,6 +338,28 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     else:
       chordsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Chords")
     self.logic.createChordBundles(self._parameterNode, chordsFolderItemId)
+
+  def logCallback(self, message):
+    slicer.util.showStatusMessage(message)
+    slicer.app.processEvents()
+
+  def onCreateLeafletSurfaces(self):
+    slicer.app.setOverrideCursor(qt.Qt.WaitCursor)
+    try:
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
+      leafletsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflets")
+      if leafletsFolderItemId:
+        shNode.RemoveItemChildren(leafletsFolderItemId)
+      else:
+        leafletsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflets")
+      self.logic.createLeafletSurfaces(self._parameterNode, leafletsFolderItemId, self.logCallback)
+    except Exception as e:
+      import traceback
+      traceback.print_exc()
+      slicer.util.errorDisplay("Failed to create leaflet surfaces: "+str(e))
+    slicer.app.restoreOverrideCursor()
+    self.logCallback("")
 
   def onExport(self):
     """
@@ -324,7 +376,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       import traceback
       traceback.print_exc()
       slicer.util.errorDisplay("Failed to export data: "+str(e))
-    slicer.app.restoreOverrideCursor() 
+    slicer.app.restoreOverrideCursor()
 
 #
 # ValveFemExportLogic
@@ -349,6 +401,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     Initialize parameter node with default settings.
     """
+
+    if not parameterNode.GetParameter("LeafletSurfaceNurbsResolution"):
+      parameterNode.SetParameter("LeafletSurfaceNurbsResolution", "20")
+    if not parameterNode.GetParameter("LeafletSurfaceMeshResolution"):
+      parameterNode.SetParameter("LeafletSurfaceMeshResolution", "30")
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     if parameterNode.GetHideFromEditors():
       parameterNode.SetHideFromEditors(False)
@@ -399,7 +456,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
         # Put under subject hierarchy folder
         shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
-  
+
   def createChordBundles(self, parameterNode, chordsFolderItemId):
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
     colors = [[1.0,0.3,0.3], [1.0,0.6,0.6], [0.3,1.0,0.3], [0.8,1.0,0.8], [0.3,0.3,1], [0.8,0.8,1.0]]
@@ -416,6 +473,365 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         self.createChordBundle(leafletSurfaceModel.GetName()+'-secondary', colors[bundleIndex*2+1],
           papillaryMuscleTips, leafletSecondaryCurve, leafletSurfaceModel, chordsFolderItemId)
 
+  @staticmethod
+  def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
+
+    # Prepare transform object
+    numberOfCurveLandmarkPoints = 80
+
+    # points on the unit disk
+    surfaceTransformSourceCurvePoints = vtk.vtkPoints()
+    surfaceTransformSourceCurvePoints.SetNumberOfPoints(numberOfCurveLandmarkPoints)
+    import math
+    angleIncrement = 2.0 * math.pi / float(numberOfCurveLandmarkPoints)
+    for pointIndex in range(numberOfCurveLandmarkPoints):
+        angle = float(pointIndex) * angleIncrement
+        surfaceTransformSourceCurvePoints.SetPoint(pointIndex, math.cos(angle), math.sin(angle), 0)
+
+    # points on the wapred boundary curve
+    surfaceTransformTargetPoints = vtk.vtkPoints()
+    curvePoints = boundaryCurveNode.GetCurvePointsWorld()
+    curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
+    #numberOfCurvePoints = boundaryCurveNode.GetNumberOfPoints()
+    # subtract a little bit (0.1 = 10th of a sampling distance) to make sure we don't go over the curve length
+    # because we could then get one less sample point
+    samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
+    if not slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(curvePoints, surfaceTransformTargetPoints, samplingDistance, True):
+        raise ValueError("slicer.vtkMRMLMarkupsCurveNode.ResamplePoints")
+
+    # Compute TPS transform
+    surfaceTransform = vtk.vtkThinPlateSplineTransform()
+    surfaceTransform.SetSourceLandmarks(surfaceTransformSourceCurvePoints)
+    surfaceTransform.SetTargetLandmarks(surfaceTransformTargetPoints)
+
+    # Warp a rectangular grid to the boundary curve
+    surfaceUnitRectangle = vtk.vtkPlaneSource()
+    surfaceUnitRectangle.SetXResolution(rectangleResolution)
+    surfaceUnitRectangle.SetYResolution(rectangleResolution)
+    radius = 1.0 + margin
+    surfaceUnitRectangle.SetOrigin(-radius, -radius, 0)
+    surfaceUnitRectangle.SetPoint1(-radius, radius, 0)
+    surfaceUnitRectangle.SetPoint2(radius, -radius, 0)
+
+    surfaceTransformFilter = vtk.vtkTransformPolyDataFilter()
+    surfaceTransformFilter.SetTransform(surfaceTransform)
+    surfaceTransformFilter.SetInputConnection(surfaceUnitRectangle.GetOutputPort())
+    #surfaceTransformFilter.Update()
+    #return surfaceTransformFilter.GetOutput()
+
+    surfacePolyDataNormals = vtk.vtkPolyDataNormals()
+    surfacePolyDataNormals.SetInputConnection(surfaceTransformFilter.GetOutputPort())
+    surfacePolyDataNormals.ConsistencyOn()
+    surfacePolyDataNormals.SplittingOff()
+    surfacePolyDataNormals.Update()
+
+    return surfacePolyDataNormals.GetOutput()
+
+  @staticmethod
+  def createTransformToWorldXYPlane(surfaceModelNode, xDirection=None):
+    import HeartValveLib
+    # Create transform node that transforms the surface model to the XY plane (in world coordinate system)
+    medialSurfaceNodePoints = slicer.util.arrayFromModelPoints(surfaceModelNode)
+    if surfaceModelNode.GetParentTransformNode():
+      transformToWorld = slicer.util.arrayFromTransformMatrix(surfaceModelNode.GetParentTransformNode(), toWorld=True)
+      # Concatenate a 4th line containing 1s so that we can transform the positions using a single matrix multiplication.
+      medialSurfaceNodePointsHom = np.row_stack((medialSurfaceNodePoints.T, np.ones(medialSurfaceNodePoints.shape[0])))
+      # Transform
+      medialSurfaceNodePointsWorldHom = np.dot(transformToWorld, medialSurfaceNodePointsHom)
+      # Save updated point positions
+      medialSurfaceNodePoints = medialSurfaceNodePointsWorldHom[0:3, :].T
+
+    [planePosition, planeNormal] = HeartValveLib.planeFit(medialSurfaceNodePoints.T)
+    transformToPlane = HeartValveLib.getVtkTransformPlaneToWorld(planePosition, planeNormal, xDirection=xDirection)
+    modelToXYPlaneTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
+    modelToXYPlaneTransformNode.SetAndObserveTransformFromParent(transformToPlane)
+    return modelToXYPlaneTransformNode
+
+  @staticmethod
+  def nurbsDistanceFromSurface(uv, surf, xyz):
+    if uv[0]<=0 or uv[0]>=1 or uv[1]<=0 or uv[1]>=1:
+        return 1000
+    dist = np.linalg.norm(surf.evaluate_single(uv)-xyz)
+    return dist
+
+  @staticmethod
+  def nurbsUvFromXyz(surf, xyz):
+    from scipy.optimize import minimize
+    res = minimize(
+        lambda uv, surf=surf, xyz=xyz: ValveFemExportLogic.nurbsDistanceFromSurface(uv, surf, xyz),
+        np.array([0.5, 0.5]),
+        method='nelder-mead')
+    return res.x
+
+  @staticmethod
+  def transformPolydata(polydata, transform):
+    transformFilter = vtk.vtkTransformPolyDataFilter()
+    transformFilter.SetTransform(transform)
+    transformFilter.SetInputData(polydata)
+    transformFilter.Update()
+    return transformFilter.GetOutput()
+
+
+  @staticmethod
+  def fitNurbsSurfaceToModel(medialSurfaceNodeInput, boundaryCurveNodeInput,
+                           size_u = 8, size_v = 8, degree_u = 2, degree_v = 2, resolution=0.05,
+                           trim_curve=None, pointMergeTolerance=0.01, xDirection=None):
+
+    # Remove all parent transforms to simplify further steps
+    medialSurfaceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "_tmp_MedialSurface")
+    medialSurfaceNode.CopyContent(medialSurfaceNodeInput)
+    medialSurfaceNode.SetAndObserveTransformNodeID(medialSurfaceNodeInput.GetTransformNodeID())
+    medialSurfaceNode.HardenTransform()
+    boundaryCurveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsClosedCurveNode", "_tmp_BoundaryCurve")
+    boundaryCurveNode.CopyContent(boundaryCurveNodeInput)
+    boundaryCurveNode.SetAndObserveTransformNodeID(boundaryCurveNodeInput.GetTransformNodeID())
+    boundaryCurveNode.HardenTransform()
+
+    import time
+    eventTimes = []
+    eventTimes.append(('get inputs', time.time()))
+
+    # Transform medial surface to XY plane for easier computation
+    leafletToXYPlaneTransformNode = ValveFemExportLogic.createTransformToWorldXYPlane(medialSurfaceNode, xDirection=xDirection)
+
+    medialSurfaceNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
+    medialSurfaceNode.HardenTransform()
+
+    warpedRectanglePolyData = ValveFemExportLogic.fitTpsRectangleToClosedCurve(boundaryCurveNode)
+    warpedRectangleModelNode = slicer.modules.models.logic().AddModel(warpedRectanglePolyData)
+    warpedRectangleModelNode.SetName(f"{medialSurfaceNodeInput.GetName()}-tps-fit")
+    warpedRectangleModelNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
+    warpedRectangleModelNode.HardenTransform()
+
+    boundaryCurveNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
+    boundaryCurveNode.HardenTransform()
+
+    # Create points array that the NURBS will fit to by cutting the leaflet with XZ planes
+    import numpy as np
+    bounds=np.zeros(6)
+    medialSurfaceNode.GetBounds(bounds)
+    # we will make the NURBS rectangular control point grid a bit bigger than the input surface
+    # to avoid artifacts on the boundary
+    margin = (bounds[1]-bounds[0])*0.10
+
+    import math
+
+    medialSurfaceLocalizer = vtk.vtkModifiedBSPTree()
+    medialSurfaceLocalizer.SetDataSet(medialSurfaceNode.GetPolyData())
+    medialSurfaceLocalizer.BuildLocator()
+
+    tri=vtk.vtkTriangleFilter()
+    tri.SetInputData(warpedRectangleModelNode.GetPolyData())
+    tri.Update()
+
+    warpedSurfaceLocalizer = vtk.vtkModifiedBSPTree()
+    #warpedSurfaceLocalizer.SetDataSet(warpedRectangleModelNode.GetPolyData())
+    warpedSurfaceLocalizer.SetDataSet(tri.GetOutput())
+    warpedSurfaceLocalizer.BuildLocator()
+
+    warpedSurfaceClosestPointLocalizer = vtk.vtkCellLocator()
+    warpedSurfaceClosestPointLocalizer.SetDataSet(tri.GetOutput())
+    warpedSurfaceClosestPointLocalizer.BuildLocator()
+
+    eventTimes.append(('get surface control points', time.time()))
+    points = []
+    intersectionPoints = vtk.vtkPoints()
+    intersectionCellIds = vtk.vtkIdList()
+    for vindex in range(size_v):
+        for uindex in range(size_u):
+            intersectingLineStart = [
+                bounds[0]-margin+(bounds[1]-bounds[0]+2*margin)*uindex/(size_u-1),
+                bounds[2]-margin+(bounds[3]-bounds[2]+2*margin)*vindex/(size_v-1),
+                bounds[4]-margin]
+            intersectingLineEnd = [
+                intersectingLineStart[0],
+                intersectingLineStart[1],
+                bounds[5]+margin]
+            #print(f"{intersectingLineStart} -> {intersectingLineEnd}")
+            intersectionPoints.Reset()
+            medialSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
+            if intersectionPoints.GetNumberOfPoints() > 0:
+                closestPoint = intersectionPoints.GetPoint(0)
+                #print(f"Medial surface: {intersectionPoints.GetPoint(0)}")
+            else:
+                # no intersection point, take it from the warped rectangular surface
+                intersectionPoints.Reset()
+                warpedSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
+                if intersectionPoints.GetNumberOfPoints() > 0:
+                    closestPoint = intersectionPoints.GetPoint(0)
+                    #print(f"Rectangular surface: {intersectionPoints.GetPoint(0)}")
+                else:
+                    #raise ValueError(f"No intersection found with warped surface at {uindex}, {vindex}. Increase rectangle margin or decrease nurbs margin.")
+                    closestPoint = np.array([0.0, 0.0, 0.0])
+                    cellObj = vtk.vtkGenericCell()
+                    cellId = vtk.mutable(0)
+                    subId = vtk.mutable(0)
+                    dist2 = vtk.mutable(0.0)
+                    targetLocation = [intersectingLineStart[0], intersectingLineStart[1], 0]
+                    warpedSurfaceClosestPointLocalizer.FindClosestPoint(targetLocation, closestPoint, cellObj, cellId, subId, dist2)
+
+#             foundClosestCurvePosition=np.zeros(3)
+#             boundaryCurveNode.GetClosestPointPositionAlongCurveWorld(closestPoint, foundClosestCurvePosition)
+#             if np.linalg.norm(closestPoint-foundClosestCurvePosition) < 1.0:
+#                 # snap point to curve if close to curve
+#                 closestPoint = points.append(foundClosestCurvePosition)
+
+            points.append(closestPoint)
+
+    points = np.array(points)
+
+    # Do global surface interpolation
+    eventTimes.append(('interpolate surface', time.time()))
+    from geomdl import fitting, tessellate
+    from geomdl import exchange_vtk
+    surf = fitting.interpolate_surface(points, size_u, size_v, degree_u, degree_v)
+
+    # Plot the interpolated surface
+    surf.delta = resolution
+
+    if trim_curve:
+        # Get trim points
+        eventTimes.append(('get trim points', time.time()))
+        timer=vtk.vtkTimerLog()
+        numberOfCurveLandmarkPoints = 80
+        boundaryPoints = vtk.vtkPoints()
+        curvePoints = boundaryCurveNode.GetCurvePointsWorld()
+        curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
+        samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
+        slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(curvePoints, boundaryPoints, samplingDistance, True)
+        boundaryPointsUv = []
+        for pointIndex in range(numberOfCurveLandmarkPoints+1):
+            uv = ValveFemExportLogic.nurbsUvFromXyz(surf, np.array(boundaryPoints.GetPoint(pointIndex % numberOfCurveLandmarkPoints)))
+            boundaryPointsUv.append([uv[0], uv[1]])
+
+        # Create BSpline curve
+        eventTimes.append(('create bspline', time.time()))
+        from geomdl import BSpline
+        from geomdl import knotvector
+        tcrv = BSpline.Curve()
+        tcrv.degree = 2
+        tcrv.ctrlpts = boundaryPointsUv
+        tcrv.opt = ['reversed', 1]
+        tcrv.knotvector = knotvector.generate(tcrv.degree, len(tcrv.ctrlpts))
+        trim_curves = [tcrv]
+
+        # Set trim curves (as a list)
+        surf.trims = trim_curves
+        surf.tessellator = tessellate.TrimTessellate()
+
+    eventTimes.append(('export to vtk', time.time()))
+    tempDir = slicer.app.temporaryPath
+    timestampStr = qt.QDateTime().currentDateTime().toString("yyyy-MM-dd_hh+mm+ss.zzz")
+    tempSurfaceFilePath =  f"{tempDir}/_tessellate_{timestampStr}.vtk"
+    exchange_vtk.export_polydata(surf, tempSurfaceFilePath, tessellate=True)
+    #exchange_vtk.export_polydata(surf, "surf.vtk", point_type="ctrlpts", tessellate=False)
+
+    tessellatedModelNode = slicer.util.loadNodeFromFile(tempSurfaceFilePath, 'ModelFile', {"coordinateSystem": "RAS"})
+    tessellatedModelNode.SetName(medialSurfaceNodeInput.GetName()+'-fit')
+
+#     smoothFilter = vtk.vtkSmoothPolyDataFilter()
+#     smoothFilter.SetInputData(0, tessellatedModelNode.GetPolyData())
+#     smoothFilter.SetInputData(1, tessellatedModelNode.GetPolyData())  # constrain smoothed points to the surface
+#     smoothFilter.SetNumberOfIterations(120)
+#     smoothFilter.SetRelaxationFactor(0.5)
+#     smoothFilter.Update()
+#     #tessellatedModelNode.SetAndObservePolyData(smoothFilter.GetOutput())
+
+    eventTimes.append(('postprocess', time.time()))
+
+    # Merge points
+    cleaner = vtk.vtkCleanPolyData()
+    cleaner.SetInputData(tessellatedModelNode.GetPolyData())
+    #cleaner.SetInputData(smoothFilter.GetOutput())
+    cleaner.SetAbsoluteTolerance(pointMergeTolerance)
+    cleaner.ToleranceIsAbsoluteOn()
+    cleaner.Update()
+    tessellatedModelNode.SetAndObservePolyData(cleaner.GetOutput())
+
+    # Transform back results to original position
+    leafletToXYPlaneTransformNode.Inverse()
+    tessellatedModelNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
+    warpedRectangleModelNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
+    tessellatedModelNode.HardenTransform()
+    warpedRectangleModelNode.HardenTransform()
+
+    # # Put results under the same transform as input medialSurfaceNode (keeping their current position)
+    # medialSurfaceTransformNode = medialSurfaceNodeInput.GetParentTransformNode()
+    # if medialSurfaceTransformNode:
+    #   for modelNode in [tessellatedModelNode, warpedRectangleModelNode]:
+    #     modelNode.SetAndObservePolyData(
+    #       ValveFemExportLogic.transformPolydata(modelNode.GetPolyData(), medialSurfaceTransformNode.GetTransformFromWorld()))
+    #     modelNode.SetAndObserveTransformNodeID(medialSurfaceTransformNode.GetID())
+    #
+    # # Transform results back to leaflet coordinate system
+    # xyPlaneToMedialSurfaceTransform = medialSurfaceToXYPlaneTransform.GetInverse()
+    # tessellatedModelNode.SetAndObservePolyData(
+    #   ValveFemExportLogic.transformPolydata(tessellatedModelNode.GetPolyData(), xyPlaneToMedialSurfaceTransform))
+    # warpedRectangleModelNode.SetAndObservePolyData(
+    #   ValveFemExportLogic.transformPolydata(warpedRectangleModelNode.GetPolyData(), xyPlaneToMedialSurfaceTransform))
+
+    warpedRectangleModelNode.GetDisplayNode().SetVisibility(False)
+    tessellatedModelNode.GetDisplayNode().EdgeVisibilityOn()
+
+    # Remove temporary nodes
+    slicer.mrmlScene.RemoveNode(medialSurfaceNode)
+    slicer.mrmlScene.RemoveNode(boundaryCurveNode)
+    slicer.mrmlScene.RemoveNode(leafletToXYPlaneTransformNode)
+
+    # Print processing times
+    eventTimes.append(('end', time.time()))
+    print("--------")
+    lastLabel=None
+    lastTimestamp=None
+    for label, timestamp in eventTimes:
+        if lastLabel is not None:
+            print(f"{lastLabel}: {timestamp-lastTimestamp}")
+        lastLabel = label
+        lastTimestamp = timestamp
+
+    return tessellatedModelNode
+
+  def createLeafletSurfaces(self, parameterNode, leafletsFolderItemId, logCallback=None):
+    # Install geomdl - NURBS modeling package
+    try:
+      import geomdl
+    except:
+      slicer.util.pip_install('geomdl')
+
+    xDirection = [0,1,0]
+    trim_curve = True
+    controlPoints = int(float(parameterNode.GetParameter("LeafletSurfaceNurbsResolution")))
+    triangulationResolution = 1.0/float(parameterNode.GetParameter("LeafletSurfaceMeshResolution")) # 0.5 * 1.0/controlPoints
+
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+
+    for leafletIndex in range(3):
+      leafletModelNode = parameterNode.GetNodeReference("LeafletModel" + str(leafletIndex + 1))
+      leafletBoundaryMarkupNode = parameterNode.GetNodeReference("LeafletBoundaryMarkups" + str(leafletIndex + 1))
+      if not leafletModelNode or not leafletBoundaryMarkupNode:
+        continue
+
+      if logCallback:
+        logCallback(f"Creating leaflet surface for {leafletModelNode.GetName()}...")
+
+      # If curve specified by fiducial lists then convert it now to a curve
+      if leafletBoundaryMarkupNode.IsA('vtkMRMLMarkupsFiducialNode'):
+        tempCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode', 'tmp_ValveFemExportCreateLeafletSurface')
+        pts = vtk.vtkPoints()
+        leafletBoundaryMarkupNode.GetControlPointPositionsWorld(pts)
+        tempCurveNode.SetControlPointPositionsWorld(pts)
+        leafletBoundaryMarkupNode = tempCurveNode
+      else:
+        tempCurveNode = None
+
+      nurbsModelNode = ValveFemExportLogic.fitNurbsSurfaceToModel(leafletModelNode, leafletBoundaryMarkupNode,
+        size_u=controlPoints, size_v=controlPoints,
+        resolution=triangulationResolution, xDirection=xDirection, trim_curve=trim_curve)
+
+      if tempCurveNode:
+        slicer.mrmlScene.RemoveNode(tempCurveNode)
+      shNode.SetItemParent(shNode.GetItemByDataNode(nurbsModelNode), leafletsFolderItemId)
+
   def saveNode(self, node, outputFolder, expectedTransformNode, enableTransformChange):
     # Ensure that the node is under the expected transform node
     originalTransformNode = node.GetParentTransformNode()
@@ -429,7 +845,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       else:
         # We are not allowed to change the coordinate system of the node, return with failure
         raise("Node {0} cannot be saved due to unexpected transform node".format(node.GetName()))
-    
+
     # Save using a temporary storage node to ensure that saving path, format, etc. is kept unchanged
     if node.IsA("vtkMRMLModelNode"):
       if not self.modelStorageNode:
@@ -479,7 +895,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         continue
       self.saveNode(chordNode, outputFolder, commonParentTransformNode, enableTransformChange=True)
       slicer.app.processEvents()
-    
+
     self.deleteTemporaryStorageNodes()
     logging.info("Export is completed to foler: "+outputFolder)
 

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>368</width>
-    <height>895</height>
+    <height>971</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
@@ -218,7 +218,17 @@
          <string>Leaflet 1</string>
         </property>
         <layout class="QGridLayout" name="gridLayout_2">
-         <item row="2" column="1">
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_8">
+           <property name="text">
+            <string>Leaflet model:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1" colspan="2">
+          <widget class="QLineEdit" name="chordBundleNameEdit1"/>
+         </item>
+         <item row="3" column="1">
           <widget class="qMRMLNodeComboBox" name="marginCurveNodeComboBox1">
            <property name="nodeTypes">
             <stringlist>
@@ -233,19 +243,8 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_9">
-           <property name="text">
-            <string>Margin curve:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_8">
-           <property name="text">
-            <string>Leaflet model:</string>
-           </property>
-          </widget>
+         <item row="3" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="marginCurvePlaceWidget1"/>
          </item>
          <item row="0" column="0">
           <widget class="QLabel" name="label_11">
@@ -254,14 +253,10 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="0">
-          <widget class="QLabel" name="label_10">
-           <property name="text">
-            <string>Secondary curve</string>
-           </property>
-          </widget>
+         <item row="4" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="secondaryCurvePlaceWidget1"/>
          </item>
-         <item row="3" column="1">
+         <item row="4" column="1">
           <widget class="qMRMLNodeComboBox" name="secondaryCurveNodeComboBox1">
            <property name="nodeTypes">
             <stringlist>
@@ -273,14 +268,19 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="2">
-          <widget class="qSlicerMarkupsPlaceWidget" name="secondaryCurvePlaceWidget1"/>
+         <item row="3" column="0">
+          <widget class="QLabel" name="label_9">
+           <property name="text">
+            <string>Margin curve:</string>
+           </property>
+          </widget>
          </item>
-         <item row="2" column="2">
-          <widget class="qSlicerMarkupsPlaceWidget" name="marginCurvePlaceWidget1"/>
-         </item>
-         <item row="0" column="1" colspan="2">
-          <widget class="QLineEdit" name="chordBundleNameEdit1"/>
+         <item row="4" column="0">
+          <widget class="QLabel" name="label_10">
+           <property name="text">
+            <string>Secondary curve</string>
+           </property>
+          </widget>
          </item>
          <item row="1" column="1" colspan="2">
           <widget class="qMRMLNodeComboBox" name="leafletModelNodeComboBox1">
@@ -294,6 +294,32 @@
            </property>
           </widget>
          </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_20">
+           <property name="text">
+            <string>Leaflet boundary:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="qMRMLNodeComboBox" name="leafletBoundaryMarkupsNodeComboBox1">
+           <property name="toolTip">
+            <string>Leaflet boundary markups node, used for NURBS surface export</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist>
+             <string>vtkMRMLMarkupsFiducialNode</string>
+             <string>vtkMRMLMarkupsClosedCurveNode</string>
+            </stringlist>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="leafletBoundaryMarkupsNodePlaceWidget1"/>
+         </item>
         </layout>
        </widget>
       </item>
@@ -303,17 +329,50 @@
          <string>Leaflet 2</string>
         </property>
         <layout class="QGridLayout" name="gridLayout_3">
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_12">
+         <item row="5" column="0">
+          <widget class="QLabel" name="label_15">
            <property name="text">
-            <string>Margin curve:</string>
+            <string>Secondary curve</string>
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_13">
-           <property name="text">
-            <string>Leaflet model:</string>
+         <item row="5" column="1">
+          <widget class="qMRMLNodeComboBox" name="secondaryCurveNodeComboBox2">
+           <property name="nodeTypes">
+            <stringlist>
+             <string>vtkMRMLMarkupsCurveNode</string>
+            </stringlist>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1" colspan="2">
+          <widget class="qMRMLNodeComboBox" name="leafletModelNodeComboBox2">
+           <property name="nodeTypes">
+            <stringlist>
+             <string>vtkMRMLModelNode</string>
+            </stringlist>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="qMRMLNodeComboBox" name="leafletBoundaryMarkupsNodeComboBox2">
+           <property name="toolTip">
+            <string>Leaflet boundary markups node, used for NURBS surface export</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist>
+             <string>vtkMRMLMarkupsFiducialNode</string>
+             <string>vtkMRMLMarkupsClosedCurveNode</string>
+            </stringlist>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
            </property>
           </widget>
          </item>
@@ -324,14 +383,37 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="0">
-          <widget class="QLabel" name="label_15">
+         <item row="5" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="secondaryCurvePlaceWidget2"/>
+         </item>
+         <item row="4" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="marginCurvePlaceWidget2"/>
+         </item>
+         <item row="0" column="1" colspan="2">
+          <widget class="QLineEdit" name="chordBundleNameEdit2"/>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_21">
            <property name="text">
-            <string>Secondary curve</string>
+            <string>Leaflet boundary:</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_13">
+           <property name="text">
+            <string>Leaflet model:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="label_12">
+           <property name="text">
+            <string>Margin curve:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
           <widget class="qMRMLNodeComboBox" name="marginCurveNodeComboBox2">
            <property name="nodeTypes">
             <stringlist>
@@ -347,37 +429,7 @@
           </widget>
          </item>
          <item row="2" column="2">
-          <widget class="qSlicerMarkupsPlaceWidget" name="marginCurvePlaceWidget2"/>
-         </item>
-         <item row="3" column="1">
-          <widget class="qMRMLNodeComboBox" name="secondaryCurveNodeComboBox2">
-           <property name="nodeTypes">
-            <stringlist>
-             <string>vtkMRMLMarkupsCurveNode</string>
-            </stringlist>
-           </property>
-           <property name="renameEnabled">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="2">
-          <widget class="qSlicerMarkupsPlaceWidget" name="secondaryCurvePlaceWidget2"/>
-         </item>
-         <item row="0" column="1" colspan="2">
-          <widget class="QLineEdit" name="chordBundleNameEdit2"/>
-         </item>
-         <item row="1" column="1" colspan="2">
-          <widget class="qMRMLNodeComboBox" name="leafletModelNodeComboBox2">
-           <property name="nodeTypes">
-            <stringlist>
-             <string>vtkMRMLModelNode</string>
-            </stringlist>
-           </property>
-           <property name="noneEnabled">
-            <bool>true</bool>
-           </property>
-          </widget>
+          <widget class="qSlicerMarkupsPlaceWidget" name="leafletBoundaryMarkupsNodePlaceWidget2"/>
          </item>
         </layout>
        </widget>
@@ -388,22 +440,21 @@
          <string>Leaflet 3</string>
         </property>
         <property name="collapsed">
-         <bool>true</bool>
+         <bool>false</bool>
         </property>
         <layout class="QGridLayout" name="gridLayout_4">
-         <item row="2" column="0">
+         <item row="4" column="0">
           <widget class="QLabel" name="label_16">
            <property name="text">
             <string>Margin curve:</string>
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_17">
-           <property name="text">
-            <string>Leaflet model:</string>
-           </property>
-          </widget>
+         <item row="4" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="marginCurvePlaceWidget3"/>
+         </item>
+         <item row="0" column="1" colspan="2">
+          <widget class="QLineEdit" name="chordBundleNameEdit3"/>
          </item>
          <item row="0" column="0">
           <widget class="QLabel" name="label_18">
@@ -412,14 +463,33 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="0">
+         <item row="5" column="0">
           <widget class="QLabel" name="label_19">
            <property name="text">
             <string>Secondary curve</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
+         <item row="5" column="1">
+          <widget class="qMRMLNodeComboBox" name="secondaryCurveNodeComboBox3">
+           <property name="nodeTypes">
+            <stringlist>
+             <string>vtkMRMLMarkupsCurveNode</string>
+            </stringlist>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_22">
+           <property name="text">
+            <string>Leaflet boundary:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
           <widget class="qMRMLNodeComboBox" name="marginCurveNodeComboBox3">
            <property name="nodeTypes">
             <stringlist>
@@ -434,26 +504,15 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="2">
-          <widget class="qSlicerMarkupsPlaceWidget" name="marginCurvePlaceWidget3"/>
-         </item>
-         <item row="3" column="1">
-          <widget class="qMRMLNodeComboBox" name="secondaryCurveNodeComboBox3">
-           <property name="nodeTypes">
-            <stringlist>
-             <string>vtkMRMLMarkupsCurveNode</string>
-            </stringlist>
-           </property>
-           <property name="renameEnabled">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="2">
+         <item row="5" column="2">
           <widget class="qSlicerMarkupsPlaceWidget" name="secondaryCurvePlaceWidget3"/>
          </item>
-         <item row="0" column="1" colspan="2">
-          <widget class="QLineEdit" name="chordBundleNameEdit3"/>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_17">
+           <property name="text">
+            <string>Leaflet model:</string>
+           </property>
+          </widget>
          </item>
          <item row="1" column="1" colspan="2">
           <widget class="qMRMLNodeComboBox" name="leafletModelNodeComboBox3">
@@ -467,6 +526,89 @@
            </property>
           </widget>
          </item>
+         <item row="2" column="1">
+          <widget class="qMRMLNodeComboBox" name="leafletBoundaryMarkupsNodeComboBox3">
+           <property name="toolTip">
+            <string>Leaflet boundary markups node, used for NURBS surface export</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist>
+             <string>vtkMRMLMarkupsFiducialNode</string>
+             <string>vtkMRMLMarkupsClosedCurveNode</string>
+            </stringlist>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="2">
+          <widget class="qSlicerMarkupsPlaceWidget" name="leafletBoundaryMarkupsNodePlaceWidget3"/>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
+        <property name="title">
+         <string>Advanced</string>
+        </property>
+        <layout class="QFormLayout" name="formLayout_3">
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_23">
+           <property name="text">
+            <string>Leaflet surface mesh resolution:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkSliderWidget" name="leafletSurfaceMeshResolution">
+           <property name="decimals">
+            <number>0</number>
+           </property>
+           <property name="singleStep">
+            <double>0.001000000000000</double>
+           </property>
+           <property name="pageStep">
+            <double>5.000000000000000</double>
+           </property>
+           <property name="minimum">
+            <double>5.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>200.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>30.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_24">
+           <property name="text">
+            <string>Leaflet surface NURBS resolution:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkSliderWidget" name="leafletSurfaceNurbsResolution">
+           <property name="decimals">
+            <number>0</number>
+           </property>
+           <property name="pageStep">
+            <double>5.000000000000000</double>
+           </property>
+           <property name="minimum">
+            <double>4.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>50.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>20.000000000000000</double>
+           </property>
+          </widget>
+         </item>
         </layout>
        </widget>
       </item>
@@ -474,6 +616,13 @@
        <widget class="QPushButton" name="createChordsButton">
         <property name="text">
          <string>Create chords</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="createLeafletSurfacesButton">
+        <property name="text">
+         <string>Create leaflet surfaces</string>
         </property>
        </widget>
       </item>
@@ -539,6 +688,11 @@
    <class>ctkPathLineEdit</class>
    <extends>QWidget</extends>
    <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>
@@ -620,12 +774,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>151</x>
-     <y>375</y>
+     <x>222</x>
+     <y>402</y>
     </hint>
     <hint type="destinationlabel">
-     <x>246</x>
-     <y>371</y>
+     <x>338</x>
+     <y>402</y>
     </hint>
    </hints>
   </connection>
@@ -636,12 +790,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>165</x>
-     <y>514</y>
+     <x>222</x>
+     <y>558</y>
     </hint>
     <hint type="destinationlabel">
-     <x>231</x>
-     <y>514</y>
+     <x>338</x>
+     <y>558</y>
     </hint>
    </hints>
   </connection>
@@ -652,12 +806,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>157</x>
-     <y>654</y>
+     <x>222</x>
+     <y>713</y>
     </hint>
     <hint type="destinationlabel">
-     <x>232</x>
-     <y>659</y>
+     <x>338</x>
+     <y>713</y>
     </hint>
    </hints>
   </connection>
@@ -668,12 +822,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>178</x>
-     <y>404</y>
+     <x>222</x>
+     <y>426</y>
     </hint>
     <hint type="destinationlabel">
-     <x>259</x>
-     <y>400</y>
+     <x>338</x>
+     <y>426</y>
     </hint>
    </hints>
   </connection>
@@ -684,12 +838,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>177</x>
-     <y>540</y>
+     <x>222</x>
+     <y>582</y>
     </hint>
     <hint type="destinationlabel">
-     <x>252</x>
-     <y>539</y>
+     <x>338</x>
+     <y>582</y>
     </hint>
    </hints>
   </connection>
@@ -700,12 +854,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>159</x>
-     <y>687</y>
+     <x>222</x>
+     <y>737</y>
     </hint>
     <hint type="destinationlabel">
-     <x>245</x>
-     <y>685</y>
+     <x>338</x>
+     <y>737</y>
     </hint>
    </hints>
   </connection>
@@ -720,8 +874,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>148</x>
-     <y>368</y>
+     <x>222</x>
+     <y>402</y>
     </hint>
    </hints>
   </connection>
@@ -736,8 +890,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>148</x>
-     <y>482</y>
+     <x>269</x>
+     <y>510</y>
     </hint>
    </hints>
   </connection>
@@ -752,8 +906,8 @@
      <y>3</y>
     </hint>
     <hint type="destinationlabel">
-     <x>134</x>
-     <y>628</y>
+     <x>255</x>
+     <y>665</y>
     </hint>
    </hints>
   </connection>
@@ -768,8 +922,8 @@
      <y>6</y>
     </hint>
     <hint type="destinationlabel">
-     <x>169</x>
-     <y>377</y>
+     <x>222</x>
+     <y>402</y>
     </hint>
    </hints>
   </connection>
@@ -800,8 +954,8 @@
      <y>7</y>
     </hint>
     <hint type="destinationlabel">
-     <x>183</x>
-     <y>513</y>
+     <x>222</x>
+     <y>558</y>
     </hint>
    </hints>
   </connection>
@@ -816,8 +970,8 @@
      <y>6</y>
     </hint>
     <hint type="destinationlabel">
-     <x>190</x>
-     <y>654</y>
+     <x>222</x>
+     <y>713</y>
     </hint>
    </hints>
   </connection>
@@ -832,8 +986,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>245</x>
-     <y>371</y>
+     <x>338</x>
+     <y>402</y>
     </hint>
    </hints>
   </connection>
@@ -848,8 +1002,8 @@
      <y>5</y>
     </hint>
     <hint type="destinationlabel">
-     <x>231</x>
-     <y>510</y>
+     <x>338</x>
+     <y>558</y>
     </hint>
    </hints>
   </connection>
@@ -864,8 +1018,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>262</x>
-     <y>651</y>
+     <x>338</x>
+     <y>713</y>
     </hint>
    </hints>
   </connection>
@@ -880,8 +1034,8 @@
      <y>7</y>
     </hint>
     <hint type="destinationlabel">
-     <x>126</x>
-     <y>398</y>
+     <x>222</x>
+     <y>426</y>
     </hint>
    </hints>
   </connection>
@@ -896,8 +1050,8 @@
      <y>7</y>
     </hint>
     <hint type="destinationlabel">
-     <x>149</x>
-     <y>536</y>
+     <x>222</x>
+     <y>582</y>
     </hint>
    </hints>
   </connection>
@@ -912,8 +1066,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>164</x>
-     <y>683</y>
+     <x>222</x>
+     <y>737</y>
     </hint>
    </hints>
   </connection>
@@ -928,8 +1082,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>233</x>
-     <y>397</y>
+     <x>338</x>
+     <y>426</y>
     </hint>
    </hints>
   </connection>
@@ -944,8 +1098,8 @@
      <y>6</y>
     </hint>
     <hint type="destinationlabel">
-     <x>286</x>
-     <y>540</y>
+     <x>338</x>
+     <y>582</y>
     </hint>
    </hints>
   </connection>
@@ -960,8 +1114,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>304</x>
-     <y>679</y>
+     <x>338</x>
+     <y>737</y>
     </hint>
    </hints>
   </connection>
@@ -1042,6 +1196,150 @@
     <hint type="destinationlabel">
      <x>274</x>
      <y>234</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ValveFemExport</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>leafletBoundaryMarkupsNodeComboBox3</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>364</x>
+     <y>663</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>222</x>
+     <y>688</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ValveFemExport</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>leafletBoundaryMarkupsNodeComboBox2</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>365</x>
+     <y>494</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>222</x>
+     <y>530</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ValveFemExport</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>leafletBoundaryMarkupsNodeComboBox1</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>361</x>
+     <y>375</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>222</x>
+     <y>372</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ValveFemExport</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>leafletBoundaryMarkupsNodePlaceWidget1</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>363</x>
+     <y>336</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>314</x>
+     <y>371</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ValveFemExport</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>leafletBoundaryMarkupsNodePlaceWidget2</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>366</x>
+     <y>471</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>322</x>
+     <y>526</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ValveFemExport</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>leafletBoundaryMarkupsNodePlaceWidget3</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>367</x>
+     <y>632</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>303</x>
+     <y>682</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>leafletBoundaryMarkupsNodeComboBox1</sender>
+   <signal>currentNodeChanged(vtkMRMLNode*)</signal>
+   <receiver>leafletBoundaryMarkupsNodePlaceWidget1</receiver>
+   <slot>setCurrentNode(vtkMRMLNode*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>150</x>
+     <y>373</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>292</x>
+     <y>374</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>leafletBoundaryMarkupsNodeComboBox2</sender>
+   <signal>currentNodeChanged(vtkMRMLNode*)</signal>
+   <receiver>leafletBoundaryMarkupsNodePlaceWidget2</receiver>
+   <slot>setCurrentNode(vtkMRMLNode*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>182</x>
+     <y>522</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>289</x>
+     <y>525</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>leafletBoundaryMarkupsNodeComboBox3</sender>
+   <signal>currentNodeChanged(vtkMRMLNode*)</signal>
+   <receiver>leafletBoundaryMarkupsNodePlaceWidget3</receiver>
+   <slot>setCurrentNode(vtkMRMLNode*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>187</x>
+     <y>678</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>253</x>
+     <y>688</y>
     </hint>
    </hints>
   </connection>
