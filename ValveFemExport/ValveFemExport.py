@@ -566,29 +566,12 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     return modelToXYPlaneTransformNode
 
   @staticmethod
-  def nurbsDistanceFromSurface(uv, surf, xyz):
-    if uv[0]<=0 or uv[0]>=1 or uv[1]<=0 or uv[1]>=1:
-        return 1000
-    dist = np.linalg.norm(surf.evaluate_single(uv)-xyz)
-    return dist
-
-  @staticmethod
-  def nurbsUvFromXyz(surf, xyz):
-    from scipy.optimize import minimize
-    res = minimize(
-        lambda uv, surf=surf, xyz=xyz: ValveFemExportLogic.nurbsDistanceFromSurface(uv, surf, xyz),
-        np.array([0.5, 0.5]),
-        method='nelder-mead')
-    return res.x
-
-  @staticmethod
   def transformPolydata(polydata, transform):
     transformFilter = vtk.vtkTransformPolyDataFilter()
     transformFilter.SetTransform(transform)
     transformFilter.SetInputData(polydata)
     transformFilter.Update()
     return transformFilter.GetOutput()
-
 
   @staticmethod
   def fitNurbsSurfaceToModel(medialSurfaceNodeInput, boundaryCurveNodeInput,
@@ -697,36 +680,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Plot the interpolated surface
     surf.delta = resolution
 
-    # if trim_curve:
-    #     # Get trim points
-    #     eventTimes.append(('get trim points', time.time()))
-    #     timer=vtk.vtkTimerLog()
-    #     numberOfCurveLandmarkPoints = 80
-    #     boundaryPoints = vtk.vtkPoints()
-    #     curvePoints = boundaryCurveNode.GetCurvePointsWorld()
-    #     curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
-    #     samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
-    #     slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(curvePoints, boundaryPoints, samplingDistance, True)
-    #     boundaryPointsUv = []
-    #     for pointIndex in range(numberOfCurveLandmarkPoints+1):
-    #         uv = ValveFemExportLogic.nurbsUvFromXyz(surf, np.array(boundaryPoints.GetPoint(pointIndex % numberOfCurveLandmarkPoints)))
-    #         boundaryPointsUv.append([uv[0], uv[1]])
-
-    #     # Create BSpline curve
-    #     eventTimes.append(('create bspline', time.time()))
-    #     from geomdl import BSpline
-    #     from geomdl import knotvector
-    #     tcrv = BSpline.Curve()
-    #     tcrv.degree = 2
-    #     tcrv.ctrlpts = boundaryPointsUv
-    #     tcrv.opt = ['reversed', 1]
-    #     tcrv.knotvector = knotvector.generate(tcrv.degree, len(tcrv.ctrlpts))
-    #     trim_curves = [tcrv]
-
-    #     # Set trim curves (as a list)
-    #     surf.trims = trim_curves
-    #     surf.tessellator = tessellate.TrimTessellate()
-
     eventTimes.append(('export to vtk', time.time()))
     tempDir = slicer.app.temporaryPath
     timestampStr = qt.QDateTime().currentDateTime().toString("yyyy-MM-dd_hh+mm+ss.zzz")
@@ -743,10 +696,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         # Get trim points
         eventTimes.append(('get trim points', time.time()))
         timer=vtk.vtkTimerLog()
-        #numberOfCurveLandmarkPoints = 80
-        #curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
-        #samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
-        #boundaryCurveNode.ResampleCurveWorld(samplingDistance)
         trimModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
         trimModel.SetToolName("Curve cut")
         trimModel.SetNodeReferenceID("CurveCut.InputModel", tessellatedModelNode.GetID())
