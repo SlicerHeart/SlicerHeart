@@ -202,6 +202,12 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # Signals are not blocked so that place widgets are updated
       nodeSelector.setCurrentNode(self._parameterNode.GetNodeReference(nodeReferenceRole))
 
+    # Allow free moving of papillary muscle tips (we don't want it to stick to the leaflets)
+    papillaryMuscleTipsNode = self._parameterNode.GetNodeReference("PapillaryMuscleTips")
+    if papillaryMuscleTipsNode:
+      papillaryMuscleTipsNode.CreateDefaultDisplayNodes()
+      papillaryMuscleTipsNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
+
     self.ui.chordBundleNameEdit1.text = self._parameterNode.GetParameter("ChordName1")
     self.ui.chordBundleNameEdit2.text = self._parameterNode.GetParameter("ChordName2")
     self.ui.chordBundleNameEdit3.text = self._parameterNode.GetParameter("ChordName3")
@@ -330,14 +336,22 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
   def onCreateChords(self):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-    parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
-    chordsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Chords")
-    if chordsFolderItemId:
-      shNode.RemoveItemChildren(chordsFolderItemId)
-    else:
-      chordsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Chords")
-    self.logic.createChordBundles(self._parameterNode, chordsFolderItemId)
+    slicer.app.setOverrideCursor(qt.Qt.WaitCursor)
+    try:
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
+      chordsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Chords")
+      if chordsFolderItemId:
+        shNode.RemoveItemChildren(chordsFolderItemId)
+      else:
+        chordsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Chords")
+      self.logic.createChordBundles(self._parameterNode, chordsFolderItemId, self.logCallback)
+    except Exception as e:
+      import traceback
+      traceback.print_exc()
+      slicer.util.errorDisplay("Failed to create chords: "+str(e))
+    slicer.app.restoreOverrideCursor()
+    self.logCallback("")
 
   def logCallback(self, message):
     slicer.util.showStatusMessage(message)
@@ -405,7 +419,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter("LeafletSurfaceNurbsResolution"):
       parameterNode.SetParameter("LeafletSurfaceNurbsResolution", "20")
     if not parameterNode.GetParameter("LeafletSurfaceMeshResolution"):
-      parameterNode.SetParameter("LeafletSurfaceMeshResolution", "30")
+      parameterNode.SetParameter("LeafletSurfaceMeshResolution", "20")
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     if parameterNode.GetHideFromEditors():
       parameterNode.SetHideFromEditors(False)
@@ -452,26 +466,33 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", "{0}-{1}-{2:02d}".format(baseName,closestStartPointName,endPointIndex))
         line.CreateDefaultDisplayNodes()
         line.GetDisplayNode().SetSelectedColor(color)
+        line.GetDisplayNode().SetPropertiesLabelVisibility(False)
         line.AddControlPointWorld(vtk.vtkVector3d(closestStartPoint_World), closestStartPointName)
         line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
         # Put under subject hierarchy folder
         shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
 
-  def createChordBundles(self, parameterNode, chordsFolderItemId):
+  def createChordBundles(self, parameterNode, chordsFolderItemId, logCallback=None):
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
     colors = [[1.0,0.3,0.3], [1.0,0.6,0.6], [0.3,1.0,0.3], [0.8,1.0,0.8], [0.3,0.3,1], [0.8,0.8,1.0]]
-    for bundleIndex in range(3):
-      leafletSurfaceModel = parameterNode.GetNodeReference("LeafletModel"+str(bundleIndex+1))
-      leafletMarginCurve = parameterNode.GetNodeReference("MarginCurve"+str(bundleIndex+1))
-      leafletSecondaryCurve = parameterNode.GetNodeReference("SecondaryCurve"+str(bundleIndex+1))
-      if not leafletSurfaceModel:
-        continue
-      if leafletMarginCurve:
-        self.createChordBundle(leafletSurfaceModel.GetName()+'-primary', colors[bundleIndex*2],
-          papillaryMuscleTips, leafletMarginCurve, leafletSurfaceModel, chordsFolderItemId)
-      if leafletSecondaryCurve:
-        self.createChordBundle(leafletSurfaceModel.GetName()+'-secondary', colors[bundleIndex*2+1],
-          papillaryMuscleTips, leafletSecondaryCurve, leafletSurfaceModel, chordsFolderItemId)
+    slicer.app.pauseRender()
+    try:
+      for bundleIndex in range(3):
+        leafletSurfaceModel = parameterNode.GetNodeReference("LeafletModel"+str(bundleIndex+1))
+        leafletMarginCurve = parameterNode.GetNodeReference("MarginCurve"+str(bundleIndex+1))
+        leafletSecondaryCurve = parameterNode.GetNodeReference("SecondaryCurve"+str(bundleIndex+1))
+        if not leafletSurfaceModel:
+          continue
+        if logCallback:
+          logCallback(f"Creating chord bundles for {leafletSurfaceModel.GetName()}...")
+        if leafletMarginCurve:
+          self.createChordBundle(leafletSurfaceModel.GetName()+'-primary', colors[bundleIndex*2],
+            papillaryMuscleTips, leafletMarginCurve, leafletSurfaceModel, chordsFolderItemId)
+        if leafletSecondaryCurve:
+          self.createChordBundle(leafletSurfaceModel.GetName()+'-secondary', colors[bundleIndex*2+1],
+            papillaryMuscleTips, leafletSecondaryCurve, leafletSurfaceModel, chordsFolderItemId)
+    finally:
+      slicer.app.resumeRender()
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
@@ -492,7 +513,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     surfaceTransformTargetPoints = vtk.vtkPoints()
     curvePoints = boundaryCurveNode.GetCurvePointsWorld()
     curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
-    #numberOfCurvePoints = boundaryCurveNode.GetNumberOfPoints()
     # subtract a little bit (0.1 = 10th of a sampling distance) to make sure we don't go over the curve length
     # because we could then get one less sample point
     samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
@@ -516,8 +536,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     surfaceTransformFilter = vtk.vtkTransformPolyDataFilter()
     surfaceTransformFilter.SetTransform(surfaceTransform)
     surfaceTransformFilter.SetInputConnection(surfaceUnitRectangle.GetOutputPort())
-    #surfaceTransformFilter.Update()
-    #return surfaceTransformFilter.GetOutput()
 
     surfacePolyDataNormals = vtk.vtkPolyDataNormals()
     surfacePolyDataNormals.SetInputConnection(surfaceTransformFilter.GetOutputPort())
@@ -679,35 +697,35 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Plot the interpolated surface
     surf.delta = resolution
 
-    if trim_curve:
-        # Get trim points
-        eventTimes.append(('get trim points', time.time()))
-        timer=vtk.vtkTimerLog()
-        numberOfCurveLandmarkPoints = 80
-        boundaryPoints = vtk.vtkPoints()
-        curvePoints = boundaryCurveNode.GetCurvePointsWorld()
-        curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
-        samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
-        slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(curvePoints, boundaryPoints, samplingDistance, True)
-        boundaryPointsUv = []
-        for pointIndex in range(numberOfCurveLandmarkPoints+1):
-            uv = ValveFemExportLogic.nurbsUvFromXyz(surf, np.array(boundaryPoints.GetPoint(pointIndex % numberOfCurveLandmarkPoints)))
-            boundaryPointsUv.append([uv[0], uv[1]])
+    # if trim_curve:
+    #     # Get trim points
+    #     eventTimes.append(('get trim points', time.time()))
+    #     timer=vtk.vtkTimerLog()
+    #     numberOfCurveLandmarkPoints = 80
+    #     boundaryPoints = vtk.vtkPoints()
+    #     curvePoints = boundaryCurveNode.GetCurvePointsWorld()
+    #     curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
+    #     samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
+    #     slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(curvePoints, boundaryPoints, samplingDistance, True)
+    #     boundaryPointsUv = []
+    #     for pointIndex in range(numberOfCurveLandmarkPoints+1):
+    #         uv = ValveFemExportLogic.nurbsUvFromXyz(surf, np.array(boundaryPoints.GetPoint(pointIndex % numberOfCurveLandmarkPoints)))
+    #         boundaryPointsUv.append([uv[0], uv[1]])
 
-        # Create BSpline curve
-        eventTimes.append(('create bspline', time.time()))
-        from geomdl import BSpline
-        from geomdl import knotvector
-        tcrv = BSpline.Curve()
-        tcrv.degree = 2
-        tcrv.ctrlpts = boundaryPointsUv
-        tcrv.opt = ['reversed', 1]
-        tcrv.knotvector = knotvector.generate(tcrv.degree, len(tcrv.ctrlpts))
-        trim_curves = [tcrv]
+    #     # Create BSpline curve
+    #     eventTimes.append(('create bspline', time.time()))
+    #     from geomdl import BSpline
+    #     from geomdl import knotvector
+    #     tcrv = BSpline.Curve()
+    #     tcrv.degree = 2
+    #     tcrv.ctrlpts = boundaryPointsUv
+    #     tcrv.opt = ['reversed', 1]
+    #     tcrv.knotvector = knotvector.generate(tcrv.degree, len(tcrv.ctrlpts))
+    #     trim_curves = [tcrv]
 
-        # Set trim curves (as a list)
-        surf.trims = trim_curves
-        surf.tessellator = tessellate.TrimTessellate()
+    #     # Set trim curves (as a list)
+    #     surf.trims = trim_curves
+    #     surf.tessellator = tessellate.TrimTessellate()
 
     eventTimes.append(('export to vtk', time.time()))
     tempDir = slicer.app.temporaryPath
@@ -719,6 +737,23 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     tessellatedModelNode = slicer.util.loadNodeFromFile(tempSurfaceFilePath, 'ModelFile', {"coordinateSystem": "RAS"})
     tessellatedModelNode.SetName(medialSurfaceNodeInput.GetName()+'-fit')
+    tessellatedModelNode.GetPolyData().SetVerts(None)  # presence of vertices would prevent most processing opeprations
+
+    if trim_curve:
+        # Get trim points
+        eventTimes.append(('get trim points', time.time()))
+        timer=vtk.vtkTimerLog()
+        #numberOfCurveLandmarkPoints = 80
+        #curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
+        #samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
+        #boundaryCurveNode.ResampleCurveWorld(samplingDistance)
+        trimModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
+        trimModel.SetToolName("Curve cut")
+        trimModel.SetNodeReferenceID("CurveCut.InputModel", tessellatedModelNode.GetID())
+        trimModel.SetNodeReferenceID("CurveCut.InputCurve", boundaryCurveNode.GetID())
+        trimModel.SetNodeReferenceID("CurveCut.OutputInside", tessellatedModelNode.GetID())
+        trimModelTool = slicer.vtkSlicerDynamicModelerCurveCutTool()
+        trimModelTool.Run(trimModel)
 
     mesh = tessellatedModelNode.GetPolyData()
 
@@ -731,7 +766,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       smoothFilter = vtk.vtkSmoothPolyDataFilter()
       smoothFilter.SetInputData(0, mesh)
       smoothFilter.SetInputData(1, mesh)  # constrain smoothed points to the surface
-      smoothFilter.SetNumberOfIterations(120)
+      smoothFilter.SetNumberOfIterations(1000)
       smoothFilter.SetRelaxationFactor(0.5)
       smoothFilter.Update()
       mesh = smoothFilter.GetOutput()
@@ -741,9 +776,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       eventTimes.append(('cleaning', time.time()))
       cleaner = vtk.vtkCleanPolyData()
       cleaner.SetInputData(mesh)
-      #cleaner.SetInputData(smoothFilter.GetOutput())
-      #cleaner.SetAbsoluteTolerance(pointMergeTolerance)
-      #cleaner.ToleranceIsAbsoluteOn()
+      # Tolerance=0.01 removes ill-shaped triangles without removing significant details
+      cleaner.SetTolerance(0.01)
       cleaner.Update()
       mesh = cleaner.GetOutput()
 
