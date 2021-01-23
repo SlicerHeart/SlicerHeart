@@ -107,6 +107,8 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.parameterEditWidgets = [
       (self.ui.leafletSurfaceNurbsResolution, "LeafletSurfaceNurbsResolution"),
       (self.ui.leafletSurfaceMeshResolution, "LeafletSurfaceMeshResolution"),
+      (self.ui.createShellModelCheckBox, "CreateLeafletSurfaceShellModel"),
+      (self.ui.createChordsCheckBox, "CreateChords"),
       ]
 
     # Create a new parameterNode
@@ -129,8 +131,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Connections
     self.ui.parameterNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setParameterNode)
     self.ui.heartValveImportButton.connect('clicked(bool)', self.onHeartValveImport)
-    self.ui.createChordsButton.connect('clicked(bool)', self.onCreateChords)
-    self.ui.createLeafletSurfacesButton.connect('clicked(bool)', self.onCreateLeafletSurfaces)
+    self.ui.generateButton.connect('clicked(bool)', self.onGenerate)
     self.ui.exportButton.connect('clicked(bool)', self.onExport)
     slicer.util.addParameterEditWidgetConnections(self.parameterEditWidgets, self.updateParameterNodeFromGUI)
 
@@ -211,6 +212,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.chordBundleNameEdit1.text = self._parameterNode.GetParameter("ChordName1")
     self.ui.chordBundleNameEdit2.text = self._parameterNode.GetParameter("ChordName2")
     self.ui.chordBundleNameEdit3.text = self._parameterNode.GetParameter("ChordName3")
+
+    self.ui.marginCurveNodeComboBox1.baseName = self.ui.chordBundleNameEdit1.text + " margin curve"
+    self.ui.marginCurveNodeComboBox2.baseName = self.ui.chordBundleNameEdit2.text + " margin curve"
+    self.ui.marginCurveNodeComboBox3.baseName = self.ui.chordBundleNameEdit3.text + " margin curve"
 
     self.ui.secondaryCurveNodeComboBox1.baseName = self.ui.chordBundleNameEdit1.text + " secondary curve"
     self.ui.secondaryCurveNodeComboBox2.baseName = self.ui.chordBundleNameEdit2.text + " secondary curve"
@@ -293,85 +298,92 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID("AnnulusCurve", valveModel.getAnnulusContourMarkupNode().GetID())
     self._parameterNode.SetNodeReferenceID("AnnulusModel", valveModel.getAnnulusContourModelNode().GetID())
 
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
+
     # Is not set for now:
     # "PapillaryMuscleTips"
     # "MarginCurve1", "SecondaryCurve1"
     # "MarginCurve2", "SecondaryCurve2"
     # "MarginCurve3", "SecondaryCurve3"
 
-    # Leaflet models
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-    parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
-    leafletModelsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflet models")
-    if leafletModelsFolderItemId:
-      shNode.RemoveItemChildren(leafletModelsFolderItemId)
-    else:
-      leafletModelsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflet models")
-    slicer.modules.segmentations.logic().ExportAllSegmentsToModels(valveModel.getLeafletSegmentationNode(), leafletModelsFolderItemId)
-    # Delete annulus mask model
-    annulusMaskModelId = shNode.GetItemChildWithName(leafletModelsFolderItemId, "Annulus mask")
-    annulusMaskModeNode = shNode.GetItemDataNode(annulusMaskModelId)
-    if annulusMaskModeNode:
-      slicer.mrmlScene.RemoveNode(annulusMaskModeNode)
-    # Put back folder under export folder
-    shNode.SetItemParent(leafletModelsFolderItemId, parameterNodeItemId)
+    # Shell model (created from leaflet surface by default)
+    # or closed surface model (created from leaflet segmentation by default)
+    leafletSurfaceShellModel = self._parameterNode.GetParameter("CreateLeafletSurfaceShellModel") == "true"
+
+    if not leafletSurfaceShellModel:
+      # Get closed surface model from segmentation
+      leafletModelsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflet segmentation")
+      if leafletModelsFolderItemId:
+        shNode.RemoveItemChildren(leafletModelsFolderItemId)
+      else:
+        leafletModelsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflet segmentation")
+      slicer.modules.segmentations.logic().ExportAllSegmentsToModels(valveModel.getLeafletSegmentationNode(), leafletModelsFolderItemId)
+      # Delete annulus mask model
+      annulusMaskModelId = shNode.GetItemChildWithName(leafletModelsFolderItemId, "Annulus mask")
+      annulusMaskModeNode = shNode.GetItemDataNode(annulusMaskModelId)
+      if annulusMaskModeNode:
+        slicer.mrmlScene.RemoveNode(annulusMaskModeNode)
+      # Put back folder under export folder
+      shNode.SetItemParent(leafletModelsFolderItemId, parameterNodeItemId)
 
     for leafletIndex, leafletModel in enumerate(valveModel.leafletModels):
-
+      # Get leaflet name
       import re
       result = re.match("[^ ]+ (.+) leaflet", leafletModel.getName())
       if result:
         chordName = result.groups()[0]
         self._parameterNode.SetParameter("ChordName"+str(leafletIndex+1), chordName)
 
+      # Get leaflet boundary
       leafletBoundaryMarkupNode = leafletModel.getSurfaceBoundaryMarkupNode()
       self._parameterNode.SetNodeReferenceID("LeafletBoundaryMarkups"+str(leafletIndex+1), leafletBoundaryMarkupNode.GetID())
 
-      leafletModelId = shNode.GetItemChildWithName(leafletModelsFolderItemId, leafletModel.getLeafletSegment().GetName())
-      leafletModelNode = shNode.GetItemDataNode(leafletModelId)
+      # Get leaflet surface
+      if leafletSurfaceShellModel:
+        # Get shell model
+        leafletModelNode = leafletModel.surfaceModelNode
+        if leafletModel.surfaceModelNode.GetPolyData().GetNumberOfPoints() == 0:
+          leafletModelNode = None
+      else:
+        # Get closed surface model
+        leafletModelId = shNode.GetItemChildWithName(leafletModelsFolderItemId, leafletModel.getLeafletSegment().GetName())
+        leafletModelNode = shNode.GetItemDataNode(leafletModelId)
       self._parameterNode.SetNodeReferenceID("LeafletModel"+str(leafletIndex+1), leafletModelNode.GetID())
 
     self._parameterNode.Modified()
     self._parameterNode.EndModify(wasModified)
 
-
-  def onCreateChords(self):
-    slicer.app.setOverrideCursor(qt.Qt.WaitCursor)
-    try:
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
-      chordsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Chords")
-      if chordsFolderItemId:
-        shNode.RemoveItemChildren(chordsFolderItemId)
-      else:
-        chordsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Chords")
-      self.logic.createChordBundles(self._parameterNode, chordsFolderItemId, self.logCallback)
-    except Exception as e:
-      import traceback
-      traceback.print_exc()
-      slicer.util.errorDisplay("Failed to create chords: "+str(e))
-    slicer.app.restoreOverrideCursor()
-    self.logCallback("")
-
   def logCallback(self, message):
     slicer.util.showStatusMessage(message)
     slicer.app.processEvents()
 
-  def onCreateLeafletSurfaces(self):
+  def onGenerate(self):
     slicer.app.setOverrideCursor(qt.Qt.WaitCursor)
     try:
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
-      leafletsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflets")
-      if leafletsFolderItemId:
-        shNode.RemoveItemChildren(leafletsFolderItemId)
+      # Clear previous outputs
+      self.logic.removeSubjectHierarchyOutputFolder(self._parameterNode)
+
+      # Generate shell or copy existing closed surface mesh
+      leafletsFolderItemId = self.logic.createSubjectHierarchyOutputSubfolder(self._parameterNode, "Leaflets")
+      if self._parameterNode.GetParameter("CreateLeafletSurfaceShellModel") == 'true':
+        leafletSurfaceModels = self.logic.createLeafletSurfaces(self._parameterNode, leafletsFolderItemId, self.logCallback)
       else:
-        leafletsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflets")
-      self.logic.createLeafletSurfaces(self._parameterNode, leafletsFolderItemId, self.logCallback)
+        leafletSurfaceModels = self.logic.copyLeafletSurfaces(self._parameterNode, leafletsFolderItemId)
+
+      # Export annulus model and curve
+      annulusFolderItemId = self.logic.createSubjectHierarchyOutputSubfolder(self._parameterNode, "Annulus")
+      self.logic.copyAnnulusModels(self._parameterNode, annulusFolderItemId)
+
+      # Generate chords
+      if self._parameterNode.GetParameter("CreateChords") == "true":
+        chordsFolderItemId = self.logic.createSubjectHierarchyOutputSubfolder(self._parameterNode, "Chords")
+        self.logic.createChordBundles(self._parameterNode, chordsFolderItemId, leafletSurfaceModels, self.logCallback)
+
     except Exception as e:
       import traceback
       traceback.print_exc()
-      slicer.util.errorDisplay("Failed to create leaflet surfaces: "+str(e))
+      slicer.util.errorDisplay("Failed to generate model: "+str(e))
     slicer.app.restoreOverrideCursor()
     self.logCallback("")
 
@@ -385,12 +397,15 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       currentPath = self.ui.outputPathLineEdit.currentPath
       if not currentPath:
         raise ValueError("No output directory defined. Please select an output directory.")
-      self.logic.exportModel(self._parameterNode, currentPath)
+      commonParentTransformNode = self._parameterNode.GetNodeReference("LeafletModel1").GetParentTransformNode()
+      subjectHierarchyOutputFolder = self.logic.getSubjectHierarchyOutputFolder(self._parameterNode)
+      self.logic.exportModel(self._parameterNode, subjectHierarchyOutputFolder, currentPath, commonParentTransformNode, self.logCallback)
     except Exception as e:
       import traceback
       traceback.print_exc()
-      slicer.util.errorDisplay("Failed to export data: "+str(e))
+      slicer.util.errorDisplay("Failed to export model: "+str(e))
     slicer.app.restoreOverrideCursor()
+    self.logCallback("")
 
 #
 # ValveFemExportLogic
@@ -410,6 +425,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     ScriptedLoadableModuleLogic.__init__(self)
     self.modelStorageNode = None
     self.markupsStorageNode = None
+    self.outputSubjectHierarchyFolderName = "FEM-model"
 
   def setDefaultParameters(self, parameterNode):
     """
@@ -420,6 +436,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter("LeafletSurfaceNurbsResolution", "20")
     if not parameterNode.GetParameter("LeafletSurfaceMeshResolution"):
       parameterNode.SetParameter("LeafletSurfaceMeshResolution", "20")
+    if not parameterNode.GetParameter("CreateLeafletSurfaceShellModel"):
+      parameterNode.SetParameter("CreateLeafletSurfaceShellModel", "true")
+    if not parameterNode.GetParameter("CreateChords"):
+      parameterNode.SetParameter("CreateChords", "true")
+
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     if parameterNode.GetHideFromEditors():
       parameterNode.SetHideFromEditors(False)
@@ -441,15 +462,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         surface_World = polyTransformToWorld.GetOutput()
     else:
         surface_World = surfaceModel.GetPolyData()
-    distanceFilter = vtk.vtkImplicitPolyDataDistance()
-    distanceFilter.SetInput(surface_World)
+    pointLocator = vtk.vtkKdTreePointLocator()
+    pointLocator.SetDataSet(surface_World)
+    pointLocator.BuildLocator()
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
         endPoint_World = [0,0,0]
         endPoints.GetNthControlPointPositionWorld(endPointIndex, endPoint_World)
-        # Snap to closest point on surface
-        closestPointOnSurface_World = [0,0,0]
-        closestPointDistance = distanceFilter.EvaluateFunctionAndGetClosestPoint(endPoint_World, closestPointOnSurface_World)
-        endPoint_World = closestPointOnSurface_World
+        # Snap to closest mesh point (FEM solver requires constraint to be assigned to a point, not anywhere on the surface)
+        closestMeshPointIndex = pointLocator.FindClosestPoint(endPoint_World)
+        endPoint_World = surface_World.GetPoint(closestMeshPointIndex)
         # Find closest start point
         closestStartPointDistance2 = 1e10
         closestStartPoint_World = [0.0,0.0,0.0]
@@ -464,6 +485,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
                 closestStartPointName = startPoints.GetNthControlPointLabel(startPointIndex)
         # Create line
         line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", "{0}-{1}-{2:02d}".format(baseName,closestStartPointName,endPointIndex))
+        line.SetLocked(True)
         line.CreateDefaultDisplayNodes()
         line.GetDisplayNode().SetSelectedColor(color)
         line.GetDisplayNode().SetPropertiesLabelVisibility(False)
@@ -472,13 +494,41 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         # Put under subject hierarchy folder
         shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
 
-  def createChordBundles(self, parameterNode, chordsFolderItemId, logCallback=None):
+  def removeSubjectHierarchyOutputFolder(self, parameterNode):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
+    outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
+    if outputFolderItemId:
+      shNode.RemoveItemChildren(outputFolderItemId)
+
+  def getSubjectHierarchyOutputFolder(self, parameterNode):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
+    outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
+    return outputFolderItemId
+
+  def createSubjectHierarchyOutputSubfolder(self, parameterNode, subfolderName):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    # Get/create output folder
+    parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
+    outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
+    if not outputFolderItemId:
+      outputFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
+    # Get/create output subfolder
+    outputSubfolderItemId = shNode.GetItemChildWithName(outputFolderItemId, subfolderName)
+    if not outputSubfolderItemId:
+      outputSubfolderItemId = shNode.CreateFolderItem(outputFolderItemId, subfolderName)
+    return outputSubfolderItemId
+
+  def createChordBundles(self, parameterNode, chordsFolderItemId, leafletSurfaceModels, logCallback=None):
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
+    if not papillaryMuscleTips or papillaryMuscleTips.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid papillary muscle tips node")
     colors = [[1.0,0.3,0.3], [1.0,0.6,0.6], [0.3,1.0,0.3], [0.8,1.0,0.8], [0.3,0.3,1], [0.8,0.8,1.0]]
     slicer.app.pauseRender()
     try:
       for bundleIndex in range(3):
-        leafletSurfaceModel = parameterNode.GetNodeReference("LeafletModel"+str(bundleIndex+1))
+        leafletSurfaceModel = leafletSurfaceModels[bundleIndex]
         leafletMarginCurve = parameterNode.GetNodeReference("MarginCurve"+str(bundleIndex+1))
         leafletSecondaryCurve = parameterNode.GetNodeReference("SecondaryCurve"+str(bundleIndex+1))
         if not leafletSurfaceModel:
@@ -496,9 +546,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
+    """Requires boundaryCurveNode curve to be sampled uniformly"""
 
     # Prepare transform object
-    numberOfCurveLandmarkPoints = 80
+
+    # points on the warped boundary curve
+    surfaceTransformTargetPoints = boundaryCurveNode.GetCurvePointsWorld()
+    numberOfCurveLandmarkPoints = surfaceTransformTargetPoints.GetNumberOfPoints()
 
     # points on the unit disk
     surfaceTransformSourceCurvePoints = vtk.vtkPoints()
@@ -508,16 +562,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     for pointIndex in range(numberOfCurveLandmarkPoints):
         angle = float(pointIndex) * angleIncrement
         surfaceTransformSourceCurvePoints.SetPoint(pointIndex, math.cos(angle), math.sin(angle), 0)
-
-    # points on the wapred boundary curve
-    surfaceTransformTargetPoints = vtk.vtkPoints()
-    curvePoints = boundaryCurveNode.GetCurvePointsWorld()
-    curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
-    # subtract a little bit (0.1 = 10th of a sampling distance) to make sure we don't go over the curve length
-    # because we could then get one less sample point
-    samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
-    if not slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(curvePoints, surfaceTransformTargetPoints, samplingDistance, True):
-        raise ValueError("slicer.vtkMRMLMarkupsCurveNode.ResamplePoints")
 
     # Compute TPS transform
     surfaceTransform = vtk.vtkThinPlateSplineTransform()
@@ -585,8 +629,23 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     medialSurfaceNode.HardenTransform()
     boundaryCurveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsClosedCurveNode", "_tmp_BoundaryCurve")
     boundaryCurveNode.CopyContent(boundaryCurveNodeInput)
+    # shortestDistanceSurface node reference is needed if curve is set to use shortest distance on surface mode
+    # but that is not included in node content (as of 2021-01-23)
+    boundaryCurveNode.SetNodeReferenceID("shortestDistanceSurface", boundaryCurveNodeInput.GetNodeReferenceID("shortestDistanceSurface"))
     boundaryCurveNode.SetAndObserveTransformNodeID(boundaryCurveNodeInput.GetTransformNodeID())
     boundaryCurveNode.HardenTransform()
+
+    # Prepare transform object
+    numberOfCurveLandmarkPoints = 30
+    curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
+    # subtract a little bit (0.1 = 10th of a sampling distance) to make sure we don't go over the curve length
+    # because we could then get one less sample point
+    samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
+    boundaryCurveNode.ResampleCurveWorld(samplingDistance)
+    boundaryCurveNode.SetNumberOfPointsPerInterpolatingSegment(3)
+    boundaryCurveNode.SetCurveTypeToCardinalSpline()  # make sure the curve is not constrained anymore
+    if boundaryCurveNode.GetCurvePointsWorld().GetNumberOfPoints() == 0:
+      raise ValueError("Invalid boundary curve")
 
     import time
     eventTimes = []
@@ -642,11 +701,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
             intersectingLineStart = [
                 bounds[0]-margin+(bounds[1]-bounds[0]+2*margin)*uindex/(size_u-1),
                 bounds[2]-margin+(bounds[3]-bounds[2]+2*margin)*vindex/(size_v-1),
-                bounds[4]-margin]
+                bounds[5]+margin]
             intersectingLineEnd = [
                 intersectingLineStart[0],
                 intersectingLineStart[1],
-                bounds[5]+margin]
+                bounds[4]-margin]
             intersectionPoints.Reset()
             medialSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
             if intersectionPoints.GetNumberOfPoints() > 0:
@@ -692,6 +751,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     tessellatedModelNode.SetName(medialSurfaceNodeInput.GetName()+'-fit')
     tessellatedModelNode.GetPolyData().SetVerts(None)  # presence of vertices would prevent most processing opeprations
 
+    os.remove(tempSurfaceFilePath)
+
     if trim_curve:
         # Get trim points
         eventTimes.append(('get trim points', time.time()))
@@ -703,11 +764,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         trimModel.SetNodeReferenceID("CurveCut.OutputInside", tessellatedModelNode.GetID())
         trimModelTool = slicer.vtkSlicerDynamicModelerCurveCutTool()
         trimModelTool.Run(trimModel)
+        slicer.mrmlScene.RemoveNode(trimModel)
 
     mesh = tessellatedModelNode.GetPolyData()
 
     smoothing = False
     cleaning = True
+    normals = True
 
     # Smooth
     if smoothing:
@@ -726,18 +789,29 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       cleaner = vtk.vtkCleanPolyData()
       cleaner.SetInputData(mesh)
       # Tolerance=0.01 removes ill-shaped triangles without removing significant details
-      cleaner.SetTolerance(0.01)
+      cleaner.SetTolerance(0.005)
       cleaner.Update()
       mesh = cleaner.GetOutput()
+      # Cleaner collapses small triangles to lines, now remove the lines
+      mesh.SetLines(None)
+
+    # Compute normals
+    if normals:
+      eventTimes.append(('normals', time.time()))
+      computeNormals = vtk.vtkPolyDataNormals()
+      computeNormals.SetInputData(mesh)
+      computeNormals.SplittingOff()  # duplicate points would confuse the FEM solver
+      computeNormals.AutoOrientNormalsOff()  # it only guaranteed to work for closed surfaces
+      computeNormals.ConsistencyOn()
+      computeNormals.Update()
+      mesh = computeNormals.GetOutput()
 
     tessellatedModelNode.SetAndObservePolyData(mesh)
 
     # Transform back results to original position
     leafletToXYPlaneTransformNode.Inverse()
     tessellatedModelNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
-    warpedRectangleModelNode.SetAndObserveTransformNodeID(leafletToXYPlaneTransformNode.GetID())
     tessellatedModelNode.HardenTransform()
-    warpedRectangleModelNode.HardenTransform()
 
     # Put results under the same transform as input medialSurfaceNode (keeping their current position)
     medialSurfaceTransformNode = medialSurfaceNodeInput.GetParentTransformNode()
@@ -749,15 +823,16 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
           ValveFemExportLogic.transformPolydata(modelNode.GetPolyData(), transformWorldToMedialSurface))
         modelNode.SetAndObserveTransformNodeID(medialSurfaceTransformNode.GetID())
 
-    warpedRectangleModelNode.GetDisplayNode().SetVisibility(False)
     tessellatedModelNode.GetDisplayNode().EdgeVisibilityOn()
 
     # Remove temporary nodes
-    slicer.mrmlScene.RemoveNode(medialSurfaceNode)
-    slicer.mrmlScene.RemoveNode(boundaryCurveNode)
     slicer.mrmlScene.RemoveNode(leafletToXYPlaneTransformNode)
-    # Comment out the next line for debugging
-    slicer.mrmlScene.RemoveNode(warpedRectangleModelNode)
+    # Set debug=True for debugging (it will leave behind the temporary nodes for inspection)
+    debug = False
+    if not debug:
+      slicer.mrmlScene.RemoveNode(medialSurfaceNode)
+      slicer.mrmlScene.RemoveNode(boundaryCurveNode)
+      slicer.mrmlScene.RemoveNode(warpedRectangleModelNode)
 
     # Print processing times
     eventTimes.append(('end', time.time()))
@@ -771,6 +846,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         lastTimestamp = timestamp
 
     return tessellatedModelNode
+
 
   def createLeafletSurfaces(self, parameterNode, leafletsFolderItemId, logCallback=None):
     # Install geomdl - NURBS modeling package
@@ -786,6 +862,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
 
+    leafletSurfaceModels = []
     for leafletIndex in range(3):
       leafletModelNode = parameterNode.GetNodeReference("LeafletModel" + str(leafletIndex + 1))
       leafletBoundaryMarkupNode = parameterNode.GetNodeReference("LeafletBoundaryMarkups" + str(leafletIndex + 1))
@@ -808,10 +885,45 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       nurbsModelNode = ValveFemExportLogic.fitNurbsSurfaceToModel(leafletModelNode, leafletBoundaryMarkupNode,
         size_u=controlPoints, size_v=controlPoints,
         resolution=triangulationResolution, xDirection=xDirection, trim_curve=trim_curve)
+      nurbsModelNode.CreateDefaultDisplayNodes()
+      nurbsModelNode.GetDisplayNode().SetColor(leafletModelNode.GetDisplayNode().GetColor())
 
       if tempCurveNode:
         slicer.mrmlScene.RemoveNode(tempCurveNode)
       shNode.SetItemParent(shNode.GetItemByDataNode(nurbsModelNode), leafletsFolderItemId)
+      leafletSurfaceModels.append(nurbsModelNode)
+
+    return leafletSurfaceModels
+
+  def copyNode(self, node, folderItemId):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    dataNodeClone = slicer.mrmlScene.AddNewNodeByClass(node.GetClassName())
+    dataNodeClone.CopyContent(node)
+    dataNodeClone.SetName(node.GetName())
+    dataNodeClone.CreateDefaultDisplayNodes()
+    displayNodeClone = dataNodeClone.GetDisplayNode()
+    displayNodeClone.CopyContent(node.GetDisplayNode())
+    if node.GetParentTransformNode():
+      dataNodeClone.SetAndObserveTransformNodeID(node.GetParentTransformNode().GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(dataNodeClone), folderItemId)
+    return dataNodeClone
+
+  def copyAnnulusModels(self, parameterNode, leafletsFolderItemId):
+    for referenceRole in ["AnnulusCurve", "AnnulusModel"]:
+      node = parameterNode.GetNodeReference(referenceRole)
+      if not node:
+        continue
+      self.copyNode(node, leafletsFolderItemId)
+
+  def copyLeafletSurfaces(self, parameterNode, leafletsFolderItemId):
+    """Instead of creating leaflet shell models, just copy the currentle selected leaflet model nodes to the output folder"""
+    leafletSurfaceModels = []
+    for referenceRole in ["LeafletModel1", "LeafletModel2", "LeafletModel3"]:
+      node = parameterNode.GetNodeReference(referenceRole)
+      if not node:
+        continue
+      leafletSurfaceModels.append(self.copyNode(node, leafletsFolderItemId))
+    return leafletSurfaceModels
 
   def saveNode(self, node, outputFolder, expectedTransformNode, enableTransformChange):
     # Ensure that the node is under the expected transform node
@@ -838,7 +950,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       if not self.markupsStorageNode:
         self.markupsStorageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsJsonStorageNode")
       storageNode = self.markupsStorageNode
-      extension = ".mkp.json"
+      extension = ".mrk.json"
     filename = node.GetName().replace(" ", "_") + extension
     logging.info("Saving node "+filename)
     storageNode.SetFileName(outputFolder+"/"+filename)
@@ -849,36 +961,46 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
   def deleteTemporaryStorageNodes(self):
     if self.modelStorageNode:
       slicer.mrmlScene.RemoveNode(self.modelStorageNode)
+      self.modelStorageNode = None
     if self.markupsStorageNode:
       slicer.mrmlScene.RemoveNode(self.markupsStorageNode)
+      self.markupsStorageNode = None
 
-  def exportModel(self, parameterNode, outputFolder):
-    commonParentTransformNode = parameterNode.GetNodeReference("LeafletModel1").GetParentTransformNode()
+  def exportModel(self, parameterNode, shFolderItemId, outputFolder, commonParentTransformNode=None, logCallback=None):
+    if not shFolderItemId:
+      raise ValueError("Subject hierarchy folder does not exist. Make sure the outputs are correctly generated.")
 
-    # Save selected HeartValve nodes
-    for referenceRole in ["AnnulusCurve", "AnnulusModel", "LeafletModel1", "LeafletModel2", "LeafletModel3"]:
-      node = parameterNode.GetNodeReference(referenceRole)
-      if not node:
-        continue
-      self.saveNode(node, outputFolder, commonParentTransformNode, enableTransformChange=False)
+    slicer.app.pauseRender()
+    try:
 
-    # Save all chords
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-    parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
-    chordsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Chords")
-    chordItemIds = vtk.vtkIdList()
-    shNode.GetItemChildren(chordsFolderItemId, chordItemIds, True)
-    for chordItemIdIndex in range(chordItemIds.GetNumberOfIds()):
-      chordItemId = chordItemIds.GetId(chordItemIdIndex)
-      chordNode = shNode.GetItemDataNode(chordItemId)
-      if not chordNode:
-        # folder item
-        continue
-      self.saveNode(chordNode, outputFolder, commonParentTransformNode, enableTransformChange=True)
-      slicer.app.processEvents()
+      os.makedirs(outputFolder, exist_ok=True)
 
-    self.deleteTemporaryStorageNodes()
-    logging.info("Export is completed to foler: "+outputFolder)
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      if shFolderItemId is None:
+        shFolderItemId = shNode.GetItemByDataNode(parameterNode)
+      if logCallback:
+        logCallback(f"Writing {shNode.GetItemName(shFolderItemId)}...")
+
+      # Write all children of this item (recursively)
+      childIds = vtk.vtkIdList()
+      shNode.GetItemChildren(shFolderItemId, childIds)
+      for itemIdIndex in range(childIds.GetNumberOfIds()):
+        shItemId = childIds.GetId(itemIdIndex)
+        dataNode = shNode.GetItemDataNode(shItemId)
+        if dataNode and dataNode.GetClassName() != "vtkMRMLFolderDisplayNode":
+          self.saveNode(dataNode, outputFolder, commonParentTransformNode, enableTransformChange=True)
+          slicer.app.processEvents()
+        # Write all children of this child item
+        grandChildIds = vtk.vtkIdList()
+        shNode.GetItemChildren(shItemId, grandChildIds)
+        if grandChildIds.GetNumberOfIds() > 0:
+          self.exportModel(parameterNode, shItemId, outputFolder, commonParentTransformNode, logCallback)
+
+      self.deleteTemporaryStorageNodes()
+
+    finally:
+      slicer.app.resumeRender()
+
 
 #
 # ValveFemExportTest

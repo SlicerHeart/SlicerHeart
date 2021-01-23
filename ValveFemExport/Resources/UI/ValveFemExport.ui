@@ -6,15 +6,146 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>368</width>
-    <height>971</height>
+    <width>369</width>
+    <height>1007</height>
    </rect>
   </property>
-  <layout class="QFormLayout" name="formLayout">
+  <layout class="QGridLayout" name="gridLayout_5">
+   <item row="4" column="0" colspan="2">
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton">
+     <property name="text">
+      <string>Advanced output options</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QFormLayout" name="formLayout_4">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_26">
+        <property name="text">
+         <string>Create leaflet surface shell model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QCheckBox" name="createShellModelCheckBox">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_24">
+        <property name="text">
+         <string>Leaflet surface NURBS resolution:</string>
+        </property>
+        <property name="indent">
+         <number>10</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkSliderWidget" name="leafletSurfaceNurbsResolution">
+        <property name="toolTip">
+         <string>Number of NURBS control points along each axis. Lower value creates smoother surface.</string>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="pageStep">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>4.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>50.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>20.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_23">
+        <property name="text">
+         <string>Leaflet surface mesh resolution:</string>
+        </property>
+        <property name="indent">
+         <number>10</number>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="ctkSliderWidget" name="leafletSurfaceMeshResolution">
+        <property name="toolTip">
+         <string>Approximate number of triangles across the leaflet.</string>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="singleStep">
+         <double>0.001000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>200.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>30.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_25">
+        <property name="text">
+         <string>Create chords:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QCheckBox" name="createChordsCheckBox">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
    <item row="0" column="0">
     <widget class="QLabel" name="parameterSetLabel">
      <property name="text">
       <string>Paremeter set: </string>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="1">
+    <widget class="ctkPathLineEdit" name="outputPathLineEdit">
+     <property name="filters">
+      <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable|ctkPathLineEdit::Writable</set>
+     </property>
+     <property name="settingKey">
+      <string>ValveFemExport/OutputFolder</string>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="0">
+    <widget class="QLabel" name="label_3">
+     <property name="text">
+      <string>Output folder:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="0" colspan="2">
+    <widget class="QPushButton" name="generateButton">
+     <property name="text">
+      <string>Generate FEM model</string>
      </property>
     </widget>
    </item>
@@ -37,56 +168,6 @@
      <property name="renameEnabled">
       <bool>true</bool>
      </property>
-    </widget>
-   </item>
-   <item row="1" column="0" colspan="2">
-    <widget class="ctkCollapsibleButton" name="importCollapsibleButton">
-     <property name="text">
-      <string>Import valve model</string>
-     </property>
-     <layout class="QFormLayout" name="formLayout_2">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label">
-        <property name="text">
-         <string>Heart valve:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="heartValveSelector">
-        <property name="toolTip">
-         <string>Select heart valve node that will be used to populate inputs</string>
-        </property>
-        <property name="nodeTypes">
-         <stringlist>
-          <string>vtkMRMLScriptedModuleNode</string>
-         </stringlist>
-        </property>
-        <property name="showHidden">
-         <bool>true</bool>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>false</bool>
-        </property>
-        <property name="removeEnabled">
-         <bool>false</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="0" colspan="2">
-       <widget class="QPushButton" name="heartValveImportButton">
-        <property name="text">
-         <string>Import</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
     </widget>
    </item>
    <item row="2" column="0" colspan="2">
@@ -206,10 +287,73 @@
      </layout>
     </widget>
    </item>
+   <item row="1" column="0" colspan="2">
+    <widget class="ctkCollapsibleButton" name="importCollapsibleButton">
+     <property name="text">
+      <string>Import valve model</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_2">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Heart valve:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="heartValveSelector">
+        <property name="toolTip">
+         <string>Select heart valve node that will be used to populate inputs</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLScriptedModuleNode</string>
+         </stringlist>
+        </property>
+        <property name="showHidden">
+         <bool>true</bool>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <widget class="QPushButton" name="heartValveImportButton">
+        <property name="text">
+         <string>Import</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="9" column="0">
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
    <item row="3" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="chordsCollapsibleButton">
      <property name="text">
-      <string>Chords</string>
+      <string>Leaflet inputs</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout">
       <item>
@@ -548,124 +692,16 @@
         </layout>
        </widget>
       </item>
-      <item>
-       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
-        <property name="title">
-         <string>Advanced</string>
-        </property>
-        <layout class="QFormLayout" name="formLayout_3">
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_23">
-           <property name="text">
-            <string>Leaflet surface mesh resolution:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="ctkSliderWidget" name="leafletSurfaceMeshResolution">
-           <property name="decimals">
-            <number>0</number>
-           </property>
-           <property name="singleStep">
-            <double>0.001000000000000</double>
-           </property>
-           <property name="pageStep">
-            <double>5.000000000000000</double>
-           </property>
-           <property name="minimum">
-            <double>5.000000000000000</double>
-           </property>
-           <property name="maximum">
-            <double>200.000000000000000</double>
-           </property>
-           <property name="value">
-            <double>30.000000000000000</double>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_24">
-           <property name="text">
-            <string>Leaflet surface NURBS resolution:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="ctkSliderWidget" name="leafletSurfaceNurbsResolution">
-           <property name="decimals">
-            <number>0</number>
-           </property>
-           <property name="pageStep">
-            <double>5.000000000000000</double>
-           </property>
-           <property name="minimum">
-            <double>4.000000000000000</double>
-           </property>
-           <property name="maximum">
-            <double>50.000000000000000</double>
-           </property>
-           <property name="value">
-            <double>20.000000000000000</double>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="createChordsButton">
-        <property name="text">
-         <string>Create chords</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="createLeafletSurfacesButton">
-        <property name="text">
-         <string>Create leaflet surfaces</string>
-        </property>
-       </widget>
-      </item>
      </layout>
     </widget>
    </item>
-   <item row="11" column="0" colspan="2">
+   <item row="6" column="0" colspan="2">
     <widget class="QPushButton" name="exportButton">
      <property name="toolTip">
       <string>Run the algorithm.</string>
      </property>
      <property name="text">
-      <string>Export</string>
-     </property>
-    </widget>
-   </item>
-   <item row="12" column="0">
-    <spacer name="verticalSpacer">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
-   </item>
-   <item row="10" column="0">
-    <widget class="QLabel" name="label_3">
-     <property name="text">
-      <string>Output folder:</string>
-     </property>
-    </widget>
-   </item>
-   <item row="10" column="1">
-    <widget class="ctkPathLineEdit" name="outputPathLineEdit">
-     <property name="filters">
-      <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable|ctkPathLineEdit::Writable</set>
-     </property>
-     <property name="settingKey">
-      <string>ValveFemExport/OutputFolder</string>
+      <string>Write FEM model to output folder</string>
      </property>
     </widget>
    </item>
