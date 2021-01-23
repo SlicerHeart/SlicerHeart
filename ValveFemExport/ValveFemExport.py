@@ -527,7 +527,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     colors = [[1.0,0.3,0.3], [1.0,0.6,0.6], [0.3,1.0,0.3], [0.8,1.0,0.8], [0.3,0.3,1], [0.8,0.8,1.0]]
     slicer.app.pauseRender()
     try:
-      for bundleIndex in range(3):
+      for bundleIndex in range(len(leafletSurfaceModels)):
         leafletSurfaceModel = leafletSurfaceModels[bundleIndex]
         leafletMarginCurve = parameterNode.GetNodeReference("MarginCurve"+str(bundleIndex+1))
         leafletSecondaryCurve = parameterNode.GetNodeReference("SecondaryCurve"+str(bundleIndex+1))
