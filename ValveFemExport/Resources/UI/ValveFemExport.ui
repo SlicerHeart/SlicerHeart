@@ -584,7 +584,7 @@
          <string>Leaflet 3</string>
         </property>
         <property name="collapsed">
-         <bool>false</bool>
+         <bool>true</bool>
         </property>
         <layout class="QGridLayout" name="gridLayout_4">
          <item row="4" column="0">

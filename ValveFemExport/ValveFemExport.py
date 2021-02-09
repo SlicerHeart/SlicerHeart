@@ -465,6 +465,32 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     pointLocator = vtk.vtkKdTreePointLocator()
     pointLocator.SetDataSet(surface_World)
     pointLocator.BuildLocator()
+
+    # Create table node for spring import into FEBio
+    chordTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
+    chordTableNode.SetName(baseName)
+    shNode.SetItemParent(shNode.GetItemByDataNode(chordTableNode), chordsFolderItemId)
+    chordIndexArray = vtk.vtkIntArray()
+    chordIndexArray.SetName("Index")
+    chordTableNode.AddColumn(chordIndexArray)
+    chordStartPositionArray = vtk.vtkDoubleArray()
+    chordStartPositionArray.SetName("StartPosition")
+    chordStartPositionArray.SetNumberOfComponents(3)
+    chordStartPositionArray.SetComponentName(0, "X")
+    chordStartPositionArray.SetComponentName(1, "Y")
+    chordStartPositionArray.SetComponentName(2, "Z")
+    chordTableNode.AddColumn(chordStartPositionArray)
+    chordEndPositionArray = vtk.vtkDoubleArray()
+    chordEndPositionArray.SetName("EndPosition")
+    chordEndPositionArray.SetNumberOfComponents(3)
+    chordEndPositionArray.SetComponentName(0, "X")
+    chordEndPositionArray.SetComponentName(1, "Y")
+    chordEndPositionArray.SetComponentName(2, "Z")
+    chordTableNode.AddColumn(chordEndPositionArray)
+    chordNameArray = vtk.vtkStringArray()
+    chordNameArray.SetName("Name")
+    chordTableNode.AddColumn(chordNameArray)
+
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
         endPoint_World = [0,0,0]
         endPoints.GetNthControlPointPositionWorld(endPointIndex, endPoint_World)
@@ -484,7 +510,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
                 closestStartPoint_World = startPoint_World
                 closestStartPointName = startPoints.GetNthControlPointLabel(startPointIndex)
         # Create line
-        line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", "{0}-{1}-{2:02d}".format(baseName,closestStartPointName,endPointIndex))
+        chordName = "{0}-{1}-{2:02d}".format(baseName,closestStartPointName,endPointIndex)
+        line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
         line.SetLocked(True)
         line.CreateDefaultDisplayNodes()
         line.GetDisplayNode().SetSelectedColor(color)
@@ -493,6 +520,12 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
         # Put under subject hierarchy folder
         shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
+        # Add chord to the table
+        rowIndex = chordTableNode.AddEmptyRow()
+        chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
+        chordStartPositionArray.SetTuple3(rowIndex, closestStartPoint_World[0], closestStartPoint_World[1], closestStartPoint_World[2])
+        chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
+        chordNameArray.SetValue(rowIndex, chordName)
 
   def removeSubjectHierarchyOutputFolder(self, parameterNode):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -926,6 +959,31 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     return leafletSurfaceModels
 
   def saveNode(self, node, outputFolder, expectedTransformNode, enableTransformChange):
+    filename = node.GetName().replace(" ", "_")
+
+    if node.IsA("vtkMRMLTableNode"):
+      # Table is a special case for several reasons, so we write it here
+      originalToExpectedTransform = vtk.vtkGeneralTransform()
+      slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(None, expectedTransformNode, originalToExpectedTransform)
+      table = node.GetTable()
+      chordIndexArray = table.GetColumnByName("Index")
+      chordStartPositionArray = table.GetColumnByName("StartPosition")
+      chordEndPositionArray = table.GetColumnByName("EndPosition")
+      chordNameArray = table.GetColumnByName("Name")
+      # Write to file
+      filename += ".csv"
+      logging.info("Saving node "+filename)
+      fout = open(outputFolder+"/"+filename, "w")
+      for rowIndex in range(table.GetNumberOfRows()):
+        startPosition = originalToExpectedTransform.TransformPoint(chordStartPositionArray.GetTuple3(rowIndex))
+        endPosition = originalToExpectedTransform.TransformPoint(chordEndPositionArray.GetTuple3(rowIndex))
+        fout.write(f"{chordIndexArray.GetValue(rowIndex)}")
+        fout.write(f",{-startPosition[0]},{-startPosition[1]},{startPosition[2]}")
+        fout.write(f",{-endPosition[0]},{-endPosition[1]},{endPosition[2]}")
+        fout.write(f",{chordNameArray.GetValue(rowIndex)}\n")
+      fout.close()
+      return
+
     # Ensure that the node is under the expected transform node
     originalTransformNode = node.GetParentTransformNode()
     if originalTransformNode != expectedTransformNode:
@@ -946,12 +1004,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       storageNode =  self.modelStorageNode
       storageNode.SetUseCompression(False)
       extension = ".vtk"
-    else:
+    elif node.IsA("vtkMRMLMarkupsNode"):
       if not self.markupsStorageNode:
         self.markupsStorageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsJsonStorageNode")
       storageNode = self.markupsStorageNode
       extension = ".mrk.json"
-    filename = node.GetName().replace(" ", "_") + extension
+    else:
+      raise RuntimeError("Failed to save node: unsupported type of node " + node.GetName())
+
+    filename += extension
     logging.info("Saving node "+filename)
     storageNode.SetFileName(outputFolder+"/"+filename)
     storageNode.SetCoordinateSystem(slicer.vtkMRMLStorageNode.CoordinateSystemLPS)
