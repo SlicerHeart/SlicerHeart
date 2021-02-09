@@ -368,6 +368,8 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       leafletsFolderItemId = self.logic.createSubjectHierarchyOutputSubfolder(self._parameterNode, "Leaflets")
       if self._parameterNode.GetParameter("CreateLeafletSurfaceShellModel") == 'true':
         leafletSurfaceModels = self.logic.createLeafletSurfaces(self._parameterNode, leafletsFolderItemId, self.logCallback)
+        if not leafletSurfaceModels:
+          raise RuntimeError("No leaflet models could be created. Disable shell model creation (in 'Advanced output options' section) to use leaflet model as is, without extracting shell by leaflet boundary.")
       else:
         leafletSurfaceModels = self.logic.copyLeafletSurfaces(self._parameterNode, leafletsFolderItemId)
 
@@ -958,7 +960,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       leafletSurfaceModels.append(self.copyNode(node, leafletsFolderItemId))
     return leafletSurfaceModels
 
-  def saveNode(self, node, outputFolder, expectedTransformNode, enableTransformChange):
+  def saveNode(self, node, outputFolder, expectedTransformNode, enableTransformChange, ignoreMarkups=True):
     filename = node.GetName().replace(" ", "_")
 
     if node.IsA("vtkMRMLTableNode"):
@@ -1005,6 +1007,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       storageNode.SetUseCompression(False)
       extension = ".vtk"
     elif node.IsA("vtkMRMLMarkupsNode"):
+      if ignoreMarkups:
+        return
       if not self.markupsStorageNode:
         self.markupsStorageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsJsonStorageNode")
       storageNode = self.markupsStorageNode
