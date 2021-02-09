@@ -12,7 +12,10 @@
   </property>
   <layout class="QGridLayout" name="gridLayout_5">
    <item row="4" column="0" colspan="2">
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton">
+    <widget class="ctkCollapsibleButton" name="advancedCollapsibleButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="text">
       <string>Advanced output options</string>
      </property>
@@ -144,6 +147,9 @@
    </item>
    <item row="5" column="0" colspan="2">
     <widget class="QPushButton" name="generateButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="text">
       <string>Generate FEM model</string>
      </property>
@@ -172,6 +178,9 @@
    </item>
    <item row="2" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="commonInputsCollapsibleButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="text">
       <string>Common inputs</string>
      </property>
@@ -289,6 +298,9 @@
    </item>
    <item row="1" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="importCollapsibleButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="text">
       <string>Import valve model</string>
      </property>
@@ -352,8 +364,14 @@
    </item>
    <item row="3" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="chordsCollapsibleButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="text">
       <string>Leaflet inputs</string>
+     </property>
+     <property name="collapsed">
+      <bool>false</bool>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout">
       <item>
@@ -697,6 +715,9 @@
    </item>
    <item row="6" column="0" colspan="2">
     <widget class="QPushButton" name="exportButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="toolTip">
       <string>Run the algorithm.</string>
      </property>
@@ -811,11 +832,11 @@
    <hints>
     <hint type="sourcelabel">
      <x>222</x>
-     <y>402</y>
+     <y>300</y>
     </hint>
     <hint type="destinationlabel">
      <x>338</x>
-     <y>402</y>
+     <y>300</y>
     </hint>
    </hints>
   </connection>
@@ -826,12 +847,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>222</x>
-     <y>558</y>
+     <x>223</x>
+     <y>298</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>558</y>
+     <x>339</x>
+     <y>298</y>
     </hint>
    </hints>
   </connection>
@@ -842,12 +863,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>222</x>
-     <y>713</y>
+     <x>223</x>
+     <y>416</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>713</y>
+     <x>339</x>
+     <y>417</y>
     </hint>
    </hints>
   </connection>
@@ -859,11 +880,11 @@
    <hints>
     <hint type="sourcelabel">
      <x>222</x>
-     <y>426</y>
+     <y>296</y>
     </hint>
     <hint type="destinationlabel">
      <x>338</x>
-     <y>426</y>
+     <y>296</y>
     </hint>
    </hints>
   </connection>
@@ -874,12 +895,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>222</x>
-     <y>582</y>
+     <x>223</x>
+     <y>295</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>582</y>
+     <x>339</x>
+     <y>295</y>
     </hint>
    </hints>
   </connection>
@@ -890,12 +911,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>222</x>
-     <y>737</y>
+     <x>223</x>
+     <y>444</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>737</y>
+     <x>339</x>
+     <y>445</y>
     </hint>
    </hints>
   </connection>
@@ -911,7 +932,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>222</x>
-     <y>402</y>
+     <y>300</y>
     </hint>
    </hints>
   </connection>
@@ -927,7 +948,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>269</x>
-     <y>510</y>
+     <y>311</y>
     </hint>
    </hints>
   </connection>
@@ -942,8 +963,8 @@
      <y>3</y>
     </hint>
     <hint type="destinationlabel">
-     <x>255</x>
-     <y>665</y>
+     <x>339</x>
+     <y>361</y>
     </hint>
    </hints>
   </connection>
@@ -959,7 +980,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>222</x>
-     <y>402</y>
+     <y>300</y>
     </hint>
    </hints>
   </connection>
@@ -975,7 +996,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>166</x>
-     <y>344</y>
+     <y>308</y>
     </hint>
    </hints>
   </connection>
@@ -990,8 +1011,8 @@
      <y>7</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>558</y>
+     <x>223</x>
+     <y>298</y>
     </hint>
    </hints>
   </connection>
@@ -1006,8 +1027,8 @@
      <y>6</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>713</y>
+     <x>223</x>
+     <y>416</y>
     </hint>
    </hints>
   </connection>
@@ -1023,7 +1044,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>338</x>
-     <y>402</y>
+     <y>300</y>
     </hint>
    </hints>
   </connection>
@@ -1038,8 +1059,8 @@
      <y>5</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>558</y>
+     <x>339</x>
+     <y>298</y>
     </hint>
    </hints>
   </connection>
@@ -1054,8 +1075,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>713</y>
+     <x>339</x>
+     <y>417</y>
     </hint>
    </hints>
   </connection>
@@ -1071,7 +1092,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>222</x>
-     <y>426</y>
+     <y>296</y>
     </hint>
    </hints>
   </connection>
@@ -1086,8 +1107,8 @@
      <y>7</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>582</y>
+     <x>223</x>
+     <y>295</y>
     </hint>
    </hints>
   </connection>
@@ -1102,8 +1123,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>737</y>
+     <x>223</x>
+     <y>444</y>
     </hint>
    </hints>
   </connection>
@@ -1119,7 +1140,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>338</x>
-     <y>426</y>
+     <y>296</y>
     </hint>
    </hints>
   </connection>
@@ -1134,8 +1155,8 @@
      <y>6</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>582</y>
+     <x>339</x>
+     <y>295</y>
     </hint>
    </hints>
   </connection>
@@ -1150,8 +1171,8 @@
      <y>4</y>
     </hint>
     <hint type="destinationlabel">
-     <x>338</x>
-     <y>737</y>
+     <x>339</x>
+     <y>445</y>
     </hint>
    </hints>
   </connection>
@@ -1246,8 +1267,8 @@
      <y>663</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>688</y>
+     <x>223</x>
+     <y>388</y>
     </hint>
    </hints>
   </connection>
@@ -1262,8 +1283,8 @@
      <y>494</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>530</y>
+     <x>223</x>
+     <y>309</y>
     </hint>
    </hints>
   </connection>
@@ -1279,7 +1300,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>222</x>
-     <y>372</y>
+     <y>304</y>
     </hint>
    </hints>
   </connection>
@@ -1295,7 +1316,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>314</x>
-     <y>371</y>
+     <y>304</y>
     </hint>
    </hints>
   </connection>
@@ -1310,8 +1331,8 @@
      <y>471</y>
     </hint>
     <hint type="destinationlabel">
-     <x>322</x>
-     <y>526</y>
+     <x>339</x>
+     <y>309</y>
     </hint>
    </hints>
   </connection>
@@ -1326,8 +1347,8 @@
      <y>632</y>
     </hint>
     <hint type="destinationlabel">
-     <x>303</x>
-     <y>682</y>
+     <x>339</x>
+     <y>389</y>
     </hint>
    </hints>
   </connection>
@@ -1339,11 +1360,11 @@
    <hints>
     <hint type="sourcelabel">
      <x>150</x>
-     <y>373</y>
+     <y>304</y>
     </hint>
     <hint type="destinationlabel">
      <x>292</x>
-     <y>374</y>
+     <y>304</y>
     </hint>
    </hints>
   </connection>
@@ -1354,12 +1375,12 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>182</x>
-     <y>522</y>
+     <x>223</x>
+     <y>309</y>
     </hint>
     <hint type="destinationlabel">
-     <x>289</x>
-     <y>525</y>
+     <x>339</x>
+     <y>309</y>
     </hint>
    </hints>
   </connection>
@@ -1370,12 +1391,60 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>187</x>
-     <y>678</y>
+     <x>223</x>
+     <y>388</y>
     </hint>
     <hint type="destinationlabel">
-     <x>253</x>
-     <y>688</y>
+     <x>339</x>
+     <y>389</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>parameterNodeSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>advancedCollapsibleButton</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>96</x>
+     <y>23</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>128</x>
+     <y>309</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>parameterNodeSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>generateButton</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>312</x>
+     <y>24</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>280</x>
+     <y>361</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>parameterNodeSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>exportButton</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>336</x>
+     <y>22</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>319</x>
+     <y>382</y>
     </hint>
    </hints>
   </connection>

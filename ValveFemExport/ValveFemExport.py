@@ -189,6 +189,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.importCollapsibleButton.enabled = self._parameterNode is not None
     self.ui.commonInputsCollapsibleButton.enabled = self._parameterNode is not None
     self.ui.chordsCollapsibleButton.enabled = self._parameterNode is not None
+    self.ui.advancedCollapsibleButton.enabled = self._parameterNode is not None
+    self.ui.generateButton.enabled = self._parameterNode is not None
+    self.ui.exportButton.enabled = self._parameterNode is not None
 
     if self._parameterNode is None:
       return
