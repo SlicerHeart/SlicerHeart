@@ -57,13 +57,15 @@ class TomTecUcdPluginFileReader(object):
       properties = {}
       timestamps = []
       headerSuffix = "_header.txt"
+      headerFilePath = None
       for root, dirs, filenames in os.walk(tempDirectory):
         for filename in filenames:
           if filename.endswith(headerSuffix):
             # found header
             print(filename)
-            internalBaseName = filename[:-len(headerSuffix)]
-            properties, timestamps = self.parseHeader(os.path.join(root, filename))
+            headerFilePath = os.path.join(root, filename)
+            properties, timestamps = self.parseHeader(headerFilePath)
+            internalBaseFilePath = headerFilePath[:-len(headerSuffix)]
             break
       if not properties:
         raise ValueError("Failed to read file as TomTec UCD data file: "+filePath)
@@ -86,7 +88,7 @@ class TomTecUcdPluginFileReader(object):
       tempModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", baseName+" temp")
       for frameIndex in range(numberOfFrames):
         # Read mesh
-        meshFilePath = os.path.join(tempDirectory, "{0}_{1:02}.ucd".format(internalBaseName, frameIndex))
+        meshFilePath = f"{internalBaseFilePath}_{frameIndex:02}.ucd"
         reader = vtk.vtkAVSucdReader()
         reader.SetFileName(meshFilePath)
         reader.Update()
