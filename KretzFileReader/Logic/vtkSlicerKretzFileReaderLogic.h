@@ -51,9 +51,9 @@ public:
 
 protected:
 
-  bool ReadKretzItemHeader(ifstream &readFileStream, KretzItem& item);
-  bool ReadKretzItemData(ifstream &readFileStream, KretzItem& item, char* buffer = NULL);
-  bool SkipKretzItemData(ifstream &readFileStream, KretzItem& item);
+  bool ReadKretzItemHeader(std::ifstream &readFileStream, KretzItem& item);
+  bool ReadKretzItemData(std::ifstream &readFileStream, KretzItem& item, char* buffer = NULL);
+  bool SkipKretzItemData(std::ifstream &readFileStream, KretzItem& item);
 
 protected:
   vtkSlicerKretzFileReaderLogic();

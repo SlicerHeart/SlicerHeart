@@ -114,7 +114,7 @@ void writeTestOutput(const char* filename, vtkStructuredGrid* dataset)
 //----------------------------------------------------------------------------
 vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/, unsigned long int fileOffset /*=0*/)
 {
-  ifstream readFileStream;
+  std::ifstream readFileStream;
   readFileStream.open(filename, std::ios::binary);
   
   // Useful when the ultrasound file is embedded into a DICOM file
@@ -403,7 +403,7 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
 }
 
 //----------------------------------------------------------------------------
-bool vtkSlicerKretzFileReaderLogic::ReadKretzItemHeader(ifstream &readFileStream, KretzItem& item)
+bool vtkSlicerKretzFileReaderLogic::ReadKretzItemHeader(std::ifstream &readFileStream, KretzItem& item)
 {
   readFileStream.read((char*)(&item.TagGroup), sizeof(item.TagGroup));
   readFileStream.read((char*)(&item.TagElement), sizeof(item.TagElement));
@@ -412,7 +412,7 @@ bool vtkSlicerKretzFileReaderLogic::ReadKretzItemHeader(ifstream &readFileStream
 }
 
 //----------------------------------------------------------------------------
-bool vtkSlicerKretzFileReaderLogic::ReadKretzItemData(ifstream &readFileStream, KretzItem& item, char* buffer /*=NULL*/)
+bool vtkSlicerKretzFileReaderLogic::ReadKretzItemData(std::ifstream &readFileStream, KretzItem& item, char* buffer /*=NULL*/)
 {
   if (buffer == NULL)
   {
@@ -424,7 +424,7 @@ bool vtkSlicerKretzFileReaderLogic::ReadKretzItemData(ifstream &readFileStream, 
 }
 
 //----------------------------------------------------------------------------
-bool vtkSlicerKretzFileReaderLogic::SkipKretzItemData(ifstream &readFileStream, KretzItem& item)
+bool vtkSlicerKretzFileReaderLogic::SkipKretzItemData(std::ifstream &readFileStream, KretzItem& item)
 {
   readFileStream.ignore(item.ItemDataSize);
   return !readFileStream.fail();
