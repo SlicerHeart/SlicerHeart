@@ -12,6 +12,7 @@ The extension currently includes the following features (new features are added 
 - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
 - ASD/VSD Device Simulator: simplified cardiac device simulator specifically for ASD/VSD device placement analysis. Implements features described in: "Simulation of Transcatheter Atrial and Ventricular Septal Defect Device Closure Within Three-Dimensional Echocardiography–Derived Heart Models on Screen and in Virtual Reality", Journal of the American Society of Echocardiography, https://doi.org/10.1016/j.echo.2020.01.011.
 - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).
+- Baffle planner: modeling tool for virtual planning of intracardiac baffle. Details are described in this [journal paper](https://www.sciencedirect.com/science/article/pii/S0003497521004574).
 
 # Installation and setup
 
