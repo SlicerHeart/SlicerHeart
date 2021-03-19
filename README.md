@@ -163,7 +163,7 @@ in the Eigen Artemis 3D US plugin of SlicerHeart.
 
 # Authors
 
-- Authors: Matthew Jolley (CHOP), Andras Lasso (PerkLab), Christian Herz (CHOP), Anna Ilina (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
+- Authors: Matthew Jolley (CHOP/UPENN), Andras Lasso (PerkLab), Christian Herz (CHOP), Csaba Pinter (Pixel), Anna Ilina (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
 - Contacts:
   - Matthew Jolley, <email>jolleym@email.chop.edu</email>
   - Andras Lasso, <email>lasso@queensu.ca</email>
