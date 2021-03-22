@@ -24,12 +24,12 @@ class AsdVsdDeviceSimulator(ScriptedLoadableModule):
     self.parent.title = "ASD/VSD Device Simulator"
     self.parent.categories = ["Cardiac"]
     self.parent.dependencies = ["CardiacDeviceSimulator"]
-    self.parent.contributors = ["Christian Herz (CHOP), Andras Lasso (PerkLab), Matt Jolley (UPenn)"]
+    self.parent.contributors = ["Christian Herz (CHOP), Andras Lasso (PerkLab, Queen's University), Matt Jolley (CHOP/UPenn)"]
     self.parent.helpText = """
     Evaluate devices for ASD/VSD treatment.
     """
     self.parent.acknowledgementText = """
-    This file was originally developed by Christian Herz (CHOP) and Andras Lasso (PerkLab).
+    This file was originally developed by Christian Herz (CHOP) and Andras Lasso (PerkLab, Queen's University).
     """
 
     try:

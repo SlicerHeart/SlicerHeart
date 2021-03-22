@@ -1,9 +1,9 @@
 Introduction and Acknowledgements
 =================================
 
-- Andras Lasso, <email>lasso@queensu.ca</email>
-- Steve Pieper, Isomics
-- Matthew Jolley, <email>jolleym@email.chop.edu</email>
+- Andras Lasso (PerkLab, Queen's University)
+- Steve Pieper (Isomics)
+- Matthew Jolley (CHOP/UPenn)
 
 Module Description
 ==================

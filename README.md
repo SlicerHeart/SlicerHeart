@@ -163,11 +163,11 @@ in the Eigen Artemis 3D US plugin of SlicerHeart.
 
 # Authors
 
-- Authors: Matthew Jolley (CHOP/UPENN), Andras Lasso (PerkLab), Christian Herz (CHOP), Csaba Pinter (Pixel), Anna Ilina (PerkLab), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
+- Authors: Matthew Jolley (CHOP/UPenn), Andras Lasso (PerkLab, Queen's University), Christian Herz (CHOP), Csaba Pinter (Pixel Medical), Anna Ilina (PerkLab, Queen's University), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
 - Contacts:
   - Matthew Jolley, <email>jolleym@email.chop.edu</email>
   - Andras Lasso, <email>lasso@queensu.ca</email>
-- License: [Slicer license](http://www.slicer.org/pages/LicenseText) (non-restrictive, BSD-type license)
+- License: [BSD 3-Clause License](LICENSE)
 
 # How to cite
 
@@ -209,4 +209,3 @@ This work was partially supported by:
 - Big Hearts to Little Hearts
 - Children’s Hospital of Philadelphia Cardiac Center Innovation Fund
 - National Cancer Institute (NCI) (contract number 19X037Q from Leidos Biomedical Research under Task Order HHSN26100071 from NCI, funding development of NCI [Imaging Data Commons](https://imagingdatacommons.github.io/))
-

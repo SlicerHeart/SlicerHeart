@@ -16,7 +16,7 @@ class CartoExport(ScriptedLoadableModule):
     self.parent.title = "CartoExport"
     self.parent.categories = ["Cardiac"]
     self.parent.dependencies = []
-    self.parent.contributors = ["Christian Herz (CHOP), Andras Lasso (PerkLab)", "Matt Jolley (UPenn)"]
+    self.parent.contributors = ["Christian Herz (CHOP), Andras Lasso (PerkLab, Queen's University)", "Matt Jolley (CHOP/UPenn)"]
     self.parent.helpText = """ 
     This module provides support for saving a VTK node into the legacy VTK format including patient name and MRN.
     """

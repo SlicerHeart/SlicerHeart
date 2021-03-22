@@ -25,12 +25,12 @@ class CardiacDeviceSimulator(ScriptedLoadableModule):
     self.parent.title = "Cardiac device simulator"
     self.parent.categories = ["Cardiac"]
     self.parent.dependencies = []
-    self.parent.contributors = ["Andras Lasso (PerkLab), Christian Herz (CHOP), Matt Jolley (UPenn)"]
+    self.parent.contributors = ["Andras Lasso (PerkLab, Queen's University), Christian Herz (CHOP), Matt Jolley (CHOP/UPenn)"]
     self.parent.helpText = """
     Create various models (stents, valves, etc) related to cardiac procedures.
     """
     self.parent.acknowledgementText = """
-    This file was originally developed by Andras Lasso, PerkLab.
+    This file was originally developed by Andras Lasso (PerkLab, Queen's University).
     """
 
     for deviceClass in [HarmonyDevice, CylinderDevice]:
