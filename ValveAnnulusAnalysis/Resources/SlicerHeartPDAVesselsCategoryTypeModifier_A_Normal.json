@@ -1,0 +1,88 @@
+{
+  "SegmentationCategoryTypeContextName": "SlicerHeart PDA vessels anatomy type A category and type",
+  "@schema": "https://raw.githubusercontent.com/qiicr/dcmqi/master/doc/segment-context-schema.json#",
+  "SegmentationCodes": {
+    "Category": [
+      {
+        "CodeMeaning": "PDA adjacent vessels (A - Normal)",
+        "CodingSchemeDesignator": "SlicerHeart",
+        "CodeValue": "85756008",
+        "Type": [
+          {
+            "CodeMeaning": "PDA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-pda",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          },
+          {
+            "CodeMeaning": "Ascending aorta",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-ascending-aorta",
+            "recommendedDisplayRGBValue": [216, 101, 79]
+          },
+          {
+            "CodeMeaning": "Proximal transverse aorta",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-a-proximal-transverse-aorta",
+            "recommendedDisplayRGBValue": [230, 220, 70]
+          },
+          {
+            "CodeMeaning": "Distal transverse aorta",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-a-distal-transverse-aorta",
+            "recommendedDisplayRGBValue": [244, 214, 49]
+          },
+          {
+            "CodeMeaning": "Descending aorta",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-descending-aorta",
+            "recommendedDisplayRGBValue": [241, 214, 145]
+          },
+          {
+            "CodeMeaning": "Brachiocephalic",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-arachiocephalic",
+            "recommendedDisplayRGBValue": [183, 156, 220]
+          },
+          {
+            "CodeMeaning": "Left common carotid",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-a-left-common-carotid",
+            "recommendedDisplayRGBValue": [152, 189, 207]
+          },
+          {
+            "CodeMeaning": "Left subclavian",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-left-subclavian",
+            "recommendedDisplayRGBValue": [111, 184, 210]
+          },
+          {
+            "CodeMeaning": "MPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-mpa",
+            "recommendedDisplayRGBValue": [183, 214, 211]
+          },
+          {
+            "CodeMeaning": "Proximal LPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-proximal-lpa",
+            "recommendedDisplayRGBValue": [68, 172, 100]
+          },
+          {
+            "CodeMeaning": "Distal LPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-distal-lpa",
+            "recommendedDisplayRGBValue": [111, 197, 131]
+          },
+          {
+            "CodeMeaning": "RPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-RPA",
+            "recommendedDisplayRGBValue": [178, 212, 242]
+          }
+        ],
+        "showAnatomy": false
+      }
+    ]
+  }
+}

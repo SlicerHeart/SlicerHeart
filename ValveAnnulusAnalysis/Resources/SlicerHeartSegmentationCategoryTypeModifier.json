@@ -1,0 +1,70 @@
+{
+  "SegmentationCategoryTypeContextName": "SlicerHeart segmentation category and type",
+  "@schema": "https://raw.githubusercontent.com/qiicr/dcmqi/master/doc/segment-context-schema.json#",
+  "SegmentationCodes": {
+    "Category": [
+      {
+        "CodeMeaning": "Leaflets",
+        "CodingSchemeDesignator": "SCT",
+        "CodeValue": "85756007",
+        "Type": [
+          {
+            "CodeMeaning": "mitral anterior leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-mv-a",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "mitral posterior leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-mv-p",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "tricuspid anterior leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-tcv-a",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "tricuspid septal leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-tcv-s",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "tricuspid posterior leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-tcv-p",
+            "recommendedDisplayRGBValue": [42, 237, 33]
+          },
+          {
+            "CodeMeaning": "superior bridging leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-cavc-sb",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "right mural leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-cavc-rm",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "inferior bridging leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-cavc-ib",
+            "recommendedDisplayRGBValue": [42, 237, 33]
+          },
+          {
+            "CodeMeaning": "left mural leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-cavc-lm",
+            "recommendedDisplayRGBValue": [243, 153, 36]
+          }
+        ],
+        "showAnatomy": false
+      }
+    ]
+  }
+}
