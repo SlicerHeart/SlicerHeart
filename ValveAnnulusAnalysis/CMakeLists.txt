@@ -6,6 +6,7 @@ set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
   HeartValveLib/__init__
   HeartValveLib/util
+  HeartValveLib/helpers
   HeartValveLib/HeartValves
   HeartValveLib/HeartValvesSubjectHierarchyPlugin
   HeartValveLib/ValveRoi
