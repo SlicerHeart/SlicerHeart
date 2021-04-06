@@ -7,8 +7,7 @@ import slicer
 from slicer.ScriptedLoadableModule import *
 from CardiacDeviceSimulator import CardiacDeviceSimulatorWidget, CardiacDeviceSimulatorLogic
 from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
-from CardiacDeviceSimulatorUtils.devices import CylinderDevice
-from CardiacSimulatorDevices.devices import CylinderSkirtValveDevice
+from CardiacDeviceSimulatorUtils.devices import CylinderDevice, CylinderSkirtValveDevice
 from TCAVDevices.devices import *
 
 #

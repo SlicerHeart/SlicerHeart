@@ -229,3 +229,46 @@ class CylinderDevice(CardiacDeviceBase):
     points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 0.75)
     points.InsertNextPoint(radiusMm, 0, origin+lengthMm * 1.00)
     return points
+
+
+class CylinderSkirtValveDevice(CardiacDeviceBase):
+
+  NAME = "Cylinder valve with skirt"
+  ID = "CylinderValveWithSkirt"
+  RESOURCES_PATH = os.path.join(os.path.dirname(__file__), "..",  "Resources")
+
+  @classmethod
+  def getParameters(cls):
+    return {
+      "radiusMm": cls._genParameters("Radius", "Base radius", 15, "mm", 0, 30, 0.1, 1),
+      "lengthMm": cls._genParameters("Length", "Total length", 30, "mm", 0, 100, 0.1, 1),
+      'skirtLengthFraction': cls._genParameters("Skirt length", "Percentage of skirt length relative to total length",
+                                                20, "%", 0, 200, 1, 5),
+      'skirtRadiusFraction': cls._genParameters("Skirt radius",  "Percentage of radius of skirt compared to the base "
+                                                                 "radius", 20, "%", 0, 200, 1, 5)
+    }
+
+  @classmethod
+  def getInternalParameters(cls):
+    return {'interpolationSmoothness': -1.0}
+
+  @staticmethod
+  def getProfilePoints(params, segment=None, openSegment=True):
+    lengthMm = params['lengthMm']
+    radiusMm = params['radiusMm']
+    skirtLengthFraction = params['skirtLengthFraction']
+    skirtRadiusFraction = params['skirtRadiusFraction']
+
+    points = vtk.vtkPoints()
+
+    # Skirt
+    points.InsertNextPoint(radiusMm * (1.0 + skirtRadiusFraction), 0, -lengthMm / 2  + lengthMm * skirtLengthFraction)
+
+    # Cylinder
+    points.InsertNextPoint(radiusMm, 0, - lengthMm / 2)
+    points.InsertNextPoint(radiusMm, 0, - lengthMm / 4)
+    points.InsertNextPoint(radiusMm, 0, 0)
+    points.InsertNextPoint(radiusMm, 0, lengthMm / 4)
+    points.InsertNextPoint(radiusMm, 0, lengthMm / 2)
+
+    return points

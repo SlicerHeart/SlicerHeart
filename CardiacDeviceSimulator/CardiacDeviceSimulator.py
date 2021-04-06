@@ -33,7 +33,7 @@ class CardiacDeviceSimulator(ScriptedLoadableModule):
     This file was originally developed by Andras Lasso (PerkLab, Queen's University).
     """
 
-    for deviceClass in [HarmonyDevice, CylinderDevice]:
+    for deviceClass in [HarmonyDevice, CylinderDevice, CylinderSkirtValveDevice]:
       CardiacDeviceSimulatorWidget.registerDevice(deviceClass)
 
 #
