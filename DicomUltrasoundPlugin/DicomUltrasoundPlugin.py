@@ -486,10 +486,10 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     try:
       pixelSpacingPrivateTag = findPrivateTag(ds, 0x1129, 0x16, "Eigen, Inc")
-      if pixelSpacingPrivateTag == None:
+      if pixelSpacingPrivateTag is None:
         pixelSpacingPrivateTag = findPrivateTag(ds, 0x1129, 0x16, "Eigen Artemis")
       if pixelSpacingPrivateTag is not None:
-        pixelSpacingPrivate = float(pixelSpacingPrivateTag.value)
+        pixelSpacingPrivate = float(ds[pixelSpacingPrivateTag].value)
     except KeyError:
       logging.warning("examineEigenArtemis3DUS: spacing not available in private tag")
 
