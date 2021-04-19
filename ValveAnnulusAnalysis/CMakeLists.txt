@@ -35,6 +35,10 @@ set(MODULE_PYTHON_RESOURCES
   Resources/SlicerHeartPDAVesselsCategoryTypeModifier_A_Normal.json
   Resources/SlicerHeartPDAVesselsCategoryTypeModifier_B_CommonBrachioBicephalicTrunk.jpg
   Resources/SlicerHeartPDAVesselsCategoryTypeModifier_B_CommonBrachioBicephalicTrunk.json
+  Resources/SlicerHeartPDAVesselsCategoryTypeModifier_C_RightAorticArch.jpg
+  Resources/SlicerHeartPDAVesselsCategoryTypeModifier_C_RightAorticArch.json
+  Resources/SlicerHeartPDAVesselsCategoryTypeModifier_Other.png # From https://www.shareicon.net/dialogue-box-slider-navigation-multimedia-chat-conversation-658180
+  Resources/SlicerHeartPDAVesselsCategoryTypeModifier_Other.json
   )
 
 #-----------------------------------------------------------------------------

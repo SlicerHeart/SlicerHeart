@@ -1,0 +1,70 @@
+{
+  "SegmentationCategoryTypeContextName": "SlicerHeart PDA vessels anatomy type C category and type",
+  "@schema": "https://raw.githubusercontent.com/qiicr/dcmqi/master/doc/segment-context-schema.json#",
+  "SegmentationCodes": {
+    "Category": [
+      {
+        "CodeMeaning": "PDA adjacent vessels (C - Right aortic arch)",
+        "CodingSchemeDesignator": "SlicerHeart",
+        "CodeValue": "85756010",
+        "Type": [
+          {
+            "CodeMeaning": "PDA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-pda",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          },
+          {
+            "CodeMeaning": "Ascending aorta",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-ascending-aorta",
+            "recommendedDisplayRGBValue": [216, 101, 79]
+          },
+          {
+            "CodeMeaning": "Descending aorta",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-descending-aorta",
+            "recommendedDisplayRGBValue": [241, 214, 145]
+          },
+          {
+            "CodeMeaning": "Left brachiocephalic",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-left-brachiocephalic",
+            "recommendedDisplayRGBValue": [183, 156, 220]
+          },
+          {
+            "CodeMeaning": "Left subclavian",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-left-subclavian",
+            "recommendedDisplayRGBValue": [111, 184, 210]
+          },
+          {
+            "CodeMeaning": "Right subclavian",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-right-subclavian",
+            "recommendedDisplayRGBValue": [111, 184, 210]
+          },
+          {
+            "CodeMeaning": "RPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-rpa",
+            "recommendedDisplayRGBValue": [178, 212, 242]
+          },
+          {
+            "CodeMeaning": "Left common carotid",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-a-left-common-carotid",
+            "recommendedDisplayRGBValue": [152, 189, 207]
+          },
+          {
+            "CodeMeaning": "Right common carotid",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-a-right-common-carotid",
+            "recommendedDisplayRGBValue": [162, 199, 217]
+          }
+        ],
+        "showAnatomy": false
+      }
+    ]
+  }
+}
