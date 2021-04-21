@@ -128,6 +128,34 @@ VALVE_TYPE_PRESETS = OrderedDict([
     "papillaryNames": ["superior-lateral", "inferior-lateral"],
     "papillaryShortNames": ["P1", "P2"],
     "phaseComparePointLabels": ['PMC', 'ALC', 'SIC']
+  }),
+  ("tri-leaflet aortic valve", {
+    "shortname": "triAV",
+    "approximateFlowDirection": "posterior",
+    "papillaryNames": ["papillary1", "papillary2", "papillary3"],
+    "papillaryShortNames": ["P1", "P2", "P3"],
+    "phaseComparePointLabels": None
+  }),
+  ("bi-commissural aortic valve", {
+    "shortname": "bicomAV",
+    "approximateFlowDirection": "posterior",
+    "papillaryNames": ["papillary1", "papillary2", "papillary3", "papillary4"],
+    "papillaryShortNames": ["P1", "P2", "P3", "P4"],
+    "phaseComparePointLabels": None
+  }),
+  ("tri-leaflet truncal valve", {
+    "shortname": "triTruncV",
+    "approximateFlowDirection": "posterior",
+    "papillaryNames": ["papillary1", "papillary2", "papillary3"],
+    "papillaryShortNames": ["P1", "P2", "P3"],
+    "phaseComparePointLabels": None
+  }),
+  ("quadracuspid truncal valve", {
+    "shortname": "quadTruncV",
+    "approximateFlowDirection": "posterior",
+    "papillaryNames": ["papillary1", "papillary2", "papillary3", "papillary4"],
+    "papillaryShortNames": ["P1", "P2", "P3", "P4"],
+    "phaseComparePointLabels": None
   })
 ])
 

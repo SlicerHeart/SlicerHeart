@@ -61,6 +61,72 @@
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-cavc-lm",
             "recommendedDisplayRGBValue": [243, 153, 36]
+          },
+          {
+            "CodeMeaning": "tri-leaflet aortic left leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-triav-l",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "tri-leaflet aortic right leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-triav-r",
+            "recommendedDisplayRGBValue": [42, 237, 33]
+          },
+          {
+            "CodeMeaning": "tri-leaflet aortic root tissue",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-tissue-triav-root",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "bi-commissural aortic left leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-bicomav-l",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "bi-commissural aortic right leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-bicomav-r",
+            "recommendedDisplayRGBValue": [42, 237, 33]
+          },
+          {
+            "CodeMeaning": "bi-commissural aortic non-coronary leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-bicomav-nc",
+            "recommendedDisplayRGBValue": [243, 153, 36]
+          },
+          {
+            "CodeMeaning": "bi-commissural aortic root tissue",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-tissue-bicomav-root",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "truncal leaflet 1",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-trunc-1",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "truncal leaflet 2",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-trunc-2",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "truncal leaflet 3",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-trunc-3",
+            "recommendedDisplayRGBValue": [42, 237, 33]
+          },
+          {
+            "CodeMeaning": "truncal leaflet 4",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-trunc-4",
+            "recommendedDisplayRGBValue": [243, 153, 36]
           }
         ],
         "showAnatomy": false
