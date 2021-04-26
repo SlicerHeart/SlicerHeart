@@ -37,6 +37,8 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
+    self.markupsNodeObservations = []
+
     # Instantiate and connect widgets ...
 
     #
@@ -110,7 +112,7 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
     
     self.orthogonalSlicerRotationStepSizeSpinBox = qt.QDoubleSpinBox()
     self.orthogonalSlicerRotationStepSizeSpinBox.setToolTip("Increment value by that a single button press changes the orthogonal view angle")
-    self.orthogonalSlicerRotationStepSizeSpinBox.value = 5
+    self.orthogonalSlicerRotationStepSizeSpinBox.value = 20
     self.orthogonalSlicerRotationStepSizeSpinBox.minimum = 0.1
     self.orthogonalSlicerRotationStepSizeSpinBox.maximum = 90
     self.orthogonalSlicerRotationStepSizeSpinBox.singleStep = 5
@@ -127,10 +129,28 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
 
     parametersFormLayout.addRow("", orthogonalSlicerRotationBox)
 
+    #
+    # Parameters Area
+    #
+    autoRotateCollapsibleButton = ctk.ctkCollapsibleButton()
+    autoRotateCollapsibleButton.text = "Auto-rotate"
+    autoRotateFormLayout = qt.QFormLayout(autoRotateCollapsibleButton)
+    self.layout.addWidget(autoRotateCollapsibleButton)
+
+    self.markupsNodeSelector = slicer.qMRMLNodeComboBox()
+    self.markupsNodeSelector.nodeTypes = ["vtkMRMLMarkupsClosedCurveNode"]
+    self.markupsNodeSelector.addEnabled = False
+    self.markupsNodeSelector.removeEnabled = True
+    self.markupsNodeSelector.noneEnabled = True
+    self.markupsNodeSelector.setMRMLScene( slicer.mrmlScene )
+    self.markupsNodeSelector.setToolTip("Pick a closed curve node that should make the rotation advance automatically upon point placement." )
+    autoRotateFormLayout.addRow("Closed curve node: ", self.markupsNodeSelector)
+
     # connections
     self.orthogonalSliceRotationAngleDecButton.connect('clicked(bool)', self.onOrthogonalSlicerRotationAngleDec)
     self.orthogonalSliceRotationAngleIncButton.connect('clicked(bool)', self.onOrthogonalSlicerRotationAngleInc)
     self.orthogonalSlicerRotationSliderWidget.connect('valueChanged(double)', self.onOrthogonalSlicerRotationAngleChanged)
+    self.markupsNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onMarkupsNodeSelectionChanged)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -166,7 +186,16 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
     logic = ValveViewLogic()
     logic.rotateOrthogonalSlicesDeg(self.axialSliceSelector.currentNode(), self.orthogonalSlice1Selector.currentNode(), self.orthogonalSlice2Selector.currentNode(), rotationAngleChangeDeg)
     self.lastOrthogonalSlicerRotationVale = newRotationValue
-    
+
+  def onMarkupsNodeSelectionChanged(self, markupsNode):
+    for node, observation in self.markupsNodeObservations:
+      node.RemoveObserver(observation)
+    self.markupsNodeObservations = []
+    if markupsNode is None:
+      return
+    for evt in [slicer.vtkMRMLMarkupsNode.PointPositionDefinedEvent]:
+      self.markupsNodeObservations.append([markupsNode, markupsNode.AddObserver(evt, lambda caller, eventId: self.onOrthogonalSlicerRotationAngleInc())])
+
 #
 # ValveViewLogic
 #
