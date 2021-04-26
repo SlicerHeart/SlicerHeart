@@ -80,6 +80,7 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.outputBaffleModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", lambda node: self.logic.setOutputBaffleModelNode(node))
     self.ui.flattenedModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", lambda node: self.logic.setOutputFlattenedModelNode(node))
     #self.ui.flattenedBaffleImageFilePathLineEdit.connect("currentPathChanged(QString)", self.updateParameterNodeFromGUI)
+    self.ui.radiusScalingFactorSlider.connect('valueChanged(double)', lambda value: self.logic.setRadiusScalingFactor(value))
     self.ui.thicknessSliderWidgetPositive.connect('valueChanged(double)', lambda value: self.logic.setSurfaceThicknessPositive(value))
     self.ui.thicknessSliderWidgetNegative.connect('valueChanged(double)', lambda value: self.logic.setSurfaceThicknessNegative(value))
 
@@ -189,12 +190,14 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Update buttons states and tooltips
     self.ui.updateButton.enabled = self.ui.inputCurveSelector.currentNode() and self.ui.outputBaffleModelSelector.currentNode()
     self.ui.flattenButton.enabled = self.ui.outputBaffleModelSelector.currentNode() and self.ui.flattenedModelSelector.currentNode()
+    self.ui.radiusScalingFactorSlider.enabled = self.ui.outputBaffleModelSelector.currentNode() is not None
     self.ui.thicknessSliderWidgetPositive.enabled = self.ui.outputBaffleModelSelector.currentNode() is not None
     self.ui.thicknessSliderWidgetNegative.enabled = self.ui.outputBaffleModelSelector.currentNode() is not None
     self.ui.saveFlattenedBaffleButton.enabled = self.ui.flattenButton.enabled
     #self.ui.saveFlattenedBaffleButton.enabled = self.ui.flattenedModelSelector.currentNode() and self.ui.flattenedBaffleImageFilePathLineEdit.currentPath != ''
     self.ui.updateButton.checkState = qt.Qt.Checked if self.logic.getAutoUpdateEnabled() else qt.Qt.Unchecked
 
+    self.ui.radiusScalingFactorSlider.value = self.logic.getRadiusScalingFactor()
     self.ui.thicknessSliderWidgetPositive.value = self.logic.getSurfaceThicknessPositive()
     self.ui.thicknessSliderWidgetNegative.value = self.logic.getSurfaceThicknessNegative()
 
@@ -528,6 +531,9 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
       self.surfaceTransformSourcePoints.InsertNextPoint(pointOnUnitDisk)
       self.surfaceTransformTargetPoints.InsertNextPoint(pointOnSurface)
 
+    radiusScalingFactor = self.getRadiusScalingFactor()
+    self.surfaceUnitDisk.SetOuterRadius(radiusScalingFactor)
+
     self.surfaceTransformSourcePoints.Modified()
     self.surfaceTransformTargetPoints.Modified()
 
@@ -576,6 +582,18 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     if not self.inputCurveNode:
       return 0.0
     self.inputCurveNode.SetAttribute("BaffleSurfaceThicknessPositive", str(thickness))
+
+  def getRadiusScalingFactor(self):
+    if not self.inputCurveNode:
+      return 1.0
+    radiusScalingFactorStr = self.inputCurveNode.GetAttribute("RadiusScalingFactor")
+    radiusScalingFactor = float(radiusScalingFactorStr) if radiusScalingFactorStr else 1.0
+    return radiusScalingFactor
+
+  def setRadiusScalingFactor(self, radiusScalingFactor):
+    if not self.inputCurveNode:
+      return 1.0
+    self.inputCurveNode.SetAttribute("RadiusScalingFactor", str(radiusScalingFactor))
 
   def getSurfaceThicknessPositive(self):
     if not self.inputCurveNode:
