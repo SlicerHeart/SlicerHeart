@@ -231,15 +231,6 @@ class MeasurementPreset(object):
       point1_valveModel1 = valveModel1.getAnnulusMarkupPositionByLabel(pointLabel1)
     if point2_valveModel2 is None:
       point2_valveModel2 = valveModel2.getAnnulusMarkupPositionByLabel(pointLabel2)
-
-    # Transform point2 to valvemodel1 coordinate system
-    point2_valveModel1 = self.transformPointFromValve2ToValve1(valveModel1, valveModel2, point2_valveModel2)
-
-    distanceMm = np.linalg.norm(point1_valveModel1-point2_valveModel1)
-    if positiveDirection_valveModel1 is not None:
-      if np.dot(positiveDirection_valveModel1, point2_valveModel1-point1_valveModel1) < 0:
-        distanceMm = -distanceMm
-
     if name is None:
       name = pointLabel1+'-'+pointLabel2+' distance'
     result = {
@@ -250,6 +241,13 @@ class MeasurementPreset(object):
       result[KEY_MESSAGE] = 'Points ' + pointLabel1 + ' and ' + pointLabel2 + ' have to be defined to compute ' + result[KEY_NAME] + '.'
       return result
 
+    # Transform point2 to valvemodel1 coordinate system
+    point2_valveModel1 = self.transformPointFromValve2ToValve1(valveModel1, valveModel2, point2_valveModel2)
+
+    distanceMm = np.linalg.norm(point1_valveModel1-point2_valveModel1)
+    if positiveDirection_valveModel1 is not None:
+      if np.dot(positiveDirection_valveModel1, point2_valveModel1-point1_valveModel1) < 0:
+        distanceMm = -distanceMm
     result[KEY_VALUE] = "{:.1f}".format(distanceMm)
     result[KEY_UNIT] = 'mm'
     result[KEY_SUCCESS] = True
