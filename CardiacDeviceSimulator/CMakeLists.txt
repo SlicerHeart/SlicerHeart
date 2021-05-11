@@ -19,6 +19,7 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
   Resources/Icons/Cylinder.png
   Resources/Icons/Harmony.png
+  Resources/Icons/CylinderValveWithSkirt.png
   Resources/Presets/Harmony.csv
   )
 
