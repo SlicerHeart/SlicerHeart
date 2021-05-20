@@ -534,6 +534,8 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     return deviceClassId
 
   def getDeviceClass(self):
+    if not self.parameterNode:
+      return None
     deviceClassId = self.parameterNode.GetParameter("DeviceClassId")
     for deviceClass in CardiacDeviceSimulatorWidget.registeredDeviceClasses:
       if deviceClass.ID == deviceClassId:
@@ -1421,7 +1423,7 @@ class CardiacDeviceSimulatorTest(ScriptedLoadableModuleTest):
 
 #
 # Utility functions copied from HeartValveLib to avoid dependencies.
-# These functions can be removed when HeartValveLib is publicly released.
+# TODO: These functions can be removed when HeartValveLib is publicly released.
 #
 
 def lineFit(points):
@@ -1437,11 +1439,6 @@ def lineFit(points):
   """
 
   import numpy as np
-
-  #points = np.concatenate((x[:, np.newaxis],
-  #                       y[:, np.newaxis],
-  #                       z[:, np.newaxis]),
-  #                      axis=1)
 
   # Calculate the mean of the points, i.e. the 'center' of the cloud
   pointsmean = points.mean(axis=0)

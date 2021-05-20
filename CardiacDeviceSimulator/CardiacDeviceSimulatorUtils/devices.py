@@ -28,9 +28,9 @@ class CardiacDeviceBase(object):
     return []
 
   @staticmethod
-  def _genParameters(name, info, value, unit, minimum, maximum, singleStep, pageStep, decimals=2):
+  def _genParameters(name, info, value, unit, minimum, maximum, singleStep, pageStep, decimals=2, visible=True):
     return {"name": name, "info": info, "value": value, "unit": unit, "minimum": minimum, "maximum": maximum,
-            "singleStep": singleStep, "pageStep": pageStep, "decimals": decimals}
+            "singleStep": singleStep, "pageStep": pageStep, "decimals": decimals, "visible": visible}
 
   @staticmethod
   def getProfilePoints(params, segment=None, openSegment=True): #segment: one of 'distal', 'middle', 'proximal', 'whole'
