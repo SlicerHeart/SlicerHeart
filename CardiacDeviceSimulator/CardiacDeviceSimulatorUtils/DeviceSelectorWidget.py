@@ -143,7 +143,7 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
 
     for paramName, paramAttributes in self.deviceClass.getParameters().items():
       paramValue = self.parameterNode.GetParameter(self.deviceClass.ID+"_"+paramName)
-      if not paramValue:
+      if not paramValue or not paramAttributes["visible"]:
         continue
       paramValue = float(paramValue)
       sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
@@ -154,6 +154,8 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
 
   def _addSliders(self):
     for paramName, paramAttributes in self.deviceClass.getParameters().items():
+      if not paramAttributes["visible"]:
+        continue
       setattr(self, "{}SliderWidget".format(paramName), self.addSlider(paramAttributes, self.layout(), self.onSliderMoved))
 
   def _addDeviceLabel(self):
@@ -164,6 +166,7 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
   def _addPresetsCombo(self):
     self._presets = self.deviceClass.getPresets()
     self._presetCombo = qt.QComboBox()
+    self._presetCombo.sizeAdjustPolicy = qt.QComboBox.AdjustToMinimumContentsLength
     if self._presets:
       for model, properties in self._presets.items():
         values = "; ".join([properties[parameter] for parameter, attributes in self.deviceClass.getParameters().items()])
@@ -173,6 +176,8 @@ class DeviceImplantWidget(qt.QFrame, UIHelper):
 
   def onSliderMoved(self):
     for paramName, paramAttributes in self.deviceClass.getParameters().items():
+      if not paramAttributes["visible"]:
+        continue
       sliderWidget = getattr(self, "{}SliderWidget".format(paramName))
       paramValue = sliderWidget.value
       paramScale = (0.01 if paramAttributes["unit"] == "%" else 1.0)
