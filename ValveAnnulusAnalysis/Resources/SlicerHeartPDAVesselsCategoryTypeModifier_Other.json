@@ -57,6 +57,18 @@
             "recommendedDisplayRGBValue": [183, 156, 220]
           },
           {
+            "CodeMeaning": "Distal brachiocephalic",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-distal-brachiocephalic",
+            "recommendedDisplayRGBValue": [183, 156, 210]
+          },
+          {
+            "CodeMeaning": "Proximal brachiocephalic",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-proximal-brachiocephalic",
+            "recommendedDisplayRGBValue": [183, 156, 200]
+          },
+          {
             "CodeMeaning": "Left subclavian",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-pda-left-subclavian",
@@ -75,6 +87,12 @@
             "recommendedDisplayRGBValue": [183, 214, 211]
           },
           {
+            "CodeMeaning": "LPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-lpa",
+            "recommendedDisplayRGBValue": [68, 172, 90]
+          },
+          {
             "CodeMeaning": "Proximal LPA",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-pda-proximal-lpa",
@@ -89,8 +107,20 @@
           {
             "CodeMeaning": "RPA",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-pda-RPA",
+            "CodeValue": "sh-pda-rpa",
             "recommendedDisplayRGBValue": [178, 212, 242]
+          },
+          {
+            "CodeMeaning": "Distal RPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-distal-rpa",
+            "recommendedDisplayRGBValue": [178, 212, 232]
+          },
+          {
+            "CodeMeaning": "Proximal RPA",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-pda-proximal-rpa",
+            "recommendedDisplayRGBValue": [178, 212, 222]
           },
           {
             "CodeMeaning": "Left common carotid",
