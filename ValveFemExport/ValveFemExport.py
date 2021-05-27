@@ -19,7 +19,7 @@ class ValveFemExport(ScriptedLoadableModule):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Valve FEM Export"
     self.parent.categories = ["Cardiac"]
-    self.parent.dependencies = []  # TODO: add here list of module names that this module requires
+    self.parent.dependencies = []
     self.parent.contributors = ["Andras Lasso (PerkLab)", "Matthew A Jolley (CHOP)"]
     self.parent.helpText = """
 Export leaflets and chords for FEM analysis.
@@ -58,6 +58,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     VTKObservationMixin.__init__(self)  # needed for parameter node observation
     self.logic = None
     self._parameterNode = None
+    self._papillaryMuscleTipsNode = None
 
   def setup(self):
     """
@@ -107,6 +108,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.parameterEditWidgets = [
       (self.ui.leafletSurfaceNurbsResolution, "LeafletSurfaceNurbsResolution"),
       (self.ui.leafletSurfaceMeshResolution, "LeafletSurfaceMeshResolution"),
+      (self.ui.chordsPerCm2Slider, "ChordsPerCm2"),
       (self.ui.createShellModelCheckBox, "CreateLeafletSurfaceShellModel"),
       (self.ui.createChordsCheckBox, "CreateChords"),
       ]
@@ -131,6 +133,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Connections
     self.ui.parameterNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setParameterNode)
     self.ui.heartValveImportButton.connect('clicked(bool)', self.onHeartValveImport)
+    self.ui.addLeafletRegionBoundaryButton.connect('clicked(bool)', self.onAddLeafletRegionBoundary)
+    self.ui.deleteLeafletRegionBoundaryButton.connect('clicked(bool)', self.onDeleteLeafletRegionBoundary)
+
+    self.ui.leafletRegionBoundaryTreeView.connect("currentItemChanged(vtkIdType)", self.onLeafletRegionBoundarySelected)
     self.ui.generateButton.connect('clicked(bool)', self.onGenerate)
     self.ui.exportButton.connect('clicked(bool)', self.onExport)
     slicer.util.addParameterEditWidgetConnections(self.parameterEditWidgets, self.updateParameterNodeFromGUI)
@@ -139,6 +145,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # (in the selected parameter node).
     for nodeSelector, nodeReferenceRole in self.nodeSelectors:
       nodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+
+    self.ui.leafletSurfaceModelNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
+    self.ui.papillaryMuscleTipPointComboBox.connect('currentTextChanged(QString)', self.updateParameterNodeFromGUI)
 
     # Initial GUI update
     self.updateGUIFromParameterNode()
@@ -167,7 +176,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # No change
       return
 
-    # Unobserve previusly selected parameter node and add an observer to the newly selected.
+    # Unobserve previously selected parameter node and add an observer to the newly selected.
     # Changes of parameter node are observed so that whenever parameters are changed by a script or any other module
     # those are reflected immediately in the GUI.
     if self._parameterNode is not None:
@@ -207,10 +216,26 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       nodeSelector.setCurrentNode(self._parameterNode.GetNodeReference(nodeReferenceRole))
 
     # Allow free moving of papillary muscle tips (we don't want it to stick to the leaflets)
+
     papillaryMuscleTipsNode = self._parameterNode.GetNodeReference("PapillaryMuscleTips")
+    wasBlocked = self.ui.papillaryMuscleTipPointComboBox.blockSignals(True)
+    self.ui.papillaryMuscleTipPointComboBox.clear()
     if papillaryMuscleTipsNode:
       papillaryMuscleTipsNode.CreateDefaultDisplayNodes()
       papillaryMuscleTipsNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
+      for i in range(papillaryMuscleTipsNode.GetNumberOfControlPoints()):
+        if papillaryMuscleTipsNode.GetNthControlPointPositionStatus(i) != slicer.vtkMRMLMarkupsNode.PositionDefined:
+          continue
+        self.ui.papillaryMuscleTipPointComboBox.addItem(papillaryMuscleTipsNode.GetNthControlPointLabel(i))
+    self.ui.papillaryMuscleTipPointComboBox.blockSignals(wasBlocked)
+
+    if self._papillaryMuscleTipsNode != papillaryMuscleTipsNode:
+      # Unobserve previously selected PapillaryMuscleTips node and add an observer to the newly selected.
+      if self._papillaryMuscleTipsNode is not None:
+        self.removeObserver(self._papillaryMuscleTipsNode, slicer.vtkMRMLMarkupsNode.PointModifiedEvent, self.updateGUIFromParameterNode)
+      if papillaryMuscleTipsNode is not None:
+        self.addObserver(papillaryMuscleTipsNode, slicer.vtkMRMLMarkupsNode.PointModifiedEvent, self.updateGUIFromParameterNode)
+      self._papillaryMuscleTipsNode = papillaryMuscleTipsNode
 
     self.ui.chordBundleNameEdit1.text = self._parameterNode.GetParameter("ChordName1")
     self.ui.chordBundleNameEdit2.text = self._parameterNode.GetParameter("ChordName2")
@@ -251,6 +276,20 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     #   self.ui.applyButton.toolTip = "Select input and output volume nodes"
     #   self.ui.applyButton.enabled = False
 
+    leafletRegionsFolderId = self.logic.getSubjectHierarchyLeafletRegionsSubfolder(self._parameterNode)
+    self.ui.leafletRegionBoundaryTreeView.setRootItem(leafletRegionsFolderId)
+    self.ui.leafletRegionBoundaryTreeView.visible = bool(leafletRegionsFolderId)
+
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
+    if leafletRegionBoundaryNode:
+      wasBlocked = self.ui.leafletSurfaceModelNodeSelector.blockSignals(True)
+      self.ui.leafletSurfaceModelNodeSelector.setCurrentNode(leafletRegionBoundaryNode.GetNodeReference("LeafletSurfaceModel"))
+      self.ui.leafletSurfaceModelNodeSelector.blockSignals(wasBlocked)
+      wasBlocked = self.ui.papillaryMuscleTipPointComboBox.blockSignals(True)
+      self.ui.papillaryMuscleTipPointComboBox.currentText = leafletRegionBoundaryNode.GetAttribute("PapillaryMuscleTipPoint")
+      self.ui.papillaryMuscleTipPointComboBox.blockSignals(wasBlocked)
+
     slicer.util.updateParameterEditWidgetsFromNode(self.parameterEditWidgets, self._parameterNode)
 
     self.updatingGUIFromParameterNode = False
@@ -287,6 +326,13 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter("ChordName1", self.ui.chordBundleNameEdit1.text)
     self._parameterNode.SetParameter("ChordName2", self.ui.chordBundleNameEdit2.text)
     self._parameterNode.SetParameter("ChordName3", self.ui.chordBundleNameEdit3.text)
+
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
+    if leafletRegionBoundaryNode:
+      leafletRegionBoundaryNode.SetNodeReferenceID("LeafletSurfaceModel", self.ui.leafletSurfaceModelNodeSelector.currentNodeID)
+      leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletSurfaceModelNodeSelector.currentNode())
+      leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
 
     slicer.util.updateNodeFromParameterEditWidgets(self.parameterEditWidgets, self._parameterNode)
 
@@ -361,6 +407,40 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     slicer.util.showStatusMessage(message)
     slicer.app.processEvents()
 
+  def onAddLeafletRegionBoundary(self):
+    nodeName = slicer.mrmlScene.GetUniqueNameByString("region")
+    leafletRegionBoundaryNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsClosedCurveNode", nodeName)
+    leafletRegionBoundaryNode.CreateDefaultDisplayNodes()
+    displayNode = leafletRegionBoundaryNode.GetDisplayNode()
+    displayNode.SetPointLabelsVisibility(False)
+    displayNode.SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
+    displayNode.SetGlyphTypeFromString("Sphere3D")
+    displayNode.SetSelectedColor(1, 0.2, 0.7)
+    displayNode.SetLineThickness(0.3)
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    newLeafletRegionBoundaryItem = shNode.GetItemByDataNode(leafletRegionBoundaryNode)
+    leafletRegionsFolderItem = self.logic.getSubjectHierarchyLeafletRegionsSubfolder(self._parameterNode, createIfNeeded=True)
+    shNode.SetItemParent(newLeafletRegionBoundaryItem, leafletRegionsFolderItem)
+    self.ui.leafletRegionBoundaryTreeView.setCurrentItem(newLeafletRegionBoundaryItem)
+    self.ui.leafletRegionBoundaryPlaceWidget.setPlaceModeEnabled(True)
+    self.updateGUIFromParameterNode()
+
+  def onDeleteLeafletRegionBoundary(self):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
+    slicer.mrmlScene.RemoveNode(leafletRegionBoundaryNode)
+
+  def onLeafletRegionBoundarySelected(self, shItemId):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    selectedLeafletRegionBoundaryNode = shNode.GetItemDataNode(shItemId)
+    if not selectedLeafletRegionBoundaryNode:
+      return
+
+    self.ui.leafletRegionBoundaryPlaceWidget.setCurrentNode(selectedLeafletRegionBoundaryNode)
+    self.ui.leafletRegionBoundaryPlaceWidget.currentNodeActive = True
+
+    self.updateGUIFromParameterNode()
+
   def onGenerate(self):
     slicer.app.setOverrideCursor(qt.Qt.WaitCursor)
     try:
@@ -384,6 +464,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if self._parameterNode.GetParameter("CreateChords") == "true":
         chordsFolderItemId = self.logic.createSubjectHierarchyOutputSubfolder(self._parameterNode, "Chords")
         self.logic.createChordBundles(self._parameterNode, chordsFolderItemId, leafletSurfaceModels, self.logCallback)
+        self.logic.createChordBundlesFromRegions(self._parameterNode, chordsFolderItemId, self.logCallback)
 
     except Exception as e:
       import traceback
@@ -402,9 +483,11 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       currentPath = self.ui.outputPathLineEdit.currentPath
       if not currentPath:
         raise ValueError("No output directory defined. Please select an output directory.")
-      commonParentTransformNode = self._parameterNode.GetNodeReference("LeafletModel1").GetParentTransformNode()
+      firstLeafletModelNode = self._parameterNode.GetNodeReference("LeafletModel1")
+      commonParentTransformNode = firstLeafletModelNode.GetParentTransformNode() if firstLeafletModelNode else None
       subjectHierarchyOutputFolder = self.logic.getSubjectHierarchyOutputFolder(self._parameterNode)
       self.logic.exportModel(self._parameterNode, subjectHierarchyOutputFolder, currentPath, commonParentTransformNode, self.logCallback)
+      slicer.util.delayDisplay("Model export completed")
     except Exception as e:
       import traceback
       traceback.print_exc()
@@ -442,9 +525,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter("LeafletSurfaceMeshResolution"):
       parameterNode.SetParameter("LeafletSurfaceMeshResolution", "20")
     if not parameterNode.GetParameter("CreateLeafletSurfaceShellModel"):
-      parameterNode.SetParameter("CreateLeafletSurfaceShellModel", "true")
+      parameterNode.SetParameter("CreateLeafletSurfaceShellModel", "false")  # currently, we more often import the shell than creating it
     if not parameterNode.GetParameter("CreateChords"):
       parameterNode.SetParameter("CreateChords", "true")
+    if not parameterNode.GetParameter("ChordsPerCm2"):
+        parameterNode.SetParameter("ChordsPerCm2", "17")
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     if parameterNode.GetHideFromEditors():
@@ -452,28 +537,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       shNode.RequestOwnerPluginSearch(parameterNode)
       shNode.SetItemAttribute(shNode.GetItemByDataNode(parameterNode), "ModuleName", "ValveFEMExport")
 
-  def createChordBundle(self, baseName, color, startPoints, endPoints, surfaceModel, chordsFolderItemId):
-    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
-    shNode.SetItemParent(folderItem, chordsFolderItemId)
-    # Transform model polydata to world coordinate system
-    if surfaceModel.GetParentTransformNode():
-        transformModelToWorld = vtk.vtkGeneralTransform()
-        slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(surfaceModel.GetParentTransformNode(), None, transformModelToWorld)
-        polyTransformToWorld = vtk.vtkTransformPolyDataFilter()
-        polyTransformToWorld.SetTransform(transformModelToWorld)
-        polyTransformToWorld.SetInputData(surfaceModel.GetPolyData())
-        polyTransformToWorld.Update()
-        surface_World = polyTransformToWorld.GetOutput()
-    else:
-        surface_World = surfaceModel.GetPolyData()
-    pointLocator = vtk.vtkKdTreePointLocator()
-    pointLocator.SetDataSet(surface_World)
-    pointLocator.BuildLocator()
-
+  def createChordTable(self, baseName, chordsFolderItemId):
     # Create table node for spring import into FEBio
     chordTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
     chordTableNode.SetName(baseName)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     shNode.SetItemParent(shNode.GetItemByDataNode(chordTableNode), chordsFolderItemId)
     chordIndexArray = vtk.vtkIntArray()
     chordIndexArray.SetName("Index")
@@ -495,6 +563,29 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordNameArray = vtk.vtkStringArray()
     chordNameArray.SetName("Name")
     chordTableNode.AddColumn(chordNameArray)
+    return chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray
+
+  def createChordBundle(self, baseName, color, startPoints, endPoints, surfaceModel, chordsFolderItemId):
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
+    shNode.SetItemParent(folderItem, chordsFolderItemId)
+    # Transform model polydata to world coordinate system
+    if surfaceModel.GetParentTransformNode():
+        transformModelToWorld = vtk.vtkGeneralTransform()
+        slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(surfaceModel.GetParentTransformNode(), None, transformModelToWorld)
+        polyTransformToWorld = vtk.vtkTransformPolyDataFilter()
+        polyTransformToWorld.SetTransform(transformModelToWorld)
+        polyTransformToWorld.SetInputData(surfaceModel.GetPolyData())
+        polyTransformToWorld.Update()
+        surface_World = polyTransformToWorld.GetOutput()
+    else:
+        surface_World = surfaceModel.GetPolyData()
+    pointLocator = vtk.vtkKdTreePointLocator()
+    pointLocator.SetDataSet(surface_World)
+    pointLocator.BuildLocator()
+
+    # Create table node for spring import into FEBio
+    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
 
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
         endPoint_World = [0,0,0]
@@ -545,6 +636,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
     return outputFolderItemId
 
+  def getSubjectHierarchyLeafletRegionsSubfolder(self, parameterNode, createIfNeeded=False):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    # Get/create output folder
+    parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
+    leafletRegionsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflet regions")
+    if not leafletRegionsFolderItemId and createIfNeeded:
+      leafletRegionsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflet regions")
+    return leafletRegionsFolderItemId
+
   def createSubjectHierarchyOutputSubfolder(self, parameterNode, subfolderName):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     # Get/create output folder
@@ -581,6 +681,119 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
             papillaryMuscleTips, leafletSecondaryCurve, leafletSurfaceModel, chordsFolderItemId)
     finally:
       slicer.app.resumeRender()
+
+  def createChordBundlesFromRegions(self, parameterNode, chordsFolderItemId, logCallback=None):
+    papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
+    if not papillaryMuscleTips or papillaryMuscleTips.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid papillary muscle tips node")
+    slicer.app.pauseRender()
+    try:
+      # Divide by 100 because chordsDensity is in length unit (mm)
+      chordsDensity = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "17") / 100.0
+      leafletRegionsFolderItem = self.getSubjectHierarchyLeafletRegionsSubfolder(parameterNode)
+      leafletRegionNodes = vtk.vtkCollection()
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      shNode.GetDataNodesInBranch(leafletRegionsFolderItem, leafletRegionNodes, "vtkMRMLMarkupsClosedCurveNode")
+      for regionIndex in range(leafletRegionNodes.GetNumberOfItems()):
+        leafletRegionBoundaryNode = leafletRegionNodes.GetItemAsObject(regionIndex)
+        if logCallback:
+          logCallback(f"Creating chord bundles for {leafletRegionBoundaryNode.GetName()}...")
+        self.createChordBundleFromRegion(parameterNode, leafletRegionBoundaryNode, chordsDensity, chordsFolderItemId)
+    finally:
+      slicer.app.resumeRender()
+
+  def createChordBundleFromRegion(self, parameterNode, leafletRegionBoundaryNode, chordsDensity, chordsFolderItemId):
+    """
+    :param parameterNode:
+    :param leafletRegionBoundaryNode:
+    :param chordsDensity: in chords per mm2, 0.17 is a good number
+    :return:
+    """
+
+    baseName = leafletRegionBoundaryNode.GetName()
+
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
+    shNode.SetItemParent(folderItem, chordsFolderItemId)
+
+    # Get leaflet region
+    leafletModelNode = leafletRegionBoundaryNode.GetNodeReference("LeafletSurfaceModel")
+    if not leafletModelNode:
+      raise ValueError("Invalid leaflet surface model")
+    curveCut = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
+    curveCut.SetToolName("Curve cut")
+    curveCut.SetNodeReferenceID("CurveCut.InputCurve", leafletRegionBoundaryNode.GetID())
+    curveCut.SetNodeReferenceID("CurveCut.InputModel", leafletModelNode.GetID())
+    leafletRegionModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")  # this node will store the hollow model
+    curveCut.SetNodeReferenceID("CurveCut.OutputInside", leafletRegionModelNode.GetID())
+    slicer.modules.dynamicmodeler.logic().RunDynamicModelerTool(curveCut)
+
+    # Get area of each cell of the leaflet region to weigh the cell sampling with it
+    meshQuality = vtk.vtkMeshQuality()
+    meshQuality.SetInputData(leafletRegionModelNode.GetPolyData())
+    meshQuality.SetTriangleQualityMeasureToArea()
+    meshQuality.Update()
+    leafletRegionMesh = meshQuality.GetOutput()
+    leafletRegionModelNode.SetAndObserveMesh(leafletRegionMesh)
+    cellAreas = slicer.util.arrayFromModelCellData(leafletRegionModelNode, 'Quality')
+    regionArea = sum(cellAreas)
+    numberOfChords = int(regionArea * chordsDensity)
+    logging.info(f"Number of chords for region {leafletRegionBoundaryNode.GetName()}: {numberOfChords}")
+    if numberOfChords>100:
+      if not slicer.util.confirmYesNoDisplay(f"The number of chords for region {leafletRegionBoundaryNode.GetName()} is very high ({numberOfChords}). Are you sure that the model scale is correct?"):
+        return
+
+    # Randomly sample cell, with using the area as weighing factor
+    import random
+    cellIds = random.choices(list(range(len(cellAreas))), weights=cellAreas, k=numberOfChords)
+
+    #leafletRegionMesh = leafletRegionModelNode.GetMesh()
+    pointPositions = []
+    for cellId in cellIds:
+      cell = leafletRegionMesh.GetCell(cellId)
+      # randomly choose one of the point of the triangle cell
+      pointPositions.append(leafletRegionMesh.GetPoint(cell.GetPointIds().GetId(random.randint(0, cell.GetNumberOfPoints()-1))))
+
+    #chordEndPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "C")
+    #slicer.util.updateMarkupsControlPointsFromArray(chordEndPoints, np.array(pointPositions))
+
+    # Get papillary muscle tip position
+    papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
+    papillaryMuscleTipsPointLabel = leafletRegionBoundaryNode.GetAttribute("PapillaryMuscleTipPoint")
+    papillaryMuscleTipPosition = np.zeros(3)
+    for i in range(papillaryMuscleTipsNode.GetNumberOfControlPoints()):
+      if papillaryMuscleTipsNode.GetNthControlPointLabel(i) == papillaryMuscleTipsPointLabel:
+        # found the muscle tip point in the list
+        papillaryMuscleTipsNode.GetNthControlPointPositionWorld(i, papillaryMuscleTipPosition)
+
+    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
+
+    for endPointIndex, endPoint_World in enumerate(pointPositions):
+        # Create line
+        chordName = "{0}-{2:02d}".format(baseName,papillaryMuscleTipsPointLabel,endPointIndex)
+        line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
+        #line.SetLocked(True)  # it is left unlocked to allow the user to rearrange the points to achieve more uniform sampling
+        line.CreateDefaultDisplayNodes()
+        line.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
+        line.GetDisplayNode().SetPropertiesLabelVisibility(False)
+        line.GetDisplayNode().SetPointLabelsVisibility(False)
+        line.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
+        line.GetDisplayNode().UseGlyphScaleOff()
+        line.GetDisplayNode().SetGlyphSize(0.5)
+        line.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
+        line.AddControlPointWorld(vtk.vtkVector3d(papillaryMuscleTipPosition), papillaryMuscleTipsPointLabel)
+        line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
+        # Put under subject hierarchy folder
+        shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
+        # Add chord to the table
+        rowIndex = chordTableNode.AddEmptyRow()
+        chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
+        chordStartPositionArray.SetTuple3(rowIndex, papillaryMuscleTipPosition[0], papillaryMuscleTipPosition[1], papillaryMuscleTipPosition[2])
+        chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
+        chordNameArray.SetValue(rowIndex, chordName)
+
+    slicer.mrmlScene.RemoveNode(curveCut)
+    slicer.mrmlScene.RemoveNode(leafletRegionModelNode)
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
