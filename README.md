@@ -13,9 +13,16 @@ The extension currently includes the following features (new features are added 
 - ASD/VSD Device Simulator: simplified cardiac device simulator specifically for ASD/VSD device placement analysis. Implements features described in: "Simulation of Transcatheter Atrial and Ventricular Septal Defect Device Closure Within Three-Dimensional Echocardiography–Derived Heart Models on Screen and in Virtual Reality", Journal of the American Society of Echocardiography, https://doi.org/10.1016/j.echo.2020.01.011.
 - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).
 - Baffle planner: modeling tool for virtual planning of intracardiac baffle. Details are described in this [journal paper](https://www.sciencedirect.com/science/article/pii/S0003497521004574).
-  - Create Markups Closed Curve under “Input Curve." Click Fiducial Button next to “Contour Points” and place along desired baffle location to form the outline of Baffle.
-  - Create new Model under “Baffle Model.” Click Fiducial Button next to “Surface Points.” Place surface points on Baffle Surface in places where user would like to adjust Virtual Baffle Model's shape. Surface points can be moved to modify baffle shape.
-  - Create new Model under “Flattened Model.” Click Fiducial Button next to “Fixed Points,” and place fixed points on Surface for reference. Click “Flatten” button to create flattened model. Input desired output location in “Flattened image file” and click “Save” to save flattened baffle image. 
+  - Specify curved surface patch (Baffle):
+    - In Create Baffle model section, select "Create a new Markups Closed Curve" for "Input Curve."
+    - Click the arrow button next to "Contour Points" and click in viewers to place to form the outline of Baffle.
+    - Choose "Create new Model" for "Baffle Model." The surface patch will appear in 3D views.
+    - Click the arrow button next to "Surface Points." and place points on Baffle surface to modify the model's shape. Points can be moved after placement to adjust the shape.
+  - Create flattened surface patch (Baffle surface mapped to a plane with minimal distortion)
+    - Create new Model for "Flattened Model."
+    - Click the arrow button next to "Fixed Points," and place fixed landmark points on the Baffle surface. These points will be useful for aligning the generated flattened surface with the Baffle surface.
+    - Click "Flatten" button to create flattened model. The model will appear near the (0,0,0) position, which may be far from the Baffle surface position.
+    - Save the flattened image into a printable PNG file by specifying a filename (for example, `c:\Users\Public\Documents\flattened.png`) for "Flattened image file" and clicking "Save" button.
 
 # Installation and setup
 

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>395</width>
-    <height>490</height>
+    <height>516</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
@@ -262,6 +262,14 @@
          <widget class="ctkPathLineEdit" name="flattenedBaffleImageFilePathLineEdit">
           <property name="filters">
            <set>ctkPathLineEdit::AllEntries|ctkPathLineEdit::Dirs|ctkPathLineEdit::Drives|ctkPathLineEdit::Files|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Writable</set>
+          </property>
+          <property name="settingKey">
+           <string>BafflePlanner/FlattenedImageFile</string>
+          </property>
+          <property name="nameFilters">
+           <stringlist>
+            <string>Image file (*.png)</string>
+           </stringlist>
           </property>
          </widget>
         </item>

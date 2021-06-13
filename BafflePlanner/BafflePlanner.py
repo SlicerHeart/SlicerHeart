@@ -248,10 +248,11 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   def onSaveFlattenedBaffleButton(self):
     try:
-      self.ui.flattenedBaffleImageFilePathLineEdit.addCurrentPathToHistory()
       filePath = self.ui.flattenedBaffleImageFilePathLineEdit.currentPath
       if filePath[len(filePath)-4:].lower() != ".png":
         filePath += '.png'
+        self.ui.flattenedBaffleImageFilePathLineEdit.currentPath = filePath
+      self.ui.flattenedBaffleImageFilePathLineEdit.addCurrentPathToHistory()
       self.logic.generatePixmapForPrinting(filePath)
     except Exception as e:
       import traceback
@@ -638,14 +639,23 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
       if (not fixedPointsNode) and outputFlattenedModelNode:
         fixedPointsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", outputFlattenedModelNode.GetName() + " fixed points")
         fixedPointsNode.CreateDefaultDisplayNodes()
-        fixedPointsNode.GetDisplayNode().SetPointLabelsVisibility(False)
+        fixedPointsNode.SetMarkupLabelFormat('F-%d')
+        fixedPointsNode.GetDisplayNode().SetPointLabelsVisibility(True)
+        fixedPointsNode.GetDisplayNode().SetGlyphType(slicer.vtkMRMLMarkupsDisplayNode.Sphere3D)
         self.setInputFixedPointsNode(fixedPointsNode)
       outputFlattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
       if (not outputFlattenedFixedPointsNode) and outputFlattenedModelNode:
         outputFlattenedFixedPointsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", outputFlattenedModelNode.GetName() + " flattened fixed points")
         outputFlattenedFixedPointsNode.CreateDefaultDisplayNodes()
-        outputFlattenedFixedPointsNode.GetDisplayNode().SetPointLabelsVisibility(False)
-        outputFlattenedFixedPointsNode.GetDisplayNode().SetSelectedColor(0.7,0.1,0.8)
+        outputFlattenedFixedPointsNode.GetDisplayNode().SetPointLabelsVisibility(True)
+        outputFlattenedFixedPointsNode.GetDisplayNode().SetSelectedColor(0.9,0.6,0.9)
+        outputFlattenedFixedPointsNode.GetDisplayNode().SetGlyphType(slicer.vtkMRMLMarkupsDisplayNode.Sphere3D)
+        try:
+          # Enable shadow (only available in Slicer-4.13)
+          slicer.vtkMRMLMarkupsDisplayNode.UpdateTextPropertyFromString('font-weight:bold;text-shadow:2px 2px 2px rgba(0,0,0,1.0)',
+            outputFlattenedFixedPointsNode.GetDisplayNode().GetTextProperty())
+        except:
+          pass
         self.setOutputFlattenedFixedPointsNode(outputFlattenedFixedPointsNode)
 
     self.inputCurveNode.SetAndObserveNodeReferenceID('FlattenedModel', outputFlattenedModelNode.GetID() if outputFlattenedModelNode else None)
@@ -719,12 +729,20 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
     # Update flattened fixed points markup node
     flattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
+    inputFixedPointsNode = self.getInputFixedPointsNode()
     flattenedFixedPointsNode.RemoveAllControlPoints()
-    closestVertexIndices = BafflePlannerLogic.getClosestVerticesForFiducials(self.getOutputBaffleModelNode(), self.getInputFixedPointsNode())
+    closestVertexIndices = BafflePlannerLogic.getClosestVerticesForFiducials(self.getOutputBaffleModelNode(), inputFixedPointsNode)
     flattenedPolyDataPoints = self.getOutputFlattenedModelNode().GetPolyData().GetPoints()
-    for vertIdx in closestVertexIndices:
+    # Set the flattened fixed node points size based on the model size
+    bounds = [0,0,0,0,0,0]
+    self.getOutputBaffleModelNode().GetRASBounds(bounds)
+    modelDiameter = pow(pow(bounds[1]-bounds[0], 2)+pow(bounds[3]-bounds[2], 2)+pow(bounds[5]-bounds[4], 2), 0.5)
+    flattenedFixedPointsNode.GetDisplayNode().SetUseGlyphScale(False)
+    flattenedFixedPointsNode.GetDisplayNode().SetGlyphSize(modelDiameter*0.05)
+    flattenedFixedPointsNode.GetDisplayNode().SetTextScale(5.0)
+    for pointIndex, vertIdx in enumerate(closestVertexIndices):
       p = flattenedPolyDataPoints.GetPoint(vertIdx)
-      flattenedFixedPointsNode.AddFiducial(p[0], p[1], p[2])
+      flattenedFixedPointsNode.AddControlPointWorld(vtk.vtkVector3d(p), inputFixedPointsNode.GetNthControlPointLabel(pointIndex))
 
   def generatePixmapForPrinting(self, filePath):
     if not self.getOutputFlattenedModelNode():
