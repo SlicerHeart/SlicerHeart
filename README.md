@@ -10,19 +10,9 @@ The extension currently includes the following features (new features are added 
   - Importing of Eigen Artemis images.
 - TomTec UCD data file importer: allows loading *.UCD.data.zip file as a model sequence. When drag-and-dropping the zip file to the application window, then choose "No" to the question "The selected file is a zip archive, open it and load contents" and then click OK in the displayed "Add data..." window.
 - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
-- ASD/VSD Device Simulator: simplified cardiac device simulator specifically for ASD/VSD device placement analysis. Implements features described in: "Simulation of Transcatheter Atrial and Ventricular Septal Defect Device Closure Within Three-Dimensional Echocardiography–Derived Heart Models on Screen and in Virtual Reality", Journal of the American Society of Echocardiography, https://doi.org/10.1016/j.echo.2020.01.011.
+- [ASD/VSD Device Simulator](#asdvsd-device-simulator-module): cardiac device  simulator for ASD/VSD device placement analysis.
 - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).
-- Baffle planner: modeling tool for virtual planning of intracardiac baffle. Details are described in this [journal paper](https://www.sciencedirect.com/science/article/pii/S0003497521004574).
-  - Specify curved surface patch (Baffle):
-    - In Create Baffle model section, select "Create a new Markups Closed Curve" for "Input Curve."
-    - Click the arrow button next to "Contour Points" and click in viewers to place to form the outline of Baffle.
-    - Choose "Create new Model" for "Baffle Model." The surface patch will appear in 3D views.
-    - Click the arrow button next to "Surface Points." and place points on Baffle surface to modify the model's shape. Points can be moved after placement to adjust the shape.
-  - Create flattened surface patch (Baffle surface mapped to a plane with minimal distortion)
-    - Create new Model for "Flattened Model."
-    - Click the arrow button next to "Fixed Points," and place fixed landmark points on the Baffle surface. These points will be useful for aligning the generated flattened surface with the Baffle surface.
-    - Click "Flatten" button to create flattened model. The model will appear near the (0,0,0) position, which may be far from the Baffle surface position.
-    - Save the flattened image into a printable PNG file by specifying a filename (for example, `c:\Users\Public\Documents\flattened.png`) for "Flattened image file" and clicking "Save" button.
+- [Baffle planner](#baffle-planner-module): modeling tool for virtual planning of intracardiac baffle.
 
 # Installation and setup
 
@@ -167,6 +157,32 @@ in the Eigen Artemis 3D US plugin of SlicerHeart.
 > * For X: `[-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]`
 > * For Y: `[-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]``
 > * For Z: `[-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]``
+
+# ASD/VSD device simulator module
+
+Cardiac device simulator for ASD/VSD device placement analysis.
+
+Implements features described in: "Simulation of Transcatheter Atrial and Ventricular Septal Defect Device Closure Within Three-Dimensional Echocardiography–Derived Heart Models on Screen and in Virtual Reality", Journal of the American Society of Echocardiography, https://doi.org/10.1016/j.echo.2020.01.011.
+
+![](https://els-jbs-prod-cdn.jbs.elsevierhealth.com/cms/attachment/6eddd872-3121-40bb-a6a5-f07361b0b07b/fx1.jpg)
+
+# Baffle planner module
+
+Baffle planner module is a modeling tool developed for virtual planning of intracardiac baffle. Details of this application are described in this [journal paper](https://www.sciencedirect.com/science/article/pii/S0003497521004574).
+
+The tool can be used for modeling any other thin curved surfaces, such as cranial flaps (see [video tutorial](https://youtu.be/AigTwMYRI1Y)).
+
+Usage:
+- Specify curved surface patch (Baffle):
+  - In Create Baffle model section, select "Create a new Markups Closed Curve" for "Input Curve."
+  - Click the arrow button next to "Contour Points" and click in viewers to place to form the outline of Baffle.
+  - Choose "Create new Model" for "Baffle Model." The surface patch will appear in 3D views.
+  - Click the arrow button next to "Surface Points." and place points on Baffle surface to modify the model's shape. Points can be moved after placement to adjust the shape.
+- Create flattened surface patch (Baffle surface mapped to a plane with minimal distortion)
+  - Create new Model for "Flattened Model."
+  - Click the arrow button next to "Fixed Points," and place fixed landmark points on the Baffle surface. These points will be useful for aligning the generated flattened surface with the Baffle surface.
+  - Click "Flatten" button to create flattened model. The model will appear near the (0,0,0) position, which may be far from the Baffle surface position.
+  - Save the flattened image into a printable PNG file by specifying a filename (for example, `c:\Users\Public\Documents\flattened.png`) for "Flattened image file" and clicking "Save" button.
 
 # Authors
 
