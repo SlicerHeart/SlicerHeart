@@ -1420,12 +1420,19 @@ class MeasurementPreset(object):
       leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletClosedSurfaceSegmentId)
       leafletRoiLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletRoiSegmentId)
 
+      roiExtent = leafletRoiLabelmap.GetExtent()
+      leafletExtent = leafletSegmentLabelmap.GetExtent()
+      commonExtent = [0, -1, 0, -1, 0, -1]
+      for axis in range(3):
+        commonExtent[axis * 2] = min(roiExtent[axis * 2], leafletExtent[axis * 2])
+        commonExtent[axis * 2 + 1] = max(roiExtent[axis * 2 + 1], leafletExtent[axis * 2 + 1])
+
       padder = vtk.vtkImageConstantPad()
-      padder.SetInputData(leafletRoiLabelmap)
+      padder.SetInputData(leafletSegmentLabelmap)
       padder.SetConstant(0)
-      padder.SetOutputWholeExtent(leafletSegmentLabelmap.GetExtent())
+      padder.SetOutputWholeExtent(commonExtent)
       padder.Update()
-      leafletRoiLabelmap.DeepCopy(padder.GetOutput())
+      leafletSegmentLabelmap.DeepCopy(padder.GetOutput())
 
       slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(leafletSegmentLabelmap,
         segmentationNode, leafletRoiSegmentId, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MIN)
