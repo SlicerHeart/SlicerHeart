@@ -45,7 +45,8 @@ def getValveModel(heartValveNode):
   if heartValveNode in ValveModels.keys():
     return ValveModels[heartValveNode]
 
-  valveModel = HeartValveLib.ValveModel()
+  from HeartValveLib.ValveModel import ValveModel
+  valveModel = ValveModel()
   valveModel.setHeartValveNode(heartValveNode)
 
   # For legacy scenes

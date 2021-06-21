@@ -24,7 +24,7 @@ class CoaptationModel:
     self.segmentationNode = None
 
   def getName(self, valveModel):
-    return "Coaptation {}".format(" - ".join(self.getConnectedLeaflets(valveModel)))
+    return "Coaptation {}".format(" - ".join(self.getConnectedLeafletsNames(valveModel)))
 
   def updateSurfaceModelName(self, valveModel):
     """ SubjectHierarchy items don't get updated after changing name or visibility of the underlying mrml node. Using
@@ -160,6 +160,11 @@ class CoaptationModel:
 
     return np.array([getDistance(i) for i in range(basePoints.GetNumberOfPoints())])
 
+  def getConnectedLeafletsNames(self, valveModel):
+    connectedLeaflets = self.getConnectedLeaflets(valveModel)
+    connectedLeaflets = map(lambda l: l.getName().replace("leaflet", "").strip(), connectedLeaflets)
+    return sorted(connectedLeaflets)
+
   def getConnectedLeaflets(self, valveModel):
     basePoints = self.baseLine.curvePoly.GetPoints()
     numberOfBasePoints = basePoints.GetNumberOfPoints()
@@ -171,10 +176,8 @@ class CoaptationModel:
       leafletBoundaryPoints = leaflet.surfaceBoundary.curvePoly.GetPoints()
       if leafletBoundaryPoints.GetNumberOfPoints() == 0:
         continue
-      connectedLeaflets[leaflet.getName()] = \
+      connectedLeaflets[leaflet] = \
         np.min([np.linalg.norm(np.array(medianCoaptationPoint) - np.array(leafletBoundaryPoints.GetPoint(i)))
                 for i in range(leafletBoundaryPoints.GetNumberOfPoints())])
     connectedLeaflets = sorted(connectedLeaflets.items(), key=operator.itemgetter(1))[:2]
-    connectedLeaflets = list(map(lambda c: c[0], connectedLeaflets))
-    connectedLeaflets = map(lambda s: s.replace("leaflet", "").strip(), connectedLeaflets)
-    return sorted(connectedLeaflets)
+    return list(map(lambda c: c[0], connectedLeaflets))

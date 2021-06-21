@@ -439,7 +439,11 @@ class ValveModel:
         papillaryModel = PapillaryModel.PapillaryModel()
         self.papillaryModels.append(papillaryModel)
 
-      papillaryMuscleName = self.valveTypePresets[self.getValveType()]["papillaryNames"][papillaryModelIndex]
+      papillaryLineModelNode = self.heartValveNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
+      if papillaryLineModelNode:
+        papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
+      else:
+        papillaryMuscleName = self.valveTypePresets[self.getValveType()]["papillaryNames"][papillaryModelIndex]
       papillaryLineMarkupNode = self.heartValveNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
       if not papillaryLineMarkupNode:
         markupsLogic = slicer.modules.markups.logic()
@@ -457,7 +461,6 @@ class ValveModel:
       self.applyProbeToRasTransformToNode(papillaryLineMarkupNode)
       papillaryModel.setPapillaryLineMarkupNode(papillaryLineMarkupNode)
 
-      papillaryLineModelNode = self.heartValveNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
       if not papillaryLineModelNode:
         modelsLogic = slicer.modules.models.logic()
         polyData = vtk.vtkPolyData()
@@ -482,11 +485,8 @@ class ValveModel:
       # Not found
       return None
 
-    def getPapillaryMuscleNames(self):
-      return self.valveTypePresets[self.getValveType()]["papillaryNames"]
-
     def updatePapillaryModels(self):
-      papillaryMuscleNames = self.getPapillaryMuscleNames()
+      papillaryMuscleNames = self.valveTypePresets[self.getValveType()]["papillaryNames"]
       numberOfPapillaryModels = len(papillaryMuscleNames)
 
       # Remove all orphan papillary models
@@ -1288,6 +1288,14 @@ class ValveModel:
       modifierLabelmap.SetImageToWorldMatrix(imageToWorldMatrix)
 
       slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(modifierLabelmap, segmentationNode, segmentId)
+
+    def getCoaptationsForLeaflet(self, leafletModel):
+      coaptations = []
+      for coaptation in self.coaptationModels:
+        connectedLeaflets = coaptation.getConnectedLeaflets(self)
+        if leafletModel in connectedLeaflets:
+          coaptations.append(coaptation)
+      return coaptations
 
 
 # source: http://stackoverflow.com/questions/12299540/plane-fitting-to-4-or-more-xyz-points

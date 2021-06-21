@@ -12,6 +12,9 @@ class PapillaryModel:
     self.papillaryLine.setTubeRadius(self.markupGlyphScale/2.0)
     self.papillaryLine.setInterpolationMethod(HeartValveLib.SmoothCurve.InterpolationSpline)
 
+  def getName(self):
+    return self.getPapillaryLineModelNode().GetName()
+
   def updateModel(self):
     self.papillaryLine.updateCurve()
     

@@ -38,6 +38,19 @@ def getValveModelNode(phase='MS'):
   raise ValueError("Could not find valve for phase %s" % phase)
 
 
+def getValveModelNodesMatchingPhase(phase):
+  for valveModelNode in getAllHeartValveModelNodes():
+    if valveModelNode.cardiacCyclePhasePresets[valveModelNode.getCardiacCyclePhase()]["shortname"] == phase:
+      yield valveModelNode
+
+
+def getValveModelNodesMatchingPhaseAndType(phase, valveType):
+  for valveModel in getValveModelNodesMatchingPhase(phase):
+    if valveModel.getValveType() == valveType:
+      return valveModel
+  raise ValueError(f"Could not find valve with type {valveType} for phase {phase}")
+
+
 def getAllHeartValveModelNodes():
   import HeartValves
   return map(HeartValves.getValveModel, getAllHeartValveNodes())
