@@ -14,7 +14,7 @@ def getSpecificHeartValveModelNodes(phases: list):
   heartValveModelNodes = []
   for phase in phases:
     try:
-      heartValveModelNodes.append(getValveModelNode(phase))
+      heartValveModelNodes.extend(list(getValveModelNodesMatchingPhase(phase)))
     except ValueError as exc:
       logging.warning(exc)
   return heartValveModelNodes
@@ -31,7 +31,7 @@ def getSpecificHeartValveMeasurementNodes(identifier):
   return validMeasurementNodes
 
 
-def getValveModelNode(phase='MS'):
+def getFirstValveModelNodeMatchingPhase(phase='MS'):
   for valveModelNode in getAllHeartValveModelNodes():
     if valveModelNode.cardiacCyclePhasePresets[valveModelNode.getCardiacCyclePhase()]["shortname"] == phase:
       return valveModelNode
