@@ -1692,7 +1692,6 @@ class MeasurementPreset(object):
     distances = []
     for leafletSurface in leafletSurfaces:
       dist.SetInputData(1, leafletSurface)
-      dist.ComputeCellCenterDistanceOn()
       dist.Update()
       distances.append(VN.vtk_to_numpy(dist.GetOutput().GetPointData().GetScalars()))
 
