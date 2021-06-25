@@ -1033,7 +1033,7 @@ class MeasurementPreset(object):
     massProperties.SetInputData(leafletSurfaceModelNode.GetPolyData())
     leafletSurfaceArea3d = massProperties.GetSurfaceArea()
     self.addMeasurement({KEY_NAME: measurementName, KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d), KEY_UNIT: 'mm*mm'})
-    return leafletSurfaceArea3d
+    return leafletSurfacePolyData, leafletSurfaceArea3d
 
   @staticmethod
   def createCurveModel(modelName, curvePoints, radius=0.25, color=None, tubeResolution=8, visibility=False):
@@ -1582,6 +1582,7 @@ class MeasurementPreset(object):
     segmentIds = vtk.vtkStringArray()
     segmentation.GetSegmentIDs(segmentIds)
     allLeafletThickness = list()
+    leafletSurfaces = []
     for segmentIndex in range(segmentIds.GetNumberOfValues()):
       segmentId = segmentIds.GetValue(segmentIndex)
       if segmentId in segmentIdsToIgnore:
@@ -1592,13 +1593,16 @@ class MeasurementPreset(object):
                                                        segment.GetColor(), leafletSegmentationNode,
                                                        segmentId)
       try:
-        leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId,
+        leafletSurfacePolyData, leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId,
                                                             "Leaflet area - {0} (3D)".format(segment.GetName()))
         if leafletSurfaceArea is not None:
           # NB: estimating leaflet thickness by dividing volume by surface area
           allLeafletThickness.append(leafletVolume/leafletSurfaceArea)
           self.addMeasurement({KEY_NAME: "Leaflet thickness estimate - {0}".format(segment.GetName()),
                                KEY_VALUE: "{:.1f}".format(allLeafletThickness[-1]), KEY_UNIT: 'mm'})
+
+        # NB: necessary for calculating partial atrial surface
+        leafletSurfaces.append( leafletSurfacePolyData )
       except TypeError as exc:
         logging.warn("Leaflet ({}) thickness computation failed: {}".format(segment.GetName(), str(exc)))
 
@@ -1610,22 +1614,6 @@ class MeasurementPreset(object):
     allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal)
     if not allLeafletSurfacePolyData:
       return
-    else:
-      # Create a copy of the leaflet surface
-      modelsLogic = slicer.modules.models.logic()
-      valveSurfaceModelNode = modelsLogic.AddModel(allLeafletSurfacePolyData)
-      valveSurfaceModelNode.SetName("Valve surface area - all (3D)")
-      valveSurfaceModelNode.GetDisplayNode().SetVisibility(False)
-      valveSurfaceModelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
-      valveSurfaceModelNode.GetDisplayNode().SetOpacity(0.6)
-      valveSurfaceModelNode.GetDisplayNode().SetAmbient(0.1)
-      valveSurfaceModelNode.GetDisplayNode().SetDiffuse(0.9)
-      valveSurfaceModelNode.GetDisplayNode().SetSpecular(0.1)
-      valveSurfaceModelNode.GetDisplayNode().SetPower(10)
-      valveSurfaceModelNode.GetDisplayNode().BackfaceCullingOff()
-      # Place model into subject and transform hierarchy
-      self.moveNodeToMeasurementFolder(valveSurfaceModelNode)
-      # valveSurfaceModelNode.SetAndObserveTransformNodeID(leafletTransformNodeId)
 
     # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
     maxLeafletDepthMm = 60
@@ -1634,7 +1622,7 @@ class MeasurementPreset(object):
       self.getSignedDistance(allLeafletSurfacePolyData, annulusAreaPolyData, planeNormal, maxLeafletDepthMm)
 
     # Add colored model of fused leaflet surface
-    self.addModelColoredBySignedDistance("Leaflet area - all (3D)", valveModel, allLeafletSurfacePolyDataWithDistance)
+    self.addModelColoredBySignedDistance('Leaflet area (atrial) - all (3D)', valveModel, allLeafletSurfacePolyDataWithDistance)
 
     self.addMaximumSurfaceDistanceMeasurement(valveModel, "Tenting height", "Billow height",
                                               allLeafletSurfacePolyDataWithDistance, annulusAreaPolyData)
@@ -1646,7 +1634,11 @@ class MeasurementPreset(object):
     massProperties = vtk.vtkMassProperties()
     massProperties.SetInputData(allLeafletSurfacePolyData)
     leafletSurfaceArea3d = massProperties.GetSurfaceArea()
-    self.addMeasurement({KEY_NAME: 'Leaflet area - all (3D)', KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d), KEY_UNIT: 'mm*mm'})
+    self.addMeasurement({KEY_NAME: 'Leaflet area (atrial) - all (3D)',
+                         KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
+                         KEY_UNIT: 'mm*mm'})
+
+    self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces)
 
     # Get leaflet projections on the valve plane normal so that we can split the volume measurements per leaflet
     leafletRois = []
@@ -1685,3 +1677,78 @@ class MeasurementPreset(object):
 
     for leafletRoi in leafletRois:
       slicer.mrmlScene.RemoveNode(leafletRoi.roiModelNode)
+
+  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces):
+    # calculate all cell center distances from atrial valve surface to individual leaflets
+    vtkCenters = vtk.vtkCellCenters()
+    vtkCenters.SetInputData(allLeafletSurfacePolyData)
+    vtkCenters.VertexCellsOn()
+    vtkCenters.Update()
+
+    atrialSurfaceCellCenters = vtkCenters.GetOutput()
+    dist = vtk.vtkDistancePolyDataFilter()
+    dist.SetInputData(0, atrialSurfaceCellCenters)
+
+    distances = []
+    for leafletSurface in leafletSurfaces:
+      dist.SetInputData(1, leafletSurface)
+      dist.ComputeCellCenterDistanceOn()
+      dist.Update()
+      distances.append(VN.vtk_to_numpy(dist.GetOutput().GetPointData().GetScalars()))
+
+    # prepare for label assignment
+    distances = np.abs(np.column_stack(distances))
+    assigned_labels = np.argmin(distances, axis=1)
+
+    # add new array to atrial surface with assigned leaflets
+    arrayName = "Closest_Leaflet"
+    label = vtk.vtkIntArray()
+    label.SetName(arrayName)
+    label.SetNumberOfComponents(1)
+    for lblIdx in assigned_labels:
+      label.InsertNextTuple1(lblIdx)
+    allLeafletSurfacePolyData.GetCellData().AddArray(label)
+
+    leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
+    segmentation = leafletSegmentationNode.GetSegmentation()
+
+    for idx, leafletModel in enumerate(valveModel.leafletModels):
+      segmentId = leafletModel.segmentId
+      segment = segmentation.GetSegment(segmentId)
+      metricName = 'Leaflet area (atrial) - {0} (3D)'.format(segment.GetName())
+
+      allLeafletSurfacePolyData.GetPointData().SetActiveScalars(arrayName)
+
+      threshold = vtk.vtkThreshold()
+      threshold.SetInputData(allLeafletSurfacePolyData)
+      threshold.ThresholdBetween(idx, idx)
+      threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS, arrayName)
+      threshold.Update()
+
+      geometryFilter = vtk.vtkGeometryFilter()
+      geometryFilter.SetInputData(threshold.GetOutput())
+      geometryFilter.Update()
+      leafletSurface = geometryFilter.GetOutput()
+
+      modelsLogic = slicer.modules.models.logic()
+      modelNode = modelsLogic.AddModel(leafletSurface)
+      modelNode.GetDisplayNode().SetVisibility(False)
+      modelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
+      modelNode.GetDisplayNode().SetColor(leafletModel.getLeafletColor())
+      modelNode.GetDisplayNode().SetOpacity(0.6)
+      modelNode.GetDisplayNode().SetAmbient(0.1)
+      modelNode.GetDisplayNode().SetDiffuse(0.9)
+      modelNode.GetDisplayNode().SetSpecular(0.1)
+      modelNode.GetDisplayNode().SetPower(10)
+      modelNode.GetDisplayNode().BackfaceCullingOff()
+      modelNode.SetName(metricName)
+
+      valveModel.applyProbeToRasTransformToNode(modelNode)
+      self.moveNodeToMeasurementFolder(modelNode)
+
+      massProperties = vtk.vtkMassProperties()
+      massProperties.SetInputData(leafletSurface)
+      leafletSurfaceArea3d = massProperties.GetSurfaceArea()
+      self.addMeasurement({KEY_NAME: metricName,
+                           KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
+                           KEY_UNIT: 'mm*mm'})
