@@ -58,6 +58,7 @@ ExternalProject_Add(${proj}
     # Superbuild
     -D${EXTENSION_NAME}_SUPERBUILD:BOOL=OFF
     -DEXTENSION_SUPERBUILD_BINARY_DIR:PATH=${${EXTENSION_NAME}_BINARY_DIR}
+    -DSlicerHeart_BUILD_ITK_FILTERS:BOOL=${SlicerHeart_BUILD_ITK_FILTERS}
   DEPENDS
     ${${proj}_DEPENDS}
   )
