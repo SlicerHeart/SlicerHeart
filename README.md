@@ -184,6 +184,8 @@ Usage:
   - Click "Flatten" button to create flattened model. The model will appear near the (0,0,0) position, which may be far from the Baffle surface position.
   - Save the flattened image into a printable PNG file by specifying a filename (for example, `c:\Users\Public\Documents\flattened.png`) for "Flattened image file" and clicking "Save" button.
 
+![](https://ars.els-cdn.com/content/image/1-s2.0-S0003497521004574-gr2_lrg.jpg)
+
 # Authors
 
 - Authors: Matthew Jolley (CHOP/UPenn), Andras Lasso (PerkLab, Queen's University), Christian Herz (CHOP), Csaba Pinter (Pixel Medical), Anna Ilina (PerkLab, Queen's University), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
