@@ -1164,7 +1164,8 @@ class ValveModel:
 
       return segmentInfoSorted
 
-    def createValveSurface(self, planePosition, planeNormal):
+    def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0):
+      # TODO: kernelSizeMm maybe determine this using the size (diameter?) of the annulus
       """
       Create valve surface from the union of all segmented leaflets.
       """
@@ -1179,7 +1180,6 @@ class ValveModel:
           allLeafletsSegId, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MAX)
 
       # Apply smoothing to make sure leaflets are closed
-      kernelSizeMm = 2.0 # TODO: maybe determine this using the size (diameter?) of the annulus
       self.smoothSegment(self.getLeafletSegmentationNode(), allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
 
       # Temporary node, we don't add it to the scene
@@ -1208,7 +1208,8 @@ class ValveModel:
       markupsDisplayNode.SetGlyphSize(glyphSize)
       markupsDisplayNode.SetUseGlyphScale(False)
 
-    def smoothSegment(self, segmentationNode, segmentId, kernelSizeMm=None,
+    @staticmethod
+    def smoothSegment(segmentationNode, segmentId, kernelSizeMm=None,
                       kernelSizePixel=None, smoothInZDirection=True, method='closing'):
       """
       Smooth segment by applying morphological closing.
