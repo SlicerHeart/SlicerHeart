@@ -995,13 +995,13 @@ class MeasurementPreset(object):
     leafletModel = valveModel.findLeafletModel(leafletSegmentId)
     if leafletModel is None:
       # empty segment
-      return
+      return None, None
     leafletSurfaceModelNodeSource = leafletModel.surfaceModelNode
     if (leafletSurfaceModelNodeSource is None
         or leafletSurfaceModelNodeSource.GetPolyData() is None
         or leafletSurfaceModelNodeSource.GetPolyData().GetNumberOfPoints() == 0):
-      # leaflet surface is not extracted
-      return
+      logging.warning(f"No surface has been extracted for {leafletSegmentId}")
+      return None, None
     leafletSurfacePolyData = vtk.vtkPolyData()
     leafletSurfacePolyData.DeepCopy(leafletSurfaceModelNodeSource.GetPolyData())
     leafletTransformNodeId = leafletSurfaceModelNodeSource.GetTransformNodeID()
@@ -1602,9 +1602,12 @@ class MeasurementPreset(object):
                                KEY_VALUE: "{:.1f}".format(allLeafletThickness[-1]), KEY_UNIT: 'mm'})
 
         # NB: necessary for calculating partial atrial surface
-        leafletSurfaces.append( leafletSurfacePolyData )
+        if leafletSurfacePolyData is not None:
+          leafletSurfaces.append( leafletSurfacePolyData )
       except TypeError as exc:
-        logging.warn("Leaflet ({}) thickness computation failed: {}".format(segment.GetName(), str(exc)))
+        logging.warning("Leaflet ({}) thickness computation failed: {}".format(segment.GetName(), str(exc)))
+        import traceback
+        traceback.print_exc()
 
     if allLeafletThickness:
       self.addMeasurement({KEY_NAME: "Leaflet thickness estimate - all",
@@ -1638,7 +1641,8 @@ class MeasurementPreset(object):
                          KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                          KEY_UNIT: 'mm*mm'})
 
-    self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces)
+    if leafletSurfaces:
+      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces)
 
     # Get leaflet projections on the valve plane normal so that we can split the volume measurements per leaflet
     leafletRois = []
