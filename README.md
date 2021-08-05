@@ -5,7 +5,7 @@ SlicerHeart extension contains tools for cardiac image import (3D/4D ultrasound,
 The extension currently includes the following features (new features are added continuously):
 - [Cardiac image import and export](Docs/ImageImportExport.md):
   - DICOM ultrasound image importer plugins: they allow loading Philips Affinity 3D ultrasound images, GE 3D ultrasound images and 2D image sequences, Eigen Artemis 3D ultrasound images, and some Siemens, Samsung, Canon, and Hitachi 3D ultrasound images.
-  - Philips 4D US DICOM patcher: Cartesian 4D echo images exported by Philips QLAB are not valid DICOM files. This module fixes the files and makes them loadable into 3D Slicer.
+  - [Philips 4D US DICOM patcher](Docs/Philips4dUsDicomPatcher.md): Cartesian 4D echo images exported by Philips QLAB are not valid DICOM files. This module fixes the files and makes them loadable into 3D Slicer.
   - Carto Export: export models to to be used in Carto EP mapping systems.
   - TomTec UCD data file importer: allows loading *.UCD.data.zip file as a model sequence. When drag-and-dropping the zip file to the application window, then choose "No" to the question "The selected file is a zip archive, open it and load contents" and then click OK in the displayed "Add data..." window.
 - Cardiac image visualization:
@@ -15,11 +15,11 @@ The extension currently includes the following features (new features are added 
   - Valve quantification
 - Implant placement planning and assessment:
   - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
-  - [ASD/VSD Device Simulator](Docs\AsdVsdDeviceSimulator.md): cardiac device  simulator for ASD/VSD device placement analysis.
+  - [ASD/VSD Device Simulator](Docs/AsdVsdDeviceSimulator.md): cardiac device  simulator for ASD/VSD device placement analysis.
   - TCAV Valve Simulator
   - ValveClip Device Simulator
 - Surgical planning:
-  - [Baffle planner](Docs\BafflePlanner.md): modeling tool for virtual planning of intracardiac baffle - or any other thin curved surfaces in any clinical specialties (for example, cranial flaps).
+  - [Baffle planner](Docs/BafflePlanner.md): modeling tool for virtual planning of intracardiac baffle - or any other thin curved surfaces in any clinical specialties (for example, cranial flaps).
 
 # Installation and setup
 
