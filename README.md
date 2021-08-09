@@ -6,6 +6,7 @@ The extension currently includes the following features (new features are added 
 - [Cardiac image import and export](Docs/ImageImportExport.md):
   - DICOM ultrasound image importer plugins: they allow loading Philips Affinity 3D ultrasound images, GE 3D ultrasound images and 2D image sequences, Eigen Artemis 3D ultrasound images, and some Siemens, Samsung, Canon, and Hitachi 3D ultrasound images.
   - [Philips 4D US DICOM patcher](Docs/Philips4dUsDicomPatcher.md): Cartesian 4D echo images exported by Philips QLAB are not valid DICOM files. This module fixes the files and makes them loadable into 3D Slicer.
+  - [Reconstruct 4D cine-MRI](Docs/Reconstruct4DCineMRI.md): Reconstruct sequence of Cartesian volumes from a sparse set of cine-MRI frames.
   - Carto Export: export models to to be used in Carto EP mapping systems.
   - TomTec UCD data file importer: allows loading *.UCD.data.zip file as a model sequence. When drag-and-dropping the zip file to the application window, then choose "No" to the question "The selected file is a zip archive, open it and load contents" and then click OK in the displayed "Add data..." window.
 - Cardiac image visualization:

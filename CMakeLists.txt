@@ -74,6 +74,7 @@ if (WIN32)
   # (see https://github.com/MedicalUltrasound/Image3dAPI)
   add_subdirectory(UltrasoundImage3dReader)
 endif()
+add_subdirectory(Reconstruct4DCineMRI)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
