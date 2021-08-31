@@ -75,6 +75,12 @@
             "recommendedDisplayRGBValue": [42, 237, 33]
           },
           {
+            "CodeMeaning": "tri-leaflet aortic non-coronary leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-triav-nc",
+            "recommendedDisplayRGBValue": [243, 153, 36]
+          },
+          {
             "CodeMeaning": "tri-leaflet aortic root tissue",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-tissue-triav-root",
