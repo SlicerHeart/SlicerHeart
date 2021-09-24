@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>UtilTest</class>
- <widget class="qMRMLWidget" name="UtilTest">
+ <class>BafflePlanner</class>
+ <widget class="qMRMLWidget" name="BafflePlanner">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -412,6 +412,29 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qSlicerWidget</class>
+   <extends>QWidget</extends>
+   <header>qSlicerWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qSlicerMarkupsPlaceWidget</class>
+   <extends>qSlicerWidget</extends>
+   <header>qSlicerMarkupsPlaceWidget.h</header>
+  </customwidget>
+  <customwidget>
    <class>ctkCheckablePushButton</class>
    <extends>ctkPushButton</extends>
    <header>ctkCheckablePushButton.h</header>
@@ -437,29 +460,6 @@
    <extends>QWidget</extends>
    <header>ctkSliderWidget.h</header>
   </customwidget>
-  <customwidget>
-   <class>qMRMLNodeComboBox</class>
-   <extends>QWidget</extends>
-   <header>qMRMLNodeComboBox.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLWidget</class>
-   <extends>QWidget</extends>
-   <header>qMRMLWidget.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qSlicerWidget</class>
-   <extends>QWidget</extends>
-   <header>qSlicerWidget.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qSlicerMarkupsPlaceWidget</class>
-   <extends>qSlicerWidget</extends>
-   <header>qSlicerMarkupsPlaceWidget.h</header>
-  </customwidget>
  </customwidgets>
  <resources/>
  <connections>
@@ -470,17 +470,17 @@
    <slot>setCurrentNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>328</x>
-     <y>41</y>
+     <x>386</x>
+     <y>193</y>
     </hint>
     <hint type="destinationlabel">
-     <x>328</x>
-     <y>86</y>
+     <x>386</x>
+     <y>247</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>UtilTest</sender>
+   <sender>BafflePlanner</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>inputCurveSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -490,13 +490,13 @@
      <y>308</y>
     </hint>
     <hint type="destinationlabel">
-     <x>129</x>
-     <y>31</y>
+     <x>222</x>
+     <y>193</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>UtilTest</sender>
+   <sender>BafflePlanner</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>outputBaffleModelSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -506,13 +506,13 @@
      <y>314</y>
     </hint>
     <hint type="destinationlabel">
-     <x>103</x>
-     <y>61</y>
+     <x>196</x>
+     <y>219</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>UtilTest</sender>
+   <sender>BafflePlanner</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>contourPointsPlaceWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -522,13 +522,13 @@
      <y>314</y>
     </hint>
     <hint type="destinationlabel">
-     <x>139</x>
-     <y>81</y>
+     <x>232</x>
+     <y>247</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>UtilTest</sender>
+   <sender>BafflePlanner</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>surfacePointsPlaceWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -538,13 +538,13 @@
      <y>306</y>
     </hint>
     <hint type="destinationlabel">
-     <x>162</x>
-     <y>98</y>
+     <x>255</x>
+     <y>275</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>UtilTest</sender>
+   <sender>BafflePlanner</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>fixedPointsPlaceWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -554,13 +554,13 @@
      <y>311</y>
     </hint>
     <hint type="destinationlabel">
-     <x>211</x>
-     <y>193</y>
+     <x>310</x>
+     <y>447</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>UtilTest</sender>
+   <sender>BafflePlanner</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>flattenedModelSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -570,8 +570,8 @@
      <y>312</y>
     </hint>
     <hint type="destinationlabel">
-     <x>250</x>
-     <y>230</y>
+     <x>349</x>
+     <y>419</y>
     </hint>
    </hints>
   </connection>
