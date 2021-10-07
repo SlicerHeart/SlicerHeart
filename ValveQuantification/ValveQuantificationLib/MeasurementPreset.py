@@ -262,11 +262,21 @@ class MeasurementPreset(object):
                                   positiveDirection_valveModel1=None, shParentFolderId=None, radius=None,
                                   color=None, visibility=False):
     """Create a measurement of curve length between two points
+    :param valveModel1: valve model to allow to get point by label and get valve coordinate system
     :param curve: curve the distance should be computed along (SmoothCurve). It must be under the same transform as valveModel1.
     :param pointLabel1: numpy array of 3 coordinate values, if point1_valveModel1 is not specified then the position of the annulus contour point with this label will be used
+    :param valveModel2: valve model to allow to get point by label and get valve coordinate system
     :param pointLabel2: numpy array of 3 coordinate values, if point2_valveModel2 is not specified then the position of the annulus contour point with this label will be used
+    :param name: measurement name (optional)
     :param point1_valveModel1: position of point1 in valveModel1 coordinate system (optional)
     :param point2_valveModel2: position of point1 in valveModel2 coordinate system (optional)
+    :param oriented: if True then the curve is travelled from point1 to point2 along positive rotation direction (using positiveDirection as axis direction and right-hand-rule),
+      if False then the shortest distance along the curve is returned.
+    :param positivedirection_valveModel1: direction of the axis of rotation (required if oriented=True)
+    :param shParentFolderId: subject hierarchy folder where the measurement will be placed under
+    :param radius: radius of the created curve segment model
+    :param color: color of the created curve segment model
+    :param visibility: visibility of the created curve segment model
     """
     if color is None:
       color = [1, 1, 0]
@@ -290,18 +300,37 @@ class MeasurementPreset(object):
     [closestPointOnCurve1, closestPointId1] = curve.getClosestPoint(point1_valveModel1)
     [closestPointOnCurve2, closestPointId2] = curve.getClosestPoint(point2_valveModel1)
 
-    length1to2 = curve.getCurveLengthBetweenStartEndPoints(closestPointId1, closestPointId2)
-    length2to1 = curve.getCurveLengthBetweenStartEndPoints(closestPointId2, closestPointId1)
+    if oriented:
+      curvePoints = curve.getInterpolatedPointsAsArray()
+      [_, annulusPointsProjected_Plane, _] = HeartValveLib.getPointsProjectedToPlane(curvePoints, [0.0, 0.0, 0.0], positiveDirection_valveModel1)
+      points = vtk.vtkPoints()
+      nInterpolatedPoints = annulusPointsProjected_Plane.shape[1]
+      points.Allocate(nInterpolatedPoints)
+      for i in range(nInterpolatedPoints):
+        points.InsertNextPoint(annulusPointsProjected_Plane[0, i], annulusPointsProjected_Plane[1, i], 0)
 
-    # Use the shorter section of the curve
-    if length1to2<length2to1:
-      startPointIndex = closestPointId1
-      endPointIndex = closestPointId2
-      lengthMm = length1to2
+      # Positive rotation direction according to right-hand-rule is counter-clockwise
+      if slicer.vtkSlicerMarkupsLogic.IsPolygonClockwise(points):
+        startPointIndex = closestPointId2
+        endPointIndex = closestPointId1
+      else:
+        startPointIndex = closestPointId1
+        endPointIndex = closestPointId2
+
+      lengthMm = curve.getCurveLengthBetweenStartEndPoints(startPointIndex, endPointIndex)
+
     else:
-      startPointIndex = closestPointId2
-      endPointIndex = closestPointId1
-      lengthMm = length2to1
+      # Non-oriented, use the shorter section of the curve
+      length1to2 = curve.getCurveLengthBetweenStartEndPoints(closestPointId1, closestPointId2)
+      length2to1 = curve.getCurveLengthBetweenStartEndPoints(closestPointId2, closestPointId1)
+      if length1to2<length2to1:
+        startPointIndex = closestPointId1
+        endPointIndex = closestPointId2
+        lengthMm = length1to2
+      else:
+        startPointIndex = closestPointId2
+        endPointIndex = closestPointId1
+        lengthMm = length2to1
 
     result[KEY_VALUE] = "{:.1f}".format(lengthMm)
     result[KEY_UNIT] = 'mm'
