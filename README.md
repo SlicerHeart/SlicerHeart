@@ -37,7 +37,7 @@ The extension currently includes the following features (new features are added 
 
 # How to cite
 
-Please cite the following paper when referring to SlicerHeart in your publication:
+For now, please cite the following paper when referring to SlicerHeart in your publication:
 
 Scanlan AB, Nguyen AV, Ilina A, Lasso A, Cripe L, Jegatheeswaran A, Silvestro E, McGowan FX, Mascio CE, Fuller S, Spray TL, Cohen MS, Fichtinger G, Jolley MA,
 ["Comparison of 3D Echocardiogram-Derived 3D Printed Valve Models to Molded Models for Simulated Repair of Pediatric Atrioventricular Valves"](http://perk.cs.queensu.ca/sites/perkd7.cs.queensu.ca/files/Scanlan2017.pdf),
