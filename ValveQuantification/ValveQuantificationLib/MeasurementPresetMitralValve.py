@@ -113,6 +113,9 @@ class MeasurementPresetMitralValve(MeasurementPreset):
       aorticValveModel.setAnnulusMarkupLabel('P', pointP_AorticValve)
       aorticValveModel.setAnnulusMarkupLabel('A', pointA_AorticValve)
 
+    # Coaptation measurements
+    self.addCoaptationMeasurements(mitralValveModel)
+
     return self.metricsMessages
 
   def onInputFieldChanged(self, fieldId, inputValveModels, inputFieldValues, computeDependentValues = False):
