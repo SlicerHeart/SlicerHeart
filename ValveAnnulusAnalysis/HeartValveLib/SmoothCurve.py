@@ -243,10 +243,11 @@ class SmoothCurve:
     self.setControlPointsFromArray(interpolatedPoints)
     self.setControlPointLabels(labels, positions)
 
-  def getSampledInterpolatedPointsAsArray(self, curvePoints, samplingDistance, closedCurve = True):
+  def getSampledInterpolatedPointsAsArray(self, curvePoints, samplingDistance, closedCurve=True):
     """Returns points as column vectors. Samples points along a polyline at equal distances."""
     if curvePoints.size == 0:
       return []
+    assert samplingDistance > 0, "Sampling Distance <= 0.0 is not valid"
     assert (curvePoints.shape[0]==3), "curvePoints number of rows is expected to be 3"
     distanceFromLastSampledPoint=0
     previousCurvePoint = curvePoints[:,0]
@@ -294,7 +295,7 @@ class SmoothCurve:
       curveSegmentPoints = np.hstack((curvePoints[:, startPointIndex:],
                                        curvePoints[:, :endPointIndex]))
 
-    sampledInterpolatedPoints = self.getSampledInterpolatedPointsAsArray(curveSegmentPoints, samplingDistance,closedCurve=False)
+    sampledInterpolatedPoints = self.getSampledInterpolatedPointsAsArray(curveSegmentPoints, samplingDistance, closedCurve=False)
     return sampledInterpolatedPoints
 
   def smoothCurveFourier(self, numberOfFourierCoefficients, controlPointDistance):
