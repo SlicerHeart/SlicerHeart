@@ -92,14 +92,14 @@ VALVE_TYPE_PRESETS = OrderedDict([
     "approximateFlowDirection": "anterior",
     "papillaryNames": ["antero-lateral", "postero-medial"],
     "papillaryShortNames": ["AL", "PM"],
-    "phaseComparePointLabels": None
+    "phaseComparePointLabels": ["A", "P", "PM", "AL"],
   }),
   ("tricuspid", {
     "shortname": "TV",
     "approximateFlowDirection": "anterior",
     "papillaryNames": ["anterior", "posterior"],
     "papillaryShortNames": ["A", "P"],
-    "phaseComparePointLabels": None
+    "phaseComparePointLabels": ["A", "P", "S", "L"],
   }),
   ("aortic", {
     "shortname": "AV",

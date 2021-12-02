@@ -18,10 +18,7 @@ class MeasurementPresetMitralValve(MeasurementPreset):
       createPointInputField("PmPoint", "PM", self.id, True),
       createPointInputField("AlPoint", "AL", self.id, True),
       createPointInputField("PmcPoint", "PMC", self.id, False),
-      createPointInputField("AlcPoint", "ALC", self.id, False),
-      createPointInputField("MaPoint", "MA", self.id, False, snapToAnnulusContour=False),
-      createPointInputField("MpPoint", "MP", self.id, False, snapToAnnulusContour=False),
-      createPointInputField("MsPoint", "MS", self.id, False, snapToAnnulusContour=False)
+      createPointInputField("AlcPoint", "ALC", self.id, False)
     ]
     self.definitionsUrl = self.getResourceFileUrl("MitralValve.html")
 
