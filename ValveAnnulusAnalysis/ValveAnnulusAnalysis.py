@@ -424,6 +424,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
     self.updateGuiEnabled()
+    self.onGoToAnalyzedFrameButtonClicked()
 
   def setAndObserveAxialSliceToRasTransformNode(self, axialSliceToRasTransformNode):
     logging.debug("Observe annulus to probe transform node: {0}".format(axialSliceToRasTransformNode.GetName() if axialSliceToRasTransformNode else "None"))
@@ -662,16 +663,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
 
   def onGoToAnalyzedFrameButtonClicked(self):
-    if self.valveModel is None:
-      return
-    valveVolumeSequenceIndex = self.valveModel.getValveVolumeSequenceIndex()
-    volumeNode = self.valveModel.getValveVolumeNode()
-    if not volumeNode:
-      return
-    volumeSequenceBrowserNode = HeartValveLib.getSequenceBrowserNodeForMasterOutputNode(volumeNode)
-    if not volumeSequenceBrowserNode:
-      return
-    volumeSequenceBrowserNode.SetSelectedItemNumber(valveVolumeSequenceIndex)
+    HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
   def onProbePositionChanged(self):
     probePosition = self.ui.probePositionSelector.itemData(self.ui.probePositionSelector.currentIndex)

@@ -389,6 +389,19 @@ def setSequenceBrowserNodeDisplayIndex(valveModel):
   volumeSequenceBrowserNode.SetIndexDisplayMode(volumeSequenceBrowserNode.IndexDisplayAsIndex)
 
 
+def goToAnalyzedFrame(valveModel):
+  if valveModel is None:
+    return
+  valveVolumeSequenceIndex = valveModel.getValveVolumeSequenceIndex()
+  volumeNode = valveModel.getValveVolumeNode()
+  if valveVolumeSequenceIndex < 0 or not volumeNode:
+    return
+  volumeSequenceBrowserNode = getSequenceBrowserNodeForMasterOutputNode(volumeNode)
+  if not volumeSequenceBrowserNode:
+    return
+  volumeSequenceBrowserNode.SetSelectedItemNumber(valveVolumeSequenceIndex)
+
+
 def copyNodeContentToNewScriptedModuleNode(oldDataNode, shNode):
   newDataNode = slicer.vtkMRMLScriptedModuleNode()
   newDataNode.HideFromEditorsOff()

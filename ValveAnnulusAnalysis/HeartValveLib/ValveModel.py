@@ -349,6 +349,7 @@ class ValveModel:
         logging.error("setValveVolumeSequenceIndex failed: invalid heartValveNode")
         return
       self.heartValveNode.SetAttribute("ValveVolumeSequenceIndex", str(index))
+      self.updateValveNodeName()
 
     # Annulus contour line radius
     def getAnnulusContourRadius(self):
@@ -1029,7 +1030,9 @@ class ValveModel:
       if not cardiacCyclePhase:
         cardiacCyclePhase = "unknown"
       cardiacCyclePhaseName = self.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
-      nodeName = "{0}Valve-{1}".format(valveName, cardiacCyclePhaseName)
+      volumeSequenceIndex = self.getVolumeSequenceIndexAsDisplayedString(self.getValveVolumeSequenceIndex())
+      volumeSequenceIndex = f"_f{volumeSequenceIndex}" if not volumeSequenceIndex == "NA" else ""
+      nodeName = f"{valveName}Valve-{cardiacCyclePhaseName}{volumeSequenceIndex}"
       currentNodeName = self.heartValveNode.GetName()
       if currentNodeName.startswith(nodeName):
         # already up-to-date
