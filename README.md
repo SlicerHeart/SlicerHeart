@@ -66,7 +66,7 @@ Pediatr Cardiol. 2018 Mar; 39(3):538-547. [doi: 10.1007/s00246-017-1785-4](https
 
 This work was partially supported by:
 - Department of Anesthesia and Critical Care at The Children’s Hospital of Philadelphia(CHOP)
-- CHOP Cardiac Center Innovation Grant
+- The Cora Topolewski Fund at the Children's Hospital of Philadelphia
 - CHOP Frontier Grant (Pediatric Valve Center)
 - National Heart, Blood, and Lung Institute (NHLBI) (R01 HL153166)
 - National Institute of Biomedical Imaging and Bioengineering (NIBIB) (P41 EB015902)
