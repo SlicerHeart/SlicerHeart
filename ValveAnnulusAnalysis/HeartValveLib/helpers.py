@@ -20,6 +20,16 @@ def getSpecificHeartValveModelNodes(phases: list):
   return heartValveModelNodes
 
 
+def getSpecificHeartValveModelNodesMatchingPhaseAndType(phases: list, valveType: str, sort:bool=True):
+  valveModels = []
+  for valveModel in getAllHeartValveModelNodes():
+    if valveModel.getValveType() == valveType and getValvePhaseShortName(valveModel) in phases:
+      valveModels.append(valveModel)
+  if sort:
+    return sorted(valveModels, key=lambda valveModel: phases.index(getValvePhaseShortName(valveModel)))
+  return valveModels
+
+
 def getSpecificHeartValveMeasurementNodes(identifier):
   valveQuantificationLogic = slicer.modules.valvequantification.widgetRepresentation().self().logic
   validMeasurementNodes = []
@@ -33,22 +43,30 @@ def getSpecificHeartValveMeasurementNodes(identifier):
 
 def getFirstValveModelNodeMatchingPhase(phase='MS'):
   for valveModelNode in getAllHeartValveModelNodes():
-    if valveModelNode.cardiacCyclePhasePresets[valveModelNode.getCardiacCyclePhase()]["shortname"] == phase:
+    if getValvePhaseShortName(valveModelNode) == phase:
       return valveModelNode
   raise ValueError("Could not find valve for phase %s" % phase)
 
 
 def getValveModelNodesMatchingPhase(phase):
   for valveModelNode in getAllHeartValveModelNodes():
-    if valveModelNode.cardiacCyclePhasePresets[valveModelNode.getCardiacCyclePhase()]["shortname"] == phase:
+    if getValvePhaseShortName(valveModelNode) == phase:
       yield valveModelNode
 
 
-def getValveModelNodesMatchingPhaseAndType(phase, valveType):
+def getFirstValveModelNodeMatchingPhaseAndType(phase, valveType):
   for valveModel in getValveModelNodesMatchingPhase(phase):
     if valveModel.getValveType() == valveType:
       return valveModel
   raise ValueError(f"Could not find valve with type {valveType} for phase {phase}")
+
+
+def getValveModelNodesMatchingPhaseAndType(phase, valveType):
+  valveModels = []
+  for valveModel in getValveModelNodesMatchingPhase(phase):
+    if valveModel.getValveType() == valveType:
+      valveModels.append(valveModel)
+  return valveModels
 
 
 def getAllHeartValveModelNodes():
@@ -95,3 +113,16 @@ def getAllFilesWithExtension(directory, extension, file_name_only=False):
 def isMRBFile(mrb_file):
   import os
   return os.path.isfile(mrb_file) and mrb_file.lower().endswith(".mrb")
+
+
+def getValveModelForSegmentationNode(segmentationNode):
+  for valveModel in getAllHeartValveModelNodes():
+    if valveModel.getLeafletSegmentationNode() is segmentationNode:
+      return valveModel
+  return None
+
+
+def getValvePhaseShortName(valveModel):
+  cardiacPhase = valveModel.getCardiacCyclePhase()
+  cardiacCyclePhasePreset = valveModel.cardiacCyclePhasePresets[cardiacPhase]
+  return cardiacCyclePhasePreset['shortname']
