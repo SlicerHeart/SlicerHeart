@@ -834,6 +834,22 @@ class ValveModel:
     #   [planeCenterPos, planeNormal] = planeFit(points)
     #   print("Annulus: center={0}, normal={1}".format(planeCenterPos, planeNormal))
 
+    def hasStoredAnnulusContour(self):
+      originalPoints = self.heartValveNode.GetAttribute("AnnulusContourCoordinates")
+      return originalPoints is not None
+
+    def storeAnnulusContour(self):
+      arr = self.annulusContourCurve.getControlPointsAsArray()
+      self.heartValveNode.SetAttribute("AnnulusContourCoordinates", str(arr.tobytes()))
+
+    def restoreAnnulusContour(self):
+      originalPoints = self.heartValveNode.GetAttribute("AnnulusContourCoordinates")
+      if not originalPoints:
+        return
+      import numpy as np
+      arr = np.frombuffer(eval(originalPoints), dtype=np.float64)
+      self.annulusContourCurve.setControlPointsFromArray(arr.reshape(3,-1))
+
     def setNonLabeledMarkupsVisibility(self, visible, unselectAll = True):
       annulusMarkupNode = self.getAnnulusContourMarkupNode()
       if not annulusMarkupNode:

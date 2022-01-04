@@ -189,8 +189,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     self.ui.smoothContourPreviewCheckbox.connect("toggled(bool)", self.setAnnulusContourPreviewActive)
 
+    self.ui.restoreContourButton.connect('clicked()', self.onRestoreContourClicked)
     self.ui.resampleContourButton.connect('clicked()', self.onResampleContourClicked)
-
 
     #
     # Display section
@@ -254,6 +254,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.axialSliceToRasTransformOrientationSliderWidget.setEnabled(volumeSelected)
     self.ui.displayFourUpViewButton.setEnabled(volumeSelected)
     self.ui.contourAdjustmentCollapsibleButton.setEnabled(valveModelSelected)
+    self.ui.restoreContourButton.setEnabled(valveModelSelected and self.valveModel.hasStoredAnnulusContour())
 
   def getAnnulusContourModelNode(self):
     if self.valveModel is None:
@@ -790,10 +791,22 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def onResampleContourClicked(self):
     self.ui.smoothContourPreviewCheckbox.setChecked(False)
+    if self.valveModel.hasStoredAnnulusContour():
+      if slicer.util.confirmYesNoDisplay("Found previously stored annulus contour points. "
+                                         "Do you want to overwrite them with the currently listed coordinates?"):
+        self.valveModel.storeAnnulusContour()
+    else:
+      self.valveModel.storeAnnulusContour()
     if self.ui.smoothContourCheckbox.checked:
       self.valveModel.smoothAnnulusContour(self.ui.smoothContourFourierCoefficientsSpinBox.value, self.ui.resampleSamplingDistanceSpinBox.value)
     else:
       self.valveModel.resampleAnnulusContourMarkups(self.ui.resampleSamplingDistanceSpinBox.value)
+    self.updateGuiEnabled()
+
+  def onRestoreContourClicked(self):
+    if slicer.util.confirmYesNoDisplay("Do you want to restore the previously saved annulus contour coordinates?"):
+      self.valveModel.restoreAnnulusContour()
+      self.annulusContourPreviewCurve.updateCurve()
 
   def getNumberOfDefinedControlPoints(self, markupsNode):
     return markupsNode.GetNumberOfDefinedControlPoints()

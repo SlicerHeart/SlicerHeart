@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>405</width>
-    <height>755</height>
+    <height>1017</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
@@ -328,6 +328,13 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
          </widget>
         </item>
         <item>
+         <widget class="QPushButton" name="restoreContourButton">
+          <property name="text">
+           <string>Restore</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QPushButton" name="resampleContourButton">
           <property name="toolTip">
            <string>Resample and optionally smooth the annulus contour</string>
@@ -441,17 +448,6 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
  </widget>
  <customwidgets>
   <customwidget>
-   <class>ctkCollapsibleButton</class>
-   <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
-  </customwidget>
-  <customwidget>
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
@@ -477,6 +473,17 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
    <class>qSlicerSimpleMarkupsWidget</class>
    <extends>qSlicerWidget</extends>
    <header>qSlicerSimpleMarkupsWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
