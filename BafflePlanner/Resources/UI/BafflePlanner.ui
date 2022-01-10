@@ -7,15 +7,12 @@
     <x>0</x>
     <y>0</y>
     <width>395</width>
-    <height>516</height>
+    <height>605</height>
    </rect>
   </property>
-  <layout class="QFormLayout" name="formLayout">
-   <property name="horizontalSpacing">
-    <number>6</number>
-   </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
    <property name="leftMargin">
-    <number>2</number>
+    <number>4</number>
    </property>
    <property name="topMargin">
     <number>2</number>
@@ -26,7 +23,101 @@
    <property name="bottomMargin">
     <number>4</number>
    </property>
-   <item row="1" column="1">
+   <item>
+    <widget class="ctkCollapsibleButton" name="clipModelCollapsibleButton">
+     <property name="text">
+      <string>Clip model</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_2">
+      <property name="leftMargin">
+       <number>4</number>
+      </property>
+      <property name="topMargin">
+       <number>4</number>
+      </property>
+      <property name="rightMargin">
+       <number>4</number>
+      </property>
+      <property name="bottomMargin">
+       <number>4</number>
+      </property>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_9">
+        <property name="text">
+         <string>Complete model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="MRMLNodeComboBox">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_11">
+        <property name="text">
+         <string>Clipping plane:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="MRMLNodeComboBox_3"/>
+      </item>
+      <item row="2" column="1">
+       <widget class="qSlicerMarkupsPlaceWidget" name="MarkupsPlaceWidget"/>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_12">
+        <property name="text">
+         <string>Show:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <item>
+         <widget class="QPushButton" name="pushButton_3">
+          <property name="text">
+           <string>Complete</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton_2">
+          <property name="text">
+           <string>Clipped (+)</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton">
+          <property name="text">
+           <string>Clipped (-)</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="ctkCollapsibleButton" name="CollapsibleButton">
      <property name="text">
       <string>Create baffle model</string>
@@ -217,7 +308,61 @@
      </layout>
     </widget>
    </item>
-   <item row="2" column="1">
+   <item>
+    <widget class="ctkCollapsibleButton" name="nurbsCollapsibleButton">
+     <property name="text">
+      <string>NURBS</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_2">
+      <property name="leftMargin">
+       <number>4</number>
+      </property>
+      <property name="topMargin">
+       <number>4</number>
+      </property>
+      <property name="rightMargin">
+       <number>4</number>
+      </property>
+      <property name="bottomMargin">
+       <number>4</number>
+      </property>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_13">
+        <property name="toolTip">
+         <string>Allows a different style of interaction with the surface with finer control over the inside.
+
+After conversion the ability to edit it as model will be lost (the section above disabled).</string>
+        </property>
+        <property name="text">
+         <string>Convert to NURBS surface:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="nurbsSurfaceSelector">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLMarkupsGridSurfaceNode</string>
+         </stringlist>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <widget class="QPushButton" name="nurbsConvertCancelButton">
+        <property name="toolTip">
+         <string>Allows a different style of interaction with the surface with finer control over the inside.
+
+After conversion the ability to edit it as model will be lost (the section above disabled).</string>
+        </property>
+        <property name="text">
+         <string>Convert</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="ctkCollapsibleButton" name="CollapsibleButton_2">
      <property name="text">
       <string>Flatten baffle</string>
@@ -314,100 +459,6 @@
      </layout>
     </widget>
    </item>
-   <item row="0" column="1">
-    <widget class="ctkCollapsibleButton" name="ClipModelCollapsibleButton">
-     <property name="text">
-      <string>Clip model</string>
-     </property>
-     <layout class="QFormLayout" name="formLayout_2">
-      <property name="leftMargin">
-       <number>4</number>
-      </property>
-      <property name="topMargin">
-       <number>4</number>
-      </property>
-      <property name="rightMargin">
-       <number>4</number>
-      </property>
-      <property name="bottomMargin">
-       <number>4</number>
-      </property>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_9">
-        <property name="text">
-         <string>Complete model:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="MRMLNodeComboBox">
-        <property name="nodeTypes">
-         <stringlist>
-          <string>vtkMRMLModelNode</string>
-         </stringlist>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>false</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_11">
-        <property name="text">
-         <string>Clipping plane:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="qMRMLNodeComboBox" name="MRMLNodeComboBox_3"/>
-      </item>
-      <item row="2" column="1">
-       <widget class="qSlicerMarkupsPlaceWidget" name="MarkupsPlaceWidget"/>
-      </item>
-      <item row="3" column="0">
-       <widget class="QLabel" name="label_12">
-        <property name="text">
-         <string>Show:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-        <item>
-         <widget class="QPushButton" name="pushButton_3">
-          <property name="text">
-           <string>Complete</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="pushButton_2">
-          <property name="text">
-           <string>Clipped (+)</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="pushButton">
-          <property name="text">
-           <string>Clipped (-)</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-     </layout>
-    </widget>
-   </item>
   </layout>
  </widget>
  <customwidgets>
@@ -471,11 +522,11 @@
    <hints>
     <hint type="sourcelabel">
      <x>386</x>
-     <y>193</y>
+     <y>190</y>
     </hint>
     <hint type="destinationlabel">
      <x>386</x>
-     <y>247</y>
+     <y>244</y>
     </hint>
    </hints>
   </connection>
@@ -490,8 +541,8 @@
      <y>308</y>
     </hint>
     <hint type="destinationlabel">
-     <x>222</x>
-     <y>193</y>
+     <x>315</x>
+     <y>190</y>
     </hint>
    </hints>
   </connection>
@@ -506,8 +557,8 @@
      <y>314</y>
     </hint>
     <hint type="destinationlabel">
-     <x>196</x>
-     <y>219</y>
+     <x>289</x>
+     <y>216</y>
     </hint>
    </hints>
   </connection>
@@ -522,8 +573,8 @@
      <y>314</y>
     </hint>
     <hint type="destinationlabel">
-     <x>232</x>
-     <y>247</y>
+     <x>325</x>
+     <y>244</y>
     </hint>
    </hints>
   </connection>
@@ -538,8 +589,8 @@
      <y>306</y>
     </hint>
     <hint type="destinationlabel">
-     <x>255</x>
-     <y>275</y>
+     <x>348</x>
+     <y>272</y>
     </hint>
    </hints>
   </connection>
@@ -554,8 +605,8 @@
      <y>311</y>
     </hint>
     <hint type="destinationlabel">
-     <x>310</x>
-     <y>447</y>
+     <x>386</x>
+     <y>536</y>
     </hint>
    </hints>
   </connection>
@@ -570,8 +621,24 @@
      <y>312</y>
     </hint>
     <hint type="destinationlabel">
-     <x>349</x>
-     <y>419</y>
+     <x>386</x>
+     <y>508</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>BafflePlanner</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>nurbsSurfaceSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>5</x>
+     <y>39</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>272</x>
+     <y>405</y>
     </hint>
    </hints>
   </connection>

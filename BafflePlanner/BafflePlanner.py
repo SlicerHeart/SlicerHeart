@@ -4,7 +4,7 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 import logging
- 
+
 #
 # BafflePlanner
 #
@@ -57,7 +57,9 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui = slicer.util.childWidgetVariables(uiWidget)
 
     # Hide the clipping section for now - it is not implemented yet, only the GUI has been designed
-    self.ui.ClipModelCollapsibleButton.hide()
+    self.ui.clipModelCollapsibleButton.visible = False
+    # Hide the NURBS section for now - it is not fully functional yet
+    self.ui.nurbsCollapsibleButton.visible = False
 
     # Set scene in MRML widgets. Make sure that in Qt designer the top-level qMRMLWidget's
     # "mrmlSceneChanged(vtkMRMLScene*)" signal in is connected to each MRML widget's.
@@ -76,19 +78,21 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
-    self.ui.inputCurveSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.inputCurveNodeSelected)
-    self.ui.outputBaffleModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", lambda node: self.logic.setOutputBaffleModelNode(node))
-    self.ui.flattenedModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", lambda node: self.logic.setOutputFlattenedModelNode(node))
-    #self.ui.flattenedBaffleImageFilePathLineEdit.connect("currentPathChanged(QString)", self.updateParameterNodeFromGUI)
-    self.ui.radiusScalingFactorSlider.connect('valueChanged(double)', lambda value: self.logic.setRadiusScalingFactor(value))
-    self.ui.thicknessSliderWidgetPositive.connect('valueChanged(double)', lambda value: self.logic.setSurfaceThicknessPositive(value))
-    self.ui.thicknessSliderWidgetNegative.connect('valueChanged(double)', lambda value: self.logic.setSurfaceThicknessNegative(value))
+    self.ui.inputCurveSelector.currentNodeChanged.connect(self.inputCurveNodeSelected)
+    self.ui.outputBaffleModelSelector.currentNodeChanged.connect(lambda node: self.logic.setOutputBaffleModelNode(node))
+    self.ui.nurbsSurfaceSelector.currentNodeChanged.connect(lambda node: self.logic.setOutputNurbsMarkupsSurfaceNode(node))
+    self.ui.flattenedModelSelector.currentNodeChanged.connect(lambda node: self.logic.setOutputFlattenedModelNode(node))
+    #self.ui.flattenedBaffleImageFilePathLineEdit.currentPathChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.radiusScalingFactorSlider.valueChanged.connect(lambda value: self.logic.setRadiusScalingFactor(value))
+    self.ui.thicknessSliderWidgetPositive.valueChanged.connect(lambda value: self.logic.setSurfaceThicknessPositive(value))
+    self.ui.thicknessSliderWidgetNegative.valueChanged.connect(lambda value: self.logic.setSurfaceThicknessNegative(value))
 
     # Buttons
-    self.ui.updateButton.connect('clicked(bool)', self.onUpdateButton)
-    self.ui.updateButton.connect('checkBoxToggled(bool)', self.onUpdateButtonToggled)
-    self.ui.flattenButton.connect('clicked(bool)', self.onFlattenButton)
-    self.ui.saveFlattenedBaffleButton.connect('clicked(bool)', self.onSaveFlattenedBaffleButton)
+    self.ui.updateButton.clicked.connect(self.onUpdateButton)
+    self.ui.updateButton.checkBoxToggled.connect(self.onUpdateButtonToggled)
+    self.ui.nurbsConvertCancelButton.clicked.connect(self.onNurbsConvertCancelButton)
+    self.ui.flattenButton.clicked.connect(self.onFlattenButton)
+    self.ui.saveFlattenedBaffleButton.clicked.connect(self.onSaveFlattenedBaffleButton)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -184,11 +188,16 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.inputCurveSelector.setCurrentNode(self.logic.getInputCurveNode())
     self.ui.outputBaffleModelSelector.setCurrentNode(self.logic.getOutputBaffleModelNode())
     self.ui.flattenedModelSelector.setCurrentNode(self.logic.getOutputFlattenedModelNode())
+    self.ui.nurbsSurfaceSelector.setCurrentNode(self.logic.getOutputNurbsMarkupNode())
     self.ui.surfacePointsPlaceWidget.setCurrentNode(self.logic.getSurfacePointsNode())
     self.ui.fixedPointsPlaceWidget.setCurrentNode(self.logic.getInputFixedPointsNode())
 
     # Update buttons states and tooltips
     self.ui.updateButton.enabled = self.ui.inputCurveSelector.currentNode() and self.ui.outputBaffleModelSelector.currentNode()
+    self.ui.nurbsConvertCancelButton.enabled = \
+      self.ui.inputCurveSelector.currentNode() and self.ui.outputBaffleModelSelector.currentNode() and self.ui.nurbsSurfaceSelector.currentNode()
+    self.ui.nurbsConvertCancelButton.text = \
+      'Cancel' if not self.ui.nurbsSurfaceSelector.currentNode() or self.ui.nurbsSurfaceSelector.currentNode().GetNumberOfControlPoints() > 0 else 'Convert'
     self.ui.flattenButton.enabled = self.ui.outputBaffleModelSelector.currentNode() and self.ui.flattenedModelSelector.currentNode()
     self.ui.radiusScalingFactorSlider.enabled = self.ui.outputBaffleModelSelector.currentNode() is not None
     self.ui.thicknessSliderWidgetPositive.enabled = self.ui.outputBaffleModelSelector.currentNode() is not None
@@ -224,7 +233,7 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.logic.updateOutputBaffleModel()
     except Exception as e:
       import traceback
-      traceback.print_exc() 
+      traceback.print_exc()
       slicer.util.errorDisplay("Error updating surface: "+str(e))
 
   def onUpdateButtonToggled(self, toggle):
@@ -234,6 +243,11 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.flattenButton.text = "Flattening in progress... " + text
     slicer.app.processEvents()
 
+  def onNurbsConvertCancelButton(self):
+    if not hasattr(slicer.modules, 'nurbsfitting'):
+      slicer.util.messageBox("The NURBS conversion requires the NurbsFitting module in the SlicerHeartPrivate extension. Install SlicerHeartPrivate and restart Slicer.")
+      return
+
   def onFlattenButton(self):
     try:
       self.ui.flattenButton.enabled = False
@@ -241,7 +255,7 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.logic.flattenOutputBaffleModel(self.onFlattenProgress)
     except Exception as e:
       import traceback
-      traceback.print_exc() 
+      traceback.print_exc()
       slicer.util.errorDisplay("Error flattening baffle image: "+str(e))
     self.ui.flattenButton.text = "Flatten"
     self.ui.flattenButton.enabled = True
@@ -256,7 +270,7 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.logic.generatePixmapForPrinting(filePath)
     except Exception as e:
       import traceback
-      traceback.print_exc() 
+      traceback.print_exc()
       slicer.util.errorDisplay("Error saving flattened baffle image: "+str(e))
 #
 # BafflePlannerLogic
@@ -551,7 +565,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
       self.surfaceExtrude.SetInputData(offsetSurface)
       self.surfaceExtrude.SetScaleFactor(thicknessNeg+thicknessPos)
-      
+
       self.surfacePolyDataNormalsThick.Update()
       self.getOutputBaffleModelNode().SetAndObservePolyData(self.surfacePolyDataNormalsThick.GetOutput())
 
@@ -615,10 +629,25 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     thickness = float(thicknessStr) if thicknessStr else 0.0
     return thickness
 
-  def getOutputFlattenedModelNode(self):
+  def setOutputNurbsMarkupsSurfaceNode(self, outputNurbsMarkupsNode):
+    baffleModelNode = self.getOutputBaffleModelNode()
+    if not self.inputCurveNode or not baffleModelNode:
+      if outputNurbsMarkupsNode:
+        raise ValueError("input curve node and output baffle model must be set before setting output NURBS markup node")
+      return
+    if not baffleModelNode.GetPolyData() or baffleModelNode.GetPolyData().GetNumberOfPoints() == 0 and outputNurbsMarkupsNode:
+      raise ValueError("Baffle model must be computed before setting output NURBS markup node")
+
+    if outputNurbsMarkupsNode:
+      # Setup NURBS markups node
+      pass #TODO: Color, other properties...
+
+    self.inputCurveNode.SetAndObserveNodeReferenceID('NurbsMarkupsSurface', outputNurbsMarkupsNode.GetID() if outputNurbsMarkupsNode else None)
+
+  def getOutputNurbsMarkupNode(self):
     if not self.inputCurveNode:
       return None
-    return self.inputCurveNode.GetNodeReference('FlattenedModel')
+    return self.inputCurveNode.GetNodeReference('NurbsMarkupsSurface')
 
   def setOutputFlattenedModelNode(self, outputFlattenedModelNode):
     if not self.inputCurveNode:
@@ -660,6 +689,11 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
     self.inputCurveNode.SetAndObserveNodeReferenceID('FlattenedModel', outputFlattenedModelNode.GetID() if outputFlattenedModelNode else None)
 
+  def getOutputFlattenedModelNode(self):
+    if not self.inputCurveNode:
+      return None
+    return self.inputCurveNode.GetNodeReference('FlattenedModel')
+
   @staticmethod
   def getClosestVerticesForFiducials(modelNode, markupsFiducialNode):
     closestVertices = []
@@ -680,18 +714,19 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     if numberOfFiducials < 2:
       raise ValueError("At least two fixed point fiducials are required")
 
-    if not self.getOutputBaffleModelNode() or not self.getOutputFlattenedModelNode():
+    flattenedModelNode = self.getOutputFlattenedModelNode()
+    if not self.getOutputBaffleModelNode() or not flattenedModelNode:
       raise ValueError("Missing parameters to flatten baffle model")
 
     # Hide flattened baffle model until rescaling to prevent flickering between initial size and final size
-    self.getOutputFlattenedModelNode().SetDisplayVisibility(False)
+    flattenedModelNode.SetDisplayVisibility(False)
 
     parameters = {}
     parameters["inputModel"] = self.getOutputBaffleModelNode().GetID()
     parameters["fixedPoints"] = self.getInputFixedPointsNode().GetID()
     # Arbitrary value for the first two fixed points. Baffle will be scaled later
     parameters["fixedPointTextureCoords"] = "0 0 100 0"
-    parameters["outputModel"] = self.getOutputFlattenedModelNode().GetID()
+    parameters["outputModel"] = flattenedModelNode.GetID()
 
     self.cliConformalTextureMapping = None
     self.cliConformalTextureMapping = slicer.cli.run(slicer.modules.conformaltexturemapping, None, parameters)
@@ -713,7 +748,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     massProperties.SetInputConnection(self.getOutputBaffleModelNode().GetPolyDataConnection())
     massProperties.Update()
     baffleArea = massProperties.GetSurfaceArea()
-    massProperties.SetInputConnection(self.getOutputFlattenedModelNode().GetPolyDataConnection())
+    massProperties.SetInputConnection(flattenedModelNode.GetPolyDataConnection())
     massProperties.Update()
     flattenedUnscaledBaffleArea = massProperties.GetSurfaceArea()
     import math
@@ -721,18 +756,18 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     flattenedBaffleToScaledFlattenedBaffleTransform = vtk.vtkTransform()
     flattenedBaffleToScaledFlattenedBaffleTransform.Scale(scale, scale, scale)
     transformFilter = vtk.vtkTransformPolyDataFilter()
-    transformFilter.SetInputData(self.getOutputFlattenedModelNode().GetPolyData())
+    transformFilter.SetInputData(flattenedModelNode.GetPolyData())
     transformFilter.SetTransform(flattenedBaffleToScaledFlattenedBaffleTransform)
     transformFilter.Update()
-    self.getOutputFlattenedModelNode().SetAndObservePolyData(transformFilter.GetOutput())
-    self.getOutputFlattenedModelNode().SetDisplayVisibility(True)
+    flattenedModelNode.SetAndObservePolyData(transformFilter.GetOutput())
+    flattenedModelNode.SetDisplayVisibility(True)
 
     # Update flattened fixed points markup node
     flattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
     inputFixedPointsNode = self.getInputFixedPointsNode()
     flattenedFixedPointsNode.RemoveAllControlPoints()
     closestVertexIndices = BafflePlannerLogic.getClosestVerticesForFiducials(self.getOutputBaffleModelNode(), inputFixedPointsNode)
-    flattenedPolyDataPoints = self.getOutputFlattenedModelNode().GetPolyData().GetPoints()
+    flattenedPolyDataPoints = flattenedModelNode.GetPolyData().GetPoints()
     # Set the flattened fixed node points size based on the model size
     bounds = [0,0,0,0,0,0]
     self.getOutputBaffleModelNode().GetRASBounds(bounds)
