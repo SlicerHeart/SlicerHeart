@@ -730,14 +730,14 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
     self.cliConformalTextureMapping = None
     self.cliConformalTextureMapping = slicer.cli.run(slicer.modules.conformaltexturemapping, None, parameters)
-    waitCount = 0
+    waitTime = 0 # Total amount of time we wait until we give up waiting
+    waitCycle = 0.1 # Amount of time we wait between checking if it finished
     import time
-    # ttt
-    while self.cliConformalTextureMapping.GetStatusString() != 'Completed' and waitCount < 20:
-      time.sleep(1.0)
-      waitCount += 1
+    while self.cliConformalTextureMapping.GetStatusString() != 'Completed' and waitTime < 20:
+      time.sleep(waitCycle)
+      waitTime += waitCycle
       if progressCallback:
-        progressCallback(str(waitCount))
+        progressCallback(str(waitTime))
 
     if self.cliConformalTextureMapping.GetStatusString() != 'Completed':
       self.cliConformalTextureMapping.Cancel()
