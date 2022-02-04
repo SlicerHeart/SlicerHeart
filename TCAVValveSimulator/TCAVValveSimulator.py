@@ -108,9 +108,25 @@ class TCAVValveSimulatorLogic(CardiacDeviceSimulatorLogic):
     self.aorticAnnulusFiducialNode = aorticAnnulusNode
 
     centerLineNode = self.getCenterlineNode()
+    numberOfCenterLineFiducials = 0
+    if centerLineNode:
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfCenterLineFiducials = centerLineNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfCenterLineFiducials = centerLineNode.GetNumberOfFiducials()
 
-    if self.aorticAnnulusFiducialNode and self.aorticAnnulusFiducialNode.GetNumberOfFiducials() and \
-      centerLineNode.GetNumberOfMarkups() == 0:
+    numberOfAorticAnnulusFiducials = 0
+    if self.aorticAnnulusFiducialNode:
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfAorticAnnulusFiducials = self.aorticAnnulusFiducialNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfAorticAnnulusFiducials = self.aorticAnnulusFiducialNode.GetNumberOfFiducials()
+
+    if numberOfAorticAnnulusFiducials > 0 and numberOfCenterLineFiducials == 0:
       probeToRasTransformNode = self.getProbeToRasTransform()
       if probeToRasTransformNode:
         centerLineNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID()
@@ -126,7 +142,18 @@ class TCAVValveSimulatorLogic(CardiacDeviceSimulatorLogic):
   def getMarkupsPointPositions(self, markupsNode):
     positions = []
     pos = [0, 0, 0]
-    for pIdx in range(markupsNode.GetNumberOfFiducials()):
-      markupsNode.GetNthFiducialPosition(pIdx, pos)
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numberOfControlPoints = markupsNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numberOfControlPoints = markupsNode.GetNumberOfFiducials()
+    for pIdx in range(numberOfControlPoints):
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        markupsNode.GetNthControlPointPosition(pIdx, pos)
+      except:
+        # Legacy API
+        markupsNode.GetNthFiducialPosition(pIdx, pos)
       positions.append(np.array(pos))
     return np.array(positions)

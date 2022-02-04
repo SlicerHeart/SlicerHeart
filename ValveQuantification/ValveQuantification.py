@@ -659,11 +659,16 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     # Get markup label
     field = self.measurementPreset.inputFields[fieldIndex]
 
+    useSlicer413api = hasattr(slicer.vtkMRMLMarkupsFiducialNode,'RemoveAllControlPoints')
+
     # Get valve model from selected valve node
     valveId = field[FIELD_VALVE_ID]
     if not valveId in self.inputValveModels.keys():
       logging.error('onReferencePointMarkupPlace failed: no {0} valve node is selected'.format(valveId))
-      qt.QTimer.singleShot(0, self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups)
+      if useSlicer413api:
+        qt.QTimer.singleShot(0, self.pointFieldMarkupsNode[fieldIndex].RemoveAllControlPoints)
+      else:
+        qt.QTimer.singleShot(0, self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups)
       return
     valveModel = self.inputValveModels[valveId]
 
@@ -671,7 +676,10 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     if enable:
       # Point placement activated - remove old markup
       valveModel.removeAnnulusMarkupLabel(label)
-      self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups()
+      if useSlicer413api:
+        self.pointFieldMarkupsNode[fieldIndex].RemoveAllControlPoints()
+      else:
+        self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups()
     else:
       # Point placement completed add new markup on the contour
       if self.pointFieldMarkupsNode[fieldIndex].GetNumberOfMarkups()==0:
@@ -682,7 +690,10 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       pointPositionWorld = [0,0,0]
       self.pointFieldMarkupsNode[fieldIndex].GetNthControlPointPositionWorld(0,pointPositionWorld)
 
-      qt.QTimer.singleShot(0, self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups)
+      if useSlicer413api:
+        qt.QTimer.singleShot(0, self.pointFieldMarkupsNode[fieldIndex].RemoveAllControlPoints)
+      else:
+        qt.QTimer.singleShot(0, self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups)
 
       # Add label on closest point on contour
       worldToProbeTransform = vtk.vtkGeneralTransform()

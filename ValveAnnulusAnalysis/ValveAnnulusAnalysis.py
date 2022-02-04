@@ -589,7 +589,12 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def currentAnnulusMarkupPointSelectionChanged(self, markupIndex):
     nOfControlPoints = self.getNumberOfDefinedControlPoints(self.annulusMarkupNode) if self.annulusMarkupNode else 0
     for i in range(nOfControlPoints):
-      self.annulusMarkupNode.SetNthFiducialSelected(i, i==markupIndex)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        self.annulusMarkupNode.SetNthControlPointSelected(i, i==markupIndex)
+      except:
+        # Legacy API
+        self.annulusMarkupNode.SetNthFiducialSelected(i, i==markupIndex)
 
   def onAnnulusModelRadiusChanged(self, radius):
     if not self.valveModel:
@@ -736,7 +741,12 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
         self.ui.deleteAllFiducialsButton.setEnabled(False)
 
   def onDeleteAllFiducialsClicked(self):
-    self.annulusMarkupNode.RemoveAllMarkups()
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      self.annulusMarkupNode.RemoveAllControlPoints()
+    except:
+      # Legacy API
+      self.annulusMarkupNode.RemoveAllMarkups()
     self.ui.deleteLastFiducialButton.setEnabled(False)
     self.ui.deleteAllFiducialsButton.setEnabled(False)
 

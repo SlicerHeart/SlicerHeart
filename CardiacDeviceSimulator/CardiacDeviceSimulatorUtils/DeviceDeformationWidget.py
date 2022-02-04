@@ -149,10 +149,10 @@ class DeviceDeformationWidget(DeviceWidget):
     if not self.logic.parameterNode:
       return
     sliceNumber = int(self.sliceSelectorSliderWidget.value)
-    fiducialNumber = sliceNumber
+    controlPointNumber = sliceNumber
     handleMarkupsNodeId = self.logic.parameterNode.GetNodeReference('DeformedHandles').GetID()
     centered = False
-    slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(handleMarkupsNodeId, fiducialNumber, centered)
+    slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(handleMarkupsNodeId, controlPointNumber, centered)
 
   def onPreviousSlice(self):
     sliceNumber = int(self.sliceSelectorSliderWidget.value)-1

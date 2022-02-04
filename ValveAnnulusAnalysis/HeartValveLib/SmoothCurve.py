@@ -72,15 +72,30 @@ class SmoothCurve:
     self.updateCurve()
 
   def getInterpolatedPointsLinear(self, sourceNode, points):
-    nOfControlPoints = sourceNode.GetNumberOfFiducials()
-    nInterpolatedPoints = self.numberOfIntermediatePoints*(nOfControlPoints if self.closed else nOfControlPoints-1)
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numberOfControlPoints = sourceNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numberOfControlPoints = sourceNode.GetNumberOfFiducials()
+    nInterpolatedPoints = self.numberOfIntermediatePoints*(numberOfControlPoints if self.closed else numberOfControlPoints-1)
     points.Allocate(nInterpolatedPoints)
 
     pos = np.array([0.0, 0.0, 0.0])
-    sourceNode.GetNthFiducialPosition(0,pos)
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      sourceNode.GetNthControlPointPosition(0,pos)
+    except:
+      # Legacy API
+      sourceNode.GetNthFiducialPosition(0,pos)
     nextPos = np.array([0.0, 0.0, 0.0])
-    for controlPointIndex in range(1,nOfControlPoints):
-      sourceNode.GetNthFiducialPosition(controlPointIndex,nextPos)
+    for controlPointIndex in range(1,numberOfControlPoints):
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        sourceNode.GetNthControlPointPosition(controlPointIndex,nextPos)
+      except:
+        # Legacy API
+        sourceNode.GetNthFiducialPosition(controlPointIndex,nextPos)
       posStep = (nextPos-pos)/float(self.numberOfIntermediatePoints)
       for intermediatePointIndex in range(self.numberOfIntermediatePoints):
         interpolatedPos = pos+intermediatePointIndex*posStep
@@ -89,7 +104,12 @@ class SmoothCurve:
 
     # Close contour with an additional segment
     if self.closed:
-      sourceNode.GetNthFiducialPosition(0,nextPos)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        sourceNode.GetNthControlPointPosition(0,nextPos)
+      except:
+        # Legacy API
+        sourceNode.GetNthFiducialPosition(0,nextPos)
       posStep = (nextPos-pos)/float(self.numberOfIntermediatePoints)
       for intermediatePointIndex in range(self.numberOfIntermediatePoints):
         interpolatedPos = pos+intermediatePointIndex*posStep
@@ -110,14 +130,24 @@ class SmoothCurve:
     aSplineZ.SetClosed(self.closed)
 
     pos = [0.0, 0.0, 0.0]
-    nOfControlPoints = sourceNode.GetNumberOfFiducials()
-    for i in range(0, nOfControlPoints):
-      sourceNode.GetNthFiducialPosition(i, pos)
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numberOfControlPoints = sourceNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numberOfControlPoints = sourceNode.GetNumberOfFiducials()
+    for i in range(0, numberOfControlPoints):
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        sourceNode.GetNthControlPointPosition(i, pos)
+      except:
+        # Legacy API
+        sourceNode.GetNthFiducialPosition(i, pos)
       aSplineX.AddPoint(i, pos[0])
       aSplineY.AddPoint(i, pos[1])
       aSplineZ.AddPoint(i, pos[2])
 
-    nInterpolatedPoints = self.numberOfIntermediatePoints*(nOfControlPoints if self.closed else nOfControlPoints-1)
+    nInterpolatedPoints = self.numberOfIntermediatePoints*(numberOfControlPoints if self.closed else numberOfControlPoints-1)
     curveParameterRange = [0.0, 0.0]
     aSplineX.GetParametricRange(curveParameterRange)
     if self.closed:
@@ -138,7 +168,13 @@ class SmoothCurve:
       lines = vtk.vtkCellArray()
       self.curvePoly.SetLines(lines)
 
-      if self.controlPointsMarkupNode.GetNumberOfFiducials() >= 2:
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfFiducials()
+      if numberOfControlPoints >= 2:
         self.pointInterpolationFunction(self.controlPointsMarkupNode, self.curvePoints)
         nInterpolatedPoints = self.curvePoints.GetNumberOfPoints()
         lines.InsertNextCell(nInterpolatedPoints)
@@ -161,23 +197,47 @@ class SmoothCurve:
       self.curveModelNode.Modified()
 
   def getControlPointsAsArray(self):
-    nOfControlPoints = self.controlPointsMarkupNode.GetNumberOfFiducials() if self.controlPointsMarkupNode else 0
-    points = np.zeros([3,nOfControlPoints])
+    numberOfControlPoints = 0
+    if self.controlPointsMarkupNode:
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfFiducials()
+    points = np.zeros([3,numberOfControlPoints])
     pos = [0.0, 0.0, 0.0]
-    for i in range(0, nOfControlPoints):
-      self.controlPointsMarkupNode.GetNthFiducialPosition(i, pos)
+    for i in range(0, numberOfControlPoints):
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        self.controlPointsMarkupNode.GetNthControlPointPosition(i, pos)
+      except:
+        # Legacy API
+        self.controlPointsMarkupNode.GetNthFiducialPosition(i, pos)
       points[0,i] = pos[0]
       points[1,i] = pos[1]
       points[2,i] = pos[2]
     return points
 
   def setControlPointsFromArray(self, controlPointsArray):
-    self.controlPointsMarkupNode.RemoveAllMarkups()
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      self.controlPointsMarkupNode.RemoveAllControlPoints()
+    except:
+      # Legacy API
+      self.controlPointsMarkupNode.RemoveAllMarkups()
     wasModifying = self.controlPointsMarkupNode.StartModify()
     for controlPointPos in controlPointsArray.T:
-      fidIndex = self.controlPointsMarkupNode.AddFiducial(controlPointPos[0], controlPointPos[1], controlPointPos[2])
-      # Deselect it because usually only one markup point is selected
-      self.controlPointsMarkupNode.SetNthFiducialSelected(fidIndex, False)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        fidIndex = self.controlPointsMarkupNode.AddControlPoint(controlPointPos)
+        # Deselect it because usually only one markup point is selected
+        self.controlPointsMarkupNode.SetNthControlPointSelected(fidIndex, False)
+      except:
+        # Legacy API
+        fidIndex = self.controlPointsMarkupNode.AddFiducial(controlPointPos[0], controlPointPos[1], controlPointPos[2])
+        # Deselect it because usually only one markup point is selected
+        self.controlPointsMarkupNode.SetNthFiducialSelected(fidIndex, False)
     self.controlPointsMarkupNode.EndModify(wasModifying)
 
   def getInterpolatedPointsAsArray(self):
@@ -336,28 +396,58 @@ class SmoothCurve:
 
   def getControlPointLabels(self):
     """Save control point labels to a list of labels and positions"""
-    numberOfMarkups = self.controlPointsMarkupNode.GetNumberOfFiducials()
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfFiducials()
     labels = []
     positions = []
-    for i in range(numberOfMarkups):
-      label = self.controlPointsMarkupNode.GetNthFiducialLabel(i)
+    for i in range(numberOfControlPoints):
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        label = self.controlPointsMarkupNode.GetNthControlPointLabel(i)
+      except:
+        # Legacy API
+        label = self.controlPointsMarkupNode.GetNthFiducialLabel(i)
       if label:
         labels.append(label)
         position = np.array([0.0, 0.0, 0.0])
-        self.controlPointsMarkupNode.GetNthFiducialPosition(i, position)
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          self.controlPointsMarkupNode.GetNthControlPointPosition(i, position)
+        except:
+          # Legacy API
+          self.controlPointsMarkupNode.GetNthFiducialPosition(i, position)
         positions.append(position)
     return labels, positions
 
   def getClosestMarkupIndex(self, position):
-    numberOfMarkups = self.controlPointsMarkupNode.GetNumberOfFiducials()
-    if numberOfMarkups<=0:
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numberOfControlPoints = self.controlPointsMarkupNode.GetNumberOfFiducials()
+    if numberOfControlPoints<=0:
       return -1
     markupPosition = np.array([0.0, 0.0, 0.0])
-    self.controlPointsMarkupNode.GetNthFiducialPosition(0, markupPosition)
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      self.controlPointsMarkupNode.GetNthControlPointPosition(0, markupPosition)
+    except:
+      # Legacy API
+      self.controlPointsMarkupNode.GetNthFiducialPosition(0, markupPosition)
     nearestDistance = np.linalg.norm(markupPosition-position)
     nearestIndex = 0
-    for i in range(1, numberOfMarkups):
-      self.controlPointsMarkupNode.GetNthFiducialPosition(i, markupPosition)
+    for i in range(1, numberOfControlPoints):
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        self.controlPointsMarkupNode.GetNthControlPointPosition(i, markupPosition)
+      except:
+        # Legacy API
+        self.controlPointsMarkupNode.GetNthFiducialPosition(i, markupPosition)
       currentDistance = np.linalg.norm(markupPosition-position)
       if currentDistance<nearestDistance:
         nearestDistance = currentDistance
@@ -367,11 +457,15 @@ class SmoothCurve:
   def setControlPointLabels(self, labels, positions):
     """Restore control point labels from a list of labels and positions"""
     wasModifying = self.controlPointsMarkupNode.StartModify()
-    numberOfMarkups = self.controlPointsMarkupNode.GetNumberOfFiducials()
     for label, position in zip(labels, positions):
       markupIndex = self.getClosestMarkupIndex(position)
       if markupIndex>=0:
-        self.controlPointsMarkupNode.SetNthFiducialLabel(markupIndex, label)
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          self.controlPointsMarkupNode.SetNthControlPointLabel(markupIndex, label)
+        except:
+          # Legacy API
+          self.controlPointsMarkupNode.SetNthFiducialLabel(markupIndex, label)
     self.controlPointsMarkupNode.EndModify(wasModifying)
 
   def getClosestPoint(self, point):

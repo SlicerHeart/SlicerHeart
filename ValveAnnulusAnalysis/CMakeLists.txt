@@ -21,6 +21,7 @@ set(MODULE_PYTHON_SCRIPTS
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
   Resources/UI/${MODULE_NAME}.ui
+  Resources/VrPresets/CT-EndoVascular.png
   Resources/VrPresets/US-Green.png
   Resources/VrPresets/US-Grey.png
   Resources/VrPresets/US-InverseGreen.png

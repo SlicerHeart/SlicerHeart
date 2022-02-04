@@ -854,32 +854,66 @@ class ValveModel:
       annulusMarkupNode = self.getAnnulusContourMarkupNode()
       if not annulusMarkupNode:
         return
-      numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
       wasModify = annulusMarkupNode.StartModify()
-      for i in range(0, numberOfMarkups):
-        if not annulusMarkupNode.GetNthFiducialLabel(i):
-          annulusMarkupNode.SetNthFiducialVisibility(i, visible)
-        if unselectAll and annulusMarkupNode.GetNthFiducialSelected(i):
-          annulusMarkupNode.SetNthFiducialSelected(i, False)
+      for i in range(0, numberOfControlPoints):
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          if not annulusMarkupNode.GetNthControlPointLabel(i):
+            annulusMarkupNode.SetNthControlPointVisibility(i, visible)
+          if unselectAll and annulusMarkupNode.GetNthControlPointSelected(i):
+            annulusMarkupNode.SetNthControlPointSelected(i, False)
+        except:
+          # Legacy API
+          if not annulusMarkupNode.GetNthFiducialLabel(i):
+            annulusMarkupNode.SetNthFiducialVisibility(i, visible)
+          if unselectAll and annulusMarkupNode.GetNthFiducialSelected(i):
+            annulusMarkupNode.SetNthFiducialSelected(i, False)
       annulusMarkupNode.EndModify(wasModify)
 
     def getAllMarkupLabels(self):
       """Get a list of all annulus point labels"""
       labels = []
       annulusMarkupNode = self.getAnnulusLabelsMarkupNode()
-      numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()
-      for i in range(0, numberOfMarkups):
-        label = annulusMarkupNode.GetNthFiducialLabel(i)
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
+      for i in range(0, numberOfControlPoints):
+        try:
+          # Slicer-4.13 (February 2022) and later
+          label = annulusMarkupNode.GetNthControlPointLabel(i)
+        except:
+          # fall back to older API
+          label = annulusMarkupNode.GetNthFiducialLabel(i)
         if label:
           labels.append(label)
       return labels
 
     def getAnnulusLabelsMarkupIndexByLabel(self, label):
       annulusMarkupNode = self.getAnnulusLabelsMarkupNode()
-      numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()
+      try:
+        # Slicer-4.13 (February 2022) and later
+        numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
+      except:
+        # fall back to older API
+        numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
       labelStripped = label.strip()
-      for i in range(0, numberOfMarkups):
-        if annulusMarkupNode.GetNthFiducialLabel(i).strip()==labelStripped:
+      for i in range(0, numberOfControlPoints):
+        try:
+          # Slicer-4.13 (February 2022) and later
+          label = annulusMarkupNode.GetNthControlPointLabel(i)
+        except:
+          # fall back to older API
+          label = annulusMarkupNode.GetNthFiducialLabel(i)
+        if label.strip()==labelStripped:
           return i
       # not found
       return -1
@@ -890,7 +924,12 @@ class ValveModel:
       if annulusMarkupIndex < 0:
         return None
       pos = [0,0,0]
-      self.getAnnulusLabelsMarkupNode().GetNthFiducialPosition(annulusMarkupIndex, pos)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        self.getAnnulusLabelsMarkupNode().GetNthControlPointPosition(annulusMarkupIndex, pos)
+      except:
+        # Legacy API
+        self.getAnnulusLabelsMarkupNode().GetNthFiducialPosition(annulusMarkupIndex, pos)
       return np.array(pos)
 
     def getAnnulusMarkupPositionsByLabels(self, labels):
@@ -905,7 +944,12 @@ class ValveModel:
     def setAnnulusMarkupLabel(self, label, position):
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
       if annulusMarkupIndex>=0:
-        self.getAnnulusLabelsMarkupNode().SetNthFiducialPosition(annulusMarkupIndex, position[0], position[1], position[2])
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          self.getAnnulusLabelsMarkupNode().SetNthControlPointPosition(annulusMarkupIndex, position[0], position[1], position[2])
+        except:
+          # Legacy API
+          self.getAnnulusLabelsMarkupNode().SetNthFiducialPosition(annulusMarkupIndex, position[0], position[1], position[2])
       else:
         self.getAnnulusLabelsMarkupNode().AddControlPoint(vtk.vtkVector3d(position), label)
 

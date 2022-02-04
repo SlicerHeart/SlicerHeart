@@ -72,7 +72,12 @@ class PapillaryModel:
       return None
     point = np.array([0., 0., 0.])
     musclePoints = self.getPapillaryLineMarkupNode()
-    musclePoints.GetNthFiducialPosition(idx, point)
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      musclePoints.GetNthControlPointPosition(idx, point)
+    except:
+      # Legacy API
+      musclePoints.GetNthFiducialPosition(idx, point)
     return point
 
   def hasMusclePointsPlaced(self):

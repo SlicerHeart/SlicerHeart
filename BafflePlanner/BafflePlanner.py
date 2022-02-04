@@ -699,9 +699,20 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     closestVertices = []
     pointLocator = vtk.vtkPointLocator()
     pointLocator.SetDataSet(modelNode.GetPolyData())
-    for fiducialIndex in range(markupsFiducialNode.GetNumberOfFiducials()):
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numberOfControlPoints = markupsFiducialNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numberOfControlPoints = markupsFiducialNode.GetNumberOfFiducials()
+    for fiducialIndex in range(numberOfControlPoints):
       fiducialPos = [0]*3
-      markupsFiducialNode.GetNthFiducialPosition(fiducialIndex, fiducialPos)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        markupsFiducialNode.GetNthControlPointPosition(fiducialIndex, fiducialPos)
+      except:
+        # Legacy API
+        markupsFiducialNode.GetNthFiducialPosition(fiducialIndex, fiducialPos)
       closestVertexIndex = pointLocator.FindClosestPoint(fiducialPos)
       if closestVertexIndex >= 0:
         closestVertices.append(closestVertexIndex)
@@ -710,7 +721,12 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
   def flattenOutputBaffleModel(self, progressCallback=None):
     if not self.getInputFixedPointsNode():
       raise ValueError("Fixed points fidicuals list is not assigned")
-    numberOfFiducials = self.getInputFixedPointsNode().GetNumberOfFiducials()
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      numberOfFiducials = self.getInputFixedPointsNode().GetNthControlPointPosition()
+    except:
+      # Legacy API
+      numberOfFiducials = self.getInputFixedPointsNode().GetNumberOfFiducials()
     if numberOfFiducials < 2:
       raise ValueError("At least two fixed point fiducials are required")
 

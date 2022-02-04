@@ -227,23 +227,18 @@ def setupDefaultLayout(layoutId=CardiacFourUpViewLayoutId):
   for nodeId in ['vtkMRMLViewNode1', 'vtkMRMLSliceNodeRed', 'vtkMRMLSliceNodeGreen', 'vtkMRMLSliceNodeYellow']:
     HeartValveLib.HeartValves.setHeartOrientationmarker(nodeId)
 
-  # # Hide all slice intersections by default (we will turn on visibility for the ones we need)
-  # compositeNodes = slicer.mrmlScene.GetNodesByClass("vtkMRMLSliceCompositeNode")
-  # compositeNodes.UnRegister(None) # GetNodesByClass returns a new collection
-  # compositeNodes.InitTraversal()
-  # while True:
-  #   compositeNode = compositeNodes.GetNextItemAsObject()
-  #   if not compositeNode:
-  #     break
-  #   compositeNode.SetSliceIntersectionVisibility(False)
-
   for sliceViewName in sliceViewNames:
     sliceLogic = layoutManager.sliceWidget(sliceViewName).sliceLogic()
     sliceCompositeNode = sliceLogic.GetSliceCompositeNode()
     sliceViewNode = sliceLogic.GetSliceNode()
 
     # Show slice intersections
-    sliceCompositeNode.SetSliceIntersectionVisibility(True)
+    try:
+      # Slicer-4.13 (February 2022) and later
+      sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
+    except:
+      # fall back to older API
+      sliceCompositeNode.SetSliceIntersectionVisibility(True)
 
     # Show only red slice in 3D view
     sliceViewNode.SetSliceVisible(sliceViewName == 'Red')
@@ -308,7 +303,12 @@ def setupDefaultSliceOrientation(resetFov=False, valveModel=None, orthoRotationD
     sliceViewNode = sliceLogic.GetSliceNode()
 
     # Show slice intersections
-    sliceCompositeNode.SetSliceIntersectionVisibility(True)
+    try:
+      # Slicer-4.13 (February 2022) and later
+      sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
+    except:
+      # fall back to older API
+      sliceCompositeNode.SetSliceIntersectionVisibility(True)
 
     # Show only red slice in 3D view
     sliceViewNode.SetSliceVisible(sliceViewName == show3DSliceName)

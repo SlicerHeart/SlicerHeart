@@ -272,10 +272,20 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
         # this is a legacy scene where this parameter was not saved as a parameter - compute it now
         # by getting the number of points that are in the same slice
         firstHandlePointPos = [0, 0, 0]
-        originalHandlesNode.GetNthFiducialPosition(0, firstHandlePointPos)
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          originalHandlesNode.GetNthControlPointPosition(0, firstHandlePointPos)
+        except:
+          # Legacy API
+          originalHandlesNode.GetNthFiducialPosition(0, firstHandlePointPos)
         for fidIndex in range(1, originalHandlesNode.GetNumberOfFiducials()):
           currentHandlePointPos = [0, 0, 0]
-          originalHandlesNode.GetNthFiducialPosition(fidIndex, currentHandlePointPos)
+          try:
+            # Current API (Slicer-4.13 February 2022)
+            originalHandlesNode.GetNthControlPointPosition(fidIndex, currentHandlePointPos)
+          except:
+            # Legacy API
+            originalHandlesNode.GetNthFiducialPosition(fidIndex, currentHandlePointPos)
           if fidIndex==1:
             handlesSpacingMm = abs(firstHandlePointPos[2]-currentHandlePointPos[2])
           if abs(firstHandlePointPos[2]-currentHandlePointPos[2]) < 0.1:
@@ -1171,12 +1181,22 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
 
     # Update markup node with points
     wasModifying = markupsNode.StartModify()
-    markupsNode.RemoveAllMarkups()
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      markupsNode.RemoveAllControlPoints()
+    except:
+      # Legacy API
+      markupsNode.RemoveAllMarkups()
     n = curvePoints.GetNumberOfPoints()
     pos = [0.0, 0.0, 0.0]
     for i in range(resolution * points.GetNumberOfPoints()):
       curvePoints.GetPoint(i, pos)
-      fidIndex = markupsNode.AddFiducial(pos[0], pos[1], pos[2])
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        fidIndex = markupsNode.AddControlPoint(pos[0], pos[1], pos[2])
+      except:
+        # Legacy API
+        fidIndex = markupsNode.AddFiducial(pos[0], pos[1], pos[2])
     markupsNode.EndModify(wasModifying)
 
   def setDeviceNormalizedPositionAlongCenterline(self, normalizedPosition, adjustOrientation):
@@ -1282,8 +1302,12 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
 
     originalHandlesNode = self.parameterNode.GetNodeReference("OriginalHandles")
     deformedHandlesNode = self.parameterNode.GetNodeReference("DeformedHandles")
-    numHandlePoints = deformedHandlesNode.GetNumberOfFiducials()
-
+    try:
+      # Slicer-4.13 (February 2022) and later
+      numHandlePoints = deformedHandlesNode.GetNumberOfControlPoints()
+    except:
+      # fall back to older API
+      numHandlePoints = deformedHandlesNode.GetNumberOfFiducials()
     # transform vessel model to device coordinate system
     vesselModel = self.getVesselModelNode()
     vesselToDeviceTransform = vtk.vtkGeneralTransform()
@@ -1308,7 +1332,13 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     for handleID in range(numHandlePoints):
       # all points are defined in device coordinate system
       originalHandlePoint = [0,0,0]
-      originalHandlesNode.GetNthFiducialPosition(handleID, originalHandlePoint)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        originalHandlesNode.GetNthControlPointPosition(handleID, originalHandlePoint)
+      except:
+        # Legacy API
+        originalHandlesNode.GetNthFiducialPosition(handleID, originalHandlePoint)
+
       pointOnCenterline = np.array([0, 0, originalHandlePoint[2]])  # point on centerline
 
       maxDistanceFactor = 5.0  # max distance of vessel wall (factor of device radius)
@@ -1320,16 +1350,30 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
         pointOnVessel = originalHandlePoint
 
       if allowDeviceExpansionToVesselWalls:
-        deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, pointOnVessel)
+        
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          deformedHandlesNode.SetNthFiducialPosition(handleID, pointOnVessel)
+        except:
+          # Legacy API
+          deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, pointOnVessel)
       else:
         # Check if handle point is outside of vessel walls; only deform (shrink) if it is. Device should not be expanded to fit
         # vessel walls because most/all RVOT devices cannot be expanded beyond their native form; they can only be compressed.
         distanceDeviceToCenterline = np.linalg.norm(originalHandlePoint-pointOnCenterline)
         distanceVesselToCenterline = np.linalg.norm(pointOnVessel-pointOnCenterline)
-        if distanceVesselToCenterline < distanceDeviceToCenterline:
-          deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, pointOnVessel)
-        else:
-          deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, originalHandlePoint)
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          if distanceVesselToCenterline < distanceDeviceToCenterline:
+            deformedHandlesNode.SetNthFiducialPosition(handleID, pointOnVessel)
+          else:
+            deformedHandlesNode.SetNthFiducialPosition(handleID, originalHandlePoint)
+        except:
+          # Legacy API
+          if distanceVesselToCenterline < distanceDeviceToCenterline:
+            deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, pointOnVessel)
+          else:
+            deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, originalHandlePoint)
 
     deformedHandlesNode.EndModify(wasModifying)
 

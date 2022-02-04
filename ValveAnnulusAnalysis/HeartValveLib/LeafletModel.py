@@ -114,7 +114,12 @@ class LeafletModel:
     selectionPoints = vtk.vtkPoints()
     new_coord = [0.0, 0.0, 0.0]
     for i in range(numberOfPoints):
-      inputMarkup.GetNthFiducialPosition(i,new_coord)
+      try:
+        # Current API (Slicer-4.13 February 2022)
+        inputMarkup.GetNthControlPointPosition(i,new_coord)
+      except:
+        # Legacy API
+        inputMarkup.GetNthFiducialPosition(i,new_coord)
       selectionPoints.InsertPoint(i, new_coord)
 
     loop = vtk.vtkSelectPolyData()
@@ -323,7 +328,13 @@ class LeafletModel:
     transformPlaneToWorldMatrix = np.linalg.inv(HeartValveLib.getTransformToPlane(planePosition, planeNormal))
 
     boundaryMarkups = self.getSurfaceBoundaryMarkupNode()
-    boundaryMarkups.RemoveAllMarkups()
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      boundaryMarkups.RemoveAllControlPoints()
+    except:
+      # Legacy API
+      boundaryMarkups.RemoveAllMarkups()
+
     numberOfBoundaryMarkups = 30
 
     # Put together the 3 transforms and get the tilted plane normal
@@ -355,7 +366,13 @@ class LeafletModel:
       closestPointId = loc.FindClosestPoint(boundaryPointFarPosition_World[0:3])
       if 0 <= closestPointId < cutter.GetOutput().GetPoints().GetNumberOfPoints():
         nearestPointOnLeafletSurface = cutter.GetOutput().GetPoints().GetPoint(closestPointId)
-        boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+        except:
+          # Legacy API
+          boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+
 
   def createSurfaceBoundaryFromCurve(self, valvePlanePosition, valvePlaneNormal, curve):
     """
@@ -379,8 +396,12 @@ class LeafletModel:
       return
 
     boundaryMarkups = self.getSurfaceBoundaryMarkupNode()
-    boundaryMarkups.RemoveAllMarkups()
-
+    try:
+      # Current API (Slicer-4.13 February 2022)
+      boundaryMarkups.RemoveAllControlPoints()
+    except:
+      # Legacy API
+      boundaryMarkups.RemoveAllMarkups()
 
     loc = vtk.vtkPointLocator()
     loc.SetDataSet(segmentPolydata)
@@ -394,4 +415,9 @@ class LeafletModel:
       closestPointId = loc.FindClosestPoint(pos)
       if 0 <= closestPointId < segmentPolydata.GetPoints().GetNumberOfPoints():
         nearestPointOnLeafletSurface = segmentPolydata.GetPoints().GetPoint(closestPointId)
-        boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+        try:
+          # Current API (Slicer-4.13 February 2022)
+          boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+        except:
+          # Legacy API
+          boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
