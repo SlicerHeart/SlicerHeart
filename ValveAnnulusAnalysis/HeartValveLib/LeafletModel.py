@@ -193,9 +193,9 @@ class LeafletModel:
       self.surfaceModelNode.GetDisplayNode().SetActiveScalarName("")
     #outputModel.Modified()
 
-  def extractTopSurface(self, surfaceNormalDirections, angleToleranceDeg):
+  @staticmethod
+  def extractTopSurface(fullLeafletPolydata, surfaceNormalDirections, angleToleranceDeg):
 
-    fullLeafletPolydata = self.getLeafletPolydata()
     if not fullLeafletPolydata or fullLeafletPolydata.GetNumberOfCells() == 0:
       # empty input mesh
       return None
@@ -267,7 +267,8 @@ class LeafletModel:
     :param surfaceNormalDirection: 3-element vector defining the surface normal
     :return MRML model node
     """
-    leafletSurfacePolydata = self.extractTopSurface(surfaceNormalDirections, angleToleranceDeg)
+    fullLeafletPolydata = self.getLeafletPolydata()
+    leafletSurfacePolydata = self.extractTopSurface(fullLeafletPolydata, surfaceNormalDirections, angleToleranceDeg)
     if not leafletSurfacePolydata:
       # empty polydata
       return None
