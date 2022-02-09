@@ -272,6 +272,8 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       import traceback
       traceback.print_exc()
       slicer.util.errorDisplay("Error saving flattened baffle image: "+str(e))
+
+
 #
 # BafflePlannerLogic
 #
@@ -799,18 +801,38 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     if not self.getOutputFlattenedModelNode():
       raise ValueError("Failed to access flattened baffle model")
 
-    viewOwnerNode = self.getOutputFlattenedModelNode()
+    flattenedBaffleNode = self.getOutputFlattenedModelNode()
+    flattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
+    vtkImage = self.generatePixmapFromFlatModel(flattenedBaffleNode, flattenedFixedPointsNode)
+
+    # Write to file with custom DPI
+    # (use Qt file writer to allow saving DPI values)
+    qImage = qt.QImage()
+    slicer.qMRMLUtils().vtkImageDataToQImage(vtkImage, qImage)
+    inchesPerMeter = 1000/25.4
+    qImage.setDotsPerMeterX(self.printXResolutionDpi*inchesPerMeter)
+    qImage.setDotsPerMeterY(self.printYResolutionDpi*inchesPerMeter)
+    imagePixmap = qt.QPixmap.fromImage(qImage)
+    imagePixmap.save(filePath)
+
+  def generatePixmapFromFlatModel(self, flatModelNode, fiducialsNode, showRuler=True, customPrintScale=None):
+    if not flatModelNode:
+      raise ValueError('Must give a valid flat model node')
+
     if not self.printThreeDViewNode:
       self.printThreeDViewNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLViewNode")
       self.printThreeDViewNode.UnRegister(None)
-      self.printThreeDViewNode.SetSingletonTag("FlattenedBafflePrinter")
-      self.printThreeDViewNode.SetName("FlattenedBafflePrinter")
-      self.printThreeDViewNode.SetLayoutName("FlattenedBafflePrinter")
-      self.printThreeDViewNode.SetLayoutLabel("FlattenedBafflePrinter")
+      self.printThreeDViewNode.SetSingletonTag("FlattenedModelPrinter")
+      self.printThreeDViewNode.SetName("FlattenedModelPrinter")
+      self.printThreeDViewNode.SetLayoutName("FlattenedModelPrinter")
+      self.printThreeDViewNode.SetLayoutLabel("FlattenedModelPrinter")
       self.printThreeDViewNode.SetLayoutColor(1, 1, 0)
-      self.printThreeDViewNode.SetAndObserveParentLayoutNodeID(viewOwnerNode.GetID())
-      self.printThreeDViewNode.SetRulerType(slicer.vtkMRMLAbstractViewNode.RulerTypeThin)
-      self.printThreeDViewNode.SetRulerColor(slicer.vtkMRMLAbstractViewNode.RulerColorBlack)
+      self.printThreeDViewNode.SetAndObserveParentLayoutNodeID(flatModelNode.GetID())
+      if showRuler:
+        self.printThreeDViewNode.SetRulerType(slicer.vtkMRMLAbstractViewNode.RulerTypeThin)
+        self.printThreeDViewNode.SetRulerColor(slicer.vtkMRMLAbstractViewNode.RulerColorBlack)
+      else:
+        self.printThreeDViewNode.SetRulerType(slicer.vtkMRMLAbstractViewNode.RulerTypeNone)
       self.printThreeDViewNode = slicer.mrmlScene.AddNode(self.printThreeDViewNode)
 
     if not self.printThreeDWidget:
@@ -821,7 +843,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
       self.printThreeDWidget.setMRMLScene(slicer.mrmlScene)
       self.printThreeDWidget.setMRMLViewNode(self.printThreeDViewNode)
 
-    self.printThreeDViewNode.SetAndObserveParentLayoutNodeID(viewOwnerNode.GetID())
+    self.printThreeDViewNode.SetAndObserveParentLayoutNodeID(flatModelNode.GetID())
     self.printThreeDWidget.setMRMLViewNode(self.printThreeDViewNode)
 
     # Configure view and widget
@@ -831,22 +853,24 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     self.printThreeDViewNode.SetBackgroundColor((1,1,1))
     self.printThreeDViewNode.SetBackgroundColor2((1,1,1))
 
-    # Set color and shading of flattened baffle and fixed points
-    flattenedModelDisplayNode = self.getOutputFlattenedModelNode().GetDisplayNode()
+    # Set color and shading of flattened model and fixed points
+    flattenedModelDisplayNode = flatModelNode.GetDisplayNode()
     flattenedModelOriginalColor = flattenedModelDisplayNode.GetColor()
     flattenedModelDisplayNode.SetColor(0.0, 0.0, 0.0)
 
-    flattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
-    flattenedFixedPointsDisplayNode = flattenedFixedPointsNode.GetDisplayNode()
-    flattenedFixedPointsOriginalColor = flattenedFixedPointsDisplayNode.GetColor()
-    flattenedFixedPointsDisplayNode.SetColor(1.0, 0.5, 0.5)
+    if fiducialsNode:
+      fiducialsDisplayNode = fiducialsNode.GetDisplayNode()
+      fiducialsOriginalColor = fiducialsDisplayNode.GetColor()
+      fiducialsDisplayNode.SetColor(1.0, 0.5, 0.5)
+    else:
+      fiducialsDisplayNode = None
 
-    # Make sure nothing is visible in the print view other than the baffle and the fixed landmarks
+    # Make sure nothing is visible in the print view other than the model and the fixed landmarks
     hiddenDisplayNodes = []
     layoutThreeDViewNode = slicer.app.layoutManager().threeDWidget(0).viewLogic().GetViewNode()
     allDisplayNodes = slicer.util.getNodesByClass('vtkMRMLDisplayNode')
     for displayNode in allDisplayNodes:
-      if displayNode is not flattenedModelDisplayNode and displayNode is not flattenedFixedPointsDisplayNode:
+      if displayNode is not flattenedModelDisplayNode and displayNode is not fiducialsDisplayNode:
         displayNode.AddViewNodeID(layoutThreeDViewNode.GetID())
         hiddenDisplayNodes.append(displayNode)
 
@@ -854,10 +878,10 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     self.printThreeDWidget.resize(self.printViewWidth,self.printViewHeight)
     self.printThreeDWidget.show()
 
-    # Determine ROI for flattened baffle
-    flattenedBaffePolyData = self.getOutputFlattenedModelNode().GetPolyData()
+    # Determine ROI for flattened model
+    flatModelPolyData = flatModelNode.GetPolyData()
     bounds = [0]*6
-    flattenedBaffePolyData.GetBounds(bounds)
+    flatModelPolyData.GetBounds(bounds)
     center = [ (bounds[0]+bounds[1])/2.0, (bounds[2]+bounds[3])/2.0, (bounds[4]+bounds[5])/2.0 ]
 
     # Setup camera
@@ -870,8 +894,12 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
     windowSizeInPixels = self.printThreeDWidget.threeDView().renderWindow().GetSize()
 
+    if customPrintScale is not None:
+      printScale = customPrintScale
+    else:
+      printScale = self.printScale
     pixelSizeInMm =  25.4 / self.printYResolutionDpi
-    printViewHeightOfViewportInMm = windowSizeInPixels[1] * pixelSizeInMm / self.printScale
+    printViewHeightOfViewportInMm = windowSizeInPixels[1] * pixelSizeInMm / printScale
     cameraNode.SetParallelScale(printViewHeightOfViewportInMm)
 
     threeDView = self.printThreeDWidget.threeDView()
@@ -898,31 +926,25 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
       renderWindow.Render()
 
     windowToImage.SetInput(renderWindow)
-
-    # Write to file with custom DPI
-    # (use Qt file writer to allow saving DPI values)
     windowToImage.Update()
     vtkImage = windowToImage.GetOutput()
-    qImage = qt.QImage()
-    slicer.qMRMLUtils().vtkImageDataToQImage(vtkImage, qImage)
-    inchesPerMeter = 1000/25.4
-    qImage.setDotsPerMeterX(self.printXResolutionDpi*inchesPerMeter)
-    qImage.setDotsPerMeterY(self.printYResolutionDpi*inchesPerMeter)
-    imagePixmap = qt.QPixmap.fromImage(qImage)
-    imagePixmap.save(filePath)
-
-    self.printThreeDWidget.hide()
 
     # Restore settings
+    self.printThreeDWidget.hide()
+
     cameraNode.GetCamera().SetUserTransform(originalCameraUserTransform)
     flattenedModelDisplayNode.SetColor(flattenedModelOriginalColor)
-    flattenedFixedPointsDisplayNode.SetColor(flattenedFixedPointsOriginalColor)
+    if fiducialsDisplayNode:
+      fiducialsDisplayNode.SetColor(fiducialsOriginalColor)
     for displayNode in hiddenDisplayNodes:
       displayNode.RemoveAllViewNodeIDs()
 
     if self.printTransparentBackground:
       renderWindow.SetAlphaBitPlanes(originalAlphaBitPlanes)
       renderer.SetGradientBackground(originalGradientBackground)
+
+    return vtkImage
+
 
 class BafflePlannerTest(ScriptedLoadableModuleTest):
   """
