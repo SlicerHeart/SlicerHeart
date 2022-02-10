@@ -815,7 +815,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     imagePixmap = qt.QPixmap.fromImage(qImage)
     imagePixmap.save(filePath)
 
-  def generatePixmapFromFlatModel(self, flatModelNode, fiducialsNode, showRuler=True, customPrintScale=None):
+  def generatePixmapFromFlatModel(self, flatModelNode, fiducialsNode, showRuler=True, customPrintScale=None, customPrintViewSize=None):
     if not flatModelNode:
       raise ValueError('Must give a valid flat model node')
 
@@ -860,6 +860,8 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
     if fiducialsNode:
       fiducialsDisplayNode = fiducialsNode.GetDisplayNode()
+      fiducialsOriginalVisibility = fiducialsDisplayNode.GetVisibility()
+      fiducialsDisplayNode.SetVisibility(True)
       fiducialsOriginalColor = fiducialsDisplayNode.GetColor()
       fiducialsDisplayNode.SetColor(1.0, 0.5, 0.5)
     else:
@@ -875,7 +877,11 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
         hiddenDisplayNodes.append(displayNode)
 
     # Show 3D view
-    self.printThreeDWidget.resize(self.printViewWidth,self.printViewHeight)
+    if customPrintViewSize is None:
+      printViewSize = [self.printViewWidth, self.printViewHeight]
+    else:
+      printViewSize = customPrintViewSize
+    self.printThreeDWidget.resize(printViewSize[0], printViewSize[1])
     self.printThreeDWidget.show()
 
     # Determine ROI for flattened model
@@ -894,10 +900,10 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
 
     windowSizeInPixels = self.printThreeDWidget.threeDView().renderWindow().GetSize()
 
-    if customPrintScale is not None:
-      printScale = customPrintScale
-    else:
+    if customPrintScale is None:
       printScale = self.printScale
+    else:
+      printScale = customPrintScale
     pixelSizeInMm =  25.4 / self.printYResolutionDpi
     printViewHeightOfViewportInMm = windowSizeInPixels[1] * pixelSizeInMm / printScale
     cameraNode.SetParallelScale(printViewHeightOfViewportInMm)
@@ -907,7 +913,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     renderer = renderWindow.GetRenderers().GetFirstRenderer()
 
     originalCameraUserTransform = cameraNode.GetCamera().GetUserTransform()
-    originalPixelAspect = renderer.GetPixelAspect()
+    # originalPixelAspect = renderer.GetPixelAspect()
     cameraUserTransform = vtk.vtkTransform()
     cameraUserTransform.Scale(self.printXResolutionDpi/self.printYResolutionDpi,1.0,1.0)
     cameraNode.GetCamera().SetUserTransform(cameraUserTransform)
@@ -935,6 +941,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     cameraNode.GetCamera().SetUserTransform(originalCameraUserTransform)
     flattenedModelDisplayNode.SetColor(flattenedModelOriginalColor)
     if fiducialsDisplayNode:
+      fiducialsDisplayNode.SetVisibility(fiducialsOriginalVisibility)
       fiducialsDisplayNode.SetColor(fiducialsOriginalColor)
     for displayNode in hiddenDisplayNodes:
       displayNode.RemoveAllViewNodeIDs()
