@@ -136,3 +136,8 @@ in the Eigen Artemis 3D US plugin of SlicerHeart.
 > * For X: `[-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]`
 > * For Y: `[-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]``
 > * For Z: `[-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]``
+
+Behavior of the current implementation:
+- If `Pixel Aspect Ratio` tag is defined then the spacing is computed from that as described above.
+- If `Pixel Aspect Ratio` tag is not defined then the spacing is read from `(0x1129, 0x16, "Eigen, Inc")` or `(0x1129, 0x16, "Eigen Artemis")` private tag value is used.
+- If neither the aspect ratio nor the private tags are defined then the image will be refused by the Artemis loader plugin. The  `Pixel Spacing` tag is ignored.

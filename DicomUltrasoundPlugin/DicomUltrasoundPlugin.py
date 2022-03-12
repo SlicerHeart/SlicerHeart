@@ -476,20 +476,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       logging.warning('Warning: multiple samples per pixel')
       confidence = .4
 
-    """Use manufacturer-specific conventions, per communication
-    from Rajesh Venkateraman (email to Andrey Fedorov et al on Feb 10, 2020):
-
-    > please take the PixelAspectRatio tag divide by 1000 and that would be your isotropic resolution for display in all 3 dimensions.
-    > Image Patient Orientation would be [1 0 0; 0 1 0] for each frame
-    > The origin of the volume is the center of the 3D cube and the span would be
-    > For X: [-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]
-    > For Y: [-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]
-    > For Z: [-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]
-
-    Also, cross-check with the private attributes, if those are available.
-
-    Chosen solution: prefer standard tag, if that is not avialable then use the spacing computed from the private spacing tag.
-    """
+    # Chosen solution: prefer getting spacing from aspect ratio tag, if that is not avialable then use the spacing computed from the private spacing tag.
+    # See more information in https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/ImageImportExport.md#eigen-artemis
 
     loadableWarnings = []
     pixelSpacingPrivate = None
