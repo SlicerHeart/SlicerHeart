@@ -139,5 +139,5 @@ in the Eigen Artemis 3D US plugin of SlicerHeart.
 
 Behavior of the current implementation:
 - If `Pixel Aspect Ratio` tag is defined then the spacing is computed from that as described above.
-- If `Pixel Aspect Ratio` tag is not defined then the spacing is read from `(0x1129, 0x16, "Eigen, Inc")` or `(0x1129, 0x16, "Eigen Artemis")` private tag value is used.
-- If neither the aspect ratio nor the private tags are defined then the image will be refused by the Artemis loader plugin. The  `Pixel Spacing` tag is ignored.
+- If `Pixel Aspect Ratio` tag is not defined then the `(0x1129, 0x16, "Eigen, Inc")` or `(0x1129, 0x16, "Eigen Artemis")` private tag value is used as spacing.
+- If neither the aspect ratio nor the private tags are defined then the image will be refused by the Artemis loader plugin. The reader plugin always ignores the `Pixel Spacing` tag.
