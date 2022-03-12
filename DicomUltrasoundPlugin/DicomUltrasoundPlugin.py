@@ -36,6 +36,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     corresponding to ways of interpreting the
     fileLists parameter.
     """
+
     loadables = []
     for files in fileLists:
       loadables += self.examineFiles(files)
@@ -47,6 +48,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     corresponding to ways of interpreting the
     files parameter.
     """
+    self.detailedLogging = self.isDetailedLogging()
     loadables = []
 
     for filePath in files:
@@ -80,7 +82,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -132,7 +135,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if sopClassUID != supportedSOPClassUID:
         # Unsupported class
-        # logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+        if self.detailedLogging:
+          logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
         return []
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
@@ -142,12 +146,14 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
       # Unsupported class
-      logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+      if self.detailedLogging:
+        logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
       return []
 
     voxelSpacingTag = findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")
@@ -208,7 +214,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=50) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
@@ -292,7 +299,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if not ds.SOPClassUID in supportedSOPClassUIDs:
@@ -354,7 +362,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if not ds.SOPClassUID in supportedSOPClassUIDs:
@@ -393,7 +402,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       reader.getLoader(filePath)
     except Exception as e:
-      logging.debug("3D ultrasound loader not found error: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("3D ultrasound loader not found error: {0}".format(str(e)))
       logging.info("File {0} looks like a GE 3D ultrasound file. Installing Image3dAPI reader may make the file loadable (https://github.com/MedicalUltrasound/Image3dAPI).")
       return []
 
@@ -428,7 +438,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if sopClassUID != supportedSOPClassUID:
         # Unsupported class
-        #logging.debug("Not EigenArtemis3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+        if self.detailedLogging:
+          logging.debug("Not EigenArtemis3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
         return []
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
@@ -438,12 +449,14 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     try:
       ds = dicom.read_file(filePath, stop_before_pixels=True)
     except Exception as e:
-      logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+      if self.detailedLogging:
+        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
       return []
 
     if ds.SOPClassUID != supportedSOPClassUID:
       # Unsupported class
-      logging.debug("Not EigenArtemis3DUS: sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
+      if self.detailedLogging:
+        logging.debug("Not EigenArtemis3DUS: sopClassUID "+ds.SOPClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
       return []
 
     if not (ds.Manufacturer == "Eigen" and ds.ManufacturerModelName == "Artemis"):
@@ -467,22 +480,20 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     from Rajesh Venkateraman (email to Andrey Fedorov et al on Feb 10, 2020):
 
     > please take the PixelAspectRatio tag divide by 1000 and that would be your isotropic resolution for display in all 3 dimensions.
-    >
     > Image Patient Orientation would be [1 0 0; 0 1 0] for each frame
-    >
     > The origin of the volume is the center of the 3D cube and the span would be
-    >
     > For X: [-0.5*Rows*PixelAspectRatio[0]/1000, -0.5*Rows*PixelAspectRatio[0]/1000 ]
-    >
     > For Y: [-0.5*Columns*PixelAspectRatio[0]/1000, -0.5*Columns*PixelAspectRatio[0]/1000 ]
-    >
     > For Z: [-0.5*NumberOfSlices*PixelAspectRatio[0]/1000, -0.5* NumberOfSlices *PixelAspectRatio[0]/1000 ]
 
     Also, cross-check with the private attributes, if those are available.
+
+    Chosen solution: prefer standard tag, if that is not avialable then use the spacing computed from the private spacing tag.
     """
 
+    loadableWarnings = []
     pixelSpacingPrivate = None
-    pixelSpacingPublic = None
+    pixelSpacingStandard = None
 
     try:
       pixelSpacingPrivateTag = findPrivateTag(ds, 0x1129, 0x16, "Eigen, Inc")
@@ -495,22 +506,27 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
     if hasattr(ds, "PixelAspectRatio"):
       if ds.PixelAspectRatio[0] != ds.PixelAspectRatio[1]:
-        logging.warning("examineEigenArtemis3DUS: PixelAspectRatio items are not equal!")
-      pixelSpacingPublic = float(ds.PixelAspectRatio[0])/1000.
-      if pixelSpacingPrivate is not None and pixelSpacingPrivate != pixelSpacingPublic:
-        logging.warning("examineEigenArtemis3DUS: private tag based spacing does not match computed spacing")
-    else:
-      if pixelSpacingPrivate is None:
-        logging.debug("examineEigenArtemis3DUS: unable to find spacing information")
-        return []
+        logging.warning("examineEigenArtemis3DUS: PixelAspectRatio items are not equal. Use the first value.")
+      pixelSpacingStandard = float(ds.PixelAspectRatio[0])/1000.
 
-    # prefer private, if available
-    outputSpacing = pixelSpacingPrivate if pixelSpacingPrivate is not None else pixelSpacingPublic
+    if pixelSpacingStandard is not None:
+      if (pixelSpacingPrivate is not None) and (pixelSpacingPrivate != pixelSpacingStandard):
+        # Both private and standard spacing tags are specified, prefer private
+        logging.warning(f"examineEigenArtemis3DUS: private tag based spacing {pixelSpacingPrivate} does not match standard tag based spacing {pixelSpacingStandard}. Standard tag based spacing will be used.")
+        loadableWarnings.append(f"Private tag based spacing {pixelSpacingPrivate} does not match standard tag based spacing {pixelSpacingStandard}. Standard tag based spacing will be used.")
+      outputSpacing = pixelSpacingStandard
+    else:
+      outputSpacing = pixelSpacingPrivate
+
+    if outputSpacing is None:
+      logging.warning("examineEigenArtemis3DUS: cannot load image, unable to find spacing information.")
+      return []
+
     outputOrigin = [0.5*float(ds.Rows)*outputSpacing,
                     0.5*float(ds.Columns)*outputSpacing,
                     -0.5*float(ds.NumberOfSlices)*outputSpacing]
 
-    logging.debug("examineEigenArtemis3DUS: assumed pixel spacing: %s" % str(outputSpacing))
+    logging.debug(f"examineEigenArtemis3DUS: use pixel spacing: {outputSpacing}")
 
     name = ''
     if hasattr(ds, 'SeriesNumber') and ds.SeriesNumber:
@@ -532,6 +548,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     loadable.confidence = confidence
     loadable.spacing = outputSpacing
     loadable.origin = outputOrigin
+    loadable.warning = ' '.join(loadableWarnings)
 
     return [loadable]
 
@@ -596,10 +613,10 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     using the volume logic helper class
     and the vtkITK archetype helper code
     """
-    name = slicer.util.toVTKString(loadable.name)
+    name = loadable.name
     filePath = loadable.files[0]
     fileList = vtk.vtkStringArray()
-    fileList.InsertNextValue(slicer.util.toVTKString(filePath))
+    fileList.InsertNextValue(filePath)
     volumesLogic = slicer.modules.volumes.logic()
     outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
 
@@ -786,10 +803,10 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
 
   def loadEigenArtemis3DUS(self,loadable):
 
-    name = slicer.util.toVTKString(loadable.name)
+    name = loadable.name
     filePath = loadable.files[0]
     fileList = vtk.vtkStringArray()
-    fileList.InsertNextValue(slicer.util.toVTKString(filePath))
+    fileList.InsertNextValue(filePath)
     volumesLogic = slicer.modules.volumes.logic()
     outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
 
@@ -814,6 +831,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     selectionNode.SetReferenceActiveVolumeID(outputVolume.GetID())
     appLogic.PropagateVolumeSelection(0)
     appLogic.FitSliceToAll()
+
+    # create Subject hierarchy nodes for the loaded series
+    self.addSeriesInSubjectHierarchy(loadable, outputVolume)
 
     return outputVolume
 
