@@ -10,7 +10,7 @@ if (WIN32)
       "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/${MODULE_NAME}.xml"
       VERBATIM
     )
-# Add ConformalTextureMapping executable and xml to the install package
+  # Add ConformalTextureMapping executable and xml to the install package
   install(
     FILES
       "${SlicerExecutionModel_DEFAULT_CLI_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
