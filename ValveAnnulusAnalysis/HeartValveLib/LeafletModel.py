@@ -227,8 +227,14 @@ class LeafletModel:
       # make sure the surfaceNormalDirection vector is normalized
       normalizedSurfaceNormalDirection = np.array(surfaceNormalDirection)
       normalizedSurfaceNormalDirection = normalizedSurfaceNormalDirection/np.linalg.norm(surfaceNormalDirection)
-      singleAngleDiffFuncStrs.append("acos(Normals.(iHat*({0})+jHat*({1})+kHat*({2})))".format(
-        normalizedSurfaceNormalDirection[0], normalizedSurfaceNormalDirection[1], normalizedSurfaceNormalDirection[2]))
+      vtkVersion = vtk.vtkVersion()
+      if vtkVersion.GetVTKMajorVersion() >= 9 and vtkVersion.GetVTKMinorVersion() > 0:
+        singleAngleDiffFuncStrs.append("acos(dot(Normals,(iHat*({0})+jHat*({1})+kHat*({2}))))".format(
+          normalizedSurfaceNormalDirection[0], normalizedSurfaceNormalDirection[1], normalizedSurfaceNormalDirection[2]))
+      else:
+        singleAngleDiffFuncStrs.append("acos(Normals.(iHat*({0})+jHat*({1})+kHat*({2})))".format(
+          normalizedSurfaceNormalDirection[0], normalizedSurfaceNormalDirection[1],
+          normalizedSurfaceNormalDirection[2]))
 
     # Get function string that computes the minimum for all angle differences
     angleDiffFuncStr = "" # min(min(min(min(diff1,diff2),diff3),diff4),diff5)
