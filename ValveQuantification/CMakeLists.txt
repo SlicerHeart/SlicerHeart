@@ -8,12 +8,15 @@ set(MODULE_PYTHON_SCRIPTS
   ValveQuantificationLib/MeasurementPreset
   ValveQuantificationLib/MeasurementPresetGenericValve
   ValveQuantificationLib/MeasurementPresetMitralValve
+  ValveQuantificationLib/MeasurementPresetTricuspidValve
   )
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
   Resources/MeasurementPreset/MitralValve.html
   Resources/MeasurementPreset/MitralValve.png
+  Resources/MeasurementPreset/TricuspidValve.html
+  Resources/MeasurementPreset/TricuspidValve.png
   )
 
 #-----------------------------------------------------------------------------

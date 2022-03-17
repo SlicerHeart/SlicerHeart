@@ -101,7 +101,8 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     packageName='ValveQuantificationLib'
     submoduleNames=['MeasurementPreset',
                     'MeasurementPresetGenericValve',
-                    'MeasurementPresetMitralValve']
+                    'MeasurementPresetMitralValve',
+                    'MeasurementPresetTricuspidValve']
 
     self.reloadPackageWithSubmodules(packageName, submoduleNames)
 
@@ -788,7 +789,8 @@ class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
   """
 
   measurementPresets = [ValveQuantificationLib.MeasurementPresetGenericValve(),
-                        ValveQuantificationLib.MeasurementPresetMitralValve()]
+                        ValveQuantificationLib.MeasurementPresetMitralValve(),
+                        ValveQuantificationLib.MeasurementPresetTricuspidValve()]
 
   @classmethod
   def registerPreset(cls, preset):
