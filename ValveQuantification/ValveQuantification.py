@@ -100,9 +100,11 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
 
     packageName='ValveQuantificationLib'
     submoduleNames=['MeasurementPreset',
+                    'MeasurementPresetCavc',
                     'MeasurementPresetGenericValve',
                     'MeasurementPresetMitralValve',
-                    'MeasurementPresetTricuspidValve']
+                    'MeasurementPresetTricuspidValve',
+                    'MeasurementPresetsPapillary']
 
     self.reloadPackageWithSubmodules(packageName, submoduleNames)
 
@@ -788,9 +790,13 @@ class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  measurementPresets = [ValveQuantificationLib.MeasurementPresetGenericValve(),
+  measurementPresets = [ValveQuantificationLib.MeasurementPresetCavc(),
+                        ValveQuantificationLib.MeasurementPresetGenericValve(),
                         ValveQuantificationLib.MeasurementPresetMitralValve(),
-                        ValveQuantificationLib.MeasurementPresetTricuspidValve()]
+                        ValveQuantificationLib.MeasurementPresetTricuspidValve(),
+                        ValveQuantificationLib.MeasurementPresetPapillaryMitralValve(),
+                        ValveQuantificationLib.MeasurementPresetPapillaryTricuspidValve(),
+                        ValveQuantificationLib.MeasurementPresetPapillaryCavc()]
 
   @classmethod
   def registerPreset(cls, preset):

@@ -6,13 +6,17 @@ set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
   ValveQuantificationLib/__init__
   ValveQuantificationLib/MeasurementPreset
+  ValveQuantificationLib/MeasurementPresetCavc
   ValveQuantificationLib/MeasurementPresetGenericValve
   ValveQuantificationLib/MeasurementPresetMitralValve
   ValveQuantificationLib/MeasurementPresetTricuspidValve
+  ValveQuantificationLib/MeasurementPresetsPapillary.py
   )
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/MeasurementPreset/Cavc.html
+  Resources/MeasurementPreset/Cavc.png
   Resources/MeasurementPreset/MitralValve.html
   Resources/MeasurementPreset/MitralValve.png
   Resources/MeasurementPreset/TricuspidValve.html

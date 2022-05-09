@@ -12,8 +12,9 @@ The extension currently includes the following features (new features are added 
 - Cardiac image visualization:
   - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).
 - Quantification:
-  - Valve annulus analysis
-  - Valve quantification
+  - Valve annulus analysis: specify basic heart valve properties and annulus contour
+  - Valve papillary analysis: allow specify papillary muscles and chords to compute angles and lengths.
+  - [Valve quantification](Docs/ValveQuantification.md): automatic computation heart valve annulus, leaflet, and papillary metrics
 - Implant placement planning and assessment:
   - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
   - [ASD/VSD Device Simulator](Docs/AsdVsdDeviceSimulator.md): cardiac device  simulator for ASD/VSD device placement analysis.

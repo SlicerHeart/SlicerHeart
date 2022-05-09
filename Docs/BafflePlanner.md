@@ -23,5 +23,5 @@ The tool can be used for modeling any other thin curved surfaces, such as crania
 
 ## References
 
-Chad Vigil, et al. "Modeling Tool for Rapid Virtual Planning of the Intracardiac Baffle in Double-Outlet Right Ventricle,
-The Annals of Thoracic Surgery", 2021, https://doi.org/10.1016/j.athoracsur.2021.02.058
+Chad Vigil, et al. "Modeling Tool for Rapid Virtual Planning of the Intracardiac Baffle in Double-Outlet Right Ventricle",
+The Annals of Thoracic Surgery, 2021, https://doi.org/10.1016/j.athoracsur.2021.02.058
