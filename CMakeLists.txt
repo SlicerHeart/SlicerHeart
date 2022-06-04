@@ -4,12 +4,12 @@ project(SlicerHeart)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "http://www.slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/SlicerHeart")
+set(EXTENSION_HOMEPAGE "https://github.com/SlicerHeart/SlicerHeart#readme")
 set(EXTENSION_CATEGORY "Cardiac")
 set(EXTENSION_CONTRIBUTORS "Andras Lasso (PerkLab, Queen's University), Steve Pieper (Isomics), Adam Rankin (Robarts), Csaba Pinter (Pixel Medical / Ebatinca), Christian Herz (CHOP), Matthew Jolley (CHOP/UPenn)")
 set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention planning and guidance")
-set(EXTENSION_ICONURL "http://www.slicer.org/slicerWiki/images/f/ff/SlicerHeart_Logo_128x128.png")
-set(EXTENSION_SCREENSHOTURLS "http://www.slicer.org/slicerWiki/images/a/ae/BasicHeartView.png")
+set(EXTENSION_ICONURL "https://github.com/SlicerHeart/SlicerHeart/raw/master/SlicerHeart.png")
+set(EXTENSION_SCREENSHOTURLS "https://github.com/SlicerHeart/SlicerHeart/raw/master/Docs/Image3dApiExample.png https://img.youtube.com/vi/hIxr9OKBvQ8/0.jpg https://raw.githubusercontent.com/SlicerHeart/SlicerHeart/master/ValveQuantification/Resources/MeasurementPreset/MitralValve.png")
 set(EXTENSION_STATUS Beta)
 set(EXTENSION_DEPENDS SlicerIGT)
 set(EXTENSION_BUILD_SUBDIRECTORY inner-build)
