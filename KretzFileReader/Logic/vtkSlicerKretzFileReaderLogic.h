@@ -42,7 +42,7 @@ class VTK_SLICER_KRETZFILEREADER_LOGIC_EXPORT vtkSlicerKretzFileReaderLogic :
 public:
   static vtkSlicerKretzFileReaderLogic *New();
   vtkTypeMacro(vtkSlicerKretzFileReaderLogic, vtkSlicerModuleLogic);
-  void PrintSelf(ostream& os, vtkIndent indent);
+  void PrintSelf(ostream& os, vtkIndent indent) override;
 
   /// Load KRETZ volume from file
   /// \param filename Path and filename of the KRETZ file
