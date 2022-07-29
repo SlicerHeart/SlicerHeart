@@ -76,6 +76,11 @@ if (WIN32)
   add_subdirectory(UltrasoundImage3dReader)
 endif()
 add_subdirectory(Reconstruct4DCineMRI)
+add_subdirectory(EchoVolumeRender)
+add_subdirectory(ValveBatchExport)
+add_subdirectory(LeafletMoldGenerator)
+add_subdirectory(ValveSegmentation)
+add_subdirectory(LeafletAnalysis)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

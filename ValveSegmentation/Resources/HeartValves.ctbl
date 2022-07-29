@@ -1,0 +1,10 @@
+0 (none) 0 0 0 0
+1 mitral_anterior_leaflet 255 18 8 255
+2 mitral_posterior_leaflet 42 61 244 255
+3 tricuspid_anterior_leaflet 255 18 8 255
+4 tricuspid_septal_leaflet 42 61 244 255
+5 tricuspid_posterior_leaflet 42 237 33 255
+6 superior_bridging_leaflet 255 18 8 255
+7 right_mural_leaflet 42 61 244 255
+8 inferior_bridging_leaflet 42 237 33 255
+9 left_mural_leaflet 243 153 36 255

@@ -10,16 +10,21 @@ The extension currently includes the following features (new features are added 
   - Carto Export: export models to to be used in Carto EP mapping systems.
   - TomTec UCD data file importer: allows loading *.UCD.data.zip file as a model sequence. When drag-and-dropping the zip file to the application window, then choose "No" to the question "The selected file is a zip archive, open it and load contents" and then click OK in the displayed "Add data..." window.
 - Cardiac image visualization:
+  - Echo Volume Render: module for display of 3D/4D cardiac ultrasound images with distance-dependent coloring.
   - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).
 - Quantification:
-  - Valve annulus analysis: specify basic heart valve properties and annulus contour
+  - Valve annulus analysis: specify basic heart valve properties and annulus contour.
+  - Valve segmentation: module for volumetric segmentation of heart valves.
+  - Leaflet analysis: create valve leaflet surface models from volmetric valve segmentation.
   - Valve papillary analysis: allow specify papillary muscles and chords to compute angles and lengths.
   - [Valve quantification](Docs/ValveQuantification.md): automatic computation heart valve annulus, leaflet, and papillary metrics
+  - Valve batch export: run valve quantification and export results for a large cohort of data.
 - Implant placement planning and assessment:
   - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
   - [ASD/VSD Device Simulator](Docs/AsdVsdDeviceSimulator.md): cardiac device  simulator for ASD/VSD device placement analysis.
   - TCAV Valve Simulator
   - ValveClip Device Simulator
+  - Leaflet Mold Generator: tool for automatic generation of 3D-printable molds for making simulated valves out of silicone.
 - Surgical planning:
   - [Baffle planner](Docs/BafflePlanner.md): modeling tool for virtual planning of intracardiac baffle - or any other thin curved surfaces in any clinical specialties (for example, cranial flaps).
 
