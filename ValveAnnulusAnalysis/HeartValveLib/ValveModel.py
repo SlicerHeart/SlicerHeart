@@ -1437,11 +1437,12 @@ def getTransformToPlane(planePosition, planeNormal, xDirection=None):
   # Generate a plane Y axis by generating an orthogonal vector to
   # plane Z axis vector by cross product plane Z axis vector with
   # an arbitrarily chosen vector (that is not parallel to the plane Z axis).
-  if xDirection:
+  if xDirection is None:
+    unitX_World = np.array([0,0,1])
+  else:
     unitX_World = np.array(xDirection)
     unitX_World = unitX_World/np.linalg.norm(unitX_World)
-  else:
-    unitX_World = np.array([0,0,1])
+
   angle = math.acos(np.dot(planeZ_World,unitX_World))
   # Normalize between -pi/2 .. +pi/2
   if angle>math.pi/2:
