@@ -48,6 +48,13 @@ def getFirstValveModelNodeMatchingPhase(phase='MS'):
   raise ValueError("Could not find valve for phase %s" % phase)
 
 
+def getFirstValveModelNodeMatchingSequenceIndex(seqIdx):
+  for valveModelNode in getAllHeartValveModelNodes():
+    if valveModelNode.getValveVolumeSequenceIndex() == seqIdx:
+      return valveModelNode
+  raise ValueError("Could not find valve for sequence index %s" % seqIdx)
+
+
 def getValveModelNodesMatchingPhase(phase):
   for valveModelNode in getAllHeartValveModelNodes():
     if getValvePhaseShortName(valveModelNode) == phase:
