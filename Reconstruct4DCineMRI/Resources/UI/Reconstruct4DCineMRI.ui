@@ -59,6 +59,7 @@
         </property>
         <property name="nodeTypes">
          <stringlist>
+          <string>vtkMRMLMarkupsROINode</string>
           <string>vtkMRMLAnnotationROINode</string>
          </stringlist>
         </property>
