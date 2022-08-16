@@ -182,6 +182,18 @@ CARDIAC_CYCLE_PHASE_PRESETS = OrderedDict([
     "color": [0.0, 1.0, 1.0],
     "shortname": "ED"
   }),
+  ("custom-systolic", {
+    "color": [1.0, 0.0, 0.0],
+    "shortname": "CS"
+  }),
+  ("custom-transition", {
+    "color": [1.0, 1.0, 0.0],
+    "shortname": "CT"
+  }),
+  ("custom-diastolic", {
+    "color": [0.0, 1.0, 1.0],
+    "shortname": "CD"
+  }),
   ("custom1", {
     "color": [0.0, 1.0, 0.0],
     "shortname": "P1"
