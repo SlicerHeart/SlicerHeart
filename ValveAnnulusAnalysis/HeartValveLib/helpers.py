@@ -26,8 +26,16 @@ def getSpecificHeartValveModelNodesMatchingPhaseAndType(phases: list, valveType:
     if valveModel.getValveType() == valveType and getValvePhaseShortName(valveModel) in phases:
       valveModels.append(valveModel)
   if sort:
-    return sorted(valveModels, key=lambda valveModel: phases.index(getValvePhaseShortName(valveModel)))
+    return sorted(valveModels, key=lambda vm: phases.index(getValvePhaseShortName(vm)))
   return valveModels
+
+
+def getAllHeartValveModelsForValveType(valveType: str):
+  valveModels = []
+  for valveModel in getAllHeartValveModelNodes():
+    if valveModel.getValveType() == valveType:
+      valveModels.append(valveModel)
+  return sorted(valveModels, key=lambda vm: vm.getValveVolumeSequenceIndex())
 
 
 def getSpecificHeartValveMeasurementNodes(identifier):
@@ -52,7 +60,14 @@ def getFirstValveModelNodeMatchingSequenceIndex(seqIdx):
   for valveModelNode in getAllHeartValveModelNodes():
     if valveModelNode.getValveVolumeSequenceIndex() == seqIdx:
       return valveModelNode
-  raise ValueError("Could not find valve for sequence index %s" % seqIdx)
+  raise ValueError(f"Could not find valve for sequence index {seqIdx}")
+
+
+def getFirstValveModelNodeMatchingSequenceIndexAndValveType(seqIdx: int, valveType: str):
+  for valveModelNode in getAllHeartValveModelNodes():
+    if valveModelNode.getValveVolumeSequenceIndex() == seqIdx and valveModelNode.getValveType() == valveType:
+      return valveModelNode
+  raise ValueError(f"Could not find valve of type '{valveType}' for sequence index {seqIdx}")
 
 
 def getValveModelNodesMatchingPhase(phase):
