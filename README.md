@@ -33,6 +33,8 @@ The extension currently includes the following features (new features are added 
 - Download and install 3D Slicer from http://download.slicer.org/
 - Start Slicer, in the Extension manager install SlicerHeart extension (in Cardiac category), click Yes to install all dependencies, click Restart
 
+If you have any questions about installing or using SlicerHeart modules please [post it on the Slicer forum](https://discourse.slicer.org/new-topic?category=support&tags=slicerheart).
+
 # Authors
 
 - Authors: Matthew Jolley (CHOP/UPenn), Andras Lasso (PerkLab, Queen's University), Christian Herz (CHOP), Csaba Pinter (Pixel Medical), Anna Ilina (PerkLab, Queen's University), Steve Pieper (Isomics), Adam Rankin (Robarts)<br>
