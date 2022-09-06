@@ -43,29 +43,29 @@ The extension currently includes the following features (new features are added 
 
 # How to cite
 
-For now, until we publish the SlicerHeart platform paper, please cite the following paper when referring to SlicerHeart in your publication:
+If you utilized SlicerHeart, please cite the following paper when referring to SlicerHeart in your publication:
 
-Scanlan AB, Nguyen AV, Ilina A, Lasso A, Cripe L, Jegatheeswaran A, Silvestro E, McGowan FX, Mascio CE, Fuller S, Spray TL, Cohen MS, Fichtinger G, Jolley MA,
-["Comparison of 3D Echocardiogram-Derived 3D Printed Valve Models to Molded Models for Simulated Repair of Pediatric Atrioventricular Valves"](http://perk.cs.queensu.ca/sites/perkd7.cs.queensu.ca/files/Scanlan2017.pdf),
-Pediatr Cardiol. 2018 Mar; 39(3):538-547. [doi: 10.1007/s00246-017-1785-4](https://www.ncbi.nlm.nih.gov/pubmed/29181795).
+https://www.frontiersin.org/articles/10.3389/fcvm.2022.886549/full
+
 
 <pre>
-@Article{Scanlan2018,
-  author =        {Scanlan, Adam B. and Nguyen, Alex V. and Ilina, Anna and Lasso, Andras and Cripe, Linnea and Jegatheeswaran, Anusha and Silvestro, Elizabeth and McGowan, Francis X. and Mascio, Christopher E. and Fuller, Stephanie and Spray, Thomas L. and Cohen, Meryl S. and Fichtinger, Gabor and Jolley, Matthew A.},
-  title =         {Comparison of 3D Echocardiogram-Derived 3D Printed Valve Models to Molded Models for Simulated Repair of Pediatric Atrioventricular Valves},
-  journal =       {Pediatric Cardiology},
-  year =          {2018},
-  volume =        {39},
-  number =        {3},
-  pages =         {538},
-  month =         mar,
-  abstract =      {Mastering the technical skills required to perform pediatric cardiac valve surgery is challenging in part due to limited opportunity for practice. Transformation of 3D echocardiographic (echo) images of congenitally abnormal heart valves to realistic physical models could allow patient-specific simulation of surgical valve repair. We compared materials, processes, and costs for 3D printing and molding of patient-specific models for visualization and surgical simulation of congenitally abnormal heart valves. Pediatric atrioventricular valves (mitral, tricuspid, and common atrioventricular valve) were modeled from transthoracic 3D echo images using semi-automated methods implemented as custom modules in 3D Slicer. Valve models were then both 3D printed in soft materials and molded in silicone using 3D printed “negative” molds. Using pre-defined assessment criteria, valve models were evaluated by congenital cardiac surgeons to determine suitability for simulation. Surgeon assessment indicated that the molded valves had superior material properties for the purposes of simulation compared to directly printed valves (p < 0.01). Patient-specific, 3D echo-derived molded valves are a step toward realistic simulation of complex valve repairs but require more time and labor to create than directly printed models. Patient-specific simulation of valve repair in children using such models may be useful for surgical training and simulation of complex congenital cases.},
-  date =          {2018-03-01},
-  doi =           {10.1007/s00246-017-1785-4},
-  issn =          {1432-1971},
-  publisher =     {Springer},
-  url =           {http://dx.doi.org/10.1007/s00246-017-1785-4}
-}
+AUTHOR=Lasso Andras, Herz Christian, Nam Hannah, Cianciulli Alana, Pieper Steve, Drouin Simon, Pinter Csaba, St-Onge Samuelle, Vigil Chad, Ching Stephen, Sunderland Kyle, Fichtinger Gabor, Kikinis Ron, Jolley Matthew A.
+	 
+TITLE=SlicerHeart: An open-source computing platform for cardiac image analysis and modeling  
+	
+JOURNAL=Frontiers in Cardiovascular Medicine     
+	
+VOLUME=9      
+	
+YEAR=2022   
+		
+URL=https://www.frontiersin.org/articles/10.3389/fcvm.2022.886549     
+	  
+DOI=10.3389/fcvm.2022.886549    
+	
+ISSN=2297-055X   
+
+ABSTRACT=Cardiovascular disease is a significant cause of morbidity and mortality in the developed world. 3D imaging of the heart's structure is critical to the understanding and treatment of cardiovascular disease. However, open-source tools for image analysis of cardiac images, particularly 3D echocardiographic (3DE) data, are limited. We describe the rationale, development, implementation, and application of SlicerHeart, a cardiac-focused toolkit for image analysis built upon 3D Slicer, an open-source image computing platform. We designed and implemented multiple Python scripted modules within 3D Slicer to import, register, and view 3DE data, including new code to volume render and crop 3DE. In addition, we developed dedicated workflows for the modeling and quantitative analysis of multi-modality image-derived heart models, including heart valves. Finally, we created and integrated new functionality to facilitate the planning of cardiac interventions and surgery. We demonstrate application of SlicerHeart to a diverse range of cardiovascular modeling and simulation including volume rendering of 3DE images, mitral valve modeling, transcatheter device modeling, and planning of complex surgical intervention such as cardiac baffle creation. SlicerHeart is an evolving open-source image processing platform based on 3D Slicer initiated to support the investigation and treatment of congenital heart disease. The technology in SlicerHeart provides a robust foundation for 3D image-based investigation in cardiovascular medicine.
 </pre>
 
 # Acknowledgments
