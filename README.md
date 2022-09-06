@@ -45,27 +45,30 @@ The extension currently includes the following features (new features are added 
 
 If you utilized SlicerHeart, please cite the following paper when referring to SlicerHeart in your publication:
 
-https://www.frontiersin.org/articles/10.3389/fcvm.2022.886549/full
+**Lasso, A., Herz, C., Nam, H., Cianciulli, A., Pieper, S., Drouin, S., Pinter, C., St-Onge, S., Vigil, C., Ching, S., Sunderland, K., Fichtinger, G., Kikinis, R., & Jolley, M. A. (2022). "SlicerHeart: An open-source computing platform for cardiac image analysis and modeling." Frontiers in Cardiovascular Medicine, 9. https://doi.org/10.3389/fcvm.2022.886549**
 
+- Full-text pdf: https://www.frontiersin.org/articles/10.3389/fcvm.2022.886549/pdf
+- URL: https://www.frontiersin.org/articles/10.3389/fcvm.2022.886549
+- DOI: 10.3389/fcvm.2022.886549
+- ISSN: 2297-055X
+- bibtex:
 
 <pre>
-AUTHOR=Lasso Andras, Herz Christian, Nam Hannah, Cianciulli Alana, Pieper Steve, Drouin Simon, Pinter Csaba, St-Onge Samuelle, Vigil Chad, Ching Stephen, Sunderland Kyle, Fichtinger Gabor, Kikinis Ron, Jolley Matthew A.
-	 
-TITLE=SlicerHeart: An open-source computing platform for cardiac image analysis and modeling  
-	
-JOURNAL=Frontiers in Cardiovascular Medicine     
-	
-VOLUME=9      
-	
-YEAR=2022   
-		
-URL=https://www.frontiersin.org/articles/10.3389/fcvm.2022.886549     
-	  
-DOI=10.3389/fcvm.2022.886549    
-	
-ISSN=2297-055X   
-
-ABSTRACT=Cardiovascular disease is a significant cause of morbidity and mortality in the developed world. 3D imaging of the heart's structure is critical to the understanding and treatment of cardiovascular disease. However, open-source tools for image analysis of cardiac images, particularly 3D echocardiographic (3DE) data, are limited. We describe the rationale, development, implementation, and application of SlicerHeart, a cardiac-focused toolkit for image analysis built upon 3D Slicer, an open-source image computing platform. We designed and implemented multiple Python scripted modules within 3D Slicer to import, register, and view 3DE data, including new code to volume render and crop 3DE. In addition, we developed dedicated workflows for the modeling and quantitative analysis of multi-modality image-derived heart models, including heart valves. Finally, we created and integrated new functionality to facilitate the planning of cardiac interventions and surgery. We demonstrate application of SlicerHeart to a diverse range of cardiovascular modeling and simulation including volume rendering of 3DE images, mitral valve modeling, transcatheter device modeling, and planning of complex surgical intervention such as cardiac baffle creation. SlicerHeart is an evolving open-source image processing platform based on 3D Slicer initiated to support the investigation and treatment of congenital heart disease. The technology in SlicerHeart provides a robust foundation for 3D image-based investigation in cardiovascular medicine.
+@ARTICLE{Lasso2022,
+  title     = "{SlicerHeart}: An open-source computing platform for cardiac
+               image analysis and modeling",
+  author    = "Lasso, Andras and Herz, Christian and Nam, Hannah and
+               Cianciulli, Alana and Pieper, Steve and Drouin, Simon and
+               Pinter, Csaba and St-Onge, Samuelle and Vigil, Chad and Ching,
+               Stephen and Sunderland, Kyle and Fichtinger, Gabor and Kikinis,
+               Ron and Jolley, Matthew A",
+  journal   = "Frontiers in Cardiovascular Medicine",
+  publisher = "Frontiers Media SA",
+  volume    =  9,
+  month     =  sep,
+  year      =  2022,
+  copyright = "https://creativecommons.org/licenses/by/4.0/"
+}
 </pre>
 
 # Acknowledgments
