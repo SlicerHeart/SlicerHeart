@@ -461,10 +461,14 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
 
     valveModel = getValveModel(scriptedModuleNode)
     if valveModel is not None:
-      segNode = valveModel.getLeafletSegmentationNode()
       # ensure heart valve is parent in subject hierarchy
+      segNode = valveModel.getLeafletSegmentationNode()
       shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
       valveModel.updateValveNodeNames()
+
+      leafletVolumeNode = valveModel.getLeafletVolumeNode()
+      if leafletVolumeNode is not None:
+        shNode.SetItemParent(shNode.GetItemByDataNode(leafletVolumeNode), valveNodeItemId)
 
   # Convert heart valve measurement nodes
   legacyShNodes = slicer.util.getNodesByClass("vtkMRMLSubjectHierarchyLegacyNode")
@@ -638,6 +642,24 @@ def getPlaneIntersectionPoint(axialNode, ortho1Node, ortho2Node):
     x = x1
 
   return x
+
+
+def removeUnusedVolumeNodes():
+  valveVolumes = []
+  for scriptedModuleNode in slicer.util.getNodesByClass('vtkMRMLScriptedModuleNode'):
+    if scriptedModuleNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    valveModel = getValveModel(scriptedModuleNode)
+    segmentedVolume = valveModel.getLeafletVolumeNode()
+    if segmentedVolume is not None:
+      valveVolumes.append(segmentedVolume)
+    valveVolume = valveModel.getValveVolumeNode()
+    if valveVolume is not None:
+      valveVolumes.append(valveVolume)
+  volumeNodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
+  parentless = set(volumeNodes) - set(valveVolumes)
+  for volumeNode in parentless:
+    slicer.mrmlScene.RemoveNode(volumeNode)
 
 
 def setMarkupPlaceModeToUnconstrained(markupsNode):

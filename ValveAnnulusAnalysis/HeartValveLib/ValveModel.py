@@ -243,6 +243,7 @@ class ValveModel:
       self.heartValveNode.SetNodeReferenceID("LeafletVolume",
                                              clippedValveVolumeNode.GetID() if clippedValveVolumeNode else None)
       self.applyProbeToRasTransformToNode(clippedValveVolumeNode)
+      self.moveNodeToHeartValveFolder(clippedValveVolumeNode)
 
     def getLeafletVolumeNode(self):
       """:returns Volume that is used for leaflet segmentation (to generate LeafletSegmentationNode)"""
