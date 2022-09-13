@@ -13,6 +13,7 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/AngularWinglets.png
   Resources/Icons/ApicalTether.png
   Resources/Icons/ApicalTetherPlug.png
+  Resources/Icons/RadialForce.png
   Resources/Icons/TCAVValveSimulator.png
   )
 
