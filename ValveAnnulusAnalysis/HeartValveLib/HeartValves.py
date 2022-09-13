@@ -450,6 +450,22 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
     # Save old->new node ID mapping
     newShItemNodeIds[legacyShNode.GetID()] = newHeartValveNode.GetID()
 
+  # Update HeartValve nodes
+  for scriptedModuleNode in slicer.util.getNodesByClass('vtkMRMLScriptedModuleNode'):
+    if scriptedModuleNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    # fix icons
+    valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+    shNode.RemoveItemAttribute(valveNodeItemId,
+                               slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelAttributeName())
+
+    valveModel = getValveModel(scriptedModuleNode)
+    if valveModel is not None:
+      segNode = valveModel.getLeafletSegmentationNode()
+      # ensure heart valve is parent in subject hierarchy
+      shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
+      valveModel.updateValveNodeNames()
+
   # Convert heart valve measurement nodes
   legacyShNodes = slicer.util.getNodesByClass("vtkMRMLSubjectHierarchyLegacyNode")
   for legacyShNode in legacyShNodes:
@@ -476,18 +492,14 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
 
   # Remove all legacy SH nodes
   legacyShNodes = slicer.util.getNodesByClass("vtkMRMLSubjectHierarchyLegacyNode")
-  legacyShNodesFound = (len(legacyShNodes) > 0)
   for legacyShNode in legacyShNodes:
     slicer.mrmlScene.RemoveNode(legacyShNode)
 
-  if legacyShNodesFound:
-    # Remove all scene views because they may contain legacy SH nodes
-    legacyNodes = slicer.util.getNodesByClass("vtkMRMLSceneViewNode")
-    for legacyNode in legacyNodes:
-      slicer.mrmlScene.RemoveNode(legacyNode)
-    legacyNodes = slicer.util.getNodesByClass("vtkMRMLSceneViewStorageNode")
-    for legacyNode in legacyNodes:
-      slicer.mrmlScene.RemoveNode(legacyNode)
+  # Remove all scene views because they are not used anymore in the SlicerHeart context
+  for svNode in slicer.util.getNodesByClass("vtkMRMLSceneViewNode"):
+    slicer.mrmlScene.RemoveNode(svNode)
+  for svsNode in slicer.util.getNodesByClass("vtkMRMLSceneViewStorageNode"):
+    slicer.mrmlScene.RemoveNode(svsNode)
 
   legacySegmentationNodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
   for legacySegmentationNode in legacySegmentationNodes:

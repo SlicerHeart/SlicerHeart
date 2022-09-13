@@ -71,9 +71,6 @@ class ValveModel:
         shNode.RequestOwnerPluginSearch(self.heartValveNode)
         shNode.SetItemAttribute(shNode.GetItemByDataNode(self.heartValveNode), "ModuleName", "HeartValve")
 
-      shNode.SetItemLevel(shNode.GetItemByDataNode(self.heartValveNode),
-                          slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelFolder())
-
       if not self.getAnnulusContourRadius():
         self.setAnnulusContourRadius(self.defaultAnnulusContourRadius)
 
@@ -349,7 +346,7 @@ class ValveModel:
         logging.error("setValveVolumeSequenceIndex failed: invalid heartValveNode")
         return
       self.heartValveNode.SetAttribute("ValveVolumeSequenceIndex", str(index))
-      self.updateValveNodeName()
+      self.updateValveNodeNames()
 
     # Annulus contour line radius
     def getAnnulusContourRadius(self):
@@ -419,6 +416,7 @@ class ValveModel:
       slicer.mrmlScene.AddNode(segmentationNode)
       segmentationNode.CreateDefaultDisplayNodes()
       self.moveNodeToHeartValveFolder(segmentationNode)
+      self.updateValveNodeNames()
       return segmentationNode
 
     def removePapillaryModel(self, papillaryModelIndex):
@@ -1081,7 +1079,7 @@ class ValveModel:
           position[0], position[1], position[2],
           paraAxialOrientationCode)
 
-    def updateValveNodeName(self):
+    def updateValveNodeNames(self):
       valveType = self.heartValveNode.GetAttribute("ValveType")
       if not valveType:
         valveType = "unknown"
@@ -1092,19 +1090,28 @@ class ValveModel:
       cardiacCyclePhaseName = self.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
       volumeSequenceIndex = self.getVolumeSequenceIndexAsDisplayedString(self.getValveVolumeSequenceIndex())
       volumeSequenceIndex = f"_f{volumeSequenceIndex}" if not volumeSequenceIndex == "NA" else ""
-      nodeName = f"{valveName}Valve-{cardiacCyclePhaseName}{volumeSequenceIndex}"
+
+      # heart valve name
+      heartValveNodeName = f"{valveName}Valve-{cardiacCyclePhaseName}{volumeSequenceIndex}"
       currentNodeName = self.heartValveNode.GetName()
-      if currentNodeName.startswith(nodeName):
-        # already up-to-date
+      if not currentNodeName.startswith(heartValveNodeName): # need to update
+        self.heartValveNode.SetName(slicer.mrmlScene.GetUniqueNameByString(heartValveNodeName))
+
+      # segmentation node name
+      segmentationNodeName = f"{valveName}Valve-Segmentation-{cardiacCyclePhaseName}{volumeSequenceIndex}"
+      leafletSegmentation = self.getLeafletSegmentationNode()
+      if not leafletSegmentation:
         return
-      self.heartValveNode.SetName(slicer.mrmlScene.GetUniqueNameByString(nodeName))
+      currentNodeName = leafletSegmentation.GetName()
+      if not currentNodeName.startswith(segmentationNodeName):  # need to update
+        leafletSegmentation.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentationNodeName))
 
     def setValveType(self, valveType):
       if not self.heartValveNode:
         logging.error("setValveType failed: invalid heartValveNode")
         return
       self.heartValveNode.SetAttribute("ValveType", valveType)
-      self.updateValveNodeName()
+      self.updateValveNodeNames()
 
     def getValveType(self):
       valveType = self.heartValveNode.GetAttribute("ValveType")
@@ -1118,7 +1125,7 @@ class ValveModel:
         logging.error("setCardiacCyclePhase failed: invalid heartValveNode")
         return
       self.heartValveNode.SetAttribute("CardiacCyclePhase", cardiacCyclePhase)
-      self.updateValveNodeName()
+      self.updateValveNodeNames()
 
       if self.getAnnulusContourModelNode() and self.getAnnulusContourModelNode().GetDisplayNode():
         self.getAnnulusContourModelNode().GetDisplayNode().SetColor(self.getBaseColor())
