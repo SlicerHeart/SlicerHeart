@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>369</width>
+    <width>402</width>
     <height>661</height>
    </rect>
   </property>
@@ -105,6 +105,22 @@
     </layout>
    </item>
    <item row="2" column="0" colspan="2">
+    <widget class="ctkCheckablePushButton" name="hideSlicerHeartDataButton">
+     <property name="toolTip">
+      <string>Only display data from the currently selected valve. Check for automatically hiding data upon selection.</string>
+     </property>
+     <property name="text">
+      <string>Hide other SlicerHeart Data</string>
+     </property>
+     <property name="checkable">
+      <bool>true</bool>
+     </property>
+     <property name="checked">
+      <bool>false</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
      <property name="text">
       <string>Valve region</string>
@@ -266,13 +282,13 @@
      </layout>
     </widget>
    </item>
-   <item row="5" column="0" colspan="2">
+   <item row="6" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="segmentationEditingCollapsibleButton">
      <property name="text">
       <string>Leaflet segmentation</string>
      </property>
      <property name="collapsed">
-      <bool>true</bool>
+      <bool>false</bool>
      </property>
      <layout class="QFormLayout" name="formLayout_2">
       <item row="0" column="0" colspan="2">
@@ -281,14 +297,14 @@
          <bool>false</bool>
         </property>
         <property name="masterVolumeNodeSelectorVisible">
-         <bool>false</bool>
+         <bool>true</bool>
         </property>
        </widget>
       </item>
      </layout>
     </widget>
    </item>
-   <item row="8" column="0" colspan="2">
+   <item row="9" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="displaySettingsCollapsibleButton">
      <property name="text">
       <string>Display</string>
@@ -344,7 +360,7 @@
       <item row="2" column="1">
        <widget class="QCheckBox" name="showVolumeRenderingCheckbox">
         <property name="text">
-         <string>  </string>
+         <string/>
         </property>
        </widget>
       </item>
@@ -362,20 +378,10 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>ctkCollapsibleButton</class>
-   <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
-  </customwidget>
-  <customwidget>
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
+   <container>1</container>
   </customwidget>
   <customwidget>
    <class>qMRMLWidget</class>
@@ -387,6 +393,27 @@
    <class>qMRMLSegmentEditorWidget</class>
    <extends>qMRMLWidget</extends>
    <header>qMRMLSegmentEditorWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCheckablePushButton</class>
+   <extends>ctkPushButton</extends>
+   <header>ctkCheckablePushButton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPushButton</class>
+   <extends>QPushButton</extends>
+   <header>ctkPushButton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

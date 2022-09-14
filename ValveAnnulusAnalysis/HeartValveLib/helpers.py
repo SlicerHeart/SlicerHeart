@@ -148,3 +148,37 @@ def getValvePhaseShortName(valveModel):
   cardiacPhase = valveModel.getCardiacCyclePhase()
   cardiacCyclePhasePreset = valveModel.cardiacCyclePhasePresets[cardiacPhase]
   return cardiacCyclePhasePreset['shortname']
+
+
+def hideAllSlicerHeartData():
+  for valveModel in getAllHeartValveModelNodes():
+    setValveModelDataVisibility(valveModel)
+
+
+def setValveModelDataVisibility(valveModel, **kwargs):
+  """ set visibility of SlicerHeart data for a specific valve model. By default everything will be hidden
+  :param valveModel:
+  :param kwargs: {
+    annulus: False,
+    annulusLabels:False,
+    segmentation:False,
+    roi:False,
+    leafletModels:False,
+    papillaryModels:False,
+    coaptationModels:False}
+  :return:
+  """
+  # TODO: add papillary models and coaptations
+  valveModel.getAnnulusContourModelNode().SetDisplayVisibility(kwargs.get("annulus", False))
+  valveModel.getAnnulusLabelsMarkupNode().SetDisplayVisibility(kwargs.get("annulusLabels", False))
+  valveModel.getLeafletSegmentationNode().SetDisplayVisibility(kwargs.get("segmentation", False))
+  valveModel.getValveRoiModelNode().SetDisplayVisibility(kwargs.get("roi", False))
+  for leafletModel in valveModel.leafletModels:
+    # TODO
+    show = kwargs.get("leafletModels", False)
+  for papModel in valveModel.papillaryModels:
+    # TODO
+    show = kwargs.get("papillaryModels", False)
+  for coaptModel in valveModel.coaptationModels:
+    # TODO
+    show = kwargs.get("coaptationModels", False)

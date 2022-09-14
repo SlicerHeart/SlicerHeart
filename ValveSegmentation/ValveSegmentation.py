@@ -86,7 +86,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
     self.ui.valveVolumeSelector.setMRMLScene(slicer.mrmlScene)
     self.ui.valveVolumeSelector.enabled = False
-    self.ui.showSegmentedVolumeButton.connect('clicked()', self.onShowSegmentedVolumeButtonClicked)
+    self.ui.showSegmentedVolumeButton.clicked.connect(self.onShowSegmentedVolumeButtonClicked)
+    self.ui.hideSlicerHeartDataButton.clicked.connect(self.onHideSlicerHeartDataClicked)
 
     # initial state is inconsistent, need to switch to reverse before we can set
     # the desired state reliably
@@ -337,42 +338,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
 
     if self.valveModel:
-      self.ui.valveVolumeSelector.setCurrentNode(self.valveModel.getValveVolumeNode())
-      valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(
-        self.valveModel.getValveVolumeSequenceIndex())
-      self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
-      # Update ROI geometry GUI
-      roiGeometry = self.valveModel.valveRoi.getRoiGeometry()
-      for paramName in self.roiGeometryWidgets.keys():
-        widget = self.roiGeometryWidgets[paramName]
-        wasBlocked = widget.blockSignals(True)
-        widget.value = roiGeometry[paramName]
-        widget.blockSignals(wasBlocked)
-      # Update display settings GUI
-      segmentationNode = self.valveModel.getLeafletSegmentationNode() if self.valveModel else None
-      segmentationDisplayNode = segmentationNode.GetDisplayNode() if segmentationNode else None
-      if segmentationDisplayNode and segmentationNode.GetSegmentation().GetNumberOfSegments() > 0:
-        firstVisibleSegmentId = self.getFirstVisibleSegmentId()
-        if firstVisibleSegmentId:
-          fillPercent = segmentationDisplayNode.GetSegmentOpacity2DFill(self.getFirstVisibleSegmentId()) * 100.0
-        else:
-          fillPercent = 50.0
-        wasBlocked = self.ui.segmentOpacity2DFillSliderWidget.blockSignals(True)
-        self.ui.segmentOpacity2DFillSliderWidget.value = fillPercent
-        self.ui.segmentOpacity2DFillSliderWidget.blockSignals(wasBlocked)
-      volumeRenderingVisible = False
-      if self.valveModel.getClippedVolumeNode():
-        clippedVolumeNode = self.valveModel.getClippedVolumeNode()
-        vrLogic = slicer.modules.volumerendering.logic()
-        try:
-          displayNode = vrLogic.GetFirstVolumeRenderingDisplayNode(clippedVolumeNode)
-          volumeRenderingVisible = displayNode.GetVisibility()
-        except AttributeError:
-          logging.warning("{}: has clipped volume node, but no "
-                          "volume rendering display node was found.".format(self.valveModel.heartValveNode.GetName()))
-      wasBlocked = self.ui.showVolumeRenderingCheckbox.blockSignals(True)
-      self.ui.showVolumeRenderingCheckbox.checked = volumeRenderingVisible
-      self.ui.showVolumeRenderingCheckbox.blockSignals(wasBlocked)
+      self._setupValveVolume()
+      self._updateRoiGeometryGui()
+      self._updateDisplaySettingsGui()
 
     # Observe nodes
     annulusMarkupNode = self.valveModel.getAnnulusContourMarkupNode() if self.valveModel else None
@@ -389,11 +357,61 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.segmentEditorWidget.setSegmentationNode(None)
     self.ui.segmentEditorWidget.setSegmentationNode(segmentationNode)
     # self.ui.segmentEditorWidget.mrmlSegmentEditorNode().Modified()
-    # self.ui.segmentEditorWidget.setMasterVolumeNode(valveVolumeNode)
+    self.ui.segmentEditorWidget.setMasterVolumeNode(self.valveModel.getLeafletVolumeNode() if self.valveModel else None)
+    if not self.ui.segmentationEditingCollapsibleButton.collapsed:
+      self.ui.clippingCollapsibleButton.collapsed = False
     self.onShowSegmentedVolumeButtonClicked()
+    if self.ui.hideSlicerHeartDataButton.checked:
+      self.onHideSlicerHeartDataClicked()
+
+  def _setupValveVolume(self):
+    self.ui.valveVolumeSelector.setCurrentNode(self.valveModel.getValveVolumeNode())
+    valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(
+      self.valveModel.getValveVolumeSequenceIndex())
+    self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
+
+  def _updateRoiGeometryGui(self):
+    roiGeometry = self.valveModel.valveRoi.getRoiGeometry()
+    for paramName in self.roiGeometryWidgets.keys():
+      widget = self.roiGeometryWidgets[paramName]
+      wasBlocked = widget.blockSignals(True)
+      widget.value = roiGeometry[paramName]
+      widget.blockSignals(wasBlocked)
+
+  def _updateDisplaySettingsGui(self):
+    segmentationNode = self.valveModel.getLeafletSegmentationNode()
+    segmentationDisplayNode = segmentationNode.GetDisplayNode() if segmentationNode else None
+    if segmentationDisplayNode and segmentationNode.GetSegmentation().GetNumberOfSegments() > 0:
+      firstVisibleSegmentId = self.getFirstVisibleSegmentId()
+      if firstVisibleSegmentId:
+        fillPercent = segmentationDisplayNode.GetSegmentOpacity2DFill(self.getFirstVisibleSegmentId()) * 100.0
+      else:
+        fillPercent = 50.0
+      wasBlocked = self.ui.segmentOpacity2DFillSliderWidget.blockSignals(True)
+      self.ui.segmentOpacity2DFillSliderWidget.value = fillPercent
+      self.ui.segmentOpacity2DFillSliderWidget.blockSignals(wasBlocked)
+    volumeRenderingVisible = False
+    if self.valveModel.getClippedVolumeNode():
+      clippedVolumeNode = self.valveModel.getClippedVolumeNode()
+      vrLogic = slicer.modules.volumerendering.logic()
+      try:
+        displayNode = vrLogic.GetFirstVolumeRenderingDisplayNode(clippedVolumeNode)
+        volumeRenderingVisible = displayNode.GetVisibility()
+      except AttributeError:
+        logging.warning("{}: has clipped volume node, but no "
+                        "volume rendering display node was found.".format(self.valveModel.heartValveNode.GetName()))
+    wasBlocked = self.ui.showVolumeRenderingCheckbox.blockSignals(True)
+    self.ui.showVolumeRenderingCheckbox.checked = volumeRenderingVisible
+    self.ui.showVolumeRenderingCheckbox.blockSignals(wasBlocked)
 
   def onShowSegmentedVolumeButtonClicked(self):
     HeartValveLib.goToAnalyzedFrame(self.valveModel)
+
+  def onHideSlicerHeartDataClicked(self):
+    from HeartValveLib.helpers import hideAllSlicerHeartData, setValveModelDataVisibility
+    hideAllSlicerHeartData()
+    if self.valveModel is not None:
+      setValveModelDataVisibility(self.valveModel, annulus=True, segmentation=True, roi=True)
 
   def getFirstVisibleSegmentId(self):
     segmentationNode = self.valveModel.getLeafletSegmentationNode()
@@ -469,7 +487,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     # Set up masking: draw only inside the valve area, don't overwrite hidden segments (valve mask)
     segmentEditorNode = self.ui.segmentEditorWidget.mrmlSegmentEditorNode()
     segmentEditorNode.SetMaskSegmentID(HeartValveLib.VALVE_MASK_SEGMENT_ID)
-    segmentEditorNode.SetMaskMode(segmentEditorNode.PaintAllowedInsideSingleSegment)
+    segmentEditorNode.SetMaskMode(slicer.vtkMRMLSegmentationNode.EditAllowedInsideSingleSegment)
     segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteVisibleSegments)
 
     volumeIjkToRasMatrix = vtk.vtkMatrix4x4()
@@ -748,8 +766,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def useCurrentValveVolumeAsLeafletVolume(self):
     volumeNode = self.valveModel.getValveVolumeNode()
     leafletVolumeNode = self.valveModel.getLeafletVolumeNode()
+    name = f"{self.valveModel.heartValveNode.GetName()}-segmented"
     if leafletVolumeNode is None:
-      leafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, volumeNode.GetName() + "-segmented")
+      leafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
       self.valveModel.setLeafletVolumeNode(leafletVolumeNode)
     else:
       leafletVolumeNodeOriginalDisplayNodeId = leafletVolumeNode.GetDisplayNodeID()
@@ -757,7 +776,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       imageDataCopy = vtk.vtkImageData()
       imageDataCopy.DeepCopy(volumeNode.GetImageData())
       leafletVolumeNode.SetAndObserveImageData(imageDataCopy)
-      leafletVolumeNode.SetName(volumeNode.GetName() + "-segmented")
+      leafletVolumeNode.SetName(name)
       leafletVolumeNode.SetAndObserveDisplayNodeID(leafletVolumeNodeOriginalDisplayNodeId)
     return volumeNode.GetName()
 
@@ -779,7 +798,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     fixedVolumeNode = self.valveModel.getLeafletVolumeNode()
     movingVolumeNode = self.valveModel.getValveVolumeNode()
 
-    self.ui.segmentEditorWidget.setMasterVolumeNode(self.valveModel.getLeafletVolumeNode())
+    self.ui.segmentEditorWidget.setMasterVolumeNode(fixedVolumeNode)
 
     valveVolumeBrowserNode = HeartValveLib.HeartValves.getSequenceBrowserNodeForMasterOutputNode(
       self.valveModel.getValveVolumeNode())
