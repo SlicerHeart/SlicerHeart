@@ -1107,6 +1107,10 @@ class ValveModel:
       if not currentNodeName.startswith(segmentationNodeName):  # need to update
         leafletSegmentation.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentationNodeName))
 
+      leafletVolumeNode = self.getLeafletVolumeNode()
+      if leafletVolumeNode is not None:
+        leafletVolumeNode.SetName(f"{self.heartValveNode.GetName()}-segmented")
+
     def setValveType(self, valveType):
       if not self.heartValveNode:
         logging.error("setValveType failed: invalid heartValveNode")
