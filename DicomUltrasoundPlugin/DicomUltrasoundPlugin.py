@@ -353,6 +353,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
       if not sopClassUID in supportedSOPClassUIDs:
         # Unsupported class
+        if self.detailedLogging:
+          logging.debug(f"Not GeImage3dApi file: unsupported SOP Class UID {sopClassUID} ({filePath})")
         return []
     except Exception as e:
       # Quick check could not be completed (probably Slicer DICOM database is not initialized).
@@ -363,11 +365,13 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
       if self.detailedLogging:
-        logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
+        logging.debug(f"Not GeImage3dApi file: failed to parse DICOM file {str(e)} ({filePath})")
       return []
 
     if not ds.SOPClassUID in supportedSOPClassUIDs:
       # Unsupported class
+      if self.detailedLogging:
+          logging.debug(f"Not GeImage3dApi file: unsupported SOP Class UID {ds.SOPClassUID} ({filePath})")
       return []
 
     try:
@@ -391,9 +395,13 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
                   break
       if not contains3D:
         # Probably 2D file
+        if self.detailedLogging:
+          logging.debug(f"Not GeImage3dApi file: no 3D information found ({filePath})")
         return []
     except:
       # Not a GE MovieGroup file
+      if self.detailedLogging:
+        logging.debug(f"Not GeImage3dApi file: not a GE MovieGroup file ({filePath})")
       return []
 
     # It looks like a GE 3D ultrasound file
@@ -403,8 +411,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       reader.getLoader(filePath)
     except Exception as e:
       if self.detailedLogging:
-        logging.debug("3D ultrasound loader not found error: {0}".format(str(e)))
-      logging.info("File {0} looks like a GE 3D ultrasound file. Installing Image3dAPI reader may make the file loadable (https://github.com/MedicalUltrasound/Image3dAPI).")
+        logging.debug(f"GeImage3dApi file: 3D ultrasound loader not found error - {str(e)}")
+      logging.info(f"File {filePath} looks like a GE 3D ultrasound file. Installing Image3dAPI reader may make the file loadable (https://github.com/MedicalUltrasound/Image3dAPI).")
       return []
 
     # GE generic moviegroup reader has confidence=0.8
