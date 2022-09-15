@@ -141,9 +141,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.collapsibleButtonsGroup.addButton(self.ui.clippingCollapsibleButton)
     self.collapsibleButtonsGroup.addButton(self.ui.segmentationEditingCollapsibleButton)
 
-    self.ui.clippingCollapsibleButton.connect('toggled(bool)', lambda toggle: self.onWorkflowStepChanged(
+    self.ui.clippingCollapsibleButton.toggled.connect(lambda toggle: self.onWorkflowStepChanged(
       self.ui.clippingCollapsibleButton, toggle))
-    self.ui.segmentationEditingCollapsibleButton.connect('toggled(bool)', lambda toggle: self.onWorkflowStepChanged(
+    self.ui.segmentationEditingCollapsibleButton.toggled.connect(lambda toggle: self.onWorkflowStepChanged(
       self.ui.segmentationEditingCollapsibleButton, toggle))
 
     # Add vertical spacer
@@ -351,7 +351,11 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
     self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None)
 
-    segmentationNode = self.valveModel.getLeafletSegmentationNode() if self.valveModel else None
+    segmentationNode = None
+    if self.valveModel:
+      self.useCurrentValveVolumeAsLeafletVolume()
+      segmentationNode = self.valveModel.getLeafletSegmentationNode()
+
     self._setSegmentationNode(segmentationNode)
     if not self.ui.segmentationEditingCollapsibleButton.collapsed:
       self.ui.clippingCollapsibleButton.collapsed = False
@@ -804,8 +808,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     elif displayConfiguration == DUAL_SCREEN:
       HeartValveLib.setupDefaultLayout(HeartValveLib.CardiacEightUpViewLayoutId)
 
-    leafletVolumeName = self.useCurrentValveVolumeAsLeafletVolume()
-    self.ui.segmentationEditingCollapsibleButton.text = "Leaflet segmentation (" + leafletVolumeName + ")"
+    self.ui.segmentationEditingCollapsibleButton.text = \
+      f"Leaflet segmentation ({self.valveModel.getLeafletVolumeNode().GetName()})"
 
     fixedVolumeNode = self.valveModel.getLeafletVolumeNode()
     movingVolumeNode = self.valveModel.getValveVolumeNode()
