@@ -352,17 +352,29 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None)
 
     segmentationNode = self.valveModel.getLeafletSegmentationNode() if self.valveModel else None
-    # NB: sometimes segmentation node is already set within mrmlSegmentEditorNode which is why the segment list doesnt
-    #     get updated. Setting it to None or firing Modified flag works.
-    self.ui.segmentEditorWidget.setSegmentationNode(None)
-    self.ui.segmentEditorWidget.setSegmentationNode(segmentationNode)
-    # self.ui.segmentEditorWidget.mrmlSegmentEditorNode().Modified()
-    self.ui.segmentEditorWidget.setMasterVolumeNode(self.valveModel.getLeafletVolumeNode() if self.valveModel else None)
+    self._setSegmentationNode(segmentationNode)
     if not self.ui.segmentationEditingCollapsibleButton.collapsed:
       self.ui.clippingCollapsibleButton.collapsed = False
     self.onShowSegmentedVolumeButtonClicked()
     if self.ui.hideSlicerHeartDataButton.checked:
       self.onHideSlicerHeartDataClicked()
+
+  def _setSegmentationNode(self, segNode):
+    # NB: sometimes segmentation node is already set within mrmlSegmentEditorNode which is why the segment list doesnt
+    #     get updated. Setting it to None or firing Modified flag works.
+    self.ui.segmentEditorWidget.setSegmentationNode(None)
+    if segNode is None:
+      return
+    # ensure the leaflet volume is the master node and not the sequence proxy
+    movingVolumeNode = self.valveModel.getValveVolumeNode()
+    fixedVolumeNode = self.valveModel.getLeafletVolumeNode()
+    currentMasterVolumeNode = segNode.GetNodeReference(segNode.GetReferenceImageGeometryReferenceRole())
+    if currentMasterVolumeNode is None or currentMasterVolumeNode is movingVolumeNode:
+      if currentMasterVolumeNode is not None:
+        logging.info(f"Sequence browser proxy was set as master volume node. Correcting that...")
+      segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
+
+    self.ui.segmentEditorWidget.setSegmentationNode(segNode)
 
   def _setupValveVolume(self):
     self.ui.valveVolumeSelector.setCurrentNode(self.valveModel.getValveVolumeNode())
@@ -797,8 +809,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
     fixedVolumeNode = self.valveModel.getLeafletVolumeNode()
     movingVolumeNode = self.valveModel.getValveVolumeNode()
-
-    self.ui.segmentEditorWidget.setMasterVolumeNode(fixedVolumeNode)
 
     valveVolumeBrowserNode = HeartValveLib.HeartValves.getSequenceBrowserNodeForMasterOutputNode(
       self.valveModel.getValveVolumeNode())

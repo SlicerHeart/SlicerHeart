@@ -466,6 +466,18 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
       valveModel.updateValveNodeNames()
 
+      # ensure master volume node of segmentation is not the sequence proxy
+      movingVolumeNode = valveModel.getValveVolumeNode()
+      fixedVolumeNode = valveModel.getLeafletVolumeNode()
+      if fixedVolumeNode is not None and movingVolumeNode is not None:
+        currentMasterVolumeNode = segNode.GetNodeReference(segNode.GetReferenceImageGeometryReferenceRole())
+        wasSet = currentMasterVolumeNode is not None
+        if not wasSet or (wasSet and currentMasterVolumeNode is movingVolumeNode):
+          if wasSet:
+            logging.info(f"{valveModel.heartValveNode.GetName()}: "
+                         f"Sequence browser proxy was set as master volume node of segmentation. Correcting that...")
+          segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
+
       leafletVolumeNode = valveModel.getLeafletVolumeNode()
       if leafletVolumeNode is not None:
         shNode.SetItemParent(shNode.GetItemByDataNode(leafletVolumeNode), valveNodeItemId)
