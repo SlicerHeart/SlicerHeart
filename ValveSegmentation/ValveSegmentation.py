@@ -351,6 +351,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
     self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None)
 
+    self.onShowSegmentedVolumeButtonClicked()
     segmentationNode = None
     if self.valveModel:
       self.useCurrentValveVolumeAsLeafletVolume()
@@ -359,7 +360,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self._setSegmentationNode(segmentationNode)
     if not self.ui.segmentationEditingCollapsibleButton.collapsed:
       self.ui.clippingCollapsibleButton.collapsed = False
-    self.onShowSegmentedVolumeButtonClicked()
     if self.ui.hideSlicerHeartDataButton.checked:
       self.onHideSlicerHeartDataClicked()
 
