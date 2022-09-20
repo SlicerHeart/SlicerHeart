@@ -10,6 +10,7 @@ import vtk.util.numpy_support as VN
 import vtkSegmentationCorePython as vtkSegmentationCore
 import SmoothCurve
 
+
 class LeafletModel:
 
   def __init__(self):

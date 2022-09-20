@@ -101,8 +101,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.roiGeometryWidgets[ValveRoi.PARAM_BOTTOM_DISTANCE] = self.ui.clippingModelBottomDistanceSliderWidget
     self.roiGeometryWidgets[ValveRoi.PARAM_BOTTOM_SCALE] = self.ui.clippingModelBottomScaleSliderWidget
 
-    self.ui.clippingModelUseAsEditorMaskButton.connect('clicked()', self.onClippingModelUseAsEditorMaskClicked)
-    self.ui.clippingModelSequenceApplyButton.connect('clicked()', self.onClippingModelSequenceApplyClicked)
+    self.ui.clippingModelUseAsEditorMaskButton.clicked.connect(self.onClippingModelUseAsEditorMaskClicked)
+    self.ui.clippingModelSequenceApplyButton.clicked.connect(self.onClippingModelSequenceApplyClicked)
 
     # Get/create parameter node
     valveSegmentationSingletonTag = "ValveSegmentation"
@@ -130,7 +130,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     displayConfigurationIndex = self.ui.displayConfigurationSelector.findData(displayConfiguration)
     self.ui.displayConfigurationSelector.setCurrentIndex(displayConfigurationIndex)
 
-    self.ui.switchScreenConfigurationButton.connect('clicked()', self.onSwitchScreenConfigurationClicked)
+    self.ui.switchScreenConfigurationButton.clicked.connect(self.onSwitchScreenConfigurationClicked)
 
     self.ui.segmentOpacity2DFillSliderWidget.connect('valueChanged(double)', self.setSegmentOpacity2DFill)
 
@@ -141,10 +141,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.collapsibleButtonsGroup.addButton(self.ui.clippingCollapsibleButton)
     self.collapsibleButtonsGroup.addButton(self.ui.segmentationEditingCollapsibleButton)
 
-    self.ui.clippingCollapsibleButton.toggled.connect(lambda toggle: self.onWorkflowStepChanged(
-      self.ui.clippingCollapsibleButton, toggle))
-    self.ui.segmentationEditingCollapsibleButton.toggled.connect(lambda toggle: self.onWorkflowStepChanged(
-      self.ui.segmentationEditingCollapsibleButton, toggle))
+    self.collapsibleButtonsGroup.buttonToggled.connect(self.onWorkflowStepChanged)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -194,7 +191,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.setAndObserveAnnulusMarkupNode()
 
   def enter(self):
-    pass
+    self.ui.clippingCollapsibleButton.collapsed = False
 
   def exit(self):
     self.ui.segmentEditorWidget.uninstallKeyboardShortcuts()
@@ -205,7 +202,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.segmentationEditingCollapsibleButton.setEnabled(enable)
 
   def onWorkflowStepChanged(self, widget, toggle):
-
     leafletClippingModel = self.getLeafletClippingModelNode()
     leafletClippingModelDisplayNode = leafletClippingModel.GetDisplayNode() if leafletClippingModel else None
 
@@ -351,10 +347,10 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
     self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None)
 
-    self.onShowSegmentedVolumeButtonClicked()
+    HeartValveLib.goToAnalyzedFrame(self.valveModel)
     segmentationNode = None
     if self.valveModel:
-      self.useCurrentValveVolumeAsLeafletVolume()
+      HeartValveLib.useCurrentValveVolumeAsLeafletVolume(self.valveModel)
       segmentationNode = self.valveModel.getLeafletSegmentationNode()
 
     self._setSegmentationNode(segmentationNode)
@@ -474,37 +470,15 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveMaskSegment = segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID)
     leafletMaskOrientedImageData = self.getLeafletVolumeClippedAxisAligned()
     if valveMaskSegment:
-      # Update existing mask segment
-      slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(leafletMaskOrientedImageData,
-                                                                          segmentationNode,
-                                                                          HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      self._updateMaskSegment(leafletMaskOrientedImageData, segmentationNode)
     else:
-      # Create new mask segment
-      valveMaskSegment = vtkSegmentationCore.vtkSegment()
-      valveMaskSegment.SetName("Annulus mask")
-      valveMaskSegment.AddRepresentation(
-        vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName(),
-        leafletMaskOrientedImageData)
-      segmentation.AddSegment(valveMaskSegment, HeartValveLib.VALVE_MASK_SEGMENT_ID)
-    valveMaskSegment.SetTag(valveMaskSegment.GetTerminologyEntryTagName(),
-                            self.ui.segmentEditorWidget.defaultTerminologyEntry)
+      self._createNewMaskSegment(segmentationNode)
+
     # Switch to editor
     self.ui.segmentationEditingCollapsibleButton.collapsed = False
 
-    # Hide mask segment (and set some default display settings, just in case the segment is manually
-    # switched to visible)
-    valveMaskSegment.SetColor(vtk.vtkVector3d([0, 0, 1]))
-    sdn = segmentationNode.GetDisplayNode()
-    sdn.SetSegmentOpacity(HeartValveLib.VALVE_MASK_SEGMENT_ID, 0.3)
-    sdn.SetSegmentVisibility2DOutline(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
-    sdn.SetSegmentVisibility3D(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
-    sdn.SetSegmentVisibility(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
-
-    # Set up masking: draw only inside the valve area, don't overwrite hidden segments (valve mask)
-    segmentEditorNode = self.ui.segmentEditorWidget.mrmlSegmentEditorNode()
-    segmentEditorNode.SetMaskSegmentID(HeartValveLib.VALVE_MASK_SEGMENT_ID)
-    segmentEditorNode.SetMaskMode(slicer.vtkMRMLSegmentationNode.EditAllowedInsideSingleSegment)
-    segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteVisibleSegments)
+    self._configureMaskSegment(segmentationNode)
+    self._setupMaskedEditing()
 
     volumeIjkToRasMatrix = vtk.vtkMatrix4x4()
     leafletMaskOrientedImageData.GetImageToWorldMatrix(volumeIjkToRasMatrix)
@@ -515,6 +489,44 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     segmentation.SetConversionParameter(
       vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName(),
       leafletMaskOrientedImageDataGeometry)
+
+  def _updateMaskSegment(self, leafletMaskOrientedImageData, segmentationNode):
+    slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(leafletMaskOrientedImageData,
+                                                                        segmentationNode,
+                                                                        HeartValveLib.VALVE_MASK_SEGMENT_ID)
+
+  def _createNewMaskSegment(self, segmentationNode):
+    import vtkSegmentationCorePython as vtkSegmentationCore
+    leafletMaskOrientedImageData = self.getLeafletVolumeClippedAxisAligned()
+    valveMaskSegment = vtkSegmentationCore.vtkSegment()
+    valveMaskSegment.SetName("Annulus mask")
+    valveMaskSegment.AddRepresentation(
+      vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName(),
+      leafletMaskOrientedImageData)
+    segmentation = segmentationNode.GetSegmentation()
+    segmentation.AddSegment(valveMaskSegment, HeartValveLib.VALVE_MASK_SEGMENT_ID)
+
+  def _configureMaskSegment(self, segmentationNode):
+    # Hide mask segment (and set some default display settings, just in case the segment is manually
+    # switched to visible)
+    segmentation = segmentationNode.GetSegmentation()
+    valveMaskSegment = segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID)
+    valveMaskSegment.SetTag(valveMaskSegment.GetTerminologyEntryTagName(),
+                            self.ui.segmentEditorWidget.defaultTerminologyEntry)
+
+    valveMaskSegment.SetColor(vtk.vtkVector3d([0, 0, 1]))
+    sdn = segmentationNode.GetDisplayNode()
+    sdn.SetSegmentOpacity(HeartValveLib.VALVE_MASK_SEGMENT_ID, 0.3)
+    sdn.SetSegmentVisibility2DOutline(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+    sdn.SetSegmentVisibility3D(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+    sdn.SetSegmentVisibility(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+
+  def _setupMaskedEditing(self):
+    # Set up masking: draw only inside the valve area, don't overwrite hidden segments (valve mask)
+    segmentEditorNode = self.ui.segmentEditorWidget.mrmlSegmentEditorNode()
+    segmentEditorNode.SetMaskSegmentID(HeartValveLib.VALVE_MASK_SEGMENT_ID)
+    segmentEditorNode.SetMaskMode(slicer.vtkMRMLSegmentationNode.EditAllowedInsideSingleSegment)
+    segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteVisibleSegments)
 
   def onClippingModelSequenceApplyClicked(self):
     self.setupVolumeRendering()
@@ -587,9 +599,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
           clippedVolumeSequenceNode.SetDataNodeAtValue(outputVolumeNode, volumeSequenceNode.GetNthIndexValue(itemIndex))
         clippedVolumeSequenceNode.EndModify(clippedVolumeSequenceNodeWasModified)
 
-      except:
+      except Exception as exc:
         qt.QApplication.restoreOverrideCursor()
-        raise
+        raise exc
 
       qt.QApplication.restoreOverrideCursor()
 
@@ -779,23 +791,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     # Copy colormap
     destinationLabelNode.GetDisplayNode().SetAndObserveColorNodeID(sourceLabelNode.GetDisplayNode().GetColorNodeID())
 
-  def useCurrentValveVolumeAsLeafletVolume(self):
-    volumeNode = self.valveModel.getValveVolumeNode()
-    leafletVolumeNode = self.valveModel.getLeafletVolumeNode()
-    name = f"{self.valveModel.heartValveNode.GetName()}-segmented"
-    if leafletVolumeNode is None:
-      leafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
-      self.valveModel.setLeafletVolumeNode(leafletVolumeNode)
-    else:
-      leafletVolumeNodeOriginalDisplayNodeId = leafletVolumeNode.GetDisplayNodeID()
-      leafletVolumeNode.Copy(volumeNode)
-      imageDataCopy = vtk.vtkImageData()
-      imageDataCopy.DeepCopy(volumeNode.GetImageData())
-      leafletVolumeNode.SetAndObserveImageData(imageDataCopy)
-      leafletVolumeNode.SetName(name)
-      leafletVolumeNode.SetAndObserveDisplayNodeID(leafletVolumeNodeOriginalDisplayNodeId)
-    return volumeNode.GetName()
-
   def setupScreen(self):
     displayConfiguration = self.ui.displayConfigurationSelector.itemData(
       self.ui.displayConfigurationSelector.currentIndex)
@@ -922,31 +917,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       sliceLogic.EndSliceNodeInteraction()
       sliceLogic.StartSliceOffsetInteraction()
       sliceLogic.EndSliceOffsetInteraction()
-
-  @staticmethod
-  def getHeartValvesColorTable():
-    heartValvesColorTable = slicer.mrmlScene.GetSingletonNode("HeartValvesColors", "vtkMRMLColorTableNode")
-    if heartValvesColorTable is None:
-      heartValvesColorTable = slicer.vtkMRMLColorTableNode()
-      # heartValvesColorTable.HideFromEditorsOn() # prevents saving into mrml
-      heartValvesColorTable.SetTypeToUser()
-      heartValvesColorTable.SetAttribute("Category", "SlicerHeart")
-      heartValvesColorTable.SetSingletonTag('HeartValvesColors')
-      heartValvesColorTable.SetName('HeartValvesColors')
-      heartValvesColorTable.SetNumberOfColors(10)
-      heartValvesColorTable.SetNamesInitialised(True) # otherwise color names will be generated from RGB values
-      heartValvesColorTable.AddColor("(none)",                      0.00, 0.00, 0.00, 0.0)
-      heartValvesColorTable.AddColor("mitral anterior leaflet",     1.00, 0.07, 0.04, 1.0)
-      heartValvesColorTable.AddColor("mitral posterior leaflet",    0.16, 0.24, 0.95, 1.0)
-      heartValvesColorTable.AddColor("tricuspid anterior leaflet",  1.00, 0.07, 0.04, 1.0)
-      heartValvesColorTable.AddColor("tricuspid septal leaflet",    0.16, 0.24, 0.95, 1.0)
-      heartValvesColorTable.AddColor("tricuspid posterior leaflet", 0.16, 0.93, 0.13, 1.0)
-      heartValvesColorTable.AddColor("superior bridging leaflet",   1.00, 0.07, 0.04, 1.0)
-      heartValvesColorTable.AddColor("right mural leaflet",         0.16, 0.24, 0.95, 1.0)
-      heartValvesColorTable.AddColor("inferior bridging leaflet",   0.16, 0.93, 0.13, 1.0)
-      heartValvesColorTable.AddColor("left mural leaflet",          0.95, 0.60, 0.14, 1.0)
-      heartValvesColorTable = slicer.mrmlScene.AddNode(heartValvesColorTable)
-    return heartValvesColorTable
 
   def onSwitchScreenConfigurationClicked(self):
     self.saveDisplayConfigurationSettings()

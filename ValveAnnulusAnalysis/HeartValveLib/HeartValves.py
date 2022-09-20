@@ -425,6 +425,25 @@ def copyNodeContentToNewScriptedModuleNode(oldDataNode, shNode):
   return newDataNode
 
 
+def useCurrentValveVolumeAsLeafletVolume(valveModel):
+  goToAnalyzedFrame(valveModel)
+  volumeNode = valveModel.getValveVolumeNode()
+  leafletVolumeNode = valveModel.getLeafletVolumeNode()
+  name = f"{valveModel.heartValveNode.GetName()}-segmented"
+  if leafletVolumeNode is None:
+    leafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
+    valveModel.setLeafletVolumeNode(leafletVolumeNode)
+  else:
+    leafletVolumeNodeOriginalDisplayNodeId = leafletVolumeNode.GetDisplayNodeID()
+    leafletVolumeNode.Copy(volumeNode)
+    imageDataCopy = vtk.vtkImageData()
+    imageDataCopy.DeepCopy(volumeNode.GetImageData())
+    leafletVolumeNode.SetAndObserveImageData(imageDataCopy)
+    leafletVolumeNode.SetName(name)
+    leafletVolumeNode.SetAndObserveDisplayNodeID(leafletVolumeNodeOriginalDisplayNodeId)
+  return volumeNode.GetName()
+
+
 def updateLegacyHeartValveNodes(unused1=None, unused2=None):
   logging.debug("updateLegacyHeartValveNodes")
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -466,21 +485,13 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
       valveModel.updateValveNodeNames()
 
-      # ensure master volume node of segmentation is not the sequence proxy
-      movingVolumeNode = valveModel.getValveVolumeNode()
+      # ensure master volume node of segmentation is not the sequence proxy and was extracted from the set frame index
       fixedVolumeNode = valveModel.getLeafletVolumeNode()
-      if fixedVolumeNode is not None and movingVolumeNode is not None:
-        currentMasterVolumeNode = segNode.GetNodeReference(segNode.GetReferenceImageGeometryReferenceRole())
-        wasSet = currentMasterVolumeNode is not None
-        if not wasSet or (wasSet and currentMasterVolumeNode is movingVolumeNode):
-          if wasSet:
-            logging.info(f"{valveModel.heartValveNode.GetName()}: "
-                         f"Sequence browser proxy was set as master volume node of segmentation. Correcting that...")
-          segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
-
-      leafletVolumeNode = valveModel.getLeafletVolumeNode()
-      if leafletVolumeNode is not None:
-        shNode.SetItemParent(shNode.GetItemByDataNode(leafletVolumeNode), valveNodeItemId)
+      if fixedVolumeNode is not None:
+        slicer.mrmlScene.RemoveNode(fixedVolumeNode)
+      useCurrentValveVolumeAsLeafletVolume(valveModel)
+      logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
+                    f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
 
   # Convert heart valve measurement nodes
   legacyShNodes = slicer.util.getNodesByClass("vtkMRMLSubjectHierarchyLegacyNode")
