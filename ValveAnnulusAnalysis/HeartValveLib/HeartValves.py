@@ -490,6 +490,8 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       if fixedVolumeNode is not None:
         slicer.mrmlScene.RemoveNode(fixedVolumeNode)
       useCurrentValveVolumeAsLeafletVolume(valveModel)
+      fixedVolumeNode = valveModel.getLeafletVolumeNode()
+      segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
       logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
                     f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
 
