@@ -5,7 +5,7 @@
 def createPolyDataFromPointArray(pointArray):
   """Create vtkPolyData from a numpy array. Performs deep copy."""
 
-  from __main__ import vtk, slicer
+  from __main__ import vtk
   number_of_points = pointArray.shape[0]
   # Points
   points = vtk.vtkPoints()
@@ -35,18 +35,20 @@ def createPointModelFromPointArray(pointArray, visible = True, color = None):
   """Create and display a MRML model node from a numpy array
   that contains 3D point coordinates, by showing a vertex at each point."""
 
-  from __main__ import vtk, slicer
+  from __main__ import slicer
   modelNode = slicer.modules.models.logic().AddModel(createPolyDataFromPointArray(pointArray))
   if color is not None:
     modelNode.GetDisplayNode().SetColor(color)
   modelNode.GetDisplayNode().SetVisibility(1 if visible else 0)
   return modelNode
 
-def createTubeModelFromPointArray(pointArray, loop=True, visible = True, color = None, radius = None, name = None, keepGeneratorNodes = False):
+
+def createTubeModelFromPointArray(pointArray, loop=True, visible=True, color=None, radius=None, name=None,
+                                  keepGeneratorNodes=False):
   """Create and display a MRML model node from a numpy array
   that contains 3D point coordinates, by showing a tube model that connects all points."""
 
-  from __main__ import vtk, slicer
+  from __main__ import slicer
   pointModelNode = createPointModelFromPointArray(pointArray, color)
   tubeModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
   tubeModelNode.CreateDefaultDisplayNodes()
@@ -55,6 +57,8 @@ def createTubeModelFromPointArray(pointArray, loop=True, visible = True, color =
   pointModelNode.GetDisplayNode().SetVisibility(0)
   tubeModelNode.GetDisplayNode().SetVisibility(1 if visible else 0)
   markupsToModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsToModelNode")
+  if markupsToModelNode is None:
+    raise AttributeError("MarkupsToModel extension was not found. Please install MarkupsToModel extension.")
   markupsToModelNode.SetModelType(markupsToModelNode.Curve)
   markupsToModelNode.SetTubeLoop(loop)
   if radius is not None:
