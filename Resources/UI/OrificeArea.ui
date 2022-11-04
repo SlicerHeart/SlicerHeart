@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>403</width>
-    <height>446</height>
+    <height>537</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -27,7 +27,7 @@
       <item row="0" column="1">
        <widget class="qMRMLNodeComboBox" name="inputSurfaceModelSelector">
         <property name="toolTip">
-         <string>Pick the input to the algorithm.</string>
+         <string>Model node that has an opening (orifice) in it.</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -61,7 +61,7 @@
       <item row="1" column="1">
        <widget class="qMRMLNodeComboBox" name="inputBoundaryCurveSelector">
         <property name="toolTip">
-         <string>Pick the input to the algorithm.</string>
+         <string>Closed curve drawn on the surface around the orifice. Be close to the orifice, but keep the boundary curve an ellipse shape, do not follow concavities of the orifice.</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -94,6 +94,9 @@
       </item>
       <item row="2" column="1">
        <widget class="qMRMLSliderWidget" name="surfaceThicknessSliderWidget">
+        <property name="toolTip">
+         <string>The input surface is the medial surface, this value specifies the thickness of the surface.</string>
+        </property>
         <property name="singleStep">
          <double>0.010000000000000</double>
         </property>
@@ -140,7 +143,7 @@
       <item row="2" column="1">
        <widget class="qMRMLNodeComboBox" name="outputOrificeModelSelector">
         <property name="toolTip">
-         <string>Input model inflated to have the specified thickness</string>
+         <string>Surface of the opening.</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -167,7 +170,7 @@
       <item row="4" column="1">
        <widget class="qMRMLNodeComboBox" name="outputOrificePointsSelector">
         <property name="toolTip">
-         <string>Input model inflated to have the specified thickness</string>
+         <string>List of points marking each connected orifice component.</string>
         </property>
         <property name="nodeTypes">
          <stringlist>
@@ -200,6 +203,9 @@
       </item>
       <item row="0" column="1">
        <widget class="qMRMLSpinBox" name="orificeAreaSpinBox">
+        <property name="toolTip">
+         <string>Total area of all identified orifice components. Small speckles (that are not included in the component list due to their small size) are ignored.</string>
+        </property>
         <property name="frame">
          <bool>false</bool>
         </property>
@@ -224,7 +230,7 @@
       <item row="1" column="1">
        <widget class="qMRMLNodeComboBox" name="outputThickSurfaceModelSelector">
         <property name="toolTip">
-         <string>Input model inflated to have the specified thickness</string>
+         <string>Input surface inflated to have the specified surface thickness. Useful for checking if there is an opening at coaptation regions.</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -257,7 +263,7 @@
       <string>Advanced</string>
      </property>
      <property name="collapsed">
-      <bool>true</bool>
+      <bool>false</bool>
      </property>
      <layout class="QFormLayout" name="formLayout_3">
       <item row="0" column="0">
@@ -270,24 +276,24 @@
       <item row="0" column="1">
        <widget class="QCheckBox" name="keepIntermediateResultsCheckBox">
         <property name="toolTip">
-         <string>If checked, values above threshold are set to 0. If unchecked, values below are set to 0.</string>
+         <string>Keep all intermediate computation results, useful for troubleshooting and finding optimal parameters.</string>
         </property>
         <property name="text">
          <string/>
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
          <string>Shrink-wrap iterations:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <widget class="ctkSliderWidget" name="shrinkWrapIterationsSliderWidget">
         <property name="toolTip">
-         <string>Higher value results in higher accuracy but longer computation time</string>
+         <string>Number of iterations used during shrink-wrapping operation. Higher value results in higher accuracy but longer computation time.</string>
         </property>
         <property name="decimals">
          <number>0</number>
@@ -302,10 +308,45 @@
          <double>1.000000000000000</double>
         </property>
         <property name="maximum">
-         <double>25.000000000000000</double>
+         <double>50.000000000000000</double>
         </property>
         <property name="value">
          <double>4.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>Distance margin: </string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkSliderWidget" name="distanceMarginPercentSliderWidget">
+        <property name="toolTip">
+         <string>How much additional margin is removed from the orifice surface. Used for removing small surface speckles due to algorithm inaccuracies. Specified as percentage of surface thickness.</string>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="singleStep">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>150.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>40.000000000000000</double>
+        </property>
+        <property name="suffix">
+         <string>%</string>
         </property>
        </widget>
       </item>

@@ -24,7 +24,8 @@ class OrificeArea(ScriptedLoadableModule):
         self.parent.dependencies = []
         self.parent.contributors = ["Andras Lasso (PerkLab, Queen's University)", "Matt Jolley (CHOP/UPenn)"]
         self.parent.helpText = """
-Compute area of a hole in a surface mesh.
+Compute area of a hole in a surface mesh, inside the orifice boundary curve drawn on the mesh.
+
 See more information in <a href="https://github.com/SlicerHeart/SlicerHeart#orifice-area">module documentation</a>.
 """
         # TODO: replace with organization, grant and thanks
@@ -87,6 +88,7 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.outputOrificeModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
         self.ui.outputOrificePointsSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
         self.ui.surfaceThicknessSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+        self.ui.distanceMarginPercentSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
         self.ui.shrinkWrapIterationsSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
         self.ui.keepIntermediateResultsCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
 
@@ -190,6 +192,7 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.outputOrificeModelSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputOrificeModel"))
         self.ui.outputOrificePointsSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputOrificePoints"))
         self.ui.surfaceThicknessSliderWidget.value = float(self._parameterNode.GetParameter("SurfaceThickness"))
+        self.ui.distanceMarginPercentSliderWidget.value = float(self._parameterNode.GetParameter("DistanceMarginPercent"))
         self.ui.shrinkWrapIterationsSliderWidget.value = int(float(self._parameterNode.GetParameter("ShrinkWrapIterations")))
         self.ui.keepIntermediateResultsCheckBox.checked = (self._parameterNode.GetParameter("KeepIntermediateResults") == "true")
 
@@ -221,6 +224,7 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNode.SetNodeReferenceID("OutputOrificeModel", self.ui.outputOrificeModelSelector.currentNodeID)
         self._parameterNode.SetNodeReferenceID("OutputOrificePoints", self.ui.outputOrificePointsSelector.currentNodeID)
         self._parameterNode.SetParameter("SurfaceThickness", str(self.ui.surfaceThicknessSliderWidget.value))
+        self._parameterNode.SetParameter("DistanceMarginPercent", str(self.ui.distanceMarginPercentSliderWidget.value))
         self._parameterNode.SetParameter("ShrinkWrapIterations", str(self.ui.shrinkWrapIterationsSliderWidget.value))
         self._parameterNode.SetParameter("KeepIntermediateResults", "true" if self.ui.keepIntermediateResultsCheckBox.checked else "false")
 
@@ -254,7 +258,7 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.logic.keepIntermediateResults = self.ui.keepIntermediateResultsCheckBox.checked
             orificeArea = self.logic.process(self.ui.inputSurfaceModelSelector.currentNode(), self.ui.inputBoundaryCurveSelector.currentNode(),
                                self.ui.outputThickSurfaceModelSelector.currentNode(), self.ui.outputOrificeModelSelector.currentNode(), self.ui.outputOrificePointsSelector.currentNode(),
-                               self.ui.surfaceThicknessSliderWidget.value, int(self.ui.shrinkWrapIterationsSliderWidget.value))
+                               self.ui.surfaceThicknessSliderWidget.value, self.ui.distanceMarginPercentSliderWidget.value, int(self.ui.shrinkWrapIterationsSliderWidget.value))
             self.ui.orificeAreaSpinBox.value = orificeArea
 
 
@@ -290,14 +294,16 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         """
         if not parameterNode.GetParameter("SurfaceThickness"):
             parameterNode.SetParameter("SurfaceThickness", "0.4")
+        if not parameterNode.GetParameter("DistanceMarginPercent"):
+            parameterNode.SetParameter("DistanceMarginPercent", "40")
         if not parameterNode.GetParameter("ShrinkWrapIterations"):
-            parameterNode.SetParameter("ShrinkWrapIterations", "18")
+            parameterNode.SetParameter("ShrinkWrapIterations", "20")
         if not parameterNode.GetParameter("KeepIntermediateResults"):
             parameterNode.SetParameter("KeepIntermediateResults", "false")
 
     def process(self, inputSurfaceModel, inputBoundaryCurve,
                                outputThickSurfaceModel, outputOrificeModel, outputOrificePoints,
-                               surfaceThickness, shrinkWrapIterations, minimumArea=1.0):
+                               surfaceThickness, distanceMarginPercent, shrinkWrapIterations, minimumArea=1.0):
         """
         Run the processing algorithm.
         Can be used without GUI widget.
@@ -312,16 +318,22 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         self.log('Processing started')
 
         # It is easier to shrink-wrap the medial surface, as it has less narrow valleys
-        medialSurfaceMesh = self.createMedialSurface(inputSurfaceModel, outputThickSurfaceModel, surfaceThickness)
+        medialSurfaceMesh = self.getMedialSurface(inputSurfaceModel)
+        gradientVolumeNode = self.createGradientVolume(medialSurfaceMesh, outputThickSurfaceModel, surfaceThickness)
         initialShrinkWrapSurface = self.createInitialShrinkWrapSurface(inputBoundaryCurve)
-        shrunkSurface = self.shrinkWrap(initialShrinkWrapSurface, medialSurfaceMesh, shrinkWrapIterations)
-        orificeSurface = self.createOrificeSurface(medialSurfaceMesh, shrunkSurface, surfaceThickness, outputOrificeModel)
+        shrunkSurface = self.shrinkWrap(initialShrinkWrapSurface, medialSurfaceMesh, shrinkWrapIterations, gradientVolumeNode)
+        # Slicer crashes when comes across this node, so always delete it
+        slicer.mrmlScene.RemoveNode(gradientVolumeNode)
 
-        self.log("Get orifice surface area")
+        self.log("Get orifice surface")
+        orificeSurface = self.createOrificeSurface(medialSurfaceMesh, shrunkSurface, surfaceThickness, outputOrificeModel, distanceMarginPercent)
+
+        self.log("Split orifice surface")
         positionsAreas = self.splitOrificeSurface(orificeSurface, minimumArea)
         orificeSurfaceArea = sum([positionArea[1] for positionArea in positionsAreas])
         if outputOrificePoints:
             outputOrificePoints.RemoveAllControlPoints()
+            outputOrificePoints.GetDisplayNode().SetOccludedVisibility(True)  # make sure all points are visible, even if occludedin current view
             for position, surfaceArea in positionsAreas:
                 outputOrificePoints.AddControlPoint(position, f"Or{outputOrificePoints.GetNumberOfControlPoints()+1}: area={surfaceArea/100.0:.2f}cm2")
 
@@ -345,7 +357,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
             modelNode.GetDisplayNode().SetColor(color)
         return modelNode
 
-    def createMedialSurface(self, inputSurfaceModel, outputThickSurfaceModel, surfaceThickness):
+    def getMedialSurface(self, inputSurfaceModel):
 
         # Input may be an unstructured grid from FE simulation that we need to convert to surface mesh
         medialSurfaceMesh = inputSurfaceModel.GetPolyData()
@@ -367,8 +379,11 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
 
         self.saveIntermediateResult("MedialSurface", medialSurfaceMesh)
 
+        return medialSurfaceMesh
+
+    def createGradientVolume(self, medialSurfaceMesh, outputThickSurfaceModel, surfaceThickness):
+
         # Create a thickened mesh
-        
         surfaceMeshCopy = vtk.vtkPolyData()
         surfaceMeshCopy.DeepCopy(medialSurfaceMesh)
         medialSurfaceMesh = surfaceMeshCopy
@@ -409,18 +424,52 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         elif self.keepIntermediateResults:
             self.saveIntermediateResult("ThickSurface", thickSurface, True, [0, 1, 0])
 
-        if self.saveIntermediateResult:
-            # Export thick surface to labelmap - useful for troubleshooting (labelmap can be browsed in slice views)
-            segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
-            thickSurfaceModelNodeTmp = slicer.modules.models.logic().AddModel(thickSurface)
-            slicer.modules.segmentations.logic().ImportModelToSegmentationNode(thickSurfaceModelNodeTmp, segmentationNode)
-            labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
-            slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(segmentationNode, labelmapVolumeNode, slicer.vtkSegmentation.EXTENT_REFERENCE_GEOMETRY)
-            slicer.mrmlScene.RemoveNode(segmentationNode)
-            slicer.mrmlScene.RemoveNode(thickSurfaceModelNodeTmp)
-            slicer.util.setSliceViewerLayers(labelmapVolumeNode, fit=True)
+        # Export thick surface to labelmap - useful for troubleshooting (labelmap can be browsed in slice views)
+        self.log("Create thick surface labelmap")
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+        # Resolution of the segmentation can be made finer by uncommenting the next line,
+        # but it seems that currently the default resolution (250x250x250 voxels) is sufficient.
+        #segmentationNode.GetSegmentation().SetConversionParameter("Oversampling factor", "2")
+        thickSurfaceModelNodeTmp = slicer.modules.models.logic().AddModel(thickSurface)
+        slicer.modules.segmentations.logic().ImportModelToSegmentationNode(thickSurfaceModelNodeTmp, segmentationNode)
+        labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+        slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(segmentationNode, labelmapVolumeNode, slicer.vtkSegmentation.EXTENT_REFERENCE_GEOMETRY)
+        slicer.mrmlScene.RemoveNode(segmentationNode)
+        slicer.mrmlScene.RemoveNode(thickSurfaceModelNodeTmp)
+        slicer.util.setSliceViewerLayers(labelmapVolumeNode, fit=True)
 
-        return medialSurfaceMesh
+        thresh = vtk.vtkImageThreshold()
+        thresh.SetInputData(labelmapVolumeNode.GetImageData())
+        thresh.ThresholdByUpper(1)
+        thresh.SetInValue(0)
+        thresh.SetOutValue(1)
+        thresh.Update()
+
+        ijkToRas = vtk.vtkMatrix4x4()
+        labelmapVolumeNode.GetIJKToRASMatrix(ijkToRas)
+
+        distanceMap = vtk.vtkImageEuclideanDistance()
+        distanceMap.SetInputData(thresh.GetOutput())
+        distanceMap.Update()
+        if self.keepIntermediateResults:
+            distancemapVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Distance map")
+            distancemapVolumeNode.SetAndObserveImageData(distanceMap.GetOutput())
+            distancemapVolumeNode.SetIJKToRASMatrix(ijkToRas)
+
+        gradient = vtk.vtkImageGradient()
+        gradient.SetDimensionality(3)
+        gradient.SetInputConnection(distanceMap.GetOutputPort())
+
+        # Normalize the gradient field so that only the direction is kept (it makes it easier to scale step size)
+        normalize = vtk.vtkImageNormalize()
+        normalize.SetInputConnection(gradient.GetOutputPort())
+        normalize.Update()
+
+        gradientVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+        gradientVolumeNode.SetAndObserveImageData(normalize.GetOutput())
+        gradientVolumeNode.SetIJKToRASMatrix(ijkToRas)
+
+        return gradientVolumeNode
 
 
     def createInitialShrinkWrapSurface(self, inputBoundaryCurve):
@@ -443,7 +492,12 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         return remesh
 
 
-    def shrinkWrap(self, shrunkSurface, surface, shrinkwrapIterations=1, saveIntermediateResult=False):
+    def shrinkWrap(self, shrunkSurface, surface, shrinkwrapIterations, gradientVolumeNode):
+
+        # Step size larger and the mesh is less smooth until the last few iterations.
+        # numberOfCooldownIterations determines how many iterations are used for final
+        # convergence to refine and smooth the mesh.
+        numberOfCooldownIterations = 3
 
         for iterationIndex in range(shrinkwrapIterations):
 
@@ -457,9 +511,10 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
                 raise ValueError("Mesh has become empty during shrink-wrap iterations")
             smoothFilter = vtk.vtkSmoothPolyDataFilter()
             smoothFilter.SetNumberOfIterations(40)  # default: 20
-            smoothFilter.SetRelaxationFactor(0.001)  # default: 0.01
+            relax = 0.05 if iterationIndex < shrinkwrapIterations - numberOfCooldownIterations else 0.01
+            smoothFilter.SetRelaxationFactor(relax)  # default: 0.01
             smoothFilter.SetInputData(0, shrunkSurface)
-            smoothFilter.SetInputData(1, surface)  # constrain smoothed points to the input surface
+            #smoothFilter.SetInputData(1, surface)  # constrain smoothed points to the input surface
             smoothFilter.Update()
             shrunkSurface = vtk.vtkPolyData()
             shrunkSurface.DeepCopy(smoothFilter.GetOutput())
@@ -467,10 +522,46 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
 
             # remesh
             self.log(f"Remeshing {iterationIndex+1} / {shrinkwrapIterations}")
-            remeshedSurface = self.remeshPolydata(shrunkSurface, subdivide=2)
+            clusters = 10000 if iterationIndex < shrinkwrapIterations - numberOfCooldownIterations else 20000
+            remeshedSurface = self.remeshPolydata(shrunkSurface, subdivide=2, clusters=clusters)
             shrunkSurface = vtk.vtkPolyData()
             shrunkSurface.DeepCopy(remeshedSurface)
             self.saveIntermediateResult(f"Remeshed {iterationIndex}", shrunkSurface)
+
+            if iterationIndex < shrinkwrapIterations - 1:
+
+                # Transform the model into the volume's IJK space
+                modelTransformerRasToIjk = vtk.vtkTransformFilter()
+                transformRasToIjk = vtk.vtkTransform()
+                ijkToRas = vtk.vtkMatrix4x4()
+                gradientVolumeNode.GetIJKToRASMatrix(ijkToRas)
+                ijkToRas.Invert()
+                transformRasToIjk.SetMatrix(ijkToRas)
+                modelTransformerRasToIjk.SetTransform(transformRasToIjk)
+                modelTransformerRasToIjk.SetInputData(shrunkSurface)
+
+                probe = vtk.vtkProbeFilter()
+                probe.SetSourceData(gradientVolumeNode.GetImageData())
+                probe.SetInputConnection(modelTransformerRasToIjk.GetOutputPort())
+
+                # Transform the model back into RAS space
+                modelTransformerIjkToRas = vtk.vtkTransformFilter()
+                modelTransformerIjkToRas.SetTransform(transformRasToIjk.GetInverse())
+                modelTransformerIjkToRas.SetInputConnection(probe.GetOutputPort())
+                modelTransformerIjkToRas.Update()
+
+                shrunkSurface = modelTransformerIjkToRas.GetOutput()
+
+                shrunkSurface.GetPointData().SetActiveVectors("ImageScalarsGradient")
+                warpVector = vtk.vtkWarpVector()
+                warpVector.SetInputData(shrunkSurface)
+                stepSize = 0.5 if iterationIndex < shrinkwrapIterations - numberOfCooldownIterations else 0.1
+                warpVector.SetScaleFactor(-stepSize)
+                warpVector.Update()
+                shrunkSurface = vtk.vtkPolyData()
+                shrunkSurface.DeepCopy(warpVector.GetOutput())
+
+                self.saveIntermediateResult(f"Offset {iterationIndex}", shrunkSurface)
 
             stopTime = time.time()
             self.log(f'Shrinkwrap iteration {iterationIndex+1} / {shrinkwrapIterations} completed in {stopTime-startTime:.2f} seconds')
@@ -479,8 +570,8 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         return shrunkSurface
 
 
-    def createOrificeSurface(self, surfaceMesh, shrunkSurface, surfaceThickness, outputOrificeModel):
-        self.log("Compute distance")
+    def createOrificeSurface(self, surfaceMesh, shrunkSurface, surfaceThickness, outputOrificeModel, distanceMarginPercent):
+        self.log("Compute distance map")
 
         import time
         startTime = time.time()
@@ -498,7 +589,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
 
         self.log("Threshold orifice surface")
         threshold = vtk.vtkThreshold()
-        threshold.SetLowerThreshold(surfaceThickness * (1 + 0.60) / 2.0)  # 60% margin is added to remove areas added just because of noise
+        threshold.SetLowerThreshold(surfaceThickness * (1.0 + distanceMarginPercent / 100.0) / 2.0)  # margin is added to remove areas added just because of noise
         threshold.SetInputData(surfaceWithDistance)
         threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS, "Distance")
         threshold.Update()
@@ -511,9 +602,10 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
             if not outputOrificeModel.GetMesh():
                 # initial update
                 outputOrificeModel.CreateDefaultDisplayNodes()
+                outputOrificeModel.GetDisplayNode().SetColor(0, 0, 1)
+                outputOrificeModel.GetDisplayNode().SetEdgeVisibility(True)
                 outputOrificeModel.GetDisplayNode().SetVisibility2D(True)
                 outputOrificeModel.GetDisplayNode().SetVisibility(True)
-                outputOrificeModel.GetDisplayNode().SetColor(0, 0, 1)
             outputOrificeModel.SetAndObservePolyData(orificeSurface)
         elif self.keepIntermediateResults:
             self.saveIntermediateResult("OrificeSurface", orificeSurface, True, [0, 0, 1])
