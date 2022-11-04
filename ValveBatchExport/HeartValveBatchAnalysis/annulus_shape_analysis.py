@@ -97,7 +97,7 @@ import os
 import logging
 import numpy as np
 from HeartValveLib.util import *
-from __main__ import vtk, qt, ctk, slicer
+import vtk, qt, ctk, slicer
 
 
 # Contour processing

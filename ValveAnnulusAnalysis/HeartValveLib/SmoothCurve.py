@@ -2,7 +2,7 @@
 #   SmoothCurve.py: Creates smooth curves from markups
 #
 
-from __main__ import vtk, qt, ctk, slicer
+import vtk, qt, ctk, slicer
 import math
 import numpy as np
 import logging

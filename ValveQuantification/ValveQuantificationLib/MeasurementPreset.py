@@ -2,7 +2,7 @@
 #   MeasurementPreset: base class for all measurement presets
 #
 
-from __main__ import vtk, slicer
+import vtk, slicer
 import math
 import numpy as np
 import vtk.util.numpy_support as VN

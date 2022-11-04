@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 import sys
 import argparse
-from __main__ import vtk, qt, ctk, slicer
+import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
 from HeartValveLib.helpers import getAllFilesWithExtension, isMRBFile

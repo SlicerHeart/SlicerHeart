@@ -1,6 +1,6 @@
 import os
 import string
-from __main__ import vtk, qt, ctk, slicer
+import vtk, qt, ctk, slicer
 import logging
 import numpy
 

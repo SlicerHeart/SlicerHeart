@@ -2,7 +2,7 @@
 #   CoaptationModel.py: Stores leaflet coaptation data, quantifies properties, and creates displayable models
 #
 
-from __main__ import vtk, slicer
+import vtk, slicer
 import numpy as np
 import logging
 import HeartValveLib

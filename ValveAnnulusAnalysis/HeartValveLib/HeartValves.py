@@ -1,5 +1,5 @@
 import HeartValveLib
-from __main__ import vtk, qt, ctk, slicer
+import vtk, qt, ctk, slicer
 import logging
 
 # Dictionary that stores a ValveModel Python object for each MRML node in the scene.
@@ -57,7 +57,7 @@ def getValveModel(heartValveNode):
 
 
 def setHeartOrientationmarker(viewNodeId):
-  from __main__ import slicer
+  import slicer
   import os
   viewNode = slicer.mrmlScene.GetNodeByID(viewNodeId)
   if HeartOrientationMarkerType == "axes":
