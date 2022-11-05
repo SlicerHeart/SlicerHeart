@@ -428,6 +428,12 @@ def copyNodeContentToNewScriptedModuleNode(oldDataNode, shNode):
 def useCurrentValveVolumeAsLeafletVolume(valveModel):
   goToAnalyzedFrame(valveModel)
   volumeNode = valveModel.getValveVolumeNode()
+  if not volumeNode:
+    appLogic = slicer.app.applicationLogic()
+    selNode = appLogic.GetSelectionNode()
+    if selNode.GetActiveVolumeID():
+      volumeNode = slicer.mrmlScene.GetNodeByID(selNode.GetActiveVolumeID())
+      valveModel.setValveVolumeNode(volumeNode)
   leafletVolumeNode = valveModel.getLeafletVolumeNode()
   name = f"{valveModel.heartValveNode.GetName()}-segmented"
   if leafletVolumeNode is None:
@@ -441,7 +447,6 @@ def useCurrentValveVolumeAsLeafletVolume(valveModel):
     leafletVolumeNode.SetAndObserveImageData(imageDataCopy)
     leafletVolumeNode.SetName(name)
     leafletVolumeNode.SetAndObserveDisplayNodeID(leafletVolumeNodeOriginalDisplayNodeId)
-  return volumeNode.GetName()
 
 
 def updateLegacyHeartValveNodes(unused1=None, unused2=None):
