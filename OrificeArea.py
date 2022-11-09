@@ -301,7 +301,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         if not parameterNode.GetParameter("DistanceMarginPercent"):
             parameterNode.SetParameter("DistanceMarginPercent", "40")
         if not parameterNode.GetParameter("ShrinkWrapIterations"):
-            parameterNode.SetParameter("ShrinkWrapIterations", "20")
+            parameterNode.SetParameter("ShrinkWrapIterations", "40")  # 20 is often enough, but not always
         if not parameterNode.GetParameter("KeepIntermediateResults"):
             parameterNode.SetParameter("KeepIntermediateResults", "false")
 
@@ -383,6 +383,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
             outputOrificeModel.SetAndObservePolyData(totalOrificeMesh)
 
         orificeSurfaceArea = OrificeAreaLogic.surfaceArea(totalOrificeMesh)
+        logging.info(f"Total orifice surface area: {orificeSurfaceArea}")
 
         stopTime = time.time()
         logging.info(f'Processing completed in {stopTime-startTime:.2f} seconds')
@@ -699,13 +700,13 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         # Generate spherical distribution
         # The distribution is not uniform, sampling is more dense near the normal direction, but that is desirable,
         # as we expect the piercing streamline to be approximately in the normal direction.
-        angularResolution = 15
+        angularResolution = 20
         # coordinates in "Orifice" coordinate system: origin is the orifice point, z axis is the surface normal
         # (homogeneous coordinates, so that we can easily transform them)
         lineEndpoints_Orifice = np.zeros([4, angularResolution * angularResolution + 1])
         lineEndpoints_Orifice[:, 0] = [0.0, 0.0, maximumStreamLineLength, 1.0]
         numberOfLineEndPoints = 1
-        for phiDeg in np.arange(4.0, 44.0, 40.0/angularResolution):
+        for phiDeg in np.arange(4.0, 24.0, 20.0/angularResolution):
             for thetaDeg in np.arange(0.0, 360.0, 360.0/angularResolution):
                 theta = thetaDeg / 180.0 * math.pi
                 phi = phiDeg / 180.0 * math.pi
