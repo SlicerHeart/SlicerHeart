@@ -165,6 +165,12 @@
         <property name="removeEnabled">
          <bool>true</bool>
         </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
        </widget>
       </item>
       <item row="4" column="1">
@@ -190,6 +196,12 @@
          <bool>true</bool>
         </property>
         <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
          <bool>true</bool>
         </property>
        </widget>
@@ -252,6 +264,52 @@
         <property name="removeEnabled">
          <bool>true</bool>
         </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_11">
+        <property name="text">
+         <string>Streamlines:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputStreamLinesModelSelector">
+        <property name="toolTip">
+         <string>Surface of the opening.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="baseName">
+         <string>Streamlines</string>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
        </widget>
       </item>
      </layout>
@@ -263,7 +321,7 @@
       <string>Advanced</string>
      </property>
      <property name="collapsed">
-      <bool>false</bool>
+      <bool>true</bool>
      </property>
      <layout class="QFormLayout" name="formLayout_3">
       <item row="0" column="0">
@@ -449,8 +507,8 @@
      <y>135</y>
     </hint>
     <hint type="destinationlabel">
-     <x>368</x>
-     <y>263</y>
+     <x>384</x>
+     <y>253</y>
     </hint>
    </hints>
   </connection>
@@ -481,8 +539,8 @@
      <y>433</y>
     </hint>
     <hint type="destinationlabel">
-     <x>196</x>
-     <y>283</y>
+     <x>344</x>
+     <y>311</y>
     </hint>
    </hints>
   </connection>
@@ -513,8 +571,8 @@
      <y>423</y>
     </hint>
     <hint type="destinationlabel">
-     <x>364</x>
-     <y>200</y>
+     <x>384</x>
+     <y>195</y>
     </hint>
    </hints>
   </connection>
@@ -531,6 +589,22 @@
     <hint type="destinationlabel">
      <x>187</x>
      <y>221</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>OrificeArea</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputStreamLinesModelSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>5</x>
+     <y>466</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>202</x>
+     <y>275</y>
     </hint>
    </hints>
   </connection>
