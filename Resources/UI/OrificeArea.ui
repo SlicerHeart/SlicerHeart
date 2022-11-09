@@ -61,7 +61,7 @@
       <item row="1" column="1">
        <widget class="qMRMLNodeComboBox" name="inputBoundaryCurveSelector">
         <property name="toolTip">
-         <string>Closed curve drawn on the surface around the orifice. Be close to the orifice, but keep the boundary curve an ellipse shape, do not follow concavities of the orifice.</string>
+         <string>Closed curve drawn on the surface around the orifice. Thecurve must be simple ellipse that encloses the opening on the surface.</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -97,6 +97,9 @@
         <property name="toolTip">
          <string>The input surface is the medial surface, this value specifies the thickness of the surface.</string>
         </property>
+        <property name="decimals">
+         <number>3</number>
+        </property>
         <property name="singleStep">
          <double>0.010000000000000</double>
         </property>
@@ -104,13 +107,13 @@
          <double>0.100000000000000</double>
         </property>
         <property name="minimum">
-         <double>0.010000000000000</double>
+         <double>0.001000000000000</double>
         </property>
         <property name="maximum">
          <double>10.000000000000000</double>
         </property>
         <property name="value">
-         <double>0.500000000000000</double>
+         <double>0.400000000000000</double>
         </property>
         <property name="quantity">
          <string>length</string>
@@ -341,17 +344,17 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="1" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
          <string>Shrink-wrap iterations:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="1" column="1">
        <widget class="ctkSliderWidget" name="shrinkWrapIterationsSliderWidget">
         <property name="toolTip">
-         <string>Number of iterations used during shrink-wrapping operation. Higher value results in higher accuracy but longer computation time.</string>
+         <string>Number of iterations used during shrink-wrapping operation. Higher value results in higher accuracy in following narrow valleys, but requires longer computation time.</string>
         </property>
         <property name="decimals">
          <number>0</number>
@@ -373,38 +376,67 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_10">
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_12">
         <property name="text">
-         <string>Distance margin: </string>
+         <string>Streamline length: </string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
-       <widget class="ctkSliderWidget" name="distanceMarginPercentSliderWidget">
+      <item row="2" column="1">
+       <widget class="qMRMLSliderWidget" name="streamLineLengthSliderWidget">
         <property name="toolTip">
-         <string>How much additional margin is removed from the orifice surface. Used for removing small surface speckles due to algorithm inaccuracies. Specified as percentage of surface thickness.</string>
-        </property>
-        <property name="decimals">
-         <number>0</number>
+         <string>Streamline is created if a straight path of this length is found from the orifice point to both sides of the orifice surface that does not cross the thick surface. Increase the value if the thick surface closes up farther from the orifice surface.</string>
         </property>
         <property name="singleStep">
-         <double>1.000000000000000</double>
-        </property>
-        <property name="pageStep">
          <double>5.000000000000000</double>
         </property>
+        <property name="pageStep">
+         <double>10.000000000000000</double>
+        </property>
         <property name="minimum">
-         <double>0.000000000000000</double>
+         <double>0.010000000000000</double>
         </property>
         <property name="maximum">
-         <double>150.000000000000000</double>
+         <double>50.000000000000000</double>
         </property>
         <property name="value">
-         <double>40.000000000000000</double>
+         <double>30.000000000000000</double>
         </property>
-        <property name="suffix">
-         <string>%</string>
+        <property name="quantity">
+         <string>length</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_13">
+        <property name="text">
+         <string>Distance from streamline:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="qMRMLSliderWidget" name="distanceFromStreamLineSliderWidget">
+        <property name="toolTip">
+         <string>This much margin is added around each streamline to make up the orifice surface. Incrase the value if there are too many isolated orifice surface components. Decrease the value if too large orifice surface region is created around the streamlines.</string>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="quantity">
+         <string>length</string>
         </property>
        </widget>
       </item>
@@ -508,7 +540,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>384</x>
-     <y>253</y>
+     <y>244</y>
     </hint>
    </hints>
   </connection>
@@ -539,15 +571,15 @@
      <y>433</y>
     </hint>
     <hint type="destinationlabel">
-     <x>344</x>
-     <y>311</y>
+     <x>384</x>
+     <y>299</y>
     </hint>
    </hints>
   </connection>
   <connection>
    <sender>OrificeArea</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>surfaceThicknessSliderWidget</receiver>
+   <receiver>streamLineLengthSliderWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
@@ -555,8 +587,8 @@
      <y>431</y>
     </hint>
     <hint type="destinationlabel">
-     <x>281</x>
-     <y>121</y>
+     <x>384</x>
+     <y>435</y>
     </hint>
    </hints>
   </connection>
@@ -572,7 +604,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>384</x>
-     <y>195</y>
+     <y>189</y>
     </hint>
    </hints>
   </connection>
@@ -587,8 +619,8 @@
      <y>442</y>
     </hint>
     <hint type="destinationlabel">
-     <x>187</x>
-     <y>221</y>
+     <x>335</x>
+     <y>217</y>
     </hint>
    </hints>
   </connection>
@@ -603,8 +635,40 @@
      <y>466</y>
     </hint>
     <hint type="destinationlabel">
-     <x>202</x>
-     <y>275</y>
+     <x>350</x>
+     <y>272</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>OrificeArea</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>distanceFromStreamLineSliderWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>309</x>
+     <y>531</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>315</x>
+     <y>465</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>OrificeArea</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>surfaceThicknessSliderWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>168</x>
+     <y>520</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>193</x>
+     <y>117</y>
     </hint>
    </hints>
   </connection>

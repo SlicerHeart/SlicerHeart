@@ -89,8 +89,9 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.outputStreamLinesModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
         self.ui.outputOrificePointsSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
         self.ui.surfaceThicknessSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
-        self.ui.distanceMarginPercentSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
         self.ui.shrinkWrapIterationsSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+        self.ui.streamLineLengthSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+        self.ui.distanceFromStreamLineSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
         self.ui.keepIntermediateResultsCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
 
         # Buttons
@@ -194,8 +195,9 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.outputStreamLinesModelSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputStreamLinesModel"))
         self.ui.outputOrificePointsSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputOrificePoints"))
         self.ui.surfaceThicknessSliderWidget.value = float(self._parameterNode.GetParameter("SurfaceThickness"))
-        self.ui.distanceMarginPercentSliderWidget.value = float(self._parameterNode.GetParameter("DistanceMarginPercent"))
         self.ui.shrinkWrapIterationsSliderWidget.value = int(float(self._parameterNode.GetParameter("ShrinkWrapIterations")))
+        self.ui.streamLineLengthSliderWidget.value = float(self._parameterNode.GetParameter("StreamLineLength"))
+        self.ui.distanceFromStreamLineSliderWidget.value = float(self._parameterNode.GetParameter("DistanceFromStreamLine"))
         self.ui.keepIntermediateResultsCheckBox.checked = (self._parameterNode.GetParameter("KeepIntermediateResults") == "true")
 
         # Update buttons states and tooltips
@@ -227,8 +229,9 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNode.SetNodeReferenceID("OutputStreamLinesModel", self.ui.outputStreamLinesModelSelector.currentNodeID)
         self._parameterNode.SetNodeReferenceID("OutputOrificePoints", self.ui.outputOrificePointsSelector.currentNodeID)
         self._parameterNode.SetParameter("SurfaceThickness", str(self.ui.surfaceThicknessSliderWidget.value))
-        self._parameterNode.SetParameter("DistanceMarginPercent", str(self.ui.distanceMarginPercentSliderWidget.value))
+        self._parameterNode.SetParameter("StreamLineLength", str(self.ui.streamLineLengthSliderWidget.value))
         self._parameterNode.SetParameter("ShrinkWrapIterations", str(self.ui.shrinkWrapIterationsSliderWidget.value))
+        self._parameterNode.SetParameter("DistanceFromStreamLine", str(self.ui.distanceFromStreamLineSliderWidget.value))
         self._parameterNode.SetParameter("KeepIntermediateResults", "true" if self.ui.keepIntermediateResultsCheckBox.checked else "false")
 
         self._parameterNode.EndModify(wasModified)
@@ -262,7 +265,8 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             orificeArea = self.logic.process(self.ui.inputSurfaceModelSelector.currentNode(), self.ui.inputBoundaryCurveSelector.currentNode(),
                                self.ui.outputThickSurfaceModelSelector.currentNode(), self.ui.outputOrificeModelSelector.currentNode(),
                                self.ui.outputStreamLinesModelSelector.currentNode(),  self.ui.outputOrificePointsSelector.currentNode(),
-                               self.ui.surfaceThicknessSliderWidget.value, self.ui.distanceMarginPercentSliderWidget.value, int(self.ui.shrinkWrapIterationsSliderWidget.value))
+                               self.ui.surfaceThicknessSliderWidget.value, int(self.ui.shrinkWrapIterationsSliderWidget.value),
+                               self.ui.streamLineLengthSliderWidget.value,  self.ui.distanceFromStreamLineSliderWidget.value)
             self.ui.orificeAreaSpinBox.value = orificeArea
 
 
@@ -298,24 +302,27 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         """
         if not parameterNode.GetParameter("SurfaceThickness"):
             parameterNode.SetParameter("SurfaceThickness", "0.4")
-        if not parameterNode.GetParameter("DistanceMarginPercent"):
-            parameterNode.SetParameter("DistanceMarginPercent", "40")
         if not parameterNode.GetParameter("ShrinkWrapIterations"):
-            parameterNode.SetParameter("ShrinkWrapIterations", "40")  # 20 is often enough, but not always
+            parameterNode.SetParameter("ShrinkWrapIterations", "40")
+        if not parameterNode.GetParameter("StreamLineLength"):
+            parameterNode.SetParameter("StreamLineLength", "30")
+        if not parameterNode.GetParameter("DistanceFromStreamLine"):
+            parameterNode.SetParameter("DistanceFromStreamLine", "1.0")
         if not parameterNode.GetParameter("KeepIntermediateResults"):
             parameterNode.SetParameter("KeepIntermediateResults", "false")
 
     def process(self, inputSurfaceModel, inputBoundaryCurve,
                 outputThickSurfaceModel, outputOrificeModel, outputStreamLinesModel, outputOrificePoints,
-                surfaceThickness, distanceMarginPercent, shrinkWrapIterations,
-                maximumStreamLineLength=30,
-                maximumDistanceFromStreamingLine=1.0
-                ):
+                surfaceThickness=0.4, shrinkWrapIterations=40, streamLineLength=30.0, distanceFromStreamLine=1.0):
         """
         Run the processing algorithm.
         Can be used without GUI widget.
         :return: total orifice area
         """
+
+        # This value usually does not require tuning. It just adds 40% of the surface thickness when thresholding the distance
+        # between the original surface and the shrink-wrapped surface.
+        distanceMarginPercent = 40
 
         if not inputSurfaceModel or not inputBoundaryCurve:
             raise ValueError("Input or output volume is invalid")
@@ -337,15 +344,15 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         orificeSurface = self.createOrificeSurface(medialSurfaceMesh, shrunkSurface, surfaceThickness, distanceMarginPercent)
 
         self.log("Find streamlines")
-        # We shoot lines `maximumStreamLineLength` distance to all directions on both sides of the orifice.
+        # We shoot lines `streamLineLength` distance to all directions on both sides of the orifice.
         # If the line does not hit a wall on either side then there is a hole in the surface at that position.
-        self.computeStreamLineLengths(orificeSurface, thickSurface, maximumStreamLineLength, outputStreamLinesModel)
+        self.computeStreamLineLengths(orificeSurface, thickSurface, streamLineLength, outputStreamLinesModel)
 
         self.log("Split orifice surface")
         # Each connected component of the potential orifice surface is filtered: regions that are farther
-        # away from streamlines by more than `maximumDistanceFromStreamingLine` distance will be cut off.
+        # away from streamlines by more than `distanceFromStreamLine` distance will be cut off.
         # The remaining area is considered as an orifice region.
-        regions = self.splitOrificeSurface(orificeSurface, maximumStreamLineLength, maximumDistanceFromStreamingLine)
+        regions = self.splitOrificeSurface(orificeSurface, streamLineLength, distanceFromStreamLine, minimumSurfaceArea=surfaceThickness*surfaceThickness)
 
         self.log("Create total orifice surface")
         append = vtk.vtkAppendPolyData()
@@ -471,7 +478,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
 
         return thickSurface
 
-
     def createGradientVolume(self, thickSurface):
 
         # Export thick surface to labelmap - useful for troubleshooting (labelmap can be browsed in slice views)
@@ -486,7 +492,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(segmentationNode, labelmapVolumeNode, slicer.vtkSegmentation.EXTENT_REFERENCE_GEOMETRY)
         slicer.mrmlScene.RemoveNode(segmentationNode)
         slicer.mrmlScene.RemoveNode(thickSurfaceModelNodeTmp)
-        slicer.util.setSliceViewerLayers(labelmapVolumeNode, fit=True)
 
         thresh = vtk.vtkImageThreshold()
         thresh.SetInputData(labelmapVolumeNode.GetImageData())
@@ -505,6 +510,9 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
             distancemapVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Distance map")
             distancemapVolumeNode.SetAndObserveImageData(distanceMap.GetOutput())
             distancemapVolumeNode.SetIJKToRASMatrix(ijkToRas)
+            slicer.util.setSliceViewerLayers(labelmapVolumeNode, fit=True)
+        else:
+            slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
 
         gradient = vtk.vtkImageGradient()
         gradient.SetDimensionality(3)
@@ -521,7 +529,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
 
         return gradientVolumeNode
 
-
     def createInitialShrinkWrapSurface(self, inputBoundaryCurve):
         areaMeasurement = inputBoundaryCurve.GetMeasurement("area")
         wasAreaMeasurementEnabled = areaMeasurement.GetEnabled()
@@ -531,7 +538,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         areaMeasurement.SetEnabled(wasAreaMeasurementEnabled)
         self.saveIntermediateResult("ShrinkWrapSurface-Initial", initialShrinkWrapSurface, color=[0,0,1])
         return initialShrinkWrapSurface
-
 
     def remeshPolydata(self, surface, subdivide=0, clusters=10000):
         import pyacvd
@@ -543,7 +549,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         clus.cluster(clusters)
         remesh = clus.create_mesh()
         return remesh
-
 
     def shrinkWrap(self, shrunkSurface, surface, shrinkwrapIterations, gradientVolumeNode):
 
@@ -621,7 +626,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         shrinkWrapSurfaceNode = self.saveIntermediateResult("ShrinkWrapSurface-final", shrunkSurface)
         return shrunkSurface
 
-
     def createOrificeSurface(self, surfaceMesh, shrunkSurface, surfaceThickness, distanceMarginPercent):
         self.log("Compute distance map")
 
@@ -654,7 +658,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
 
         return orificeSurface
 
-
     @staticmethod
     def surfaceArea(surface):
         properties = vtk.vtkMassProperties()
@@ -662,8 +665,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         properties.Update()
         return properties.GetSurfaceArea()
 
-
-    def computeStreamLineLengths(self, orificeSurface, thickSurface, maximumStreamLineLength, outputStreamLinesModel):
+    def computeStreamLineLengths(self, orificeSurface, thickSurface, streamLineLength, outputStreamLinesModel):
         """Compute longest length of a streamline that traverses through the orifice"""
         self.log("Compute streamlines")
 
@@ -704,7 +706,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         # coordinates in "Orifice" coordinate system: origin is the orifice point, z axis is the surface normal
         # (homogeneous coordinates, so that we can easily transform them)
         lineEndpoints_Orifice = np.zeros([4, angularResolution * angularResolution + 1])
-        lineEndpoints_Orifice[:, 0] = [0.0, 0.0, maximumStreamLineLength, 1.0]
+        lineEndpoints_Orifice[:, 0] = [0.0, 0.0, streamLineLength, 1.0]
         numberOfLineEndPoints = 1
         for phiDeg in np.arange(4.0, 24.0, 20.0/angularResolution):
             for thetaDeg in np.arange(0.0, 360.0, 360.0/angularResolution):
@@ -712,9 +714,9 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
                 phi = phiDeg / 180.0 * math.pi
                 if phi == 0:
                     phi = 50.0/2.0/angularResolution
-                x = maximumStreamLineLength * math.sin(phi) * math.cos(theta)
-                y = maximumStreamLineLength * math.sin(phi) * math.sin(theta)
-                z = maximumStreamLineLength * math.cos(phi)
+                x = streamLineLength * math.sin(phi) * math.cos(theta)
+                y = streamLineLength * math.sin(phi) * math.sin(theta)
+                z = streamLineLength * math.cos(phi)
                 lineEndpoints_Orifice[:, numberOfLineEndPoints] = [x, y, z, 1.0]
                 numberOfLineEndPoints += 1
 
@@ -772,16 +774,16 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
                             longestFreeDistance = freeDistance
                             longestPathEndPoint = p2.copy()
                     else:
-                        longestFreeDistance = maximumStreamLineLength
+                        longestFreeDistance = streamLineLength
                         longestPathEndPoint = p2.copy()
-                    if longestFreeDistance >= maximumStreamLineLength:
+                    if longestFreeDistance >= streamLineLength:
                         break
                 return longestFreeDistance, longestPathEndPoint
 
             longestFreeDistance1, longestPathEndPoint1 = getLongestFreeDistance(xAxis, yAxis, zAxis)
             longestFreeDistance2, longestPathEndPoint2 = getLongestFreeDistance(yAxis, xAxis, -zAxis)
             longestFreeDistance = min(longestFreeDistance1, longestFreeDistance2)
-            if self.saveIntermediateResult and longestFreeDistance >= maximumStreamLineLength:
+            if self.saveIntermediateResult and longestFreeDistance >= streamLineLength:
                 numberOfPoints = longestStreamLinesPoints.GetNumberOfPoints()
                 longestStreamLinesLines.InsertNextCell(3)
                 longestStreamLinesLines.InsertCellPoint(numberOfPoints)
@@ -816,7 +818,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         stopTime = time.time()
         logging.info(f'Streamlines computation completed in {stopTime - startTime:.2f} seconds')
 
-    def splitOrificeSurface(self, orificeSurface, minimumStreamLineLength, maximumDistanceFromStreamingLine):
+    def splitOrificeSurface(self, orificeSurface, minimumStreamLineLength, distanceFromStreamLine, minimumSurfaceArea):
         """Return list of [position, surfaceArea, surfaceMesh] tuples"""
         self.log("Split orifice surface to connected components")
         import numpy as np
@@ -831,7 +833,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         distanceArrayName = "DistanceFromStreamLines"
         distanceFromStreamLines = slicer.vtkFastMarchingGeodesicDistance()
         distanceFromStreamLines.SetFieldDataName(distanceArrayName)
-        distanceFromStreamLines.SetDistanceStopCriterion(maximumDistanceFromStreamingLine)
+        distanceFromStreamLines.SetDistanceStopCriterion(distanceFromStreamLine)
         distanceFromStreamLines.SetInputData(orificeSurface)
         seeds = vtk.vtkIdList()
         for piercingPointIndex in piercingPointIndices:
@@ -843,7 +845,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         threshold = vtk.vtkThreshold()
         threshold.SetInputData(distanceFromStreamLines.GetOutput())
         threshold.SetLowerThreshold(-1e-5)
-        threshold.SetUpperThreshold(maximumDistanceFromStreamingLine)
+        threshold.SetUpperThreshold(distanceFromStreamLine)
         threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
         threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, distanceArrayName) 
         threshold.Update()
@@ -868,7 +870,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
             component = connect.GetOutput()
 
             surfaceArea = OrificeAreaLogic.surfaceArea(component)
-            if surfaceArea < maximumDistanceFromStreamingLine * maximumDistanceFromStreamingLine:
+            if surfaceArea < minimumSurfaceArea:
                 # skip almost-zero area regions
                 continue
 
@@ -894,7 +896,6 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         regions = sorted(regions, key=lambda x: x[1], reverse=True)
 
         return regions
-
 
 
 #
