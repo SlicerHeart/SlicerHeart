@@ -95,6 +95,7 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.keepIntermediateResultsCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
 
         # Buttons
+        self.ui.createAllOutputsToolButton.connect('clicked(bool)', self.onCreateAllOutputs)
         self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
 
         # Make sure parameter node is initialized (needed for module reload)
@@ -143,12 +144,14 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # so that when the scene is saved and reloaded, these settings are restored.
 
         self.setParameterNode(self.logic.getParameterNode())
-
         # Select default input nodes if nothing is selected yet to save a few clicks for the user
         if not self._parameterNode.GetNodeReference("InputSurfaceModel"):
-            firstNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLModelNode")
-            if firstNode:
-                self._parameterNode.SetNodeReferenceID("InputSurfaceModel", firstNode.GetID())
+            # Find first model node that is not a slice model
+            modelNodes = slicer.util.getNodesByClass("vtkMRMLModelNode")
+            for modelNode in modelNodes:
+                if not slicer.vtkMRMLSliceLogic.IsSliceModelNode(modelNode):
+                    self._parameterNode.SetNodeReferenceID("InputSurfaceModel", modelNode.GetID())
+                    break
         if not self._parameterNode.GetNodeReference("InputBoundaryCurve"):
             firstNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLMarkupsClosedCurveNode")
             if firstNode:
@@ -268,6 +271,19 @@ class OrificeAreaWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                                self.ui.surfaceThicknessSliderWidget.value, int(self.ui.shrinkWrapIterationsSliderWidget.value),
                                self.ui.streamLineLengthSliderWidget.value,  self.ui.distanceFromStreamLineSliderWidget.value)
             self.ui.orificeAreaSpinBox.value = orificeArea
+
+    def onCreateAllOutputs(self):
+        outputNodeSelectors = [
+            self.ui.outputThickSurfaceModelSelector,
+            self.ui.outputOrificeModelSelector,
+            self.ui.outputStreamLinesModelSelector,
+            self.ui.outputOrificePointsSelector
+        ]
+        nameSuffix = f" {self.ui.inputSurfaceModelSelector.currentNode().GetName()}" if self.ui.inputSurfaceModelSelector.currentNode() else " "
+        for nodeSelector in outputNodeSelectors:
+            if not nodeSelector.currentNode():
+                outputNode = slicer.mrmlScene.AddNewNodeByClass(nodeSelector.nodeTypes[0], nodeSelector.baseName + nameSuffix)
+                nodeSelector.setCurrentNode(outputNode)
 
 
 #
@@ -847,7 +863,7 @@ class OrificeAreaLogic(ScriptedLoadableModuleLogic):
         threshold.SetLowerThreshold(-1e-5)
         threshold.SetUpperThreshold(distanceFromStreamLine)
         threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
-        threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, distanceArrayName) 
+        threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, distanceArrayName)
         threshold.Update()
         extractSurface = vtk.vtkDataSetSurfaceFilter()
         extractSurface.SetInputData(threshold.GetOutput())

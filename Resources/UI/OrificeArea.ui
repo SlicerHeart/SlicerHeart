@@ -129,86 +129,6 @@
       <string>Outputs</string>
      </property>
      <layout class="QFormLayout" name="formLayout_4">
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_2">
-        <property name="text">
-         <string>Orifice surface:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0">
-       <widget class="QLabel" name="label_8">
-        <property name="text">
-         <string>Orifice components:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="qMRMLNodeComboBox" name="outputOrificeModelSelector">
-        <property name="toolTip">
-         <string>Surface of the opening.</string>
-        </property>
-        <property name="nodeTypes">
-         <stringlist notr="true">
-          <string>vtkMRMLModelNode</string>
-         </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
-        </property>
-        <property name="baseName">
-         <string>Orifice surface</string>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="removeEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="1">
-       <widget class="qMRMLNodeComboBox" name="outputOrificePointsSelector">
-        <property name="toolTip">
-         <string>List of points marking each connected orifice component.</string>
-        </property>
-        <property name="nodeTypes">
-         <stringlist>
-          <string>vtkMRMLMarkupsFiducialNode</string>
-         </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
-        </property>
-        <property name="baseName">
-         <string>Orifice components</string>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="removeEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
       <item row="0" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
@@ -217,23 +137,37 @@
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="qMRMLSpinBox" name="orificeAreaSpinBox">
-        <property name="toolTip">
-         <string>Total area of all identified orifice components. Small speckles (that are not included in the component list due to their small size) are ignored.</string>
-        </property>
-        <property name="frame">
-         <bool>false</bool>
-        </property>
-        <property name="readOnly">
-         <bool>true</bool>
-        </property>
-        <property name="quantity">
-         <string>area</string>
-        </property>
-        <property name="unitAwareProperties">
-         <set>qMRMLSpinBox::MaximumValue|qMRMLSpinBox::MinimumValue|qMRMLSpinBox::Precision|qMRMLSpinBox::Prefix|qMRMLSpinBox::Scaling|qMRMLSpinBox::Suffix</set>
-        </property>
-       </widget>
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <item>
+         <widget class="qMRMLSpinBox" name="orificeAreaSpinBox">
+          <property name="toolTip">
+           <string>Total area of all identified orifice components. Small speckles (that are not included in the component list due to their small size) are ignored.</string>
+          </property>
+          <property name="frame">
+           <bool>false</bool>
+          </property>
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
+          <property name="quantity">
+           <string>area</string>
+          </property>
+          <property name="unitAwareProperties">
+           <set>qMRMLSpinBox::MaximumValue|qMRMLSpinBox::MinimumValue|qMRMLSpinBox::Precision|qMRMLSpinBox::Prefix|qMRMLSpinBox::Scaling|qMRMLSpinBox::Suffix</set>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="createAllOutputsToolButton">
+          <property name="toolTip">
+           <string>Create nodes for all outputs, if an output node is not selected already</string>
+          </property>
+          <property name="text">
+           <string>Create all outputs</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
       <item row="1" column="0">
        <widget class="QLabel" name="label_9">
@@ -275,6 +209,46 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Orifice surface:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputOrificeModelSelector">
+        <property name="toolTip">
+         <string>Surface of the opening.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="baseName">
+         <string>Orifice surface</string>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
       <item row="3" column="0">
        <widget class="QLabel" name="label_11">
         <property name="text">
@@ -297,6 +271,46 @@
         </property>
         <property name="baseName">
          <string>Streamlines</string>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_8">
+        <property name="text">
+         <string>Orifice components:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputOrificePointsSelector">
+        <property name="toolTip">
+         <string>List of points marking each connected orifice component.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLMarkupsFiducialNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="baseName">
+         <string>Orifice components</string>
         </property>
         <property name="noneEnabled">
          <bool>true</bool>
