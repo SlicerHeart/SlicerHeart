@@ -6,6 +6,8 @@ from MeasurementPresetCavc import MeasurementPresetCavc
 from MeasurementPresetGenericValve import *
 from MeasurementPresetMitralValve import *
 from MeasurementPresetTricuspidValve import *
+from MeasurementPresetLavv import *
+from MeasurementPresetPhaseCompare import *
 from MeasurementPresetsPapillary import (
     MeasurementPresetPapillaryMitralValve,
     MeasurementPresetPapillaryTricuspidValve,

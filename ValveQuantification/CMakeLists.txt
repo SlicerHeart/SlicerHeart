@@ -10,7 +10,9 @@ set(MODULE_PYTHON_SCRIPTS
   ValveQuantificationLib/MeasurementPresetGenericValve
   ValveQuantificationLib/MeasurementPresetMitralValve
   ValveQuantificationLib/MeasurementPresetTricuspidValve
-  ValveQuantificationLib/MeasurementPresetsPapillary.py
+  ValveQuantificationLib/MeasurementPresetsPapillary
+  ValveQuantificationLib/MeasurementPresetLavv
+  ValveQuantificationLib/MeasurementPresetPhaseCompare
   )
 
 set(MODULE_PYTHON_RESOURCES
@@ -21,6 +23,8 @@ set(MODULE_PYTHON_RESOURCES
   Resources/MeasurementPreset/MitralValve.png
   Resources/MeasurementPreset/TricuspidValve.html
   Resources/MeasurementPreset/TricuspidValve.png
+  Resources/MeasurementPreset/Lavv.html
+  Resources/MeasurementPreset/Lavv.png
   )
 
 #-----------------------------------------------------------------------------
