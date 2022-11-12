@@ -47,7 +47,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
           # it is not a label on the annulus (for example, centroid), ignore it
           continue
         label = annulusMarkupNode.GetNthFiducialLabel(annulusMarkupIndex).strip()
-        self.resultsTableNode.SetCellText(startingRowIndex + closestPointIdOnAnnulusCurve, 6, label)
+        self.resultsTableNode.SetCellText(startingRowIndex + closestPointIdOnAnnulusCurve, 7, label)
 
   def processEnd(self):
     self.writeTableNodeToCsv(self.resultsTableNode, self.CSV_OUTPUT_FILENAME)
