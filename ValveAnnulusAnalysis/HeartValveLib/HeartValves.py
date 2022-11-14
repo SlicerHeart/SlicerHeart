@@ -483,8 +483,32 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
     shNode.RemoveItemAttribute(valveNodeItemId,
                                slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelAttributeName())
 
+    # replace deprecated annulus SmoothCurve
+    annulusContourModel = scriptedModuleNode.GetNodeReference("AnnulusContourModel")
+    annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
+    annulusPoints = None
+    if annulusContourNode and annulusContourModel:
+      annulusPoints = slicer.util.arrayFromMarkupsControlPoints(annulusContourNode)
+      slicer.mrmlScene.RemoveNode(annulusContourNode)
+      slicer.mrmlScene.RemoveNode(annulusContourModel)
+
     valveModel = getValveModel(scriptedModuleNode)
     if valveModel is not None:
+      # set annulus contour settings
+      if annulusPoints is not None:
+        annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
+        slicer.mrmlScene.RemoveNode(annulusContourNode)
+        valveModel.setAnnulusContourMarkupNode(valveModel.createAnnulusContourMarkupNode())
+        annulusMarkupNode = valveModel.annulusContourCurve
+        slicer.util.updateMarkupsControlPointsFromArray(annulusMarkupNode, annulusPoints)
+        annulusMarkupNode.SetLocked(True)
+        for ptIdx in range(annulusMarkupNode.GetNumberOfControlPoints()):
+          annulusMarkupNode.SetNthControlPointVisibility(ptIdx, False)
+
+      annulusLabelsMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
+      if annulusLabelsMarkupNode:
+        annulusLabelsMarkupNode.SetLocked(True)
+
       # ensure heart valve is parent in subject hierarchy
       segNode = valveModel.getLeafletSegmentationNode()
       shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
@@ -500,7 +524,7 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
                     f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
 
-  # Convert heart valve measurement nodes
+    # Convert heart valve measurement nodes
   legacyShNodes = slicer.util.getNodesByClass("vtkMRMLSubjectHierarchyLegacyNode")
   for legacyShNode in legacyShNodes:
     if legacyShNode.GetAttribute("ModuleName") != "HeartValveMeasurement":

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 from .base import ValveBatchExportRule
+from HeartValveLib.util import getClosestCurvePointIndexToPosition, getClosestPointPositionAlongCurve
 
 
 class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
@@ -25,7 +26,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
       # Add a row for each contour point
-      curvePoints = valveModel.annulusContourCurve.curvePoints
+      curvePoints = valveModel.annulusContourCurve.GetCurve().GetPoints()
       numberOfAnnulusContourPoints = curvePoints.GetNumberOfPoints()
       startingRowIndex = self.resultsTableNode.GetNumberOfRows()
       filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
@@ -37,17 +38,16 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
         curvePoints.GetPoint(i, pos)
         self.addRowData(self.resultsTableNode, filename, cardiacCyclePhaseName, str(frameNumber), valveType, *[f'{p:.2f}' for p in pos])
       # Add labels to label column
-      annulusMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
-      numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()
-      for annulusMarkupIndex in range(numberOfMarkups):
-        pos = [0,0,0]
-        annulusMarkupNode.GetNthFiducialPosition(annulusMarkupIndex, pos)
-        [closestPointPositionOnAnnulusCurve, closestPointIdOnAnnulusCurve] = valveModel.annulusContourCurve.getClosestPoint(pos)
+      for label in valveModel.getAnnulusMarkupLabels():
+        pos = valveModel.getAnnulusMarkupPositionByLabel(label)
+        closestPointIdOnAnnulusCurve = \
+          getClosestCurvePointIndexToPosition(valveModel.annulusContourCurve, pos)
+        closestPointPositionOnAnnulusCurve = \
+          getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, pos)
         if np.linalg.norm(np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > valveModel.getAnnulusContourRadius() * 1.5:
           # it is not a label on the annulus (for example, centroid), ignore it
           continue
-        label = annulusMarkupNode.GetNthFiducialLabel(annulusMarkupIndex).strip()
-        self.resultsTableNode.SetCellText(startingRowIndex + closestPointIdOnAnnulusCurve, 7, label)
+        self.resultsTableNode.SetCellText(startingRowIndex + closestPointIdOnAnnulusCurve, 7, label.strip())
 
   def processEnd(self):
     self.writeTableNodeToCsv(self.resultsTableNode, self.CSV_OUTPUT_FILENAME)

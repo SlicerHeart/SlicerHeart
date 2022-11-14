@@ -169,7 +169,7 @@ def setValveModelDataVisibility(valveModel, **kwargs):
   :return:
   """
   # TODO: add papillary models and coaptations
-  valveModel.getAnnulusContourModelNode().SetDisplayVisibility(kwargs.get("annulus", False))
+  valveModel.getAnnulusContourMarkupNode().SetDisplayVisibility(kwargs.get("annulus", False))
   valveModel.getAnnulusLabelsMarkupNode().SetDisplayVisibility(kwargs.get("annulusLabels", False))
   valveModel.getLeafletSegmentationNode().SetDisplayVisibility(kwargs.get("segmentation", False))
   valveModel.getValveRoiModelNode().SetDisplayVisibility(kwargs.get("roi", False))

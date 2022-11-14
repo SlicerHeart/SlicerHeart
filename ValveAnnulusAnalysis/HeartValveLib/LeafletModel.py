@@ -404,28 +404,19 @@ class LeafletModel:
       return
 
     boundaryMarkups = self.getSurfaceBoundaryMarkupNode()
-    try:
-      # Current API (Slicer-4.13 February 2022)
-      boundaryMarkups.RemoveAllControlPoints()
-    except:
-      # Legacy API
-      boundaryMarkups.RemoveAllMarkups()
+    boundaryMarkups.RemoveAllControlPoints()
 
     loc = vtk.vtkPointLocator()
     loc.SetDataSet(segmentPolydata)
 
-    numberOfCurvePoints = curve.curvePoints.GetNumberOfPoints()
-    pos = [0.0, 0.0, 0.0]
+    numberOfCurvePoints = curve.GetCurve().GetNumberOfPoints()
+    pos = np.zeros(3)
     for pointIndex in range(numberOfCurvePoints):
-      curve.curvePoints.GetPoint(pointIndex, pos)
+      curve.GetCurve().GetPoint(pointIndex, pos)
       pos += (pos - valvePlanePosition) * 0.2
 
       closestPointId = loc.FindClosestPoint(pos)
       if 0 <= closestPointId < segmentPolydata.GetPoints().GetNumberOfPoints():
         nearestPointOnLeafletSurface = segmentPolydata.GetPoints().GetPoint(closestPointId)
-        try:
-          # Current API (Slicer-4.13 February 2022)
-          boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
-        except:
-          # Legacy API
-          boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+        boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1],
+                                        nearestPointOnLeafletSurface[2])

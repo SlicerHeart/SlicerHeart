@@ -8,6 +8,7 @@ import numpy as np
 import vtk.util.numpy_support as VN
 import logging
 import HeartValveLib
+from HeartValveLib.util import toWorldCoordinates, toLocalCoordinates
 from HeartValveLib.helpers import getBinaryLabelmapRepresentation
 import vtkSegmentationCorePython as vtkSegmentationCore
 
@@ -167,7 +168,7 @@ class MeasurementPreset(object):
   def getAnnulusCircumference(self, valveModel, name='Annulus'):
     return {
       KEY_NAME: '{} circumference (3D)'.format(name),
-      KEY_VALUE: "{:.1f}".format(valveModel.annulusContourCurve.getCurveLength()),
+      KEY_VALUE: "{:.1f}".format(valveModel.annulusContourCurve.GetCurveLengthWorld()),
       KEY_UNIT: 'mm' }
 
   @staticmethod
@@ -257,22 +258,20 @@ class MeasurementPreset(object):
 
     return result
 
-  def getCurveLengthBetweenPoints(self, valveModel1, curve, pointLabel1, valveModel2, pointLabel2, name=None,
-                                  point1_valveModel1=None, point2_valveModel2=None, oriented=False,
-                                  positiveDirection_valveModel1=None, shParentFolderId=None, radius=None,
-                                  color=None, visibility=False):
+  def getCurveLengthBetweenPoints(self, valveModel, markupsCurveNode, pointLabel1, pointLabel2, name=None,
+                                  pointPos1=None, pointPos2=None, oriented=False, positiveDirection=None,
+                                  shParentFolderId=None, radius=None, color=None, visibility=False):
     """Create a measurement of curve length between two points
-    :param valveModel1: valve model to allow to get point by label and get valve coordinate system
-    :param curve: curve the distance should be computed along (SmoothCurve). It must be under the same transform as valveModel1.
-    :param pointLabel1: numpy array of 3 coordinate values, if point1_valveModel1 is not specified then the position of the annulus contour point with this label will be used
-    :param valveModel2: valve model to allow to get point by label and get valve coordinate system
-    :param pointLabel2: numpy array of 3 coordinate values, if point2_valveModel2 is not specified then the position of the annulus contour point with this label will be used
+    :param valveModel: valve model to allow getting point by label and get valve coordinate system
+    :param markupsCurveNode: MarkupsCurveNode the distance should be computed along.
+    :param pointLabel1: numpy array of 3 coordinate values, if pointPos1 is not specified then the position of the annulus contour point with this label will be used
+    :param pointLabel2: numpy array of 3 coordinate values, if pointPos2 is not specified then the position of the annulus contour point with this label will be used
     :param name: measurement name (optional)
-    :param point1_valveModel1: position of point1 in valveModel1 coordinate system (optional)
-    :param point2_valveModel2: position of point1 in valveModel2 coordinate system (optional)
+    :param pointPos1: position of point1 in valveModel1 coordinate system (optional)
+    :param pointPos2: position of point1 in valveModel2 coordinate system (optional)
     :param oriented: if True then the curve is travelled from point1 to point2 along positive rotation direction (using positiveDirection as axis direction and right-hand-rule),
       if False then the shortest distance along the curve is returned.
-    :param positivedirection_valveModel1: direction of the axis of rotation (required if oriented=True)
+    :param positiveDirection: direction of the axis of rotation (required if oriented=True)
     :param shParentFolderId: subject hierarchy folder where the measurement will be placed under
     :param radius: radius of the created curve segment model
     :param color: color of the created curve segment model
@@ -280,29 +279,28 @@ class MeasurementPreset(object):
     """
     if color is None:
       color = [1, 1, 0]
-    if point1_valveModel1 is None:
-      point1_valveModel1 = valveModel1.getAnnulusMarkupPositionByLabel(pointLabel1)
-    if point2_valveModel2 is None:
-      point2_valveModel2 = valveModel2.getAnnulusMarkupPositionByLabel(pointLabel2)
+    if pointPos1 is None:
+      pointPos1 = valveModel.getAnnulusMarkupPositionByLabel(pointLabel1)
+    if pointPos2 is None:
+      pointPos2 = valveModel.getAnnulusMarkupPositionByLabel(pointLabel2)
     if name is None:
-      name = pointLabel1+'-'+pointLabel2+' distance along annulus curve'
+      name = f'{pointLabel1}-{pointLabel2} distance along annulus curve'
     result = {
       KEY_NAME: name,
       KEY_SUCCESS: False
     }
-    if point1_valveModel1 is None or point2_valveModel2 is None:
-      result[KEY_MESSAGE] = 'Points ' + pointLabel1 + ' and ' + pointLabel2 + ' have to be defined to compute ' + result[KEY_NAME] + '.'
+    if pointPos1 is None or pointPos2 is None:
+      result[KEY_MESSAGE] = f'Points {pointLabel1} and {pointLabel2} have to be defined to compute {result[KEY_NAME]}.'
       return result
 
-    # Transform point2 to valvemodel1 coordinate system
-    point2_valveModel1 = self.transformPointFromValve2ToValve1(valveModel1, valveModel2, point2_valveModel2)
-
-    [closestPointOnCurve1, closestPointId1] = curve.getClosestPoint(point1_valveModel1)
-    [closestPointOnCurve2, closestPointId2] = curve.getClosestPoint(point2_valveModel1)
+    from HeartValveLib.util import getClosestCurvePointIndexToPosition
+    closestPointId1 = getClosestCurvePointIndexToPosition(markupsCurveNode, pointPos1)
+    closestPointId2 = getClosestCurvePointIndexToPosition(markupsCurveNode, pointPos2)
 
     if oriented:
-      curvePoints = curve.getInterpolatedPointsAsArray()
-      [_, annulusPointsProjected_Plane, _] = HeartValveLib.getPointsProjectedToPlane(curvePoints, [0.0, 0.0, 0.0], positiveDirection_valveModel1)
+      curvePoints = slicer.util.arrayFromMarkupsCurvePoints(markupsCurveNode).T
+      [_, annulusPointsProjected_Plane, _] = \
+        HeartValveLib.getPointsProjectedToPlane(curvePoints, [0.0, 0.0, 0.0], positiveDirection)
       points = vtk.vtkPoints()
       nInterpolatedPoints = annulusPointsProjected_Plane.shape[1]
       points.Allocate(nInterpolatedPoints)
@@ -317,12 +315,11 @@ class MeasurementPreset(object):
         startPointIndex = closestPointId1
         endPointIndex = closestPointId2
 
-      lengthMm = curve.getCurveLengthBetweenStartEndPoints(startPointIndex, endPointIndex)
-
+      lengthMm = markupsCurveNode.GetCurveLengthBetweenStartEndPointsWorld(startPointIndex, endPointIndex)
     else:
       # Non-oriented, use the shorter section of the curve
-      length1to2 = curve.getCurveLengthBetweenStartEndPoints(closestPointId1, closestPointId2)
-      length2to1 = curve.getCurveLengthBetweenStartEndPoints(closestPointId2, closestPointId1)
+      length1to2 = markupsCurveNode.GetCurveLengthBetweenStartEndPointsWorld(closestPointId1, closestPointId2)
+      length2to1 = markupsCurveNode.GetCurveLengthBetweenStartEndPointsWorld(closestPointId2, closestPointId1)
       if length1to2<length2to1:
         startPointIndex = closestPointId1
         endPointIndex = closestPointId2
@@ -336,7 +333,7 @@ class MeasurementPreset(object):
     result[KEY_UNIT] = 'mm'
     result[KEY_SUCCESS] = True
 
-    curvePoints = curve.getInterpolatedPointsAsArray()
+    curvePoints = slicer.util.arrayFromMarkupsCurvePoints(markupsCurveNode).T
     if startPointIndex<=endPointIndex:
       curveSegmentPoints = curvePoints[:,startPointIndex:endPointIndex+1]
     else:
@@ -344,10 +341,10 @@ class MeasurementPreset(object):
                                        curvePoints[:, :endPointIndex]))
 
     if radius is None:
-      radius = curve.tubeRadius * 1.1
+      radius = valveModel.getAnnulusContourRadius() * 1.1
 
-    curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, curve.tubeResolution, visibility)
-    self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, curveModel, shParentFolderId)
+    curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility)
+    self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, curveModel, shParentFolderId)
 
     return result
 
@@ -458,12 +455,12 @@ class MeasurementPreset(object):
 
   def createAnnulusContourModelColoredByDistance(self, valveModel, planePosition, planeNormal):
 
-    nInterpolatedPoints = valveModel.annulusContourCurve.curvePoints.GetNumberOfPoints()
+    nInterpolatedPoints = valveModel.annulusContourCurve.GetCurvePoints().GetNumberOfPoints()
     if nInterpolatedPoints < 2:
       return
 
     curvePoints = vtk.vtkPoints()
-    curvePoints.DeepCopy(valveModel.annulusContourCurve.curvePoints)
+    curvePoints.DeepCopy(valveModel.annulusContourCurve.GetCurvePoints())
 
     lines = vtk.vtkCellArray()
     lines.InsertNextCell(nInterpolatedPoints+1)
@@ -488,8 +485,8 @@ class MeasurementPreset(object):
     tubeFilter.SetInputData(curvePoly)
     # Make tube radius 5% larger than the original contour so that when both
     # are shown in 3D then the colored tube is visible.
-    tubeFilter.SetRadius(valveModel.annulusContourCurve.tubeRadius * 1.05)
-    tubeFilter.SetNumberOfSides(valveModel.annulusContourCurve.tubeResolution)
+    tubeFilter.SetRadius(valveModel.annulusContourCurve.GetDisplayNode().GetGlyphSize() * 1.05)
+    tubeFilter.SetNumberOfSides(20)
     tubeFilter.SetCapping(False)
     tubeFilter.Update()
 
@@ -503,7 +500,7 @@ class MeasurementPreset(object):
     distanceFromPlaneArray.SetName("Distance")
     distanceFromPlaneArray.Allocate(numberOfTubePoints)
     for pointIndex in range(nInterpolatedPoints):
-      for rotationIndex in range(valveModel.annulusContourCurve.tubeResolution):
+      for rotationIndex in range(20):
         # Make distance positive when height is high
         distanceFromPlaneArray.InsertNextValue(-curvePointsDistances.GetValue(pointIndex))
 
@@ -558,7 +555,7 @@ class MeasurementPreset(object):
   def addAnnulusHeightMeasurements(self, valveModel, planePosition, planeNormal):
     """
     """
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     [annulusPointsProjected, _, pointsOnPositiveSideOfPlane] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     distancesFromValvePlane = np.linalg.norm(annulusPoints-annulusPointsProjected, axis=0)
@@ -688,7 +685,7 @@ class MeasurementPreset(object):
 
     # Clipping planes that divide the plane to halves and quadrants
     planeNormalX = np.cross(quadrantPointsProjected_World[:, 2] - quadrantPointsProjected_World[:, 3], planeNormal)
-    if np.dot(planeNormalX, quadrantPointsProjected_World[:, 0]-quadrantPointsProjected_World[:, 1]) > 0:
+    if np.dot(planeNormalX, quadrantPointsProjected_World[:, 0] - quadrantPointsProjected_World[:, 1]) > 0:
       planeNormalMinusX = planeNormalX
       planeNormalPlusX = -planeNormalX
     else:
@@ -696,7 +693,7 @@ class MeasurementPreset(object):
       planeNormalPlusX = planeNormalX
 
     planeNormalY = np.cross(quadrantPointsProjected_World[:, 1] - quadrantPointsProjected_World[:, 0], planeNormal)
-    if np.dot(planeNormalY, quadrantPointsProjected_World[:, 2]-quadrantPointsProjected_World[:, 3]) > 0:
+    if np.dot(planeNormalY, quadrantPointsProjected_World[:, 2] - quadrantPointsProjected_World[:, 3]) > 0:
       planeNormalMinusY = planeNormalY
       planeNormalPlusY = -planeNormalY
     else:
@@ -733,6 +730,7 @@ class MeasurementPreset(object):
     :param quadrantPointLabels: 4 annulus points defining halves and quadrants (-X, +X, -Y, +Y)
     :param invertBendingAngleDirection1: invert bending angle signed for first two halves
     :param invertBendingAngleDirection2: invert bending angle signed for second two halves
+    :param name:
     :return:
     """
     if not quadrantPointLabels:
@@ -745,7 +743,7 @@ class MeasurementPreset(object):
                                       invertBendingAngleDirection1, invertBendingAngleDirection2, name)
       return
 
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     if mode == "2D":
       # Transform annulus points to plane coordinate system
       [annulusPointsProjected, _, _] = \
@@ -754,11 +752,11 @@ class MeasurementPreset(object):
     elif mode == "3D":
       annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints)
     else:
-      logging.error("Invalid mode: {0}".format(mode))
+      logging.error(f"Invalid mode: {mode}")
       return
 
     # Full area
-    self.addSurfaceAreaMeasurements('{} area ({})'.format(name, mode), annulusAreaPolyData, valveModel)
+    self.addSurfaceAreaMeasurements(f'{name} area ({mode})', annulusAreaPolyData, valveModel)
 
     # Count how many quadrant separator points are defined (must be 4 for a complete definition)
     numberOfFoundLabels = 0
@@ -772,17 +770,23 @@ class MeasurementPreset(object):
       # Cut quadrants at halfway between landmarks
       for clipBetweenQuadrantPoints in [False, True]:
 
-        nameSuffix = " centered" if clipBetweenQuadrantPoints else ""
+        suffix = " centered" if clipBetweenQuadrantPoints else ""
 
         # Add annulus bending angle
         if mode == '3D':
           [_, planeNormalPlusX, _, planeNormalPlusY, planePosition, halvesNames, _] = \
             self.getClipPlanesNormalsOrigin(valveModel, planePosition, planeNormal, quadrantPointLabels,
                                             clipBetweenQuadrantPoints=clipBetweenQuadrantPoints)
-          self.addCurveBendingAngleMeasurement('{0} bending angle{1} ({2}-{3})'.format(name, nameSuffix, halvesNames[0], halvesNames[1]), annulusPoints, planePosition, planeNormalPlusX, valveModel, invertDirection=invertBendingAngleDirection1)
-          self.addCurveBendingAngleMeasurement('{0} bending angle{1} ({2}-{3})'.format(name, nameSuffix, halvesNames[2], halvesNames[3]), annulusPoints, planePosition, planeNormalPlusY, valveModel, invertDirection=invertBendingAngleDirection2)
+          self.addCurveBendingAngleMeasurement(f'{name} bending angle{suffix} ({halvesNames[0]}-{halvesNames[1]})',
+                                               annulusPoints, planePosition, planeNormalPlusX, valveModel,
+                                               invertDirection=invertBendingAngleDirection1)
+          self.addCurveBendingAngleMeasurement(f'{name} bending angle{suffix} ({halvesNames[2]}-{halvesNames[3]})',
+                                               annulusPoints, planePosition, planeNormalPlusY, valveModel,
+                                               invertDirection=invertBendingAngleDirection2)
 
-        [[planeMinusX, planePlusX, planeMinusY, planePlusY], halvesNames, quadrantNames] = self.getClipPlanes(valveModel, planePosition, planeNormal, quadrantPointLabels, clipBetweenQuadrantPoints=clipBetweenQuadrantPoints)
+        [[planeMinusX, planePlusX, planeMinusY, planePlusY], halvesNames, quadrantNames] = \
+          self.getClipPlanes(valveModel, planePosition, planeNormal, quadrantPointLabels,
+                             clipBetweenQuadrantPoints=clipBetweenQuadrantPoints)
 
         # These measurements are the same for both clipBetweenQuadrantPoints True/False, so do them only for one of them:
         if not clipBetweenQuadrantPoints:
@@ -812,16 +816,28 @@ class MeasurementPreset(object):
           valveModel.setAnnulusMarkupLabel('MX', np.mean(np.array([pointMA, pointMP]), axis=0))
 
         # Halves
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, halvesNames[0]), annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX])
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, halvesNames[1]), annulusAreaPolyData, valveModel, clipPlanes=[planePlusX])
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, halvesNames[2]), annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY])
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, halvesNames[3]), annulusAreaPolyData, valveModel, clipPlanes=[planePlusY])
+        self.addSurfaceAreaMeasurements(
+          f'{name} area{suffix} ({mode}, {halvesNames[0]})', annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX]
+        )
+        self.addSurfaceAreaMeasurements(
+          f'{name} area{suffix} ({mode}, {halvesNames[1]})', annulusAreaPolyData, valveModel, clipPlanes=[planePlusX]
+        )
+        self.addSurfaceAreaMeasurements(
+          f'{name} area{suffix} ({mode}, {halvesNames[2]})', annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY]
+        )
+        self.addSurfaceAreaMeasurements(
+          f'{name} area{suffix} ({mode}, {halvesNames[3]})', annulusAreaPolyData, valveModel, clipPlanes=[planePlusY]
+        )
 
         # Quadrants
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, quadrantNames[0]), annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX, planeMinusY])
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, quadrantNames[1]), annulusAreaPolyData, valveModel, clipPlanes=[planePlusX,  planeMinusY])
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, quadrantNames[2]), annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX, planePlusY])
-        self.addSurfaceAreaMeasurements('{0} area{1} ({2}, {3})'.format(name, nameSuffix, mode, quadrantNames[3]), annulusAreaPolyData, valveModel, clipPlanes=[planePlusX,  planePlusY])
+        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[0]})', annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planeMinusX, planeMinusY])
+        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[1]})', annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planePlusX, planeMinusY])
+        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[2]})', annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planeMinusX, planePlusY])
+        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[3]})', annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planePlusX, planePlusY])
 
   @staticmethod
   def createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, radiusScalingFactor=1.0):
@@ -881,6 +897,7 @@ class MeasurementPreset(object):
     return annulusAreaPolyData
 
   def addSurfaceAreaMeasurements(self, name, polyData, valveModel, clipPlanes=None, visibility=False):
+    logging.info(name)
     modelsLogic = slicer.modules.models.logic()
     annulusArea3dModel = modelsLogic.AddModel(polyData)
     annulusArea3dModel.SetName(name)
@@ -958,7 +975,7 @@ class MeasurementPreset(object):
                                                    valveModel, planePositions[1], planeNormals[1], name))
 
   def addCurveBendingAngleMeasurement(self, name, curvePoints, separatingPlanePosition, separatingPlaneNormal,
-                                      valveModel, visibility=False, invertDirection=False):
+                                      valveModel, invertDirection=False):
     """Separate the point set using separating plane. Fit a plane to each, and report the orientation difference."""
 
     [_, _, pointsOnPositiveSideOfPlane] = \
@@ -1009,12 +1026,13 @@ class MeasurementPreset(object):
     :return: [posteriorPoint, anteriorPoint]
     """
     import math
-    curveIntersectionPoints = valveModel.annulusContourCurve.getPointsOnPlane(planePosition, planeNormal)
+    from HeartValveLib.util import getPointsOnPlane
+    curveIntersectionPoints = getPointsOnPlane(planePosition, planeNormal, valveModel.annulusContourCurve.GetCurve())
 
     # TODO: handle cases when number of intersection points != 2
     # TODO: it would be more robust to sort based on sortDirectionVector position and pick first and last points
     if curveIntersectionPoints.shape[1] != 2:
-      logging.warning("There are {} intersection points while exactly 2 points are expected.".format(curveIntersectionPoints.shape[1]))
+      logging.warning(f"There are {curveIntersectionPoints.shape[1]} intersection points while exactly 2 points are expected.")
 
     p1 = curveIntersectionPoints[:,0]
     p2 = curveIntersectionPoints[:,1]
@@ -1348,7 +1366,8 @@ class MeasurementPreset(object):
     volumeModelNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
     return volumeMm3
 
-  def addVolumeMeasurementBetweenSurfaces(self, measurementName, color, valveModel, allLeafletSurfacePolyData, annulusAreaPolyData, extrusionDirection, extrusionLength, leafletRois):
+  def addVolumeMeasurementBetweenSurfaces(self, measurementName, color, valveModel, allLeafletSurfacePolyData,
+                                          annulusAreaPolyData, extrusionDirection, extrusionLength, leafletRois):
     """
     Create a new segmentation node that will be used for performing Boolean operations and
     conversion to surface mesh.
@@ -1604,7 +1623,7 @@ class MeasurementPreset(object):
 
     # Create soap bubble surface
 
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.2)
 
     # Create fused leaflet surface

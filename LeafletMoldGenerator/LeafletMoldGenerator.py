@@ -265,11 +265,6 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     volumeSelected = self.valveModel is not None and self.valveModel.getValveVolumeNode() is not None
     self.moldMeasurementsCollapsibleButton.setEnabled(valveModuleSelected)
 
-  def getAnnulusContourModelNode(self):
-    if self.valveModel is None:
-      return None
-    return self.valveModel.getAnnulusContourModelNode()
-
   def setAndObserveParameterNode(self, parameterNode):
     if parameterNode == self.parameterNode and self.parameterNodeObserver:
       # no change and node is already observed
@@ -444,7 +439,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     valveRimMarkupNode.SetMarkupLabelFormat("")  # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
     self.valveModel.moveNodeToHeartValveFolder(valveRimMarkupNode)
     valveRimMarkupDisplayNode = valveRimMarkupNode.GetDisplayNode()  # .SetColor(51,255,51)# rgb green
-    valveRimMarkupDisplayNode.SetGlyphScale(self.valveModel.defaultAnnulusContourRadius * self.valveModel.annulusContourMarkupScale * 2)
+    valveRimMarkupDisplayNode.SetGlyphScale(
+      self.valveModel.ANNULUS_CONTOUR_RADIUS * self.valveModel.ANNULUS_CONTOUR_MARKUP_SCALE * 2)
     valveRimMarkupDisplayNode.SetColor(50, 255, 0.3)  # rgb pale yellow
     valveRimMarkupDisplayNode.SetVisibility(False) # added this
     return valveRimMarkupNode
