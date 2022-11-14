@@ -1,5 +1,11 @@
 import numpy as np
 import HeartValveLib
+from HeartValveLib.util import (
+  getSampledInterpolatedPointsAsArray,
+  getClosestPointPositionAlongCurve,
+  getClosestCurvePointIndexToPosition
+)
+
 import vtk
 import slicer
 from ValveQuantificationLib.MeasurementPreset import *
@@ -24,14 +30,16 @@ class MeasurementPresetCavc(MeasurementPreset):
       if not numberOfBasePoints:
         continue
 
-      # Find which end of the coaptation base line is farther from the annulus contour
+      # Find which end of the coaptation baseline is farther from the annulus contour
       # (that will be the center point)
       firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
-      [closestAnnulusPointToFirstPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(
-        firstCoaptationLinePoint)
+      closestAnnulusPointToFirstPoint = \
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, firstCoaptationLinePoint)
+
       firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint - firstCoaptationLinePoint)
       lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
-      [closestAnnulusPointToLastPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(lastCoaptationLinePoint)
+      closestAnnulusPointToLastPoint = \
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, lastCoaptationLinePoint)
       lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint - lastCoaptationLinePoint)
 
       if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
@@ -52,10 +60,12 @@ class MeasurementPresetCavc(MeasurementPreset):
 
   @staticmethod
   def getAnnulusContourSplitSidesStartIndices(valveModel, pointMA, pointMP, pointL):
-    [_, closestPointIdMA] = valveModel.annulusContourCurve.getClosestPoint(pointMA)
-    [_, closestPointIdMP] = valveModel.annulusContourCurve.getClosestPoint(pointMP)
-    [_, closestPointIdL] = valveModel.annulusContourCurve.getClosestPoint(pointL)
-    interpolatedPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusContourCurve = valveModel.annulusContourCurve
+    closestPointIdMA = getClosestCurvePointIndexToPosition(annulusContourCurve, pointMA)
+    closestPointIdMP = getClosestCurvePointIndexToPosition(annulusContourCurve, pointMP)
+    closestPointIdL = getClosestCurvePointIndexToPosition(annulusContourCurve, pointL)
+
+    interpolatedPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     # Determine which side is left/right
     numberOfInterpolatedPoints = interpolatedPoints.shape[1]
     closestPointIdMP_WrappedAround = \
@@ -72,7 +82,7 @@ class MeasurementPresetCavc(MeasurementPreset):
 
   @staticmethod
   def getAnnulusCurvePoints(valveModel, startEndPointIndex):
-    interpolatedPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    interpolatedPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     if startEndPointIndex[0] < startEndPointIndex[1]:
       # Segment between MA and MP point without wrapping around
       curvePoints = interpolatedPoints[:, startEndPointIndex[0]:startEndPointIndex[1] + 1]
@@ -84,7 +94,7 @@ class MeasurementPresetCavc(MeasurementPreset):
     curvePoints = np.c_[curvePoints, curvePoints[:, 0]]
     # resample so that the long connection between the start and end point is has
     # sufficient number of points (to make it count during plane fitting)
-    annulusPoints = valveModel.annulusContourCurve.getSampledInterpolatedPointsAsArray(
+    annulusPoints = getSampledInterpolatedPointsAsArray(
       curvePoints, samplingDistance=0.1, closedCurve=True)
     return annulusPoints
 
@@ -330,13 +340,13 @@ class MeasurementPresetCavc(MeasurementPreset):
 
   def addAnnulusCurveLengthMeasurements(self, valveModel):
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'L', valveModel, 'MA'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'L', 'MA'))
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MA', valveModel, 'R'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MA', 'R'))
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'R', valveModel, 'MP'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'R', 'MP'))
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MP', valveModel, 'L'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MP', 'L'))
 
   def addAngleForAC_LC_R(self, aorticValveModel, valveModel):
     [aorticPlanePosition, _] = aorticValveModel.getAnnulusContourPlane()
@@ -445,8 +455,7 @@ class MeasurementPresetCavc(MeasurementPreset):
   def createAnnulusCurveModel(self, valveModel, annulusPoints, curveSideName):
     curveName = "Annulus contour " + curveSideName
     modelNode = \
-      self.createCurveModel(curveName, annulusPoints, valveModel.annulusContourCurve.tubeRadius,
-                            valveModel.getBaseColor(), valveModel.annulusContourCurve.tubeResolution)
+      self.createCurveModel(curveName, annulusPoints, valveModel.getAnnulusContourRadius(), valveModel.getBaseColor(), 20)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, modelNode)
 
   def onInputFieldChanged(self, fieldId, inputValveModels, inputFieldValues, computeDependentValues = False):

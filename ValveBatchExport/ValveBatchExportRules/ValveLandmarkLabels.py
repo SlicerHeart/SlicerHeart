@@ -6,6 +6,7 @@ from .base import ValveBatchExportRule, getNewSegmentationNode, createLabelNodeF
 
 
 VALVE_COMMISSURAL_LANDMARKS = {
+  "aortic": [],
   "mitral": ['PMC', 'ALC'],
   "tricuspid": ['ASC', 'PSC', 'APC'],
   "cavc": ['SRC', 'SLC', 'IRC', 'ILC'],
@@ -13,6 +14,7 @@ VALVE_COMMISSURAL_LANDMARKS = {
 }
 
 VALVE_QUADRANT_LANDMARKS = {
+  "aortic": [],
   "mitral": ['A', 'P', 'PM', 'AL'],
   "tricuspid": ['A', 'P', 'S', 'L'],
   "cavc": ['R', 'L', 'MA', 'MP'],

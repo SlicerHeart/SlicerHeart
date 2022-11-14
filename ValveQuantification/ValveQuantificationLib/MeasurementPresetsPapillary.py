@@ -319,20 +319,20 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     # main valve (e.g. mitral, lavv)
     mainValveModel = inputValveModels[self._requiredValveType]
     planePositionMV, planeNormalMV = mainValveModel.getAnnulusContourPlane()
-    mainAnnulusPoints = mainValveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    mainAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(mainValveModel.annulusContourCurve).T
     self.createAnnulusPlaneModel(mainValveModel, mainAnnulusPoints, planePositionMV, planeNormalMV,
                                  name=f"{self.inputValveNames[self._requiredValveType]} Annulus plane")
 
     if mainValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel) is None:
       mainValveModel.setAnnulusMarkupLabel(
-        self._valveCenterLabel, np.mean(mainValveModel.annulusContourCurve.getInterpolatedPointsAsArray(), axis=1)
+        self._valveCenterLabel, np.mean(slicer.util.arrayFromMarkupsCurvePoints(mainValveModel.annulusContourCurve).T, axis=1)
       )
 
     # tricuspid plane
     try:
       tricuspidValveModel = inputValveModels["TricuspidValve"]
       planePositionTV, planeNormalTV = tricuspidValveModel.getAnnulusContourPlane()
-      tricuspidAnnulusPoints = tricuspidValveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+      tricuspidAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(tricuspidValveModel.annulusContourCurve).T
       self.createAnnulusPlaneModel(tricuspidValveModel, tricuspidAnnulusPoints, planePositionTV, planeNormalTV, name="TV Annulus plane")
     except KeyError:
       self.metricsMessages.append("No Tricuspid Valve found. Skipping parts of the calculation.")
@@ -365,9 +365,9 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     # ref axis at 9 o'clock
     ref_axis = tv_center - mv_tv_center
     ref_axis = ref_axis / np.linalg.norm(ref_axis)
-    mitralAnnulusSmoothCurve = mitralValveModel.annulusContourCurve
-    resampledMitralAnnulusPoints = mitralAnnulusSmoothCurve.getSampledInterpolatedPointsAsArray(
-      mitralAnnulusSmoothCurve.getInterpolatedPointsAsArray(), 0.1).transpose()
+    interpolatedPoints =  slicer.util.arrayFromMarkupsCurvePoints(mitralValveModel.annulusContourCurve).T
+    from HeartValveLib.util import getSampledInterpolatedPointsAsArray
+    resampledMitralAnnulusPoints = getSampledInterpolatedPointsAsArray(interpolatedPoints, 0.1).transpose()
     from scipy.spatial import KDTree
     tree = KDTree(resampledMitralAnnulusPoints)
     idx = tree.query(mv_tv_center)
@@ -528,7 +528,7 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
   def addSeptalBasedRotationalAngles(self, cavcValveModel, pointLC, pointRC):
     # common annulus plane
     planePosition, planeNormal = cavcValveModel.getAnnulusContourPlane()
-    mitralAnnulusPoints = cavcValveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    mitralAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(cavcValveModel.annulusContourCurve).T
     self.createAnnulusPlaneModel(cavcValveModel, mitralAnnulusPoints, planePosition, planeNormal, name="Common Annulus plane")
 
     left_center = getPointProjectedToPlane(planePosition, planeNormal, pointLC)

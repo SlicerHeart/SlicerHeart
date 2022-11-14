@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>405</width>
+    <width>413</width>
     <height>1017</height>
    </rect>
   </property>
@@ -143,6 +143,12 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
           <property name="enabled">
            <bool>false</bool>
           </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
           <property name="text">
            <string>Delete last</string>
           </property>
@@ -153,61 +159,14 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
           <property name="enabled">
            <bool>false</bool>
           </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
           <property name="text">
            <string>Delete all</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item row="3" column="1">
-       <layout class="QHBoxLayout" name="horizontalLayout_4">
-        <item>
-         <widget class="QDoubleSpinBox" name="orthogonalSlicerRotationStepSizeSpinBox">
-          <property name="toolTip">
-           <string>Increment value by that a single button press changes the orthogonal view angle</string>
-          </property>
-          <property name="decimals">
-           <number>0</number>
-          </property>
-          <property name="minimum">
-           <double>5.000000000000000</double>
-          </property>
-          <property name="maximum">
-           <double>90.000000000000000</double>
-          </property>
-          <property name="singleStep">
-           <double>5.000000000000000</double>
-          </property>
-          <property name="value">
-           <double>15.000000000000000</double>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="orthogonalSliceRotationAngleDecButton">
-          <property name="text">
-           <string>&lt;</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="orthogonalSliceRotationAngleIncButton">
-          <property name="text">
-           <string>&gt;</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="autoRotateButton">
-          <property name="toolTip">
-           <string>Automatically spin to next slice if two annulus points are marked</string>
-          </property>
-          <property name="text">
-           <string>Auto</string>
-          </property>
-          <property name="checkable">
-           <bool>true</bool>
           </property>
          </widget>
         </item>
@@ -230,6 +189,90 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
        <widget class="QLabel" name="label_3">
         <property name="text">
          <string>Rotation angle: </string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout_4">
+        <item>
+         <widget class="QDoubleSpinBox" name="orthogonalSlicerRotationStepSizeSpinBox">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string>Increment value by that a single button press changes the orthogonal view angle</string>
+          </property>
+          <property name="decimals">
+           <number>0</number>
+          </property>
+          <property name="minimum">
+           <double>5.000000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>90.000000000000000</double>
+          </property>
+          <property name="singleStep">
+           <double>5.000000000000000</double>
+          </property>
+          <property name="value">
+           <double>15.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="orthogonalSliceRotationAngleDecButton">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>&lt;</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="orthogonalSliceRotationAngleIncButton">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>&gt;</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="autoRotateButton">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>30</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string>Automatically spin to next slice if two annulus points are marked</string>
+          </property>
+          <property name="text">
+           <string>Auto</string>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_7">
+        <property name="text">
+         <string>Angle increment:</string>
         </property>
        </widget>
       </item>
@@ -448,6 +491,17 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
  </widget>
  <customwidgets>
   <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
+  </customwidget>
+  <customwidget>
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
@@ -473,17 +527,6 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
    <class>qSlicerSimpleMarkupsWidget</class>
    <extends>qSlicerWidget</extends>
    <header>qSlicerSimpleMarkupsWidget.h</header>
-  </customwidget>
-  <customwidget>
-   <class>ctkCollapsibleButton</class>
-   <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

@@ -529,8 +529,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         if valveId:
           # point is constrained to the annulus contour, show slider to allow adjustment
           if pointPositionAnnulus is not None:
-            [_, closestPointIdOnAnnulusCurve] = valveModel.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
-            pointDistanceAlongCurve = valveModel.annulusContourCurve.getCurveLength(closestPointIdOnAnnulusCurve)
+            from HeartValveLib.util import getClosestCurvePointIndexToPosition
+            annulusContourCurve = valveModel.annulusContourCurve
+            closestPointIdOnAnnulusCurve = \
+              getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
+            pointDistanceAlongCurve = \
+              annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
             valueSlider.minimum = pointDistanceAlongCurve-20
             valueSlider.maximum = pointDistanceAlongCurve+20
             valueSlider.value = pointDistanceAlongCurve
@@ -633,8 +637,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         # landmark is present
         if positionSlider.minimum == positionSlider.maximum:
           # Previously it was not present, update slider
-          [_, closestPointIdOnAnnulusCurve] = valveModel.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
-          pointDistanceAlongCurve = valveModel.annulusContourCurve.getCurveLength(closestPointIdOnAnnulusCurve)
+          from HeartValveLib.util import getClosestCurvePointIndexToPosition
+          annulusContourCurve = valveModel.annulusContourCurve
+          closestPointIdOnAnnulusCurve = \
+            getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
+          pointDistanceAlongCurve = \
+            annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
           wasBlocked = positionSlider.blockSignals(True)
           positionSlider.minimum = pointDistanceAlongCurve-20
           positionSlider.maximum = pointDistanceAlongCurve+20
@@ -706,7 +714,9 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       pointPositionAnnulus = worldToProbeTransform.TransformDoublePoint(pointPositionWorld[0:3])
 
       if field[FIELD_ON_ANNULUS_CONTOUR] is True:
-        [closestPointOnAnnulusCurve, _] = valveModel.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
+        from HeartValveLib.util import getClosestPointPositionAlongCurve
+        closestPointOnAnnulusCurve = \
+          getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, pointPositionAnnulus)
         pointPosition = closestPointOnAnnulusCurve
       else:
         # NB: no snapping or restriction
@@ -722,8 +732,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     if field[FIELD_TYPE]==FIELD_TYPE_POINT:
       valveModel = self.inputValveModels[field[FIELD_VALVE_ID]]
       if value is not None:
-        updatedPointPos = valveModel.annulusContourCurve.getPointAlongCurve(value)
-        valveModel.setAnnulusMarkupLabel(field[FIELD_NAME], updatedPointPos)
+        from HeartValveLib.util import getPositionAlongCurve
+        updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, value)
+        valveModel.setAnnulusMarkupLabel(
+          field[FIELD_NAME],
+          updatedPointPos
+        )
       else:
         valveModel.removeAnnulusMarkupLabel(field[FIELD_NAME])
     else:
@@ -750,7 +764,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
             positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
             sliderWasBlocked = positionSlider.blockSignals(True)
             positionSlider.minimum = 0
-            positionSlider.maximum = valveModel.annulusContourCurve.getCurveLength()
+            positionSlider.maximum = valveModel.annulusContourCurve.getCurveLengthWorld()
             positionSlider.value = 0
             positionSlider.blockSignals(sliderWasBlocked)
             self.onInputFieldValueChanged(inputFieldIndex, 0)
