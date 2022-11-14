@@ -46,11 +46,14 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
       # Find which end of the coaptation base line is farther from the annulus contour
       # (that will be the center point)
       firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
-      [closestAnnulusPointToFirstPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(firstCoaptationLinePoint)
-      firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint-firstCoaptationLinePoint) 
+      from HeartValveLib.util import getClosestPointPositionAlongCurve
+      closestAnnulusPointToFirstPoint = \
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, firstCoaptationLinePoint)
+      firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint-firstCoaptationLinePoint)
       lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
-      [closestAnnulusPointToLastPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(lastCoaptationLinePoint)
-      lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint-lastCoaptationLinePoint) 
+      closestAnnulusPointToLastPoint = \
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, lastCoaptationLinePoint)
+      lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint-lastCoaptationLinePoint)
 
       if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
         coaptationCenterPoint = firstCoaptationLinePoint
@@ -94,9 +97,10 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
     # Annulus height measurements
     self.addAnnulusHeightMeasurements(valveModel, planePosition, planeNormal)
 
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'APC', valveModel, 'PSC', oriented=True, positiveDirection_valveModel1=planeNormal))
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'PSC', valveModel, 'ASC', oriented=True, positiveDirection_valveModel1=planeNormal))
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'ASC', valveModel, 'APC', oriented=True, positiveDirection_valveModel1=planeNormal))
+    annulusCurve = valveModel.annulusContourCurve
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, annulusCurve, 'APC', 'PSC', oriented=True, positiveDirection=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, annulusCurve, 'PSC', 'ASC', oriented=True, positiveDirection=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, annulusCurve, 'ASC', 'APC', oriented=True, positiveDirection=planeNormal))
 
     # Annulus area measurements
     self.addAnnulusAreaMeasurements(valveModel, planePosition, planeNormal,

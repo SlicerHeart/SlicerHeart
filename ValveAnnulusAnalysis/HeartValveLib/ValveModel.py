@@ -3,7 +3,6 @@
 #
 
 import vtk, slicer
-import SmoothCurve
 import LeafletModel
 import CoaptationModel
 import PapillaryModel
@@ -16,11 +15,15 @@ from helpers import getBinaryLabelmapRepresentation
 
 class ValveModel:
 
+    ANNULUS_CONTOUR_MARKUP_SCALE = 1.3
+    ANNULUS_CONTOUR_RADIUS = 0.5
+
+    @property
+    def annulusContourCurve(self):
+        return self.getAnnulusContourMarkupNode()
+
     def __init__(self):
       self.heartValveNode = None
-      self.annulusContourCurve = SmoothCurve.SmoothCurve()
-      self.annulusContourCurve.setInterpolationMethod(SmoothCurve.InterpolationSpline)
-      self.annulusContourCurve.setClosed(True)
 
       self.valveRoi = ValveRoi.ValveRoi()
       self.valveRoi.setAnnulusContourCurve(self.annulusContourCurve)
@@ -34,10 +37,6 @@ class ValveModel:
       # List of PapillaryModel objects, one for each papillary muscle
       self.papillaryModels = []
 
-      # how many times the markup point is larger than the tube diameter
-      self.annulusContourMarkupScale = 1.3
-      self.defaultAnnulusContourRadius = 0.5
-
       self.probePositionPresets = PROBE_POSITION_PRESETS
 
       self.valveTypePresets = VALVE_TYPE_PRESETS
@@ -48,15 +47,13 @@ class ValveModel:
       if self.heartValveNode == node:
         # no change
         return
-      self.annulusContourCurve.setCurveModelNode(None)
-      self.annulusContourCurve.setControlPointsMarkupNode(None)
       self.heartValveNode = node
       if self.heartValveNode:
         self.setHeartValveNodeDefaults()
         # Update parameters and references
-        self.setAnnulusContourRadius(self.getAnnulusContourRadius())
-        self.setAnnulusContourModelNode(self.getAnnulusContourModelNode())
         self.setAnnulusContourMarkupNode(self.getAnnulusContourMarkupNode())
+        self.setAnnulusContourRadius(self.getAnnulusContourRadius())
+
         self.setAnnulusLabelsMarkupNode(self.getAnnulusLabelsMarkupNode())
         self.setValveRoiModelNode(self.getValveRoiModelNode())
 
@@ -72,7 +69,7 @@ class ValveModel:
         shNode.SetItemAttribute(shNode.GetItemByDataNode(self.heartValveNode), "ModuleName", "HeartValve")
 
       if not self.getAnnulusContourRadius():
-        self.setAnnulusContourRadius(self.defaultAnnulusContourRadius)
+        self.setAnnulusContourRadius(self.ANNULUS_CONTOUR_RADIUS)
 
       if self.getValveVolumeSequenceIndex() < 0:
         self.setValveVolumeSequenceIndex(-1)  # by default it is set to -1 (undefined)
@@ -92,10 +89,6 @@ class ValveModel:
         logging.debug("Did not find label markup node, create a new one")
         self.setAnnulusLabelsMarkupNode(self.createAnnulusLabelsMarkupNode())
 
-      if not self.getAnnulusContourModelNode():
-        logging.debug("Did not find markup model node, create a new one")
-        self.setAnnulusContourModelNode(self.createAnnulusContourModelNode())
-
       if not self.getValveRoiModelNode():
         logging.debug("Did not find ROI model node, create a new one")
         self.setValveRoiModelNode(self.createValveRoiModelNode())
@@ -107,7 +100,7 @@ class ValveModel:
       self.updateLeafletModelsFromSegmentation()
       self.updateCoaptationModels()
 
-    def moveNodeToHeartValveFolder(self, node, subfolderName = None):
+    def moveNodeToHeartValveFolder(self, node, subfolderName=None):
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
       valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
       if subfolderName:
@@ -217,7 +210,6 @@ class ValveModel:
 
       # Put valve under probeToRas transform (Probe coordinate system)
       self.applyProbeToRasTransformToNode(self.getAnnulusContourMarkupNode())
-      self.applyProbeToRasTransformToNode(self.getAnnulusContourModelNode())
       self.applyProbeToRasTransformToNode(self.getAnnulusLabelsMarkupNode())
       self.applyProbeToRasTransformToNode(self.getValveRoiModelNode())
       self.applyProbeToRasTransformToNode(self.getLeafletSegmentationNode())
@@ -272,17 +264,22 @@ class ValveModel:
       self.heartValveNode.SetNodeReferenceID("AnnulusContourPoints",
                                              annulusContourMarkupNode.GetID() if annulusContourMarkupNode else None)
       self.applyProbeToRasTransformToNode(annulusContourMarkupNode)
-      self.annulusContourCurve.setControlPointsMarkupNode(self.getAnnulusContourMarkupNode())
+      self.moveNodeToHeartValveFolder(annulusContourMarkupNode)
+      self.valveRoi.setAnnulusContourCurve(annulusContourMarkupNode)
 
     def createAnnulusContourMarkupNode(self):
       markupsLogic = slicer.modules.markups.logic()
-      annulusMarkupNodeId = markupsLogic.AddNewFiducialNode()
-      annulusMarkupNode = slicer.mrmlScene.GetNodeByID(annulusMarkupNodeId)
+      annulusMarkupNode = markupsLogic.AddNewMarkupsNode('vtkMRMLMarkupsClosedCurveNode')
       annulusMarkupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("AnnulusContourMarkup"))
-      annulusMarkupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
+      # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
+      annulusMarkupNode.SetMarkupLabelFormat("")
+      displayNode = annulusMarkupNode.GetDisplayNode()
+      displayNode.SetSelectedColor(self.getBaseColor())
+      displayNode.SetColor(self.getBaseColor())
+      displayNode.SetPropertiesLabelVisibility(False)
+      ValveModel.setLineDiameter(annulusMarkupNode, self.ANNULUS_CONTOUR_RADIUS*2)
+      ValveModel.setGlyphSize(annulusMarkupNode, self.ANNULUS_CONTOUR_RADIUS*self.ANNULUS_CONTOUR_MARKUP_SCALE*2)
       self.moveNodeToHeartValveFolder(annulusMarkupNode)
-      annulusMarkupDisplayNode=annulusMarkupNode.GetDisplayNode()
-      ValveModel.setGlyphSize(annulusMarkupDisplayNode, self.defaultAnnulusContourRadius*self.annulusContourMarkupScale*2)
       return annulusMarkupNode
 
     # Annulus contour labels
@@ -296,7 +293,6 @@ class ValveModel:
       self.heartValveNode.SetNodeReferenceID("AnnulusLabelsPoints",
                                              annulusLabelsMarkupNode.GetID() if annulusLabelsMarkupNode else None)
       self.applyProbeToRasTransformToNode(annulusLabelsMarkupNode)
-      self.annulusContourCurve.setControlPointsMarkupNode(self.getAnnulusContourMarkupNode())
 
     def createAnnulusLabelsMarkupNode(self):
       markupsLogic = slicer.modules.markups.logic()
@@ -306,30 +302,8 @@ class ValveModel:
       annulusMarkupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
       annulusMarkupNode.SetLocked(True) # prevent accidental changes
       self.moveNodeToHeartValveFolder(annulusMarkupNode)
-      annulusMarkupDisplayNode=annulusMarkupNode.GetDisplayNode()
-      ValveModel.setGlyphSize(annulusMarkupDisplayNode, self.defaultAnnulusContourRadius*self.annulusContourMarkupScale*3)
+      ValveModel.setGlyphSize(annulusMarkupNode, self.ANNULUS_CONTOUR_RADIUS*self.ANNULUS_CONTOUR_MARKUP_SCALE*3)
       return annulusMarkupNode
-
-    # Annulus contour line
-    def getAnnulusContourModelNode(self):
-      return self.heartValveNode.GetNodeReference("AnnulusContourModel") if self.heartValveNode else None
-
-    def setAnnulusContourModelNode(self, modelNode):
-      if not self.heartValveNode:
-        logging.error("setAnnulusModelNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("AnnulusContourModel", modelNode.GetID() if modelNode else None)
-      self.applyProbeToRasTransformToNode(modelNode)
-      self.annulusContourCurve.setCurveModelNode(self.getAnnulusContourModelNode())
-
-    def createAnnulusContourModelNode(self):
-      modelsLogic = slicer.modules.models.logic()
-      polyData = vtk.vtkPolyData()
-      modelNode = modelsLogic.AddModel(polyData)
-      modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString("AnnulusContourModel"))
-      self.moveNodeToHeartValveFolder(modelNode)
-      modelNode.GetDisplayNode().SetColor(self.cardiacCyclePhasePresets[self.getCardiacCyclePhase()]["color"])
-      return modelNode
 
     def getVolumeSequenceIndexAsDisplayedString(self, volumeSequenceIndex):
       if volumeSequenceIndex < 0:
@@ -360,15 +334,11 @@ class ValveModel:
         return
       self.heartValveNode.SetAttribute("AnnulusContourRadius",str(radius))
 
-      self.annulusContourCurve.setTubeRadius(radius)
-      self.annulusContourCurve.updateCurve()
-
       if self.getAnnulusContourMarkupNode():
-        annulusMarkupDisplayNode = self.getAnnulusContourMarkupNode().GetDisplayNode()
-        ValveModel.setGlyphSize(annulusMarkupDisplayNode, radius*self.annulusContourMarkupScale*2)
+        ValveModel.setLineDiameter(self.annulusContourCurve, radius*2)
+        ValveModel.setGlyphSize(self.annulusContourCurve, radius*self.ANNULUS_CONTOUR_MARKUP_SCALE*2)
       if self.getAnnulusLabelsMarkupNode():
-        annulusMarkupDisplayNode = self.getAnnulusLabelsMarkupNode().GetDisplayNode()
-        ValveModel.setGlyphSize(annulusMarkupDisplayNode, radius*self.annulusContourMarkupScale*3)
+        ValveModel.setGlyphSize(self.annulusContourCurve, radius*self.ANNULUS_CONTOUR_MARKUP_SCALE*3)
 
     # Annulus contour line
     def getValveRoiModelNode(self):
@@ -452,9 +422,8 @@ class ValveModel:
         #markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'PapillaryMusclesEdit')
-        markupDisplayNode = markupNode.GetDisplayNode()
-        ValveModel.setGlyphSize(markupDisplayNode, papillaryModel.markupGlyphScale)
-        markupDisplayNode.SetColor(0.5,0,1)
+        ValveModel.setGlyphSize(markupNode, papillaryModel.markupGlyphScale)
+        markupNode.GetDisplayNode().SetColor(0.5,0,1)
         self.heartValveNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupNode.GetID())
         papillaryLineMarkupNode = markupNode
       papillaryLineMarkupNode.SetName("PapillaryMarkup-"+papillaryMuscleName)
@@ -470,8 +439,8 @@ class ValveModel:
         modelNode.GetDisplayNode().SetOpacity(1.0)
         self.heartValveNode.SetNthNodeReferenceID("PapillaryLineModel", papillaryModelIndex, modelNode.GetID())
         papillaryLineModelNode = modelNode
-      annulusContourModel = self.getAnnulusContourModelNode()
-      papillaryLineModelNode.GetDisplayNode().SetColor(annulusContourModel.GetDisplayNode().GetColor())
+      annulusContourMarkupsNode = self.getAnnulusContourMarkupNode()
+      papillaryLineModelNode.GetDisplayNode().SetColor(annulusContourMarkupsNode.GetDisplayNode().GetSelectedColor())
       papillaryLineModelNode.SetName(papillaryMuscleName+" papillary muscle")
       self.applyProbeToRasTransformToNode(papillaryLineModelNode)
       papillaryModel.setPapillaryLineModelNode(papillaryLineModelNode)
@@ -595,9 +564,8 @@ class ValveModel:
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'LeafletSurfaceEdit')
-        markupDisplayNode = markupNode.GetDisplayNode()
-        ValveModel.setGlyphSize(markupDisplayNode, leafletModel.markupGlyphScale)
-        markupDisplayNode.SetColor(0,0,1)
+        ValveModel.setGlyphSize(markupNode, leafletModel.markupGlyphScale)
+        markupNode.GetDisplayNode().SetColor(0,0,1)
         self.setLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId, markupNode)
         leafletSurfaceBoundaryMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryMarkupNode)
@@ -707,9 +675,8 @@ class ValveModel:
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'CoaptationEdit')
-        markupDisplayNode = markupNode.GetDisplayNode()
-        ValveModel.setGlyphSize(markupDisplayNode, coaptationModel.markupGlyphScale)
-        markupDisplayNode.SetColor(0,0,1)
+        ValveModel.setGlyphSize(markupNode, coaptationModel.markupGlyphScale)
+        markupNode.GetDisplayNode().SetColor(0,0,1)
         self.heartValveNode.SetNthNodeReferenceID("CoaptationBaseLineMarkup", coaptationModelIndex, markupNode.GetID())
         baseLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(baseLineMarkupNode)
@@ -738,9 +705,8 @@ class ValveModel:
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'CoaptationEdit')
-        markupDisplayNode = markupNode.GetDisplayNode()
-        ValveModel.setGlyphSize(markupDisplayNode, coaptationModel.markupGlyphScale)
-        markupDisplayNode.SetColor(0,0,1)
+        ValveModel.setGlyphSize(markupNode, coaptationModel.markupGlyphScale)
+        markupNode.GetDisplayNode().SetColor(0,0,1)
         self.heartValveNode.SetNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex, markupNode.GetID())
         marginLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(marginLineMarkupNode)
@@ -781,18 +747,14 @@ class ValveModel:
       for coaptationModelIndex in range(numberOfCoaptationModels):
         self.addCoaptationModel(coaptationModelIndex)
 
-    # Operations
-    def updateAnnulusContourModel(self):
-      self.annulusContourCurve.updateCurve()
-
     def getAnnulusContourPlane(self):
       """
       Get plane position and normal of the contour. Plane normal vector points in the direction of blood flow through the valve.
       """
       import numpy as np
 
-      interpolatedPoints = self.annulusContourCurve.getInterpolatedPointsAsArray()
-      [planePosition, planeNormal] = planeFit(interpolatedPoints)
+      interpolatedPoints = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurve).T
+      planePosition, planeNormal = planeFit(interpolatedPoints)
 
       valveTypeName = self.heartValveNode.GetAttribute("ValveType")
       if not valveTypeName:
@@ -817,28 +779,21 @@ class ValveModel:
 
       return planePosition, planeNormal
 
-    # def updateAnnulusPlaneModel(self):
-    #   interpolatedPoints = self.annulusContourCurve.getInterpolatedPointsAsArray()
-    #   [planePosition, planeNormal] = planeFit(interpolatedPoints)
-    #   logging.info("pos={0}, normal={1}".format(planePosition, planeNormal))
-
     def resampleAnnulusContourMarkups(self, samplingDistance):
-      self.annulusContourCurve.resampleCurve(samplingDistance)
+      self.annulusContourCurve.ResampleCurveWorld(samplingDistance)
 
     def smoothAnnulusContour(self, numberOfFourierCoefficients, samplingDistance):
-      self.annulusContourCurve.smoothCurveFourier(numberOfFourierCoefficients, samplingDistance)
-
-    # def sortAnnulusContourMarkups(self):
-    #   points = self.annulusContourCurve.getControlPointsAsArray()
-    #   [planeCenterPos, planeNormal] = planeFit(points)
-    #   print("Annulus: center={0}, normal={1}".format(planeCenterPos, planeNormal))
+      from HeartValveLib.util import smoothCurveFourier
+      wasModify = self.annulusContourCurve.StartModify()
+      smoothCurveFourier(self.annulusContourCurve, numberOfFourierCoefficients, samplingDistance)
+      self.annulusContourCurve.EndModify(wasModify)
 
     def hasStoredAnnulusContour(self):
       originalPoints = self.heartValveNode.GetAttribute("AnnulusContourCoordinates")
       return originalPoints is not None
 
     def storeAnnulusContour(self):
-      arr = self.annulusContourCurve.getControlPointsAsArray()
+      arr = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurve)
       self.heartValveNode.SetAttribute("AnnulusContourCoordinates", str(arr.tobytes()))
 
     def restoreAnnulusContour(self):
@@ -847,7 +802,9 @@ class ValveModel:
         return
       import numpy as np
       arr = np.frombuffer(eval(originalPoints), dtype=np.float64)
-      self.annulusContourCurve.setControlPointsFromArray(arr.reshape(3,-1))
+      wasModify = self.annulusContourCurve.StartModify()
+      slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourCurve, arr.reshape(-1, 3))
+      self.annulusContourCurve.EndModify(wasModify)
 
     def setNonLabeledMarkupsVisibility(self, visible, unselectAll = True):
       annulusMarkupNode = self.getAnnulusContourMarkupNode()
@@ -861,18 +818,10 @@ class ValveModel:
         numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
       wasModify = annulusMarkupNode.StartModify()
       for i in range(0, numberOfControlPoints):
-        try:
-          # Current API (Slicer-4.13 February 2022)
-          if not annulusMarkupNode.GetNthControlPointLabel(i):
-            annulusMarkupNode.SetNthControlPointVisibility(i, visible)
-          if unselectAll and annulusMarkupNode.GetNthControlPointSelected(i):
-            annulusMarkupNode.SetNthControlPointSelected(i, False)
-        except:
-          # Legacy API
-          if not annulusMarkupNode.GetNthFiducialLabel(i):
-            annulusMarkupNode.SetNthFiducialVisibility(i, visible)
-          if unselectAll and annulusMarkupNode.GetNthFiducialSelected(i):
-            annulusMarkupNode.SetNthFiducialSelected(i, False)
+        if not annulusMarkupNode.GetNthControlPointLabel(i):
+          annulusMarkupNode.SetNthControlPointVisibility(i, visible)
+        if unselectAll and annulusMarkupNode.GetNthControlPointSelected(i):
+          annulusMarkupNode.SetNthControlPointSelected(i, False)
       annulusMarkupNode.EndModify(wasModify)
 
     def getAllMarkupLabels(self):
@@ -1132,9 +1081,8 @@ class ValveModel:
       self.heartValveNode.SetAttribute("CardiacCyclePhase", cardiacCyclePhase)
       self.updateValveNodeNames()
 
-      if self.getAnnulusContourModelNode() and self.getAnnulusContourModelNode().GetDisplayNode():
-        self.getAnnulusContourModelNode().GetDisplayNode().SetColor(self.getBaseColor())
       if self.getAnnulusContourMarkupNode() and self.getAnnulusContourMarkupNode().GetDisplayNode():
+        self.getAnnulusContourMarkupNode().GetDisplayNode().SetSelectedColor(self.getBaseColor())
         self.getAnnulusContourMarkupNode().GetDisplayNode().SetColor(self.getBaseColor())
       if self.getAnnulusLabelsMarkupNode() and self.getAnnulusLabelsMarkupNode().GetDisplayNode():
         self.getAnnulusLabelsMarkupNode().GetDisplayNode().SetSelectedColor(self.getBaseColor())
@@ -1161,7 +1109,9 @@ class ValveModel:
       annulusMarkupLabels = []
       for label in labels:
         pointPositionAnnulus = self.getAnnulusMarkupPositionByLabel(label)
-        [closestPointPositionOnAnnulusCurve, closestPointIdOnAnnulusCurve] = self.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
+        from HeartValveLib.util import getClosestPointPositionAlongCurve
+        closestPointPositionOnAnnulusCurve =\
+          getClosestPointPositionAlongCurve(self.annulusContourCurve, pointPositionAnnulus)
         if np.linalg.norm(pointPositionAnnulus - closestPointPositionOnAnnulusCurve) > self.getAnnulusContourRadius() * 1.5 + 1.0:
           # it is not a label on the annulus (for example, centroid), ignore it
           continue
@@ -1184,14 +1134,17 @@ class ValveModel:
         segmentLengthBefore
         segmentLengthAfter
       """
-      import numpy as np
+      from HeartValveLib.util import getPositionAlongCurve, getClosestPointPositionAlongCurve, getClosestCurvePointIndexToPosition
       segmentInfo = []
       for label in splitPointLabels:
         pointPositionAnnulus = self.getAnnulusMarkupPositionByLabel(label)
-        [closestPointPositionOnAnnulusCurve, closestPointIdOnAnnulusCurve] = self.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
-        segmentInfo.append({"pointLabel": label,
-          "closestPointIdOnAnnulusCurve": closestPointIdOnAnnulusCurve,
-          "closestPointPositionOnAnnulusCurve": closestPointPositionOnAnnulusCurve})
+        segmentInfo.append({
+          "pointLabel": label,
+          "closestPointIdOnAnnulusCurve":
+            getClosestCurvePointIndexToPosition(self.annulusContourCurve, pointPositionAnnulus),
+          "closestPointPositionOnAnnulusCurve":
+            getClosestPointPositionAlongCurve(self.annulusContourCurve, pointPositionAnnulus)
+        })
 
       # Sort based on closestPointIdOnAnnulusCurve1
       segmentInfoSorted = sorted(segmentInfo, key=lambda tup: tup["closestPointIdOnAnnulusCurve"])
@@ -1208,24 +1161,32 @@ class ValveModel:
         curveSegmentStartLabel = segmentInfoSorted[labelIndex % len(segmentInfoSorted)]
         curveSegmentEndLabel = segmentInfoSorted[(labelIndex + 1) % len(segmentInfoSorted)]
 
-        curveSegmentLength = self.annulusContourCurve.getCurveLengthBetweenStartEndPoints(
+        curveSegmentLength = self.annulusContourCurve.GetCurveLengthBetweenStartEndPointsWorld(
           curveSegmentStartLabel["closestPointIdOnAnnulusCurve"],
           curveSegmentEndLabel["closestPointIdOnAnnulusCurve"])
 
         if splitBetweenPoints:
           # Split halfway between start and end label
           segmentLabel = curveSegmentStartLabel["pointLabel"]
-          curveSegmentDividerPointPosition = self.annulusContourCurve.getPointAlongCurve(
-            curveSegmentLength / 2.0, curveSegmentStartLabel["closestPointIdOnAnnulusCurve"])
-          [curveSegmentDividerPointPosition, curveSegmentDividerPointIndex] = \
-            self.annulusContourCurve.getClosestPoint(curveSegmentDividerPointPosition)
+          curveSegmentDividerPointPosition = \
+            getPositionAlongCurve(self.annulusContourCurve,
+                                  curveSegmentStartLabel["closestPointIdOnAnnulusCurve"],
+                                  curveSegmentLength / 2.0)
+          curveSegmentDividerPointIndex = getClosestCurvePointIndexToPosition(self.annulusContourCurve,
+                                                                              curveSegmentDividerPointPosition)
+          curveSegmentDividerPointPosition = getClosestPointPositionAlongCurve(self.annulusContourCurve,
+                                                                               curveSegmentDividerPointPosition)
           lengthAfter = curveSegmentLength / 2.0
           lengthBefore = curveSegmentLength / 2.0
         else:
           # Split at start label
           segmentLabel = curveSegmentStartLabel["pointLabel"] + "-" + curveSegmentEndLabel["pointLabel"]
-          [curveSegmentDividerPointPosition, curveSegmentDividerPointIndex] = self.annulusContourCurve.getClosestPoint(
-            curveSegmentStartLabel["closestPointPositionOnAnnulusCurve"])
+          curveSegmentDividerPointIndex = \
+            getClosestCurvePointIndexToPosition(self.annulusContourCurve,
+                                                curveSegmentStartLabel["closestPointPositionOnAnnulusCurve"])
+          curveSegmentDividerPointPosition = \
+            getClosestPointPositionAlongCurve(self.annulusContourCurve,
+                                              curveSegmentStartLabel["closestPointPositionOnAnnulusCurve"])
           lengthAfter = curveSegmentLength
           lengthBefore = 0
 
@@ -1279,9 +1240,16 @@ class ValveModel:
       return allLeafletsSurfacePolyData
 
     @staticmethod
-    def setGlyphSize(markupsDisplayNode, glyphSize):
+    def setGlyphSize(markupsNode, glyphSize):
+      markupsDisplayNode = markupsNode.GetDisplayNode()
       markupsDisplayNode.SetGlyphSize(glyphSize)
       markupsDisplayNode.SetUseGlyphScale(False)
+
+    @staticmethod
+    def setLineDiameter(markupsNode, diameter):
+      markupsDisplayNode = markupsNode.GetDisplayNode()
+      markupsDisplayNode.SetCurveLineSizeMode(markupsDisplayNode.UseLineDiameter)
+      markupsDisplayNode.SetLineDiameter(diameter)
 
     @staticmethod
     def smoothSegment(segmentationNode, segmentId, kernelSizeMm=None,

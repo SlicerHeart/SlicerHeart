@@ -6,7 +6,7 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
 import HeartValveLib
-from HeartValveLib.SmoothCurve import SmoothCurve, InterpolationSpline
+from HeartValveLib.util import setAllControlPointsVisibility
 from HeartValveLib.Constants import VALVE_TYPE_PRESETS, CARDIAC_CYCLE_PHASE_PRESETS, PROBE_POSITION_PRESETS
 
 
@@ -71,23 +71,21 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     # and also provides methods to operate on it.
     self.valveModel = None
 
-    self.annulusContourPreviewCurve = SmoothCurve()
-    self.annulusContourPreviewCurve.setInterpolationMethod(InterpolationSpline)
-    self.annulusContourPreviewCurve.setClosed(True)
-    self.annulusContourPreviewControlPoints = slicer.vtkMRMLMarkupsFiducialNode() # no need to put this into the scene
-    self.annulusContourPreviewCurve.setControlPointsMarkupNode(self.annulusContourPreviewControlPoints)
-
-    modelsLogic = slicer.modules.models.logic()
-    polyData = vtk.vtkPolyData()
-    self.annulusContourPreviewModel = modelsLogic.AddModel(polyData)
-    self.annulusContourPreviewModel.SetName(slicer.mrmlScene.GetUniqueNameByString("AnnulusContourPreviewModel"))
-    self.annulusContourPreviewModel.SetSaveWithScene(False)
-    self.annulusContourPreviewModel.SetHideFromEditors(True)
-    self.annulusContourPreviewModel.SetAttribute(slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(), "1") # prevent the node from showing up in SH
-    self.annulusContourPreviewModel.GetDisplayNode().SetColor(0.8,0,1.0) # yellow
-    self.annulusContourPreviewCurve.setCurveModelNode(self.annulusContourPreviewModel)
-    self.annulusContourPreviewCurve.setTubeRadius(0.5)
-    self.annulusContourPreviewActive = True # force an initial update
+    markupsLogic = slicer.modules.markups.logic()
+    self.annulusContourPreviewCurve = markupsLogic.AddNewMarkupsNode('vtkMRMLMarkupsClosedCurveNode')
+    self.annulusContourPreviewCurve.SetSaveWithScene(False)
+    self.annulusContourPreviewCurve.SetHideFromEditors(True)
+    markupsDisplayNode = self.annulusContourPreviewCurve.GetDisplayNode()
+    markupsDisplayNode.SetColor(0.8, 0, 1.0)  # yellow
+    markupsDisplayNode.SetSelectedColor(0.8, 0, 1.0)  # yellow
+    # prevent the node from showing up in SH
+    self.annulusContourPreviewCurve.SetAttribute(
+      slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(), "1")
+    from HeartValveLib.ValveModel import ValveModel
+    ValveModel.setLineDiameter(self.annulusContourPreviewCurve, ValveModel.ANNULUS_CONTOUR_RADIUS*2)
+    ValveModel.setGlyphSize(self.annulusContourPreviewCurve,
+                            ValveModel.ANNULUS_CONTOUR_RADIUS * ValveModel.ANNULUS_CONTOUR_MARKUP_SCALE * 4)
+    self.annulusContourPreviewActive = True
     self.setAnnulusContourPreviewActive(False)
 
   def setup(self):
@@ -115,13 +113,13 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       self.ui.cardiacCyclePhaseSelector.addItem(cardiacCyclePhaseName)
     self.ui.cardiacCyclePhaseSelector.connect("currentIndexChanged(int)", self.onCardiacCyclePhaseChanged)
 
-    self.ui.useCurrentFrameButton.connect("clicked()", self.onUseCurrentFrameButtonClicked)
-    self.ui.goToAnalyzedFrameButton.connect("clicked()", self.onGoToAnalyzedFrameButtonClicked)
+    self.ui.useCurrentFrameButton.clicked.connect(self.onUseCurrentFrameButtonClicked)
+    self.ui.goToAnalyzedFrameButton.clicked.connect(self.onGoToAnalyzedFrameButtonClicked)
 
     #
     # View section
     #
-    self.ui.viewCollapsibleButton.connect('toggled(bool)', lambda toggle: self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, toggle))
+    self.ui.viewCollapsibleButton.toggled.connect(lambda t: self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, t))
 
     # Size policy cannot be set on Qt5 (https://github.com/commontk/CTK/issues/791)
     #self.ui.valveVolumeSelector.sizeAdjustPolicy = qt.QComboBox.AdjustToMinimumContentsLength
@@ -134,7 +132,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       self.ui.probePositionSelector.setItemData(itemIndex, probePositionPreset['description'], qt.Qt.ToolTipRole)
     self.ui.probePositionSelector.connect("currentIndexChanged(int)", self.onProbePositionChanged)
 
-    self.ui.displayFourUpViewButton.connect('clicked()', self.onResetAnnulusView)
+    self.ui.displayFourUpViewButton.clicked.connect(self.onResetAnnulusView)
 
     # Valve normalization - orientation
     self.ui.axialSliceToRasTransformOrientationSliderWidget.setMRMLScene(slicer.mrmlScene)
@@ -149,57 +147,63 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     #
     # Annulus contouring section
     #
-    self.ui.contouringCollapsibleButton.connect('toggled(bool)', lambda toggle: self.onWorkflowStepChanged(self.ui.contouringCollapsibleButton, toggle))
+    self.ui.contouringCollapsibleButton.toggled.connect(
+      lambda toggle: self.onWorkflowStepChanged(self.ui.contouringCollapsibleButton, toggle))
 
     self.ui.placeButton.setIcon(qt.QIcon(":/Icons/MarkupsMouseModePlace.png"))
-    self.ui.placeButton.connect('clicked(bool)', self.onActivateAnnulusMarkupPlacement)
+    self.ui.placeButton.toggled.connect(self.onActivateAnnulusMarkupPlacement)
 
     self.ui.deleteLastFiducialButton.setIcon(qt.QIcon(":/Icons/MarkupsDelete.png"))
-    self.ui.deleteLastFiducialButton.connect('clicked()', self.onDeleteLastFiducialClicked)
+    self.ui.deleteLastFiducialButton.clicked.connect(self.onDeleteLastFiducialClicked)
 
     self.ui.deleteAllFiducialsButton.setIcon(qt.QIcon(":/Icons/MarkupsDeleteAllRows.png"))
-    self.ui.deleteAllFiducialsButton.connect('clicked()', self.onDeleteAllFiducialsClicked)
+    self.ui.deleteAllFiducialsButton.clicked.connect(self.onDeleteAllFiducialsClicked)
 
-    self.ui.orthogonalSlicerRotationSliderWidget.connect('valueChanged(double)', self.onOrthogonalSlicerRotationAngleChanged)
+    self.ui.orthogonalSlicerRotationSliderWidget.valueChanged.connect(self.onOrthogonalSlicerRotationAngleChanged)
 
     if self.developerMode:
       self.ui.orthogonalSlicerRotationStepSizeSpinBox.value = 30
 
-    self.ui.orthogonalSliceRotationAngleDecButton.connect('clicked(bool)', self.onOrthogonalSlicerRotationAngleDec)
-    self.ui.orthogonalSliceRotationAngleIncButton.connect('clicked(bool)', self.onOrthogonalSlicerRotationAngleInc)
+    self.ui.orthogonalSliceRotationAngleDecButton.clicked.connect(self.onOrthogonalSlicerRotationAngleDec)
+    self.ui.orthogonalSliceRotationAngleIncButton.clicked.connect(self.onOrthogonalSlicerRotationAngleInc)
 
     self.ui.autoRotateButton.setIcon(qt.QIcon(":/Icons/ViewSpin.png"))
-    self.ui.autoRotateButton.connect('clicked(bool)', self.onAutoRotateClicked)
+    self.ui.autoRotateButton.clicked.connect(self.onAutoRotateClicked)
 
     #
     # Annulus contouring adjustment section
     #
-    self.ui.contourAdjustmentCollapsibleButton.connect('toggled(bool)', lambda toggle: self.onWorkflowStepChanged(self.ui.contourAdjustmentCollapsibleButton, toggle))
+    self.ui.contourAdjustmentCollapsibleButton.toggled.connect(lambda t: self.onWorkflowStepChanged(self.ui.contourAdjustmentCollapsibleButton, t))
 
     self.ui.annulusMarkupAdjustmentList.setMRMLScene(slicer.mrmlScene)
 
+    annulusContourComboBox = self.ui.annulusMarkupAdjustmentList.markupsSelectorComboBox()
+    annulusContourComboBox.nodeTypes = ["vtkMRMLMarkupsClosedCurveNode"]
+
     # Uncheck markup placement button if the placement or the markup list is not active anymore
-    self.ui.annulusMarkupAdjustmentList.connect('activeMarkupsFiducialPlaceModeChanged(bool)', self.ui.placeButton.setChecked)
-    self.ui.annulusMarkupAdjustmentList.connect('currentMarkupsFiducialSelectionChanged(int)', self.currentAnnulusMarkupPointSelectionChanged)
+    self.ui.annulusMarkupAdjustmentList.connect('activeMarkupsFiducialPlaceModeChanged(bool)',
+                                                self.ui.placeButton.setChecked)
+    self.ui.annulusMarkupAdjustmentList.connect('currentMarkupsFiducialSelectionChanged(int)',
+                                                self.currentAnnulusMarkupPointSelectionChanged)
 
-    self.ui.resampleSamplingDistanceSpinBox.connect("valueChanged(double)", self.onResampleSamplingDistanceChanged)
-    self.ui.smoothContourFourierCoefficientsSpinBox.connect("valueChanged(int)", self.onSmoothContourFourierCoefficientsChanged)
+    self.ui.resampleSamplingDistanceSpinBox.valueChanged.connect(lambda v: self.updateAnnulusContourPreviewModel())
+    self.ui.smoothContourFourierCoefficientsSpinBox.valueChanged.connect(lambda v: self.updateAnnulusContourPreviewModel())
 
-    self.ui.smoothContourCheckbox.connect("stateChanged(int)", self.onSmoothingEnabledChanged)
+    self.ui.smoothContourCheckbox.toggled.connect(self.onSmoothingEnabledChanged)
 
-    self.ui.smoothContourPreviewCheckbox.connect("toggled(bool)", self.setAnnulusContourPreviewActive)
+    self.ui.smoothContourPreviewCheckbox.toggled.connect(self.setAnnulusContourPreviewActive)
 
-    self.ui.restoreContourButton.connect('clicked()', self.onRestoreContourClicked)
-    self.ui.resampleContourButton.connect('clicked()', self.onResampleContourClicked)
+    self.ui.restoreContourButton.clicked.connect(self.onRestoreContourClicked)
+    self.ui.resampleContourButton.clicked.connect(self.onResampleContourClicked)
 
     #
     # Display section
     #
     #self.ui.displayCollapsibleButton.checked = False
-    self.ui.displayCollapsibleButton.connect('toggled(bool)',
-      lambda toggle: self.onWorkflowStepChanged(self.ui.displayCollapsibleButton, toggle))
+    self.ui.displayCollapsibleButton.toggled.connect(lambda t:
+                                                     self.onWorkflowStepChanged(self.ui.displayCollapsibleButton, t))
 
-    self.ui.annulusModelRadiusSliderWidget.connect('valueChanged(double)', self.onAnnulusModelRadiusChanged)
+    self.ui.annulusModelRadiusSliderWidget.valueChanged.connect(self.onAnnulusModelRadiusChanged)
 
     # Adding GUI panels to group. This makes sure only one is open at a time.
     self.collapsibleButtonsGroup = qt.QButtonGroup()
@@ -232,8 +236,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.removeGUIObservers()
     self.removeNodeObservers()
     self.setAndObserveParameterNode(None)
-    if self.annulusContourPreviewModel:
-      slicer.mrmlScene.RemoveNode(self.annulusContourPreviewModel)
+    if self.annulusContourPreviewCurve:
+      slicer.mrmlScene.RemoveNode(self.annulusContourPreviewCurve)
 
   def removeNodeObservers(self):
     if self.annulusMarkupNode and self.annulusMarkupNodeObserver:
@@ -256,47 +260,57 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.contourAdjustmentCollapsibleButton.setEnabled(valveModelSelected)
     self.ui.restoreContourButton.setEnabled(valveModelSelected and self.valveModel.hasStoredAnnulusContour())
 
-  def getAnnulusContourModelNode(self):
+  def getAnnulusContourMarkupNode(self):
     if self.valveModel is None:
       return None
-    return self.valveModel.getAnnulusContourModelNode()
+    return self.valveModel.getAnnulusContourMarkupNode()
 
   def onWorkflowStepChanged(self, widget, toggle):
-
+    self.ui.placeButton.setChecked(False)
     if toggle:
       # Deactivate smoothing preview if not in contour adjustment
-      if widget!=self.ui.contourAdjustmentCollapsibleButton:
+      if widget != self.ui.contourAdjustmentCollapsibleButton:
         self.ui.smoothContourPreviewCheckbox.setChecked(False)
-      # Activate placement mode when entering contouring, deactivate when exiting
-      self.onActivateAnnulusMarkupPlacement(widget==self.ui.contouringCollapsibleButton)
       # Only allow fiducial moving in contouring or adjustment mode
       if self.annulusMarkupNode:
-        self.annulusMarkupNode.SetLocked(not (widget==self.ui.contouringCollapsibleButton or widget==self.ui.contourAdjustmentCollapsibleButton))
+        self.annulusMarkupNode.SetLocked(not (widget == self.ui.contouringCollapsibleButton or
+                                              widget == self.ui.contourAdjustmentCollapsibleButton))
         if self.valveModel:
-          self.valveModel.setNonLabeledMarkupsVisibility(widget==self.ui.contouringCollapsibleButton or widget==self.ui.contourAdjustmentCollapsibleButton)
-      # Hide annulus slice intersection in contouring mode (it is confusing to see something in the slice views while still just adding points)
-      if self.getAnnulusContourModelNode():
-        self.getAnnulusContourModelNode().GetDisplayNode().SetVisibility2D(widget!=self.ui.contouringCollapsibleButton)
-        self.getAnnulusContourModelNode().GetDisplayNode().SetSliceIntersectionThickness(4)
+          self.valveModel.setNonLabeledMarkupsVisibility(widget == self.ui.contouringCollapsibleButton or
+                                                         widget == self.ui.contourAdjustmentCollapsibleButton)
+      # Hide annulus slice intersection in contouring mode
+      # (it is confusing to see something in the slice views while still just adding points)
+      annulusContourNode = self.getAnnulusContourMarkupNode()
+      if annulusContourNode:
+        annulusContourNode.GetDisplayNode().SetVisibility2D(widget != self.ui.contouringCollapsibleButton)
+        annulusContourNode.GetDisplayNode().SetSliceIntersectionThickness(4)
 
     # View step
-    if widget==self.ui.viewCollapsibleButton:
+    if widget == self.ui.viewCollapsibleButton:
       if toggle:
         # set up viewers
         self.onDisplayFourUpView(resetViewOrientations=True)
       else:
         # re-center and re-orient view based on axialSliceToRas transform
         self.updateAxialSliceToRasCenterFromSliceViewIntersections()
-        #self.onAxialSliceToRasTransformNodeModified()
 
     # Contour adjustment step
-    if toggle and widget==self.ui.contourAdjustmentCollapsibleButton:
-      qt.QTimer.singleShot(0, self.ui.annulusMarkupAdjustmentList.tableWidget().setFocus)
-      qt.QTimer.singleShot(0, lambda: self.ui.annulusMarkupAdjustmentList.highlightNthFiducial(0))
-      # Hide all slice views from 3D
-      HeartValveLib.showSlices(False)
+    if widget == self.ui.contourAdjustmentCollapsibleButton:
+      annulusContourNode = self.getAnnulusContourMarkupNode()
+      valveModel = self.valveModel
+      if annulusContourNode:
+        annulusContourNode.GetDisplayNode().SetSelectedColor(valveModel.getBaseColor() if not toggle
+                                                             else valveModel.getDarkColor())
+      if toggle:
+        self.ui.annulusMarkupAdjustmentList.highlightNthFiducial(0)
+        # Hide all slice views from 3D
+        HeartValveLib.showSlices(False)
 
-    if toggle and widget==self.ui.displayCollapsibleButton:
+        tableWidget = self.ui.annulusMarkupAdjustmentList.tableWidget()
+        tableWidget.setSelectionMode(qt.QTableWidget.SelectRows)
+        tableWidget.horizontalHeader().setSectionResizeMode(qt.QHeaderView.Stretch)
+
+    if toggle and widget == self.ui.displayCollapsibleButton:
       # Contour editing centers on the selected contour point.
       # When we finish with that, go back to the default view
       self.onDisplayFourUpView(resetViewOrientations=True)
@@ -492,7 +506,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.annulusMarkupAdjustmentList.setCurrentNode(self.annulusMarkupNode)
     # Hide label column, annulus labels are specified in a different markup list
     # It can only be done here, after a node is set because columns may be re-created when a new node is set.
-    self.ui.annulusMarkupAdjustmentList.tableWidget().setColumnHidden(0,True)
+    self.ui.annulusMarkupAdjustmentList.tableWidget().setColumnHidden(0, True)
     # Update model
     self.onAnnulusMarkupNodeModified()
 
@@ -503,7 +517,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       return
 
     numberOfPoints = self.getNumberOfDefinedControlPoints(self.annulusMarkupNode)
-    if numberOfPoints>0:
+    if numberOfPoints > 0:
       self.ui.deleteLastFiducialButton.setEnabled(True)
       self.ui.deleteAllFiducialsButton.setEnabled(True)
 
@@ -528,17 +542,13 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     if self.ui.contourAdjustmentCollapsibleButton.checked:
       self.trackFiducialInSliceView()
 
-    self.valveModel.updateAnnulusContourModel()
     self.updateAnnulusContourPreviewModel()
-
-    # TODO
-    #self.valveModel.updateAnnulusPlaneModel()
 
   def onHeartValveVolumeSelect(self, valveVolumeNode):
     if self.valveModel is None:
       return
     self.valveModel.setValveVolumeNode(valveVolumeNode)
-    self.onDisplayFourUpView(resetViewOrientations = True, resetFov = True)
+    self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
     self.updateGuiEnabled()
 
   def onResampleSamplingDistanceChanged(self):
@@ -554,37 +564,46 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def updateAnnulusContourPreviewModel(self):
     if not self.annulusContourPreviewActive:
       return
-    self.annulusContourPreviewControlPoints.Copy(self.valveModel.getAnnulusContourMarkupNode())
-    self.annulusContourPreviewCurve.updateCurve()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve)
+    if not len(annulusControlPoints):
+      return
+    slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourPreviewCurve, annulusControlPoints)
     if self.ui.smoothContourCheckbox.checked:
-      self.annulusContourPreviewCurve.smoothCurveFourier(self.ui.smoothContourFourierCoefficientsSpinBox.value,
-                                                         self.ui.resampleSamplingDistanceSpinBox.value)
+      from HeartValveLib.util import smoothCurveFourier
+      smoothCurveFourier(self.annulusContourPreviewCurve,
+                         self.ui.smoothContourFourierCoefficientsSpinBox.value,
+                         self.ui.resampleSamplingDistanceSpinBox.value)
     else:
-      self.annulusContourPreviewCurve.resampleCurve(self.ui.resampleSamplingDistanceSpinBox.value)
-    self.annulusContourPreviewCurve.updateCurve()
+      self.annulusContourPreviewCurve.ResampleCurveWorld(self.ui.resampleSamplingDistanceSpinBox.value)
 
   def setAnnulusContourPreviewActive(self, active):
     if self.annulusContourPreviewActive == active:
       return
     self.annulusContourPreviewActive = active
     self.updateAnnulusContourPreviewModel()
-    if self.getAnnulusContourModelNode():
-      self.getAnnulusContourModelNode().GetDisplayNode().SetVisibility(not self.annulusContourPreviewActive)
-    annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.curveModelNode.GetDisplayNode()
+
+    annulusMarkupsNode = self.getAnnulusContourMarkupNode()
+    if annulusMarkupsNode:
+      annulusMarkupsNode.GetDisplayNode().SetVisibility(not self.annulusContourPreviewActive)
+      setAllControlPointsVisibility(annulusMarkupsNode, not self.annulusContourPreviewActive)
+    annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.GetDisplayNode()
     if not annulusContourPreviewDisplayNode:
-      self.annulusContourPreviewCurve.curveModelNode.CreateDefaultDisplayNodes()
-      annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.curveModelNode.GetDisplayNode()
+      self.annulusContourPreviewCurve.CreateDefaultDisplayNodes()
+      annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.GetDisplayNode()
     annulusContourPreviewDisplayNode.SetVisibility(self.annulusContourPreviewActive)
     annulusContourPreviewDisplayNode.SetVisibility2D(True)
     annulusContourPreviewDisplayNode.SetSliceIntersectionThickness(4)
     probeToRasTransformNodeId = None
     if self.valveModel and self.valveModel.getProbeToRasTransformNode():
       probeToRasTransformNodeId = self.valveModel.getProbeToRasTransformNode().GetID()
-    self.annulusContourPreviewCurve.curveModelNode.SetAndObserveTransformNodeID(probeToRasTransformNodeId)
-    # Show markups as cross hair in preview mode to make sure they don't obstruct the preview line
-    if self.valveModel and self.valveModel.getAnnulusContourMarkupNode():
-      markupDisplayNode = self.valveModel.getAnnulusContourMarkupNode().GetDisplayNode()
-      markupDisplayNode.SetGlyphType(markupDisplayNode.Cross2D if self.annulusContourPreviewActive else markupDisplayNode.Sphere3D)
+    self.annulusContourPreviewCurve.SetAndObserveTransformNodeID(probeToRasTransformNodeId)
+    # Show markups as crosshair in preview mode to make sure they don't obstruct the preview line
+    if self.annulusContourPreviewCurve:
+      self.annulusContourPreviewCurve.SetLocked(True)
+      annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.GetDisplayNode()
+      annulusContourPreviewDisplayNode.SetOpacity(0.8)
+      annulusContourPreviewDisplayNode.SetGlyphType(annulusContourPreviewDisplayNode.Cross2D
+                                     if self.annulusContourPreviewActive else annulusContourPreviewDisplayNode.Sphere3D)
 
   def currentAnnulusMarkupPointSelectionChanged(self, markupIndex):
     nOfControlPoints = self.getNumberOfDefinedControlPoints(self.annulusMarkupNode) if self.annulusMarkupNode else 0
@@ -601,7 +620,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       return
 
     self.valveModel.setAnnulusContourRadius(radius)
-    self.valveModel.updateAnnulusContourModel()
 
   def onOrthogonalSlicerRotationAngleDec(self):
     orthogonalSliceRotationValue = self.ui.orthogonalSlicerRotationSliderWidget.value
@@ -723,11 +741,10 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
           # Cancel
           self.ui.annulusMarkupAdjustmentList.placeActive(False)
           self.ui.placeButton.setChecked(False)
-          #qt.QTimer.singleShot(0, lambda: self.ui.placeButton.setChecked(False))
           return
 
     slicer.app.applicationLogic().GetInteractionNode().SetPlaceModePersistence(1)
-    if self.getNumberOfDefinedControlPoints(self.annulusMarkupNode)==0:
+    if self.getNumberOfDefinedControlPoints(self.annulusMarkupNode) == 0:
       self.ui.autoRotateButton.setChecked(True)
     if self.ui.autoRotateButton.isChecked():
       # forces the slice to the first rotation position
@@ -786,7 +803,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     logging.debug("Reloading ValveAnnulusAnalysis")
 
     packageName='HeartValveLib'
-    submoduleNames=['util', 'LeafletModel', 'SmoothCurve', 'ValveRoi', 'PapillaryModel', 'ValveModel', 'HeartValves']
+    submoduleNames=['util', 'LeafletModel', 'ValveRoi', 'PapillaryModel', 'ValveModel', 'HeartValves']
     import imp
     f, filename, description = imp.find_module(packageName)
     package = imp.load_module(packageName, f, filename, description)
@@ -801,6 +818,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def onResampleContourClicked(self):
     self.ui.smoothContourPreviewCheckbox.setChecked(False)
+    if not self.valveModel.annulusContourCurve.GetNumberOfControlPoints():
+      return
     if self.valveModel.hasStoredAnnulusContour():
       if slicer.util.confirmYesNoDisplay("Found previously stored annulus contour points. "
                                          "Do you want to overwrite them with the currently listed coordinates?"):
@@ -808,7 +827,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     else:
       self.valveModel.storeAnnulusContour()
     if self.ui.smoothContourCheckbox.checked:
-      self.valveModel.smoothAnnulusContour(self.ui.smoothContourFourierCoefficientsSpinBox.value, self.ui.resampleSamplingDistanceSpinBox.value)
+      self.valveModel.smoothAnnulusContour(self.ui.smoothContourFourierCoefficientsSpinBox.value,
+                                           self.ui.resampleSamplingDistanceSpinBox.value)
     else:
       self.valveModel.resampleAnnulusContourMarkups(self.ui.resampleSamplingDistanceSpinBox.value)
     self.updateGuiEnabled()
@@ -816,7 +836,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def onRestoreContourClicked(self):
     if slicer.util.confirmYesNoDisplay("Do you want to restore the previously saved annulus contour coordinates?"):
       self.valveModel.restoreAnnulusContour()
-      self.annulusContourPreviewCurve.updateCurve()
+      self.currentAnnulusMarkupPointSelectionChanged(-1)
+      self.updateAnnulusContourPreviewModel()
 
   def getNumberOfDefinedControlPoints(self, markupsNode):
     return markupsNode.GetNumberOfDefinedControlPoints()
