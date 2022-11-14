@@ -22,6 +22,10 @@ class ValveModel:
     def annulusContourCurve(self):
         return self.getAnnulusContourMarkupNode()
 
+    @annulusContourCurve.setter
+    def annulusContourCurve(self, node):
+      self.setAnnulusContourMarkupNode(node)
+
     def __init__(self):
       self.heartValveNode = None
 
