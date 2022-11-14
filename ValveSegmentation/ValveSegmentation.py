@@ -460,7 +460,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def onAnnulusMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
     if not self.annulusMarkupNode:
       return
-    self.valveModel.updateAnnulusContourModel()
     self.updateLeafletClippingModel()
 
   def onClippingModelUseAsEditorMaskClicked(self):

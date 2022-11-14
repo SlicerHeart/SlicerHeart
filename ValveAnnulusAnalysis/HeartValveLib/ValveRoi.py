@@ -59,7 +59,7 @@ class ValveRoi:
   def setLeaflet(self, valveModel, leafletSegmentId):
     self.valveModel = valveModel
     self.leafletSegmentId = leafletSegmentId
-    self.annululusContourCurve = None
+    self.annulusContourCurve = None
     self.updateRoi()
 
   def getLeafletBoundary(self):
@@ -163,23 +163,24 @@ class ValveRoi:
       return None
 
     ## Get annulus contour segment and append it to the leafletBoundaryPoints to create a closed curve
-
+    from HeartValveLib.util import getClosestCurvePointIndexToPosition
     # Find out if the segment is between (when going in increasing point index direction)
     # or outside the two intersection points.
     annulusContour = self.valveModel.annulusContourCurve
-    [annulusContourStartPoint, annulusContourStartPointId] = annulusContour.getClosestPoint(leafletBoundaryPoints[:,0])
-    [annulusContourEndPoint, annulusContourEndPointId] = annulusContour.getClosestPoint(leafletBoundaryPoints[:, -1])
+
+    annulusContourStartPointId = getClosestCurvePointIndexToPosition(annulusContour, leafletBoundaryPoints[:,0])
+    annulusContourEndPointId = getClosestCurvePointIndexToPosition(annulusContour, leafletBoundaryPoints[:, -1])
     # midPointIndexForward: index between start/end point if we go forward (from low index to high index)
     midPointBetweenId = int((annulusContourStartPointId+annulusContourEndPointId)/2)
     # midPointIndexReverse: index between start/end point if we go backwards (from high index to low index)
     midPointOutsideId = int(max(annulusContourStartPointId, annulusContourEndPointId)
-                            + (annulusContour.curvePoints.GetNumberOfPoints()-abs(annulusContourStartPointId-annulusContourEndPointId))/2)
-    midPointOutsideId = midPointOutsideId % annulusContour.curvePoints.GetNumberOfPoints()
+                            + (annulusContour.GetCurve().GetNumberOfPoints()-abs(annulusContourStartPointId-annulusContourEndPointId))/2)
+    midPointOutsideId = midPointOutsideId % annulusContour.GetCurve().GetNumberOfPoints()
 
     midPointBetween = [0.0, 0.0, 0.0]
-    annulusContour.curvePoints.GetPoint(midPointBetweenId, midPointBetween)
+    annulusContour.GetCurve().GetPoint(midPointBetweenId, midPointBetween)
     midPointOutside = [0.0, 0.0, 0.0]
-    annulusContour.curvePoints.GetPoint(midPointOutsideId, midPointOutside)
+    annulusContour.GetCurve().GetPoint(midPointOutsideId, midPointOutside)
 
     closestPoint = [0, 0, 0]
     midPointBetweenDistance = closestPointFinder.EvaluateFunctionAndGetClosestPoint(midPointBetween, closestPoint)
@@ -187,12 +188,12 @@ class ValveRoi:
 
     if midPointBetweenDistance < midPointOutsideDistance:
       # get points between start/end
-      annulusContourPoints = annulusContour.getInterpolatedPointsAsArray()
+      annulusContourPoints = slicer.util.arrayFromMarkupsCurvePoints(annulusContour).T
       annulusContourSegmentPoints = annulusContourPoints[:,min(annulusContourStartPointId,annulusContourEndPointId):
                                                            max(annulusContourStartPointId, annulusContourEndPointId)]
     else:
       # get points outside start/end
-      annulusContourPoints = annulusContour.getInterpolatedPointsAsArray()
+      annulusContourPoints = slicer.util.arrayFromMarkupsCurvePoints(annulusContour).T
       annulusContourSegmentPoints1 = annulusContourPoints[:, max(annulusContourStartPointId,annulusContourEndPointId):-1]
       annulusContourSegmentPoints2 = annulusContourPoints[:, 0:min(annulusContourStartPointId,annulusContourEndPointId)]
       annulusContourSegmentPoints = np.hstack([annulusContourSegmentPoints1,annulusContourSegmentPoints2])
@@ -228,10 +229,10 @@ class ValveRoi:
     planePosition = None
     planeNormal = None
     if self.annulusContourCurve:
-      contourPoints = self.annulusContourCurve.curvePoints  # vtk.vtkPoints()
+      contourPoints = self.annulusContourCurve.GetCurve()  # vtk.vtkPoints()
       numberOfContourPoints = contourPoints.GetNumberOfPoints()
       if numberOfContourPoints>0:
-        annulusPoints = self.annulusContourCurve.getInterpolatedPointsAsArray()  # formerly contourPointsArray_Ras
+        annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(self.annulusContourCurve).T
         [planePosition, planeNormal] = HeartValveLib.planeFit(annulusPoints)
     elif self.valveModel is not None and self.leafletSegmentId is not None:
       annulusPoints = self.getLeafletBoundary()
