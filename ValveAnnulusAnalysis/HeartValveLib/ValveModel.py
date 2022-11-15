@@ -504,7 +504,6 @@ class ValveModel:
         if leafletModel.segmentId == segmentId:
           self.removeLeafletNodeReference("LeafletSurfaceModel", segmentId)
           self.removeLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId)
-          self.removeLeafletNodeReference("LeafletSurfaceBoundaryModel", segmentId)
           self.leafletModels.remove(leafletModel)
           return
 
@@ -543,9 +542,8 @@ class ValveModel:
 
       leafletSurfaceBoundaryMarkupNode = self.getLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId)
       if not leafletSurfaceBoundaryMarkupNode:
-        markupsLogic = slicer.modules.markups.logic()
-        markupNodeId = markupsLogic.AddNewFiducialNode()
-        markupNode = slicer.mrmlScene.GetNodeByID(markupNodeId)
+        markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode')
+        markupNode.SetNumberOfPointsPerInterpolatingSegment(20)
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + "SurfaceBoundaryMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
@@ -557,24 +555,9 @@ class ValveModel:
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryMarkupNode)
       leafletModel.setSurfaceBoundaryMarkupNode(leafletSurfaceBoundaryMarkupNode)
 
-      leafletSurfaceBoundaryModelNode = self.getLeafletNodeReference("LeafletSurfaceBoundaryModel", segmentId)
-      if not leafletSurfaceBoundaryModelNode:
-        modelsLogic = slicer.modules.models.logic()
-        polyData = vtk.vtkPolyData()
-        modelNode = modelsLogic.AddModel(polyData)
-        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName+"SurfaceBoundaryModel"))
-        self.moveNodeToHeartValveFolder(modelNode, 'LeafletSurfaceEdit')
-        modelNode.GetDisplayNode().SetColor(0,0,1)
-        modelNode.GetDisplayNode().SetOpacity(0.2)
-        self.setLeafletNodeReference("LeafletSurfaceBoundaryModel", segmentId, modelNode)
-        leafletSurfaceBoundaryModelNode = modelNode
-      self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryModelNode)
-      leafletModel.setSurfaceBoundaryModelNode(leafletSurfaceBoundaryModelNode)
-
       # Move items to folders - for legacy scenes
       self.moveNodeToHeartValveFolder(leafletSurfaceModelNode, 'LeafletSurface')
       self.moveNodeToHeartValveFolder(leafletSurfaceBoundaryMarkupNode, 'LeafletSurfaceEdit')
-      self.moveNodeToHeartValveFolder(leafletSurfaceBoundaryModelNode, 'LeafletSurfaceEdit')
 
     def updateLeafletModelsFromSegmentation(self):
       segmentIds = []
@@ -597,6 +580,15 @@ class ValveModel:
         if segmentIdInLeafletModel not in segmentIds:
           # segment is deleted, remove associated leaflet model
           self.removeLeafletModel(segmentIdInLeafletModel)
+
+      # cleanup legacy leaflet surface nodes
+      numSurfaceBoundaryMarkups = self.heartValveNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
+      for boundaryMarkupIndex in reversed(range(numSurfaceBoundaryMarkups)):
+        boundaryMarkupNode = self.heartValveNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryMarkupIndex)
+        surfaceModelNode = self.heartValveNode.GetNthNodeReference("LeafletSurfaceModel", boundaryMarkupIndex)
+        if not boundaryMarkupNode.GetAttribute('SegmentID') in segmentIds:
+          slicer.mrmlScene.RemoveNode(boundaryMarkupNode)
+          slicer.mrmlScene.RemoveNode(surfaceModelNode)
 
       # Add any missing leaflet models
       for segmentId in segmentIds:
@@ -1211,7 +1203,7 @@ class ValveModel:
 
       # Temporary node, we don't add it to the scene
       allLeafletsSurfaceModelNode = slicer.vtkMRMLModelNode()
-      allLeafletsSurfaceBoundaryMarkupNode = slicer.vtkMRMLMarkupsFiducialNode()
+      allLeafletsSurfaceBoundaryMarkupNode = slicer.vtkMRMLMarkupsClosedCurveNode()
 
       allLeafletsModel = LeafletModel.LeafletModel()
       allLeafletsModel.setSegmentationNode(self.getLeafletSegmentationNode())
