@@ -121,6 +121,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
   def addPapillaryMusclesTreeView(self):
     self.papillaryMusclesTreeView = slicer.qMRMLSubjectHierarchyTreeView()
     self.papillaryMusclesTreeView.setMRMLScene(slicer.mrmlScene)
+    self.papillaryMusclesTreeView.setSelectionMode(qt.QTableWidget.SelectRows)
     self.papillaryMusclesTreeView.setSizePolicy(self.getMusclesTreeViewSizePolicy())
     model = self.papillaryMusclesTreeView.model()
     self.papillaryMusclesTreeView.hideColumn(model.idColumn)
@@ -418,6 +419,10 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     HeartValveLib.setupDefaultSliceOrientation(resetFov=True, valveModel=self.valveModel,
                                                show3DSliceName=self.orthogonalSlice2.GetName())
 
+    for papillaryModel in self.valveModel.papillaryModels:
+      papillaryModel.getPapillaryLineMarkupNode().SetLocked(True)
+      papillaryModel.getPapillaryLineMarkupNode().GetDisplayNode().SetVisibility(True)
+
   def papillaryMuscleModelSelectionChanged(self):
     if not self.valveModel:
       return
@@ -437,7 +442,6 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
 
     for papillaryModel in self.valveModel.papillaryModels:
       selected = (papillaryModel == selectedPapillaryModel)
-      papillaryModel.getPapillaryLineModelNode().GetDisplayNode().SetVisibility(selected or (selectedPapillaryModel is None))
       papillaryModel.getPapillaryLineMarkupNode().SetLocked(not selected)
       papillaryModel.getPapillaryLineMarkupNode().GetDisplayNode().SetVisibility(selected)
 
@@ -455,7 +459,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.papillaryMuscleLineMarkupPlaceWidget.setCurrentNode(papillaryLineMarkupNode)
     self.setAndObservePapillaryLineMarkupNode(papillaryLineMarkupNode)
 
-    if papillaryLineMarkupNode and papillaryLineMarkupNode.GetNumberOfFiducials()>0:
+    if papillaryLineMarkupNode and papillaryLineMarkupNode.GetNumberOfControlPoints() > 0:
       self.onShowMusclePoint(0)
 
   def setAndObservePapillaryLineMarkupNode(self, papillaryLineMarkupNode):
@@ -474,8 +478,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
       self.papillaryLineMarkupNodeObserver = \
         self.papillaryLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                                                  self.onPapillaryLineMarkupNodeModified)
-      numberOfPapillaryMuscles = len(self.papillaryMusclePointNames)
-      self.papillaryLineMarkupNode.SetMaximumNumberOfControlPoints(numberOfPapillaryMuscles)
+      self.papillaryLineMarkupNode.MaximumNumberOfControlPoints = len(self.papillaryMusclePointNames)
 
     # Update model
     self.onPapillaryLineMarkupNodeModified()
@@ -510,8 +513,6 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
         # All 3 muscle points have been placed
         self.papillaryMuscleLineMarkupPlaceWidget.placeModeEnabled = False
 
-    selectedPapillaryModel.updateModel()
-
     numberOfPapillaryLineMarkups = papillaryLineMarkups.GetNumberOfDefinedControlPoints()
     if numberOfPapillaryLineMarkups<numberOfPapillaryMuscles:
       nextFiducialPlaceText = "Place " + self.papillaryMusclePointNames[numberOfPapillaryLineMarkups]
@@ -519,7 +520,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
       nextFiducialPlaceText = ""
 
     for muscleIndex in range(min(papillaryLineMarkups.GetNumberOfControlPoints(), numberOfPapillaryMuscles)):
-      papillaryLineMarkups.SetNthFiducialLabel(muscleIndex, self.papillaryMusclePointNames[muscleIndex])
+      papillaryLineMarkups.SetNthControlPointLabel(muscleIndex, self.papillaryMusclePointNames[muscleIndex])
     self.papillaryMuscleLineMarkupPlaceWidget.placeButton().text = nextFiducialPlaceText
     self.papillaryMuscleLineMarkupPlaceWidget.placeButton().enabled = numberOfPapillaryLineMarkups < numberOfPapillaryMuscles
 
