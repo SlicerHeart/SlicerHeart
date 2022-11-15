@@ -173,7 +173,7 @@ class CoaptationModel:
     medianCoaptationPoint = basePoints.GetPoint(int(numberOfBasePoints / 2))
     connectedLeaflets = {}
     for leaflet in valveModel.leafletModels:
-      leafletBoundaryPoints = leaflet.surfaceBoundary.curvePoly.GetPoints()
+      leafletBoundaryPoints = leaflet.surfaceBoundary.GetCurve().GetPoints()
       if leafletBoundaryPoints.GetNumberOfPoints() == 0:
         continue
       connectedLeaflets[leaflet] = \
