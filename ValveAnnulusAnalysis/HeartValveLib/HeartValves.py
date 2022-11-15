@@ -483,7 +483,7 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
     shNode.RemoveItemAttribute(valveNodeItemId,
                                slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelAttributeName())
 
-    # replace deprecated annulus SmoothCurve
+    # replace deprecated annulus SmoothCurves
     annulusContourModel = scriptedModuleNode.GetNodeReference("AnnulusContourModel")
     annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
     annulusPoints = None
@@ -491,6 +491,8 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       annulusPoints = slicer.util.arrayFromMarkupsControlPoints(annulusContourNode)
       slicer.mrmlScene.RemoveNode(annulusContourNode)
       slicer.mrmlScene.RemoveNode(annulusContourModel)
+
+    updateLegacyPapillaryMuscleNodes(scriptedModuleNode)
 
     valveModel = getValveModel(scriptedModuleNode)
     if valveModel is not None:
@@ -634,6 +636,63 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       modelStorageNode.SetFileName(orientationMarkerModelFilePath)
       modelStorageNode.ReadData(orientationMarkerNode)
       slicer.mrmlScene.RemoveNode(modelStorageNode)
+
+
+def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  if subfolderName:
+    folderItemId = shNode.GetItemChildWithName(valveNodeItemId, subfolderName)
+    if not folderItemId:
+      folderItemId = shNode.CreateFolderItem(valveNodeItemId, subfolderName)
+  else:
+    folderItemId = valveNodeItemId
+  shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
+
+
+def updateLegacyPapillaryMuscleNodes(scriptedModuleNode):
+  # replace papillary muscle SmoothCurves
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+
+  logging.info(f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineModel')} Line Models vs "
+               f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineMarkup')} Markup Models")
+
+  for papillaryModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("PapillaryLineModel")):
+    papillaryLineModelNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
+    papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
+    color = papillaryLineModelNode.GetDisplayNode().GetColor()
+
+    # convert into MarkupsCurve
+    papillaryLineMarkupNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
+    markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode')
+    markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
+    dNode = markupsCurveNode.GetDisplayNode()
+    dNode.Copy(papillaryLineMarkupNode.GetDisplayNode())
+    markupsCurveNode.Copy(papillaryLineMarkupNode)
+    markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
+    dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
+    dNode.SetLineDiameter(0.5)
+    dNode.SetSelectedColor(color)
+    scriptedModuleNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupsCurveNode.GetID())
+    markupsCurveNode.SetName(f"{papillaryMuscleName} papillary muscle")
+
+    # add to same shfolder
+    moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'PapillaryMuscles')
+
+  # remove PapillaryMusclesEdit folder including its children
+  papMusclesEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMusclesEdit")
+  if papMusclesEditFolderId:
+    shNode.RemoveItemChildren(papMusclesEditFolderId)
+    shNode.RemoveItem(papMusclesEditFolderId)
+
+  papMusclesFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMuscles")
+  if papMusclesFolderId:
+    children = vtk.vtkCollection()
+    shNode.GetDataNodesInBranch(papMusclesFolderId, children)
+    for childIdx in range(children.GetNumberOfItems()):
+      child = children.GetItemAsObject(childIdx)
+      if type(child) is slicer.vtkMRMLModelNode:
+        slicer.mrmlScene.RemoveNode(child)
 
 
 def getPlaneIntersectionPoint(axialNode, ortho1Node, ortho2Node):

@@ -274,6 +274,7 @@ class ValveModel:
     def createAnnulusContourMarkupNode(self):
       markupsLogic = slicer.modules.markups.logic()
       annulusMarkupNode = markupsLogic.AddNewMarkupsNode('vtkMRMLMarkupsClosedCurveNode')
+      annulusMarkupNode.SetNumberOfPointsPerInterpolatingSegment(20)
       annulusMarkupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("AnnulusContourMarkup"))
       # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
       annulusMarkupNode.SetMarkupLabelFormat("")
@@ -397,12 +398,9 @@ class ValveModel:
     def removePapillaryModel(self, papillaryModelIndex):
       papillaryModel = self.papillaryModels[papillaryModelIndex]
       papillaryLineMarkupNode = self.heartValveNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
-      papillaryLineModelNode = self.heartValveNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
       self.heartValveNode.RemoveNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex)
-      self.heartValveNode.RemoveNthNodeReferenceID("PapillaryLineModel", papillaryModelIndex)
       self.papillaryModels.remove(papillaryModel)
       slicer.mrmlScene.RemoveNode(papillaryLineMarkupNode)
-      slicer.mrmlScene.RemoveNode(papillaryLineModelNode)
 
     def updatePapillaryModel(self, papillaryModelIndex=-1):
       if papillaryModelIndex < 0:
@@ -413,47 +411,31 @@ class ValveModel:
         papillaryModel = PapillaryModel.PapillaryModel()
         self.papillaryModels.append(papillaryModel)
 
-      papillaryLineModelNode = self.heartValveNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
-      if papillaryLineModelNode:
-        papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
+      papillaryLineMarkupNode = self.heartValveNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
+      if papillaryLineMarkupNode:
+        papillaryMuscleName = papillaryLineMarkupNode.GetName().replace(" papillary muscle", "")
       else:
         papillaryMuscleName = self.valveTypePresets[self.getValveType()]["papillaryNames"][papillaryModelIndex]
-      papillaryLineMarkupNode = self.heartValveNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
       if not papillaryLineMarkupNode:
-        markupsLogic = slicer.modules.markups.logic()
-        markupNodeId = markupsLogic.AddNewFiducialNode()
-        markupNode = slicer.mrmlScene.GetNodeByID(markupNodeId)
+        markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode')
         #markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
-        self.moveNodeToHeartValveFolder(markupNode, 'PapillaryMusclesEdit')
-        ValveModel.setGlyphSize(markupNode, papillaryModel.markupGlyphScale)
-        markupNode.GetDisplayNode().SetColor(0.5,0,1)
+        self.moveNodeToHeartValveFolder(markupNode, 'PapillaryMuscles')
         self.heartValveNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupNode.GetID())
         papillaryLineMarkupNode = markupNode
-      papillaryLineMarkupNode.SetName("PapillaryMarkup-"+papillaryMuscleName)
-      self.applyProbeToRasTransformToNode(papillaryLineMarkupNode)
-      papillaryModel.setPapillaryLineMarkupNode(papillaryLineMarkupNode)
 
-      if not papillaryLineModelNode:
-        modelsLogic = slicer.modules.models.logic()
-        polyData = vtk.vtkPolyData()
-        modelNode = modelsLogic.AddModel(polyData)
-        self.moveNodeToHeartValveFolder(modelNode, 'PapillaryMuscles')
-        modelNode.GetDisplayNode().SetVisibility2D(True)
-        modelNode.GetDisplayNode().SetOpacity(1.0)
-        self.heartValveNode.SetNthNodeReferenceID("PapillaryLineModel", papillaryModelIndex, modelNode.GetID())
-        papillaryLineModelNode = modelNode
+      papillaryLineMarkupNode.SetName(f"{papillaryMuscleName} papillary muscle")
+      self.applyProbeToRasTransformToNode(papillaryLineMarkupNode)
       annulusContourMarkupsNode = self.getAnnulusContourMarkupNode()
-      papillaryLineModelNode.GetDisplayNode().SetColor(annulusContourMarkupsNode.GetDisplayNode().GetSelectedColor())
-      papillaryLineModelNode.SetName(papillaryMuscleName+" papillary muscle")
-      self.applyProbeToRasTransformToNode(papillaryLineModelNode)
-      papillaryModel.setPapillaryLineModelNode(papillaryLineModelNode)
+      ValveModel.setGlyphSize(papillaryLineMarkupNode, papillaryModel.markupGlyphScale)
+      papillaryLineMarkupNode.GetDisplayNode().SetSelectedColor(annulusContourMarkupsNode.GetDisplayNode().GetSelectedColor())
+      papillaryModel.setPapillaryLineMarkupNode(papillaryLineMarkupNode)
 
       return papillaryModel
 
-    def findPapillaryModel(self, papillaryLineModelNode):
+    def findPapillaryModel(self, papillaryLineMarkupsNode):
       for papillaryModel in self.papillaryModels:
-        if papillaryModel.getPapillaryLineModelNode() == papillaryLineModelNode:
+        if papillaryModel.getPapillaryLineMarkupNode() == papillaryLineMarkupsNode:
           return papillaryModel
       # Not found
       return None

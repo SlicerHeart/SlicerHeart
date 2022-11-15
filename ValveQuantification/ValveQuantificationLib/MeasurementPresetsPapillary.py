@@ -31,7 +31,7 @@ class MeasurementPresetPapillary(MeasurementPreset):
     papillaryModels = []
     for papillaryModel in self._valveModel.papillaryModels:
       if not papillaryModel.hasMusclePointsPlaced():
-        self.metricsMessages.append("Warning: PM `{}` doesn't have enough points placed".format(papillaryModel.getName()))
+        self.metricsMessages.append(f"Warning: PM `{papillaryModel.getName()}` doesn't have enough points placed")
         continue
       papillaryModels.append(papillaryModel)
     return papillaryModels
@@ -137,17 +137,14 @@ class MeasurementPresetPapillaryAngle(MeasurementPresetPapillary):
     super(MeasurementPresetPapillaryAngle, self).computeMetrics(inputValveModels, outputTableNode)
     if self._valveModel:
       self._quantifyMuscleDistances(self._getListOfPapillaryMuscleDistancePairs())
-      # for papillaryMuscleName, papillaryModel in self._getPapillaryMusclesForLocationDetermination().items():
-      #   self._quantifyClockwiseMuscleLocationOnAnnularPlane(papillaryModel, papillaryMuscleName)
-      #   self._quantifyClockwiseMuscleLocationOnBasePointPlane(papillaryModel, papillaryMuscleName)
     return self.metricsMessages
 
   def _quantifyMuscleDistances(self, papillaryMuscles):
     if not papillaryMuscles:
       return
     for papillaryModels in papillaryMuscles:
-      basePoint1 = papillaryModels[0].getNthMusclePoint(0)
-      basePoint2 = papillaryModels[1].getNthMusclePoint(0)
+      basePoint1 = papillaryModels[0].getNthMusclePointPosition(0)
+      basePoint2 = papillaryModels[1].getNthMusclePointPosition(0)
       colName = f'{papillaryModels[0].getName()}-{papillaryModels[1].getName()} distance'
       self.addMeasurement({
         KEY_NAME: colName,
@@ -160,25 +157,6 @@ class MeasurementPresetPapillaryAngle(MeasurementPresetPapillary):
   @abstractmethod
   def _getListOfPapillaryMuscleDistancePairs(self):
     ...
-
-  def _getPapillaryMusclesForLocationDetermination(self):
-    return self._getPapillaryMuscles()
-
-  def _quantifyClockwiseMuscleLocationOnAnnularPlane(self, papillaryModel, papillaryMuscleName):
-    self._getSeptalAnnularLocationAngle(papillaryModel, papillaryMuscleName)
-    self._getValveCenterAnnularLocationAngle(papillaryModel, papillaryMuscleName)
-
-  def _getSeptalAnnularLocationAngle(self, papillaryModel, papillaryMuscleName):
-    lineTip, lineOrigin = self._getSeptalLinePointsOnAnnularPlane()
-    projectedBasePoint = self.getPointProjectedToAnnularPlane(self._valveModel, papillaryModel.getNthMusclePoint(0))
-    muscleAngleDeg = self._getBasePointToLineAngle(projectedBasePoint, lineOrigin, lineTip)
-    modelNode = self.createArrowModel("MX->{}".format(papillaryMuscleName), lineOrigin, projectedBasePoint)
-    self.applyProbeToRASAndMoveToMeasurementFolder(self._valveModel, modelNode)
-    self.addMeasurement({
-      KEY_NAME: 'septal plane (ann projection) muscle {} angle'.format(papillaryMuscleName),
-      KEY_VALUE: '%3.1f' % muscleAngleDeg,
-      KEY_UNIT: 'deg'
-    })
 
   def _getSeptalLinePointsOnAnnularPlane(self):
     pointMA, pointMP = self._valveModel.getAnnulusMarkupPositionsByLabels(["MA", "MP"])
@@ -193,19 +171,6 @@ class MeasurementPresetPapillaryAngle(MeasurementPresetPapillary):
   def _applyProbeToRASAndMoveToMeasurementFolder(self, model):
     self._valveModel.applyProbeToRasTransformToNode(model)
     self.moveNodeToMeasurementFolder(model)
-
-  def _getValveCenterAnnularLocationAngle(self, papillaryModel, papillaryMuscleName):
-    lineTip, lineOrigin = self._getValveCenterLinePoints()
-    projectedBasePoint = self.getPointProjectedToAnnularPlane(self._valveModel, papillaryModel.getNthMusclePoint(0))
-    muscleAngleDeg = self._getBasePointToLineAngle(projectedBasePoint, lineOrigin, lineTip)
-    modelNode = self.createArrowModel("{}->{}".format(self._valveCenterLabel, papillaryMuscleName), lineOrigin,
-                            projectedBasePoint)
-    self.applyProbeToRASAndMoveToMeasurementFolder(self._valveModel, modelNode)
-    self.addMeasurement({
-      KEY_NAME: 'valve center plane (ann projection) muscle {} angle'.format(papillaryMuscleName),
-      KEY_VALUE: '%3.1f' % muscleAngleDeg,
-      KEY_UNIT: 'deg'
-    })
 
   def _getValveCenterLinePoints(self):
     projectedPointMA, projectedPointMX = self._getSeptalLinePointsOnAnnularPlane()
@@ -227,43 +192,6 @@ class MeasurementPresetPapillaryAngle(MeasurementPresetPapillary):
     angle_deg = np.rad2deg(np.arctan2(det, dot))
     angle_deg = np.abs(angle_deg) if angle_deg < 0 else 360.0 - angle_deg
     return angle_deg
-
-  def _quantifyClockwiseMuscleLocationOnBasePointPlane(self, papillaryModel, papillaryMuscleName):
-    pointMA, pointMP, pointMS = self._valveModel.getAnnulusMarkupPositionsByLabels(["MA", "MP", "MS"])
-    septalPlane = self._getOrCreatePlane([pointMA, pointMP, pointMS], "Septal Plane")
-    basePoint = papillaryModel.getNthMusclePoint(0)
-    septalPlaneProjectedBasePoint = self.getPlaneProjectedPoint(septalPlane, basePoint)
-
-    # perpendicular plane to septal plane
-    pointMX = np.mean(np.array([pointMA, pointMP]), axis=0)
-    translatedProjectedSeptalBasePoint = np.array(septalPlaneProjectedBasePoint) + (np.array(pointMA) - np.array(pointMX))
-    basePointPlane = \
-      self.createMarkupsPlane([translatedProjectedSeptalBasePoint, septalPlaneProjectedBasePoint, basePoint],
-                                             "{} Plane".format(papillaryMuscleName))
-    self.applyProbeToRASAndMoveToMeasurementFolder(self._valveModel, basePointPlane)
-
-    basePointPlaneProjectedMXPoint = self.getPlaneProjectedPoint(basePointPlane, pointMX)
-    basePointPlaneProjectedMAPoint = self.getPlaneProjectedPoint(basePointPlane, pointMA)
-
-    # valve center
-    valveCenterPoint = self._valveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel)
-    valveCenterPlane = self._getOrCreateValveCenterPlane(septalPlane, pointMX, valveCenterPoint)
-    projectedValveCenterPoint = self.getPlaneProjectedPoint(septalPlane, valveCenterPoint)
-    valveCenterTranslation = valveCenterPoint - projectedValveCenterPoint
-    translatedProjectedMXPoint = basePointPlaneProjectedMXPoint + valveCenterTranslation
-    translatedProjectedMAPoint = self.getPlaneProjectedPoint(basePointPlane, pointMA)
-
-    for angleName, originName, (lineOrigin, lineTip) in \
-      [("septal plane", "MX", (basePointPlaneProjectedMXPoint, basePointPlaneProjectedMAPoint)),
-       ("valve center plane", self._valveCenterLabel, (translatedProjectedMXPoint, translatedProjectedMAPoint))]:
-      muscleAngleDeg = self._getBasePointToLineAngle(basePoint, lineOrigin, lineTip)
-      modelNode = self.createArrowModel("{}->{}".format(originName, papillaryMuscleName), lineOrigin, basePoint)
-      self.applyProbeToRASAndMoveToMeasurementFolder(self._valveModel, modelNode)
-      self.addMeasurement({
-        KEY_NAME: '{} muscle {} angle'.format(angleName, papillaryMuscleName),
-        KEY_VALUE: '%3.1f' % muscleAngleDeg,
-        KEY_UNIT: 'deg'
-      })
 
   def _getOrCreatePlane(self, points, planeName):
     plane = self._getItemDataNodeByName(planeName)
@@ -319,14 +247,16 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     mitralValveModel = inputValveModels["MitralValve"]
     planePositionMV, planeNormalMV = mitralValveModel.getAnnulusContourPlane()
     mitralAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(mitralValveModel.annulusContourCurve).T
-    self.createAnnulusPlaneModel(mitralValveModel, mitralAnnulusPoints, planePositionMV, planeNormalMV, name="MV Annulus plane")
+    self.createAnnulusPlaneModel(mitralValveModel, mitralAnnulusPoints, planePositionMV, planeNormalMV,
+                                 name="MV Annulus plane")
 
     # tricuspid plane
     try:
       tricuspidValveModel = inputValveModels["TricuspidValve"]
       planePositionTV, planeNormalTV = tricuspidValveModel.getAnnulusContourPlane()
       tricuspidAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(tricuspidValveModel.annulusContourCurve).T
-      self.createAnnulusPlaneModel(tricuspidValveModel, tricuspidAnnulusPoints, planePositionTV, planeNormalTV, name="TV Annulus plane")
+      self.createAnnulusPlaneModel(tricuspidValveModel, tricuspidAnnulusPoints, planePositionTV, planeNormalTV,
+                                   name="TV Annulus plane")
     except KeyError:
       self.metricsMessages.append("No Tricuspid Valve found. Skipping parts of the calculation.")
       return self.metricsMessages
@@ -336,7 +266,8 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     interpolatedPoints = np.append(mitralAnnulusPoints, tricuspidAnnulusPoints, axis=1)
     from HeartValveLib.ValveModel import planeFit
     planePositionCP, planeNormalCP = planeFit(interpolatedPoints)
-    self.createAnnulusPlaneModel(tricuspidValveModel, interpolatedPoints, planePositionCP, planeNormalCP, name="Common Annulus plane")
+    self.createAnnulusPlaneModel(tricuspidValveModel, interpolatedPoints, planePositionCP, planeNormalCP,
+                                 name="Common Annulus plane")
 
     self.addSeptalBasedRotationalAngle(mitralValveModel, tricuspidValveModel, planePositionCP, planeNormalCP)
     self.addMitralCenterBasedRotationAngle(mitralValveModel, tricuspidValveModel, planePositionMV, planeNormalMV)
@@ -368,7 +299,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     angleOrientationAxis = self.getAngleOrientationAxis(mitralValveModel, planeNormal)
     # get base points
     for papillaryModel in self._getPapillaryMuscles():
-      basePoint = papillaryModel.getNthMusclePoint(0)
+      basePoint = papillaryModel.getNthMusclePointPosition(0)
       basePoint = getPointProjectedToPlane(planePosition, planeNormal, basePoint)
       name = f'{papillaryModel.getName()} septal point based rotation muscle angle'
       node = createAngleNode(ref=closest_point_on_annulus + 5 * ref_axis,
@@ -423,7 +354,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
 
     # get base points
     for papillaryModel in self._getPapillaryMuscles():
-      basePoint = papillaryModel.getNthMusclePoint(0)
+      basePoint = papillaryModel.getNthMusclePointPosition(0)
       basePoint = getPointProjectedToPlane(planePosition, planeNormal, basePoint)
       name = f'{papillaryModel.getName()} center point based rotation muscle angle'
       node = createAngleNode(ref=mv_center + 5 * ref_axis,
@@ -467,7 +398,7 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
   @staticmethod
   def getAnnularSide(valveModel, papillaryModel):
     pointR, pointL = valveModel.getAnnulusMarkupPositionsByLabels(["R", "L"])
-    chordInsertionPoint = papillaryModel.getNthMusclePoint(2)
+    chordInsertionPoint = papillaryModel.getNthMusclePointPosition(2)
     distanceRMm = np.linalg.norm(chordInsertionPoint - pointR)
     distanceLMm = np.linalg.norm(chordInsertionPoint - pointL)
     return "L" if distanceLMm < distanceRMm else "R"
@@ -505,7 +436,8 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
     # common annulus plane
     planePosition, planeNormal = cavcValveModel.getAnnulusContourPlane()
     mitralAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(cavcValveModel.annulusContourCurve).T
-    self.createAnnulusPlaneModel(cavcValveModel, mitralAnnulusPoints, planePosition, planeNormal, name="Common Annulus plane")
+    self.createAnnulusPlaneModel(cavcValveModel, mitralAnnulusPoints, planePosition, planeNormal,
+                                 name="Common Annulus plane")
 
     left_center = getPointProjectedToPlane(planePosition, planeNormal, pointLC)
     right_center = getPointProjectedToPlane(planePosition, planeNormal, pointRC)
@@ -534,7 +466,7 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
       if "lateral" in papillaryMuscleName:
         angleOrientationAxis = angleOrientationAxis * (-1)
 
-      basePoint = papillaryModel.getNthMusclePoint(0)
+      basePoint = papillaryModel.getNthMusclePointPosition(0)
       basePoint = getPointProjectedToPlane(planePosition, planeNormal, basePoint)
 
       name = f'{papillaryMuscleName} septal point based rotation muscle angle'
@@ -565,7 +497,8 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
   def addLeftCenterBasedRotationalAngles(self, cavcValveModel, pointLC, pointRC):
     # left annulus plane
     annulusPoints, planeNormal, planePosition = self.getSideSpecificAnnulus(side="L")
-    self.createAnnulusPlaneModel(cavcValveModel, annulusPoints, planePosition, planeNormal, name="Left Annulus plane")
+    self.createAnnulusPlaneModel(cavcValveModel, annulusPoints, planePosition, planeNormal,
+                                 name="Left Annulus plane")
 
     left_center = getPointProjectedToPlane(planePosition, planeNormal, pointLC)
     right_center = getPointProjectedToPlane(planePosition, planeNormal, pointRC)
@@ -595,7 +528,7 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
       if "lateral" in papillaryMuscleName:
         angleOrientationAxis = angleOrientationAxis * (-1)
 
-      basePoint = papillaryModel.getNthMusclePoint(0)
+      basePoint = papillaryModel.getNthMusclePointPosition(0)
       basePoint = getPointProjectedToPlane(planePosition, planeNormal, basePoint)
       side_center_point = left_center if "lateral" in papillaryMuscleName else right_center
       side_indicator = "left" if "lateral" in papillaryMuscleName else "right"
@@ -626,9 +559,6 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
                                                                 annulusContourSideStartIndices[side])
     planePosition, planeNormal = MeasurementPresetCavc.getPartialContourPlane(annulusPoints, self._valveModel)
     return annulusPoints, planeNormal, planePosition
-
-  def _getPapillaryMusclesForLocationDetermination(self):
-    return self._getMusclesBySide("L")
 
   def _getMusclesBySide(self, side):
     return list(filter(lambda x: self.getAnnularSide(self._valveModel, x) == side, self._getPapillaryMuscles()))
