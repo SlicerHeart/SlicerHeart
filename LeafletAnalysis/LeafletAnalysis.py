@@ -335,7 +335,6 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
       leafletModel.surfaceModelNode.GetDisplayNode().SetVisibility(selected or (selectedSegmentId is None))
       leafletModel.getSurfaceBoundaryMarkupNode().GetDisplayNode().SetVisibility(selected)
       leafletModel.getSurfaceBoundaryMarkupNode().SetLocked(not selected)
-      leafletModel.getSurfaceBoundaryModelNode().GetDisplayNode().SetVisibility(selected)
 
     # Set markups placement state so that if the user switches between leaflets
     # and activates markups placement on the toolbar, the correct markups are placed.

@@ -493,6 +493,7 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       slicer.mrmlScene.RemoveNode(annulusContourModel)
 
     updateLegacyPapillaryMuscleNodes(scriptedModuleNode)
+    updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode)
 
     valveModel = getValveModel(scriptedModuleNode)
     if valveModel is not None:
@@ -638,6 +639,47 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       slicer.mrmlScene.RemoveNode(modelStorageNode)
 
 
+def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode):
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+
+  # leaflet surface boundary nodes
+  numLegacySurfaceBoundaries = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryModel")
+  numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
+  numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
+  if numLegacySurfaceBoundaries:
+    # if not numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels:
+    #   logging.warning("Leg")
+    assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+
+    for boundaryModelIndex in range(numLegacySurfaceBoundaries):
+      boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)
+      boundaryModelNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryModel", boundaryModelIndex)
+      color = boundaryModelNode.GetDisplayNode().GetColor()
+
+      markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode')
+      markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
+      dNode = markupsCurveNode.GetDisplayNode()
+      dNode.Copy(boundaryMarkupNode.GetDisplayNode())
+      markupsCurveNode.Copy(boundaryMarkupNode)
+      markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
+      dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
+      dNode.SetLineDiameter(0.25)
+      dNode.SetSelectedColor(color)
+      scriptedModuleNode.SetNthNodeReferenceID("LeafletSurfaceBoundaryMarkup", boundaryModelIndex,
+                                               markupsCurveNode.GetID())
+      moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'LeafletSurfaceEdit')
+
+    leafletSurfaceEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurfaceEdit")
+    if leafletSurfaceEditFolderId:
+      children = vtk.vtkCollection()
+      shNode.GetDataNodesInBranch(leafletSurfaceEditFolderId, children)
+      for childIdx in range(children.GetNumberOfItems()):
+        child = children.GetItemAsObject(childIdx)
+        if not type(child) is slicer.vtkMRMLMarkupsClosedCurveNode:
+          slicer.mrmlScene.RemoveNode(child)
+
+
 def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   if subfolderName:
@@ -654,8 +696,8 @@ def updateLegacyPapillaryMuscleNodes(scriptedModuleNode):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
 
-  logging.info(f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineModel')} Line Models vs "
-               f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineMarkup')} Markup Models")
+  logging.debug(f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineModel')} Line Models vs "
+                f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineMarkup')} Markup Models")
 
   for papillaryModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("PapillaryLineModel")):
     papillaryLineModelNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
