@@ -6,49 +6,49 @@ import SmoothCurve
 
 class PapillaryModel:
 
+  @property
+  def papillaryLine(self):
+    return self.getPapillaryLineMarkupNode()
+
+  @papillaryLine.setter
+  def papillaryLine(self, node):
+    self.setPapillaryLineMarkupNode(node)
+
   def __init__(self):
     self.markupGlyphScale = 1.0
-    self.papillaryLine = SmoothCurve.SmoothCurve()
-    self.papillaryLine.setTubeRadius(self.markupGlyphScale/2.0)
-    self.papillaryLine.setInterpolationMethod(HeartValveLib.SmoothCurve.InterpolationSpline)
+    self.markupsCurveNode = None
 
   def getName(self):
-    return self.getPapillaryLineModelNode().GetName()
+    return self.markupsCurveNode.GetName()
 
-  def updateModel(self):
-    self.papillaryLine.updateCurve()
-    
-  def setPapillaryLineMarkupNode(self, papillaryLineMarkupNode):
-    self.papillaryLine.setControlPointsMarkupNode(papillaryLineMarkupNode)
+  def setPapillaryLineMarkupNode(self, markupsNode):
+    self.markupsCurveNode = markupsNode
+    markupsDisplayNode = markupsNode.GetDisplayNode()
+    markupsDisplayNode.SetCurveLineSizeMode(markupsDisplayNode.UseLineDiameter)
+    markupsDisplayNode.SetLineDiameter(self.markupGlyphScale/4.0)
 
   def getPapillaryLineMarkupNode(self):
-    return self.papillaryLine.controlPointsMarkupNode
-
-  def setPapillaryLineModelNode(self, papillaryLineModelNode):
-    self.papillaryLine.setCurveModelNode(papillaryLineModelNode)
-
-  def getPapillaryLineModelNode(self):
-    return self.papillaryLine.curveModelNode
+    return self.markupsCurveNode
 
   def getMuscleChordLength(self):
-    musclePoints = self.getPapillaryLineMarkupNode()
-    if musclePoints and musclePoints.GetNumberOfMarkups() >= 3:
-      muscleTipPointIndex = self.papillaryLine.getCurvePointIndexFromControlPointIndex(1)
-      return self.papillaryLine.getCurveLengthBetweenStartEndPoints(muscleTipPointIndex,
-                                                                    self.papillaryLine.curvePoints.GetNumberOfPoints()-1)
+    markupsNode = self.getPapillaryLineMarkupNode()
+    if markupsNode and markupsNode.GetNumberOfControlPoints() >= 3:
+      muscleTipPointIndex = markupsNode.GetCurvePointIndexFromControlPointIndex(1)
+      return markupsNode.GetCurveLengthBetweenStartEndPointsWorld(muscleTipPointIndex,
+                                                                  markupsNode.GetCurve().GetNumberOfPoints()-1)
     return None
 
   def getMuscleLength(self):
-    musclePoints = self.getPapillaryLineMarkupNode()
-    if musclePoints and musclePoints.GetNumberOfMarkups() >= 2:
-      muscleTipPointIndex = self.papillaryLine.getCurvePointIndexFromControlPointIndex(1)
-      return self.papillaryLine.getCurveLengthBetweenStartEndPoints(0, muscleTipPointIndex)
+    markupsNode = self.getPapillaryLineMarkupNode()
+    if markupsNode and markupsNode.GetNumberOfMarkups() >= 2:
+      muscleTipPointIndex = markupsNode.GetCurvePointIndexFromControlPointIndex(1)
+      return markupsNode.GetCurveLengthBetweenStartEndPointsWorld(0, muscleTipPointIndex)
     return None
 
   def getTipChordMuscleAngleDeg(self, annulusPlaneNormal):
     """Returns angle of muscle tip-chord insertion point line and the annulus plane"""
-    muscleTipPoint = self.getNthMusclePoint(1)
-    chordInsertionPoint = self.getNthMusclePoint(2)
+    muscleTipPoint = self.getNthMusclePointPosition(1)
+    chordInsertionPoint = self.getNthMusclePointPosition(2)
     if muscleTipPoint is None or chordInsertionPoint is None:
       return None
     muscleDirectionVector = chordInsertionPoint - muscleTipPoint
@@ -56,8 +56,8 @@ class PapillaryModel:
 
   def getBaseChordMuscleAngleDeg(self, annulusPlaneNormal):
     """Returns angle of muscle base-chord insertion point line and the annulus plane"""
-    muscleBasePoint = self.getNthMusclePoint(0)
-    chordInsertionPoint = self.getNthMusclePoint(2)
+    muscleBasePoint = self.getNthMusclePointPosition(0)
+    chordInsertionPoint = self.getNthMusclePointPosition(2)
     if muscleBasePoint is None or chordInsertionPoint is None:
       return None
     muscleDirectionVector = chordInsertionPoint - muscleBasePoint
@@ -67,7 +67,7 @@ class PapillaryModel:
     muscleDirectionVector = muscleDirectionVector / np.linalg.norm(muscleDirectionVector)
     return math.acos(np.dot(annulusPlaneNormal, muscleDirectionVector)) * 180.0 / math.pi - 90.0
 
-  def getNthMusclePoint(self, idx):
+  def getNthMusclePointPosition(self, idx):
     if not self.hasMusclePointsPlaced():
       return None
     point = np.array([0., 0., 0.])
@@ -81,5 +81,5 @@ class PapillaryModel:
     return point
 
   def hasMusclePointsPlaced(self):
-    musclePoints = self.getPapillaryLineMarkupNode()
-    return musclePoints and not musclePoints.GetNumberOfMarkups() < 3
+    markupsNode = self.getPapillaryLineMarkupNode()
+    return markupsNode and not markupsNode.GetNumberOfMarkups() < 3
