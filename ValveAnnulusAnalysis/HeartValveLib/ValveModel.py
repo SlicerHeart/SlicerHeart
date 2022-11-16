@@ -563,10 +563,8 @@ class ValveModel:
       segmentIds = []
       segmentationNode = self.getLeafletSegmentationNode()
       if segmentationNode:
-        segmentIdsVtk = vtk.vtkStringArray()
-        segmentationNode.GetSegmentation().GetSegmentIDs(segmentIdsVtk)
-        for i in range(segmentIdsVtk.GetNumberOfValues()):
-          segmentId = segmentIdsVtk.GetValue(i)
+        from HeartValveLib.util import getAllSegmentIDs
+        for segmentId in getAllSegmentIDs(segmentationNode):
           if segmentId == VALVE_MASK_SEGMENT_ID:
             continue
           segmentIds.append(segmentId)

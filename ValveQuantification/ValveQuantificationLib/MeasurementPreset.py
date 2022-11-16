@@ -1626,13 +1626,12 @@ class MeasurementPreset(object):
 
     segmentIdsToIgnore = ["ValveMask"]
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
+    from HeartValveLib.util import getAllSegmentIDs
+
     segmentation = leafletSegmentationNode.GetSegmentation()
-    segmentIds = vtk.vtkStringArray()
-    segmentation.GetSegmentIDs(segmentIds)
     allLeafletThickness = list()
     leafletSurfaces = []
-    for segmentIndex in range(segmentIds.GetNumberOfValues()):
-      segmentId = segmentIds.GetValue(segmentIndex)
+    for segmentId in getAllSegmentIDs(leafletSegmentationNode):
       if segmentId in segmentIdsToIgnore:
         continue
       segment = segmentation.GetSegment(segmentId)
