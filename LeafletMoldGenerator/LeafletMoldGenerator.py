@@ -1039,17 +1039,15 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     return leafletName
 
   def getLeafletIDs(self):
-    import vtkSegmentationCorePython as vtkSegmentationCore
     segmentationNode = self.getMoldSegmentationNode()
-    numberOfSegments = segmentationNode.GetSegmentation().GetNumberOfSegments()  #the 0th segment is 'ValveMask', not considered a leaflet
-    segmentIDs = vtk.vtkStringArray()
-    segmentationNode.GetSegmentation().GetSegmentIDs(segmentIDs)
     leafletIDs = []
-
-    for index in range(0,numberOfSegments):
-      nameOfSegment = self.getLeafletNameFromID(segmentIDs.GetValue(index))
+    from HeartValveLib.util import getAllSegmentIDs
+    for segmentID in getAllSegmentIDs(segmentationNode):
+      if segmentID == "ValveMask":
+        continue
+      nameOfSegment = self.getLeafletNameFromID(segmentID)
       if "leaflet" in nameOfSegment and "Grown model" not in nameOfSegment:
-        leafletIDs.append(segmentIDs.GetValue(index))
+        leafletIDs.append(segmentID)
     return leafletIDs
 
   def addModelToMoldSegmentation(self, modelNode):

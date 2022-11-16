@@ -40,7 +40,6 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     try:
       global HeartValveLib
       import HeartValveLib
-      import HeartValveLib.SmoothCurve
     except ImportError as exc:
       logging.error("{}: {}".format(self.moduleName, exc.message))
 
@@ -311,10 +310,9 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
   def getFirstVisibleSegmentId(self):
     segmentationNode = self.valveModel.getLeafletSegmentationNode()
     segmentationDisplayNode = segmentationNode.GetDisplayNode()
-    segmentIDs = vtk.vtkStringArray()
-    segmentationNode.GetSegmentation().GetSegmentIDs(segmentIDs)
-    for index in range(segmentIDs.GetNumberOfValues()):
-      segmentID = segmentIDs.GetValue(index)
+
+    from HeartValveLib.util import getAllSegmentIDs
+    for segmentID in getAllSegmentIDs(segmentationNode):
       if segmentationDisplayNode.GetSegmentVisibility(segmentID):
         return segmentID
     return None
@@ -659,7 +657,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
         importlib.reload(submodule)
       importlib.reload(package)
 
-    reload('HeartValveLib', ['LeafletModel', 'SmoothCurve', 'ValveRoi', 'ValveModel', 'HeartValves'])
+    reload('HeartValveLib', ['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves'])
 
     ScriptedLoadableModuleWidget.onReload(self)
 

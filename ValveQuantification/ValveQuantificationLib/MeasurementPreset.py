@@ -1626,6 +1626,8 @@ class MeasurementPreset(object):
 
     # Create fused leaflet surface
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
+    from HeartValveLib.util import getAllSegmentIDs
+
     segmentation = leafletSegmentationNode.GetSegmentation()
     allLeafletThickness = []
     leafletSurfaces = []
