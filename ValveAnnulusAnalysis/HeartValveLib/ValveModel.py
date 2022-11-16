@@ -596,20 +596,14 @@ class ValveModel:
       coaptationModel = self.coaptationModels[coaptationModelIndex]
       coaptationSurfaceModelNode = self.heartValveNode.GetNthNodeReference("CoaptationSurfaceModel",coaptationModelIndex)
       baseLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
-      baseLineModelNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineModel", coaptationModelIndex)
       marginLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
-      marginLineModelNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineModel", coaptationModelIndex)
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationBaseLineMarkup", coaptationModelIndex)
-      self.heartValveNode.RemoveNthNodeReferenceID("CoaptationBaseLineModel", coaptationModelIndex)
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex)
-      self.heartValveNode.RemoveNthNodeReferenceID("CoaptationMarginLineModel", coaptationModelIndex)
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationSurfaceModel", coaptationModelIndex)
       self.coaptationModels.remove(coaptationModel)
       slicer.mrmlScene.RemoveNode(coaptationSurfaceModelNode)
       slicer.mrmlScene.RemoveNode(baseLineMarkupNode)
-      slicer.mrmlScene.RemoveNode(baseLineModelNode)
       slicer.mrmlScene.RemoveNode(marginLineMarkupNode)
-      slicer.mrmlScene.RemoveNode(marginLineModelNode)
 
     def addCoaptationModel(self, coaptationModelIndex=-1):
       if coaptationModelIndex<0:
@@ -644,9 +638,7 @@ class ValveModel:
 
       baseLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
       if not baseLineMarkupNode:
-        markupsLogic = slicer.modules.markups.logic()
-        markupNodeId = markupsLogic.AddNewFiducialNode()
-        markupNode = slicer.mrmlScene.GetNodeByID(markupNodeId)
+        markupNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"BaseLineMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
@@ -658,49 +650,20 @@ class ValveModel:
       self.applyProbeToRasTransformToNode(baseLineMarkupNode)
       coaptationModel.setBaseLineMarkupNode(baseLineMarkupNode)
 
-      baseLineModelNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineModel", coaptationModelIndex)
-      if not baseLineModelNode:
-        modelsLogic = slicer.modules.models.logic()
-        polyData = vtk.vtkPolyData()
-        modelNode = modelsLogic.AddModel(polyData)
-        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"BaseLineModel"))
-        self.moveNodeToHeartValveFolder(modelNode, 'CoaptationEdit')
-        modelNode.GetDisplayNode().SetColor(1,1,0)
-        modelNode.GetDisplayNode().SetOpacity(1.0)
-        self.heartValveNode.SetNthNodeReferenceID("CoaptationBaseLineModel", coaptationModelIndex, modelNode.GetID())
-        baseLineModelNode = modelNode
-      self.applyProbeToRasTransformToNode(baseLineModelNode)
-      coaptationModel.setBaseLineModelNode(baseLineModelNode)
-
       marginLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
       if not marginLineMarkupNode:
-        markupsLogic = slicer.modules.markups.logic()
-        markupNodeId = markupsLogic.AddNewFiducialNode()
-        markupNode = slicer.mrmlScene.GetNodeByID(markupNodeId)
+        markupNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"MarginLineMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'CoaptationEdit')
         ValveModel.setGlyphSize(markupNode, coaptationModel.markupGlyphScale)
         markupNode.GetDisplayNode().SetColor(0,0,1)
+        # modelNode.GetDisplayNode().SetColor(1,0.5,0)
         self.heartValveNode.SetNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex, markupNode.GetID())
         marginLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(marginLineMarkupNode)
       coaptationModel.setMarginLineMarkupNode(marginLineMarkupNode)
-
-      marginLineModelNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineModel", coaptationModelIndex)
-      if not marginLineModelNode:
-        modelsLogic = slicer.modules.models.logic()
-        polyData = vtk.vtkPolyData()
-        modelNode = modelsLogic.AddModel(polyData)
-        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"MarginLineModel"))
-        self.moveNodeToHeartValveFolder(modelNode, 'CoaptationEdit')
-        modelNode.GetDisplayNode().SetColor(1,0.5,0)
-        modelNode.GetDisplayNode().SetOpacity(1.0)
-        self.heartValveNode.SetNthNodeReferenceID("CoaptationMarginLineModel", coaptationModelIndex, modelNode.GetID())
-        marginLineModelNode = modelNode
-      self.applyProbeToRasTransformToNode(marginLineModelNode)
-      coaptationModel.setMarginLineModelNode(marginLineModelNode)
 
       coaptationModel.updateSurfaceModelName(self)
       return coaptationModel

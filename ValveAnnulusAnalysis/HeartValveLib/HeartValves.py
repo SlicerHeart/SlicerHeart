@@ -496,6 +496,7 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
     removeEmptyLeafletSegments(scriptedModuleNode)
     updateLegacyPapillaryMuscleNodes(scriptedModuleNode)
     updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode)
+    updateLegacyCoaptationModelNodes(scriptedModuleNode)
 
     valveModel = getValveModel(scriptedModuleNode)
     if valveModel is not None:
@@ -641,6 +642,57 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       slicer.mrmlScene.RemoveNode(modelStorageNode)
 
 
+def updateLegacyCoaptationModelNodes(scriptedModuleNode):
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+
+  numCoaptationBaseLineModels = scriptedModuleNode.GetNumberOfNodeReferences("CoaptationBaseLineModel")
+  numCoaptationMarginLineModels = scriptedModuleNode.GetNumberOfNodeReferences("CoaptationMarginLineModel")
+  if numCoaptationBaseLineModels > 0 and numCoaptationMarginLineModels > 0:
+    for coaptationModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("CoaptationBaseLineModel")):
+      marginLineModelNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineModel", coaptationModelIndex)
+      marginLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
+      newMarginLineMarkupsCurveNode = \
+        markupsCurveFromMarkupsFiducialNode(marginLineMarkupNode, markupsClass='vtkMRMLMarkupsCurveNode',
+                                            diameter=0.5, color=marginLineModelNode.GetDisplayNode().GetColor())
+      scriptedModuleNode.SetNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex,
+                                               newMarginLineMarkupsCurveNode.GetID())
+      moveNodeToHeartValveFolder(valveNodeItemId, newMarginLineMarkupsCurveNode, 'CoaptationEdit')
+
+      baseLineModelNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineModel", coaptationModelIndex)
+      baseLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
+      newBaseLineMarkupsCurveNode = \
+        markupsCurveFromMarkupsFiducialNode(baseLineMarkupNode, markupsClass='vtkMRMLMarkupsCurveNode',
+                                            diameter=0.5, color=baseLineModelNode.GetDisplayNode().GetColor())
+      scriptedModuleNode.SetNthNodeReferenceID("CoaptationBaseLineMarkup", coaptationModelIndex,
+                                               newBaseLineMarkupsCurveNode.GetID())
+      moveNodeToHeartValveFolder(valveNodeItemId, newBaseLineMarkupsCurveNode, 'CoaptationEdit')
+
+  coaptationEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "CoaptationEdit")
+  if coaptationEditFolderId:
+    children = vtk.vtkCollection()
+    shNode.GetDataNodesInBranch(coaptationEditFolderId, children)
+    for childIdx in range(children.GetNumberOfItems()):
+      child = children.GetItemAsObject(childIdx)
+      if not type(child) is slicer.vtkMRMLMarkupsCurveNode:
+        slicer.mrmlScene.RemoveNode(child)
+
+
+def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diameter=None, color=None):
+  markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass(markupsClass)
+  markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
+  dNode = markupsCurveNode.GetDisplayNode()
+  dNode.Copy(markupsFiducialNode.GetDisplayNode())
+  markupsCurveNode.Copy(markupsFiducialNode)
+  markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
+  dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
+  if diameter:
+    dNode.SetLineDiameter(diameter)
+  if color:
+    dNode.SetSelectedColor(color)
+  return markupsCurveNode
+
+
 def removeEmptyLeafletSegments(scriptedModuleNode):
   leafletSegmentationNode = scriptedModuleNode.GetNodeReference("LeafletSegmentation")
   from SegmentStatisticsPlugins import LabelmapSegmentStatisticsPlugin
@@ -669,24 +721,14 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode):
   numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
   numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
   if numLegacySurfaceBoundaries:
-    # if not numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels:
-    #   logging.warning("Leg")
     assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
 
     for boundaryModelIndex in range(numLegacySurfaceBoundaries):
       boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)
       boundaryModelNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryModel", boundaryModelIndex)
-      color = boundaryModelNode.GetDisplayNode().GetColor()
-
-      markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode')
-      markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
-      dNode = markupsCurveNode.GetDisplayNode()
-      dNode.Copy(boundaryMarkupNode.GetDisplayNode())
-      markupsCurveNode.Copy(boundaryMarkupNode)
-      markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
-      dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
-      dNode.SetLineDiameter(0.25)
-      dNode.SetSelectedColor(color)
+      markupsCurveNode =\
+        markupsCurveFromMarkupsFiducialNode(boundaryMarkupNode, 'vtkMRMLMarkupsClosedCurveNode', diameter=0.25,
+                                            color=boundaryModelNode.GetDisplayNode().GetColor())
       scriptedModuleNode.SetNthNodeReferenceID("LeafletSurfaceBoundaryMarkup", boundaryModelIndex,
                                                markupsCurveNode.GetID())
       moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'LeafletSurfaceEdit')
@@ -721,21 +763,12 @@ def updateLegacyPapillaryMuscleNodes(scriptedModuleNode):
                 f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineMarkup')} Markup Models")
 
   for papillaryModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("PapillaryLineModel")):
+    papillaryLineMarkupNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
     papillaryLineModelNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
     papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
-    color = papillaryLineModelNode.GetDisplayNode().GetColor()
-
-    # convert into MarkupsCurve
-    papillaryLineMarkupNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
-    markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode')
-    markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
-    dNode = markupsCurveNode.GetDisplayNode()
-    dNode.Copy(papillaryLineMarkupNode.GetDisplayNode())
-    markupsCurveNode.Copy(papillaryLineMarkupNode)
-    markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
-    dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
-    dNode.SetLineDiameter(0.5)
-    dNode.SetSelectedColor(color)
+    markupsCurveNode = \
+      markupsCurveFromMarkupsFiducialNode(papillaryLineMarkupNode, 'vtkMRMLMarkupsCurveNode', diameter=0.5,
+                                          color=papillaryLineModelNode.GetDisplayNode().GetColor())
     scriptedModuleNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupsCurveNode.GetID())
     markupsCurveNode.SetName(f"{papillaryMuscleName} papillary muscle")
 

@@ -237,10 +237,10 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
       self.leafletSegmentSelector.setSelectedSegmentIDs([])
       if toggle:
         self.valveModel.updateLeafletModelsFromSegmentation()
-        self.valveModel.annulusContourCurve.curveModelNode.GetDisplayNode().SetVisibility(False)
+        self.valveModel.annulusContourCurve.GetDisplayNode().SetVisibility(False)
         self.valveModel.getValveRoiModelNode().GetDisplayNode().SetVisibility(False)
       else:
-        self.valveModel.annulusContourCurve.curveModelNode.GetDisplayNode().SetVisibility(True)
+        self.valveModel.annulusContourCurve.GetDisplayNode().SetVisibility(True)
         self.valveModel.getValveRoiModelNode().GetDisplayNode().SetVisibility(True)
         # show all segments
         segmentationNode = self.valveModel.getLeafletSegmentationNode()
@@ -433,12 +433,10 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
 
       coaptationModel.surfaceModelNode.GetDisplayNode().SetVisibility(selected or (selectedCoaptationModel is None))
 
-      coaptationModel.getBaseLineModelNode().GetDisplayNode().SetVisibility(selected or (selectedCoaptationModel is None))
       coaptationModel.getBaseLineMarkupNode().GetDisplayNode().SetVisibility(selected)
       coaptationModel.getBaseLineMarkupNode().SetLocked(not selected)
       coaptationModel.getBaseLineMarkupNode().GetDisplayNode().SetVisibility(selected)
 
-      coaptationModel.getMarginLineModelNode().GetDisplayNode().SetVisibility(selected or (selectedCoaptationModel is None))
       coaptationModel.getMarginLineMarkupNode().GetDisplayNode().SetVisibility(selected)
       coaptationModel.getMarginLineMarkupNode().SetLocked(not selected)
       coaptationModel.getMarginLineMarkupNode().GetDisplayNode().SetVisibility(selected)

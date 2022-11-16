@@ -88,7 +88,7 @@ class ValveRoi:
     closestPointFinder.SetInput(leafletSurfacePolyData)
     boundaryCoaptationModels = []
     for coaptationModel in self.valveModel.coaptationModels:
-      boundaryPoints = coaptationModel.baseLine.getControlPointsAsArray()
+      boundaryPoints = slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.baseLine).T
       numberOfPoints = boundaryPoints.shape[1]
       numberOfBoundaryPoints = 0
       for pointIndex in range(numberOfPoints):
@@ -110,7 +110,7 @@ class ValveRoi:
       # They have to be concatenated into a single curve (leafletBoundaryPoints).
 
       coaptationModel = boundaryCoaptationModels.pop()
-      leafletBoundaryPoints = coaptationModel.baseLine.getInterpolatedPointsAsArray()
+      leafletBoundaryPoints = slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.baseLine).T
 
       while boundaryCoaptationModels:
 
@@ -120,7 +120,7 @@ class ValveRoi:
         append = False # append or prepend
         reverseOrder = False # need to reverse the order before append or prepend
         for (coaptationModelIndex, coaptationModel) in enumerate(boundaryCoaptationModels):
-          boundaryPoints = coaptationModel.baseLine.getControlPointsAsArray()
+          boundaryPoints = slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.baseLine).T
           closestDistanceAppendForward = np.linalg.norm(leafletBoundaryPoints[:,-1]-boundaryPoints[:,0])
           closestDistanceAppendReverse = np.linalg.norm(leafletBoundaryPoints[:, -1]-boundaryPoints[:, -1])
           closestDistancePrependForward = np.linalg.norm(boundaryPoints[:, -1]-leafletBoundaryPoints[:, 0])
@@ -147,7 +147,8 @@ class ValveRoi:
             reverseOrder = True
 
         # append best matching curve
-        boundaryPoints = boundaryCoaptationModels[closestCoaptationModelIndex].baseLine.getInterpolatedPointsAsArray()
+        boundaryPoints = \
+          slicer.util.arrayFromMarkupsCurvePoints(boundaryCoaptationModels[closestCoaptationModelIndex].baseLine).T
         if reverseOrder:
           boundaryPoints = np.fliplr(boundaryPoints)
         if append:

@@ -600,11 +600,11 @@ class MeasurementPreset(object):
                                       surfaceModelNode.GetPolyData(), valveModel)
 
       self.addMeasurement({KEY_NAME: '{} base line length'.format(namePrefix),
-                           KEY_VALUE: "{:.1f}".format(coaptationModel.baseLine.getCurveLength()),
+                           KEY_VALUE: "{:.1f}".format(coaptationModel.baseLine.GetCurveLengthWorld()),
                            KEY_UNIT: 'mm'})
 
       self.addMeasurement({KEY_NAME: '{} margin line length'.format(namePrefix),
-                           KEY_VALUE: "{:.1f}".format(coaptationModel.marginLine.getCurveLength()),
+                           KEY_VALUE: "{:.1f}".format(coaptationModel.marginLine.GetCurveLengthWorld()),
                            KEY_UNIT: 'mm'})
 
       distances = coaptationModel.getBaseLineMarginLineDistances()
@@ -897,7 +897,6 @@ class MeasurementPreset(object):
     return annulusAreaPolyData
 
   def addSurfaceAreaMeasurements(self, name, polyData, valveModel, clipPlanes=None, visibility=False):
-    logging.info(name)
     modelsLogic = slicer.modules.models.logic()
     annulusArea3dModel = modelsLogic.AddModel(polyData)
     annulusArea3dModel.SetName(name)
@@ -1715,8 +1714,7 @@ class MeasurementPreset(object):
 
     # Get leaflet projections on the valve plane normal so that we can split the volume measurements per leaflet
     leafletRois = []
-    for segmentIndex in range(segmentIds.GetNumberOfValues()):
-      segmentId = segmentIds.GetValue(segmentIndex)
+    for segmentId in getAllSegmentIDs(leafletSegmentationNode):
       if segmentId in segmentIdsToIgnore:
         continue
 

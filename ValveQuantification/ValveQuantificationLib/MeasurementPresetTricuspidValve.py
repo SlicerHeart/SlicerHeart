@@ -38,7 +38,7 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
 
     for coaptationModel in coaptationModels:
       
-      basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
+      basePoints = coaptationModel.baseLine.GetCurve().GetPoints()
       numberOfBasePoints = basePoints.GetNumberOfPoints()
       if not numberOfBasePoints:
         continue
