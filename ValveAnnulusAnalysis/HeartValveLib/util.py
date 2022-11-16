@@ -291,3 +291,11 @@ def getPositionAlongCurve(markupsCurveNode, startCurvePointId, distanceFromStart
   pointPosition = np.zeros(3)
   markupsCurveNode.GetPositionAlongCurveWorld(pointPosition, startCurvePointId, distanceFromStartPoint)
   return toLocalCoordinates(markupsCurveNode, pointPosition)
+
+
+def getAllSegmentIDs(segmentationNode):
+  import vtk
+  segmentIDs = vtk.vtkStringArray()
+  segmentation = segmentationNode.GetSegmentation()
+  segmentation.GetSegmentIDs(segmentIDs)
+  return [segmentIDs.GetValue(idx) for idx in range(segmentIDs.GetNumberOfValues())]

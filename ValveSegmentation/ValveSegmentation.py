@@ -428,10 +428,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def getFirstVisibleSegmentId(self):
     segmentationNode = self.valveModel.getLeafletSegmentationNode()
     segmentationDisplayNode = segmentationNode.GetDisplayNode()
-    segmentIDs = vtk.vtkStringArray()
-    segmentationNode.GetSegmentation().GetSegmentIDs(segmentIDs)
-    for index in range(segmentIDs.GetNumberOfValues()):
-      segmentID = segmentIDs.GetValue(index)
+    from HeartValveLib.util import getAllSegmentIDs
+    for segmentID in getAllSegmentIDs(segmentationNode):
       if segmentationDisplayNode.GetSegmentVisibility(segmentID):
         return segmentID
     return None

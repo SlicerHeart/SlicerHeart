@@ -1,4 +1,5 @@
 import HeartValveLib
+from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
 import vtk, qt, ctk, slicer
 import logging
 
@@ -492,6 +493,7 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       slicer.mrmlScene.RemoveNode(annulusContourNode)
       slicer.mrmlScene.RemoveNode(annulusContourModel)
 
+    removeEmptyLeafletSegments(scriptedModuleNode)
     updateLegacyPapillaryMuscleNodes(scriptedModuleNode)
     updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode)
 
@@ -637,6 +639,25 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       modelStorageNode.SetFileName(orientationMarkerModelFilePath)
       modelStorageNode.ReadData(orientationMarkerNode)
       slicer.mrmlScene.RemoveNode(modelStorageNode)
+
+
+def removeEmptyLeafletSegments(scriptedModuleNode):
+  leafletSegmentationNode = scriptedModuleNode.GetNodeReference("LeafletSegmentation")
+  from SegmentStatisticsPlugins import LabelmapSegmentStatisticsPlugin
+  labelStatisticsPlugin = LabelmapSegmentStatisticsPlugin()
+  parameterNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
+  parameterNode.SetParameter("Segmentation", leafletSegmentationNode.GetID())
+  labelStatisticsPlugin.setParameterNode(parameterNode)
+  from HeartValveLib.util import getAllSegmentIDs
+  for segmentID in getAllSegmentIDs(leafletSegmentationNode):
+    if segmentID == VALVE_MASK_SEGMENT_ID:
+      continue
+    stats = labelStatisticsPlugin.computeStatistics(segmentID)
+    if stats["voxel_count"] == 0:
+      segment = leafletSegmentationNode.GetSegmentation().GetSegment(segmentID)
+      logging.debug(f"Found empty segment {segment.GetName()} for {scriptedModuleNode.GetName()}. Removing it.")
+      leafletSegmentationNode.RemoveSegment(segmentID)
+  slicer.mrmlScene.RemoveNode(parameterNode)
 
 
 def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode):
