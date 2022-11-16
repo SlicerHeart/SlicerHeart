@@ -25,7 +25,7 @@ class MeasurementPresetCavc(MeasurementPreset):
     coaptationCenterPoints = None
 
     for coaptationModel in coaptationModels:
-      basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
+      basePoints = coaptationModel.baseLine.GetCurve().GetPoints()
       numberOfBasePoints = basePoints.GetNumberOfPoints()
       if not numberOfBasePoints:
         continue
@@ -245,13 +245,24 @@ class MeasurementPresetCavc(MeasurementPreset):
     for coaptationModel in coaptationModels:
       coaptationModel.updateSurface()
 
-      totalBaselineLengths.append(coaptationModel.baseLine.getCurveLength())
-      totalMarginLineLengths.append(coaptationModel.marginLine.getCurveLength())
+      totalBaselineLengths.append(coaptationModel.baseLine.GetCurveLengthWorld())
+      totalMarginLineLengths.append(coaptationModel.marginLine.GetCurveLengthWorld())
       distances.extend(coaptationModel.getBaseLineMarginLineDistances())
 
       appendSurface.AddInputData(coaptationModel.surfaceModelNode.GetPolyData())
-      appendBaseLines.AddInputData(coaptationModel.baseLine.curveModelNode.GetPolyData())
-      appendMarginLines.AddInputData(coaptationModel.marginLine.curveModelNode.GetPolyData())
+      from HeartValveLib.util import createTubeModelFromPointArray
+      baseLineModel = \
+        createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.baseLine), loop=False,
+                                      radius=coaptationModel.markupGlyphScale / 6.0)[0]
+      appendBaseLines.AddInputData(baseLineModel.GetPolyData())
+      slicer.mrmlScene.RemoveNode(baseLineModel)
+
+      marginLineModel = \
+        createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.marginLine), loop=False,
+                                      radius=coaptationModel.markupGlyphScale / 6.0)[0]
+      appendMarginLines.AddInputData(marginLineModel.GetPolyData())
+      slicer.mrmlScene.RemoveNode(marginLineModel)
+
     appendSurface.Update()
     appendBaseLines.Update()
     appendMarginLines.Update()
@@ -583,26 +594,26 @@ def cutModel(modelNode, planeNode, cappingOn=True):
   return outputNegativeModelNode, outputPositiveModelNode
 
 
-def getControlPointsWorldAsArray(smoothCurve):
-  nOfControlPoints = smoothCurve.controlPointsMarkupNode.GetNumberOfFiducials() if smoothCurve.controlPointsMarkupNode else 0
+def getControlPointsWorldAsArray(markupsCurve):
+  nOfControlPoints = markupsCurve.GetNumberOfControlPoints() if markupsCurve else 0
   points = np.zeros([3, nOfControlPoints])
   pos = [0.0, 0.0, 0.0]
   for i in range(0, nOfControlPoints):
-    smoothCurve.controlPointsMarkupNode.GetNthControlPointPositionWorld(i, pos)
+    markupsCurve.GetNthControlPointPositionWorld(i, pos)
     points[0, i] = pos[0]
     points[1, i] = pos[1]
     points[2, i] = pos[2]
   return points
 
 
-def setControlPointsWorldFromArray(coaptationModel, controlPointsArray):
-  coaptationModel.controlPointsMarkupNode.RemoveAllMarkups()
-  wasModifying = coaptationModel.controlPointsMarkupNode.StartModify()
+def setControlPointsWorldFromArray(markupsNode, controlPointsArray):
+  markupsNode.RemoveAllMarkups()
+  wasModifying = markupsNode.StartModify()
   for controlPointPos in controlPointsArray:
-    fidIndex = coaptationModel.controlPointsMarkupNode.AddControlPointWorld(vtk.vtkVector3d(controlPointPos))
+    fidIndex = markupsNode.AddControlPointWorld(vtk.vtkVector3d(controlPointPos))
     # Deselect it because usually only one markup point is selected
-    coaptationModel.controlPointsMarkupNode.SetNthFiducialSelected(fidIndex, False)
-  coaptationModel.controlPointsMarkupNode.EndModify(wasModifying)
+    markupsNode.SetNthControlPointSelected(fidIndex, False)
+  markupsNode.EndModify(wasModifying)
 
 
 def getAbovePlaneIndicator(pointsArray, planePosition, planeNormal):
@@ -640,10 +651,10 @@ def getIntersectionPos(planeOrigin, planeNormal, p1, p2):
   return intersection
 
 
-def getLeftCoaptationPointsIncludingIntersection(smoothCurve, planeNode):
+def getLeftCoaptationPointsIncludingIntersection(markupsNode, planeNode):
   # order is from above plane towards below plane
   # left to right
-  controlPoints = getControlPointsWorldAsArray(smoothCurve).transpose()
+  controlPoints = getControlPointsWorldAsArray(markupsNode).transpose()
   planeNormal = getPointPosition(planeNode.GetNormalWorld)
   planeOrigin = getPointPosition(planeNode.GetOriginWorld)
 

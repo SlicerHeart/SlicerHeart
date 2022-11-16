@@ -37,13 +37,13 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
     coaptationCenterPoints = None
     if len(coaptationModels) == 1: # tricuspid has only two leaflets
       coaptationModel = coaptationModels[0]
-      basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
+      basePoints = coaptationModel.baseLine.GetCurve().GetPoints()
       numberOfBasePoints = basePoints.GetNumberOfPoints()
       if numberOfBasePoints:
         coaptationCenterPoints = np.array(basePoints.GetPoint(numberOfBasePoints//2 - 1))
     elif len(coaptationModels) == 3: # not always the case (for example if tricuspid has only two leaflets)
       for coaptationModel in coaptationModels:
-        basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
+        basePoints = coaptationModel.baseLine.GetCurve().GetPoints()
         numberOfBasePoints = basePoints.GetNumberOfPoints()
         if not numberOfBasePoints:
           continue

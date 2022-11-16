@@ -12,14 +12,28 @@ import operator
 
 class CoaptationModel:
 
+  @property
+  def baseLine(self):
+    return self.getBaseLineMarkupNode()
+
+  @baseLine.setter
+  def baseLine(self, markupsNode):
+    self.setBaseLineMarkupNode(markupsNode)
+
+  @property
+  def marginLine(self):
+    return self.getMarginLineMarkupNode()
+
+  @marginLine.setter
+  def marginLine(self, markupsNode):
+    self.setMarginLineMarkupNode(markupsNode)
+
   def __init__(self):
     self.markupGlyphScale = 1.0
-    self.baseLine = SmoothCurve.SmoothCurve()
-    self.baseLine.setTubeRadius(self.markupGlyphScale/6.0)
-    self.baseLine.setInterpolationMethod(HeartValveLib.SmoothCurve.InterpolationSpline)
-    self.marginLine = SmoothCurve.SmoothCurve()
-    self.marginLine.setTubeRadius(self.markupGlyphScale/6.0)
-    self.marginLine.setInterpolationMethod(HeartValveLib.SmoothCurve.InterpolationSpline)
+
+    self.baseLineMarkupNode = None
+    self.marginLineMarkupNode = None
+
     self.surfaceModelNode = None
     self.segmentationNode = None
 
@@ -46,78 +60,37 @@ class CoaptationModel:
     self.updateSurface()
 
   def setBaseLineMarkupNode(self, baseLineMarkupNode):
-    self.baseLine.setControlPointsMarkupNode(baseLineMarkupNode)
+    self.baseLineMarkupNode = baseLineMarkupNode
     self.updateSurface()
 
   def getBaseLineMarkupNode(self):
-    return self.baseLine.controlPointsMarkupNode
-
-  def setBaseLineModelNode(self, baseLineModelNode):
-    self.baseLine.setCurveModelNode(baseLineModelNode)
-
-  def getBaseLineModelNode(self):
-    return self.baseLine.curveModelNode
+    return self.baseLineMarkupNode
 
   def setMarginLineMarkupNode(self, marginLineMarkupNode):
-    self.marginLine.setControlPointsMarkupNode(marginLineMarkupNode)
+    self.marginLineMarkupNode = marginLineMarkupNode
     self.updateSurface()
 
   def getMarginLineMarkupNode(self):
-    return self.marginLine.controlPointsMarkupNode
-
-  def setMarginLineModelNode(self, marginLineModelNode):
-    self.marginLine.setCurveModelNode(marginLineModelNode)
-
-  def getMarginLineModelNode(self):
-    return self.marginLine.curveModelNode
+    return self.marginLineMarkupNode
 
   def updateSurface(self):
-    self.baseLine.updateCurve()
-    self.marginLine.updateCurve()
-    self.computeSurfaceBetweenLines()
-
-  def getValvePlanePosition(self):
-    arrayAsString = self.baseLine.controlPointsMarkupNode.GetAttribute("ValvePlanePosition")
-    if not arrayAsString:
-      return None
-    # for example: arrayAsString = "0.32 0.45 0.11"
-    return [float(x) for x in arrayAsString.split(' ')]
-
-  def setValvePlanePosition(self, valvePlanePosition):
-    if valvePlanePosition is None:
-      self.baseLine.controlPointsMarkupNode.RemoveAttribute("ValvePlanePosition")
-    else:
-      arrayAsString = ' '.join([str(x) for x in valvePlanePosition])
-      self.baseLine.controlPointsMarkupNode.SetAttribute("ValvePlanePosition", arrayAsString)
-
-  def getValvePlaneNormal(self):
-    arrayAsString = self.baseLine.controlPointsMarkupNode.GetAttribute("ValvePlaneNormal")
-    if not arrayAsString:
-      return None
-    # for example: arrayAsString = "0.32 0.45 0.11"
-    return np.array([float(x) for x in arrayAsString.split(' ')])
-
-  def setValvePlaneNormal(self, valvePlaneNormal):
-    if valvePlaneNormal is None:
-      self.baseLine.controlPointsMarkupNode.RemoveAttribute("ValvePlaneNormal")
-    else:
-      arrayAsString = ' '.join([str(x) for x in valvePlaneNormal])
-      self.baseLine.controlPointsMarkupNode.SetAttribute("ValvePlaneNormal", arrayAsString)
+    if self.baseLine is not None and self.marginLine is not None:
+      self.computeSurfaceBetweenLines()
 
   def computeSurfaceBetweenLines(self):
     """
     Update model with a surface between base and margin lines.
     """
 
-    numberOfBasePoints = self.baseLine.curvePoints.GetNumberOfPoints()
-    numberOfMarginPoints = self.marginLine.curvePoints.GetNumberOfPoints()
-    if numberOfBasePoints==0 or numberOfMarginPoints==0:
+    numberOfBasePoints = self.baseLine.GetCurve().GetNumberOfPoints()
+    numberOfMarginPoints = self.marginLine.GetCurve().GetNumberOfPoints()
+    if numberOfBasePoints == 0 or numberOfMarginPoints == 0:
       self.surfaceModelNode.SetAndObservePolyData(None)
       return
 
     boundaryPoints = vtk.vtkPoints()
-    boundaryPoints.DeepCopy(self.baseLine.curvePoints)
-    boundaryPoints.InsertPoints(numberOfBasePoints, numberOfMarginPoints, 0, self.marginLine.curvePoints)
+    boundaryPoints.DeepCopy(self.baseLine.GetCurve().GetPoints())
+    boundaryPoints.InsertPoints(numberOfBasePoints, numberOfMarginPoints, 0, self.marginLine.GetCurve().GetPoints())
 
     # Add a triangle strip between the base and margin lines
     strips = vtk.vtkCellArray()
@@ -146,17 +119,18 @@ class CoaptationModel:
     same as closest distance of base line from margin line points).
     """
 
-    numberOfBasePoints = self.baseLine.curvePoints.GetNumberOfPoints()
-    numberOfMarginPoints = self.marginLine.curvePoints.GetNumberOfPoints()
-    if numberOfBasePoints==0 or numberOfMarginPoints==0:
+    numberOfBasePoints = self.baseLine.GetCurve().GetNumberOfPoints()
+    numberOfMarginPoints = self.marginLine.GetCurve().GetNumberOfPoints()
+    if numberOfBasePoints == 0 or numberOfMarginPoints == 0:
       self.surfaceModelNode.SetAndObservePolyData(None)
       return None
 
-    basePoints = self.baseLine.curvePoly.GetPoints()
+    basePoints = self.baseLine.GetCurve().GetPoints()
 
     def getDistance(index):
-      closestPoint, _ = self.marginLine.getClosestPoint(basePoints.GetPoint(index))
-      return np.linalg.norm(np.array(basePoints.GetPoint(index)) - np.array(closestPoint))
+      from HeartValveLib.util import getClosestPointPositionAlongCurve
+      closestPointPosition = getClosestPointPositionAlongCurve(self.marginLine, basePoints.GetPoint(index))
+      return np.linalg.norm(np.array(basePoints.GetPoint(index)) - np.array(closestPointPosition))
 
     return np.array([getDistance(i) for i in range(basePoints.GetNumberOfPoints())])
 
@@ -166,7 +140,7 @@ class CoaptationModel:
     return sorted(connectedLeaflets)
 
   def getConnectedLeaflets(self, valveModel):
-    basePoints = self.baseLine.curvePoly.GetPoints()
+    basePoints = self.baseLine.GetCurve().GetPoints()
     numberOfBasePoints = basePoints.GetNumberOfPoints()
     if not numberOfBasePoints:
       return []
