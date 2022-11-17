@@ -136,15 +136,17 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
     if not valveModel:
       return
 
+    from HeartValveLib.util import getFarthestCurvePointIndexToPosition
+
     if fieldId == 'APoint':  # A point (farthest from P)
       pointP = valveModel.getAnnulusMarkupPositionByLabel('P')
       if pointP is not None:
-        [pointAPosition, pointAId] = valveModel.annulusContourCurve.getFarthestPoint(pointP)
+        pointAPosition = getFarthestCurvePointIndexToPosition(valveModel.annulusContourCurve, pointP)
         valveModel.setAnnulusMarkupLabel('A', pointAPosition)
     elif fieldId == 'PPoint':  # P point (farthest from A)
       pointA = valveModel.getAnnulusMarkupPositionByLabel('A')
       if pointA is not None:
-        [pointPPosition, pointPId] = valveModel.annulusContourCurve.getFarthestPoint(pointA)
+        pointPPosition = getFarthestCurvePointIndexToPosition(valveModel.annulusContourCurve, pointA)
         valveModel.setAnnulusMarkupLabel('P', pointPPosition)
     elif fieldId == 'SPoint':  # PM point (on the other side of the P-A line from AL, P-A orthogonal to AL-PM)
       pointP = valveModel.getAnnulusMarkupPositionByLabel('P')

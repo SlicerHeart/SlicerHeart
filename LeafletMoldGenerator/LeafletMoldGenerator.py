@@ -6,6 +6,8 @@ from slicer.ScriptedLoadableModule import *
 import logging
 import math
 import numpy as np
+from HeartValveLib.util import getClosestPointPositionAlongCurve
+
 #
 # LeafletMoldGenerator
 #
@@ -387,34 +389,6 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   ## before, used self.valveModel.getLeafletSegmentationNode()
 
-  # Rim contour line
-  def getValveRimModelNode(self):
-    return self.valveModel.heartValveNode.GetNodeReference("valveRim") if self.valveModel.heartValveNode else None
-
-  # def copySegmentationColourNode(self, sourceLabelNode, destinationLabelNode):
-  #   destinationLabelNode.GetDisplayNode().SetAndObserveColorNodeID(sourceLabelNode.GetDisplayNode().GetColorNodeID())
-
-  def setValveRimModelNode(self, modelNode):
-    if not self.valveModel.heartValveNode:
-      logging.error("setvalveRimModelNode failed: invalid heartValveNode")
-      return
-    self.valveModel.heartValveNode.SetNodeReferenceID("valveRim", modelNode.GetID() if modelNode else None)
-    if modelNode:
-      probeToRasTransformNode = self.valveModel.getProbeToRasTransformNode()
-      modelNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
-
-  def createValveRimModelNode(self):
-    modelsLogic = slicer.modules.models.logic()
-    polyData = vtk.vtkPolyData()
-    modelNode = modelsLogic.AddModel(polyData)
-    #modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString("valveRimModel"))
-    modelNode.SetName("valveRim")
-    self.valveModel.moveNodeToHeartValveFolder(modelNode)
-    modelNode.GetDisplayNode().SetColor(0.5, 0, 0.5)  # rgb pink
-    return modelNode
-
-  # annulusContourCurve replaced with valveRim everywhere
-
   # Annulus contour points
   def getValveRimMarkupNode(self):
     return self.valveModel.heartValveNode.GetNodeReference("valveRimPoints") if self.valveModel.heartValveNode else None
@@ -432,15 +406,16 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def createValveRimMarkupNode(self):
     # i could change 'annulus' to 'valveRim' here but no point since we're just returning a node
-    markupsLogic = slicer.modules.markups.logic()
-    valveRimMarkupNodeId = markupsLogic.AddNewFiducialNode()
-    valveRimMarkupNode = slicer.mrmlScene.GetNodeByID(valveRimMarkupNodeId)
-    valveRimMarkupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("valveRimMarkup"))
+    valveRimMarkupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode')
+    valveRimMarkupNode.SetName("valveRimMarkup")
     valveRimMarkupNode.SetMarkupLabelFormat("")  # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
     self.valveModel.moveNodeToHeartValveFolder(valveRimMarkupNode)
+    rimRadius = self.rimSizeSpinBox.value  # used to be 3
     valveRimMarkupDisplayNode = valveRimMarkupNode.GetDisplayNode()  # .SetColor(51,255,51)# rgb green
     valveRimMarkupDisplayNode.SetGlyphScale(
       self.valveModel.ANNULUS_CONTOUR_RADIUS * self.valveModel.ANNULUS_CONTOUR_MARKUP_SCALE * 2)
+    valveRimMarkupDisplayNode.SetCurveLineSizeMode(valveRimMarkupDisplayNode.UseLineDiameter)
+    valveRimMarkupDisplayNode.SetLineDiameter(rimRadius * 2)
     valveRimMarkupDisplayNode.SetColor(50, 255, 0.3)  # rgb pale yellow
     valveRimMarkupDisplayNode.SetVisibility(False) # added this
     return valveRimMarkupNode
@@ -448,17 +423,6 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
   #flat wide skirt around rim
   def getValveSkirtModelNode(self):
     return self.valveModel.heartValveNode.GetNodeReference("valveSkirt") if self.valveModel.heartValveNode else None
-
-
-  def setValveRimDefaults(self, valveRim):
-    import HeartValveLib
-    from HeartValveLib import SmoothCurve
-    rimRadius = self.rimSizeSpinBox.value  # used to be 3
-    valveRim.setInterpolationMethod(SmoothCurve.InterpolationSpline)
-    valveRim.setClosed(True)
-    valveRim.setTubeRadius(rimRadius)
-    valveRim.setCurveModelNode(None)
-    valveRim.controlPointsMarkupNode = None
 
   # calculates the factor by which you have to multiply the annulus points in plane
   # to shift them out so the inner edge of the rim is at the center of the annulus
@@ -471,7 +435,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def getAverageValveRadius(self):
     import HeartValveLib
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     numberOfPoints = annulusControlPoints.shape[1]
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
@@ -486,13 +450,16 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def createRimTube(self):
     import HeartValveLib
-    from HeartValveLib import SmoothCurve
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     numberOfPoints = annulusControlPoints.shape[1]
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
-    valveRim = SmoothCurve.SmoothCurve()
-    self.setValveRimDefaults(valveRim)
+
+    valveRim = self.getValveRimMarkupNode()
+    if not valveRim:
+      self.setValveRimMarkupNode(self.createValveRimMarkupNode())
+      valveRim = self.getValveRimMarkupNode()
+
     # STEP 1: Move annulus control points to valve plane
     # Concatenate a 4th line containing 1s so that we can transform the positions using
     # a single matrix multiplication.
@@ -506,27 +473,15 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     rimControlPoints_Plane = np.empty((3, numberOfPoints,))
     rimControlPoints_Plane[:] = np.NAN
     # move it out by tubeRadius mm, then bring it back in by shrinkRim mm ######################################
-    shiftFactor = self.calculateShiftFactor(annulusControlPoints_Plane, valveRim.tubeRadius - self.shrinkRimSpinBox.value)
+    shiftFactor = self.calculateShiftFactor(annulusControlPoints_Plane,
+                                            valveRim.GetDisplayNode().GetLineDiameter() - self.shrinkRimSpinBox.value)
     rimControlPoints_Plane[0:2, :] = shiftFactor * annulusControlPoints_Plane[0:2, :]
     rimControlPoints_Plane[2, :] = annulusControlPoints_Plane[2, :]  # do not scale z axis
     # STEP 3: Move shifted points back to original plane
     rimControlPoints_Plane = np.row_stack((rimControlPoints_Plane, np.ones(numberOfPoints)))
     rimControlPoints_World = np.dot(np.linalg.inv(transformWorldToPlaneMatrix), rimControlPoints_Plane)
     rimControlPoints_World = rimControlPoints_World[0:3, :]
-
-    if slicer.mrmlScene.GetFirstNodeByName("valveRim"):
-      slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName("valveRim"))
-    self.setValveRimModelNode(self.createValveRimModelNode())
-    #
-    valveRim.setCurveModelNode(self.getValveRimModelNode())  # moved here from end of setvalveRimModelNode
-    # setting valve.controlPointsMarkupNode
-    if not slicer.mrmlScene.GetFirstNodeByName("valveRimMarkup"):
-      self.setValveRimMarkupNode(self.createValveRimMarkupNode())
-    else:
-      self.setValveRimMarkupNode(self.getValveRimMarkupNode())
-    valveRim.setControlPointsMarkupNode(self.getValveRimMarkupNode())  # moved here from end of SetvalveRimMarkupNode
-    valveRim.setControlPointsFromArray(rimControlPoints_World)
-    valveRim.updateCurve()
+    slicer.util.updateMarkupsControlPointsFromArray(valveRim, rimControlPoints_World.T)
     return valveRim
 
   #If needed, shrink the rim/skirt to close the gap between rim and grown leaflets
@@ -563,11 +518,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def createRimStiffener(self, valveRimTopHeight, valveRimBottomHeight):
     import HeartValveLib
-    from HeartValveLib import SmoothCurve
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
-    numberOfPoints = annulusControlPoints.shape[1]
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
-    transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     numberOfLandmarkPoints = 80
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -586,7 +538,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     # find the corresponding closest points on the annulus (in Probe plane)
     for pointIndex in range(numberOfLandmarkPoints):
       pointOnCircle = valveRadiusSizeCirclePoints_Probe[0:3,pointIndex]
-      [closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex], _] = self.valveModel.annulusContourCurve.getClosestPoint(pointOnCircle)
+      closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex] = \
+        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurve, pointOnCircle)
       closestCorrespondingAnnulusPoints_Probe[3,pointIndex] = 1
 
     ###########
@@ -682,7 +635,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     magnitude = self.norm(vector)
     return [vector[i]/magnitude for i in range(len(vector))]
 
-  # project a vector onto a plane defined by it's normal
+  # project a vector onto a plane defined by its normal
   def projectVectorOntoPlane(self, vector, planeNormal):
     # To project vector onto plane: project the vector onto the normal of the plane and subtract that from the vector.
     # formula at https://www.maplesoft.com/support/help/Maple/view.aspx?path=MathApps/ProjectionOfVectorOntoPlane
@@ -692,7 +645,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def makeOrientationMarkerUsingSkirtWarp(self, markerText, markerRasVector, scaledDiskToProbeTspTransform):
     import HeartValveLib
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
 
     # before warping, skirt had inner radius 'averageValveRadius' and outer radius 'skirtOuterRadius'
@@ -783,7 +736,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     import HeartValveLib
     # import math
     numberOfLandmarkPoints = 80
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -801,7 +754,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     # find the corresponding closest points on the annulus (in Probe plane)
     for pointIndex in range(numberOfLandmarkPoints):
       pointOnCircle = valveRadiusSizeCirclePoints_Probe[0:3,pointIndex]
-      [closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex], _] = self.valveModel.annulusContourCurve.getClosestPoint(pointOnCircle)
+      closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex] = \
+        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurve, pointOnCircle)
       closestCorrespondingAnnulusPoints_Probe[3,pointIndex] = 1
 
     if self.shrinkRimSpinBox.value > 0:
@@ -896,7 +850,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     moldBox = vtk.vtkCubeSource()
     moldBox.SetBounds(-boxLength/2.0, boxLength/2.0, -boxLength/2.0, boxLength/2.0,zMin,zMax)
     #
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -931,7 +885,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     rectPrism = vtk.vtkCubeSource()
     rectPrism.SetBounds(xMin, xMax, yMin, yMax,zMin,zMax)
     #
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -1001,7 +955,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     triangleExtrusion.CappingOn()
 
     # Get ProbeToAnnulus and AnnulusToProve transforms
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -1396,7 +1350,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     #get annuls to probe transform
     import HeartValveLib
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -1437,7 +1391,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     # find the corresponding closest points on the annulus (in Probe plane)
     for pointIndex in range(numberOfTunnels):
       pointOnCircle = valveRadiusSizeCirclePoints_Probe[0:3,pointIndex]
-      [closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex], _] = self.valveModel.annulusContourCurve.getClosestPoint(pointOnCircle)
+      closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex] = \
+        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurve, pointOnCircle)
       closestCorrespondingAnnulusPoints_Probe[3,pointIndex] = 1
 
     # take shrinkSpinBox setting into consideration for tunnels placed above rim
@@ -1558,7 +1513,15 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     self.createAirTunnels()
 
     # add the mold models to MoldSegmentation
-    self.addModelToMoldSegmentation(valveRim.curveModelNode)
+    from HeartValveLib.util import createTubeModelFromPointArray
+    curveModelNode = createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(valveRim),
+                                                   color=valveRim.GetDisplayNode().GetColor(),
+                                                   radius=self.rimSizeSpinBox.value)[0]
+    curveModelNode.SetName("valveRim")
+    parentTransformNode = valveRim.GetParentTransformNode()
+    curveModelNode.SetAndObserveTransformNodeID(parentTransformNode.GetID() if parentTransformNode else None)
+    self.addModelToMoldSegmentation(curveModelNode)
+    slicer.mrmlScene.RemoveNode(curveModelNode)
     self.addModelToMoldSegmentation(valveRimStiffener)
     self.addModelToMoldSegmentation(valveSkirt)
     self.addModelToMoldSegmentation(moldBoxTop)
@@ -1778,8 +1741,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     # get planeNormal unit vector for valve
     import HeartValveLib
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
-    [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    [_, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     planeNormalUnitVector = (1 / np.linalg.norm(planeNormal)) * planeNormal
 
     # Apply translation to imageToWorldMatrix
@@ -1819,8 +1782,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     # get planeNormal unit vector for valve
     import HeartValveLib
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
-    [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    [_, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     planeNormalUnitVector = (1 / np.linalg.norm(planeNormal)) * planeNormal
 
     # Apply translation to imageToWorldMatrix
@@ -1860,8 +1823,8 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     # get planeNormal unit vector for valve
     import HeartValveLib
-    annulusControlPoints = self.valveModel.annulusContourCurve.getControlPointsAsArray()
-    [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    [_, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     planeNormalUnitVector = (1 / np.linalg.norm(planeNormal)) * planeNormal
 
     # Apply translation to imageToWorldMatrix
@@ -1908,7 +1871,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     logging.debug("Reloading LeafletMoldGenerator")
 
     packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'SmoothCurve', 'ValveRoi', 'ValveModel', 'HeartValves']
+    submoduleNames=['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves']
     import imp
     f, filename, description = imp.find_module(packageName)
     package = imp.load_module(packageName, f, filename, description)
@@ -1940,7 +1903,10 @@ class LeafletMoldGeneratorLogic(ScriptedLoadableModuleLogic):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     itemIDToClone = shNode.GetItemByDataNode(node)
     clonedItemID = slicer.modules.subjecthierarchy.logic().CloneSubjectHierarchyItem(shNode, itemIDToClone)
-    return shNode.GetItemDataNode(clonedItemID)
+    dataNode = shNode.GetItemDataNode(clonedItemID)
+    parentTransformNode = node.GetParentTransformNode()
+    dataNode.SetAndObserveTransformNodeID(parentTransformNode.GetID() if parentTransformNode else None)
+    return dataNode
 
   def __init__(self):
     ScriptedLoadableModuleLogic.__init__(self)

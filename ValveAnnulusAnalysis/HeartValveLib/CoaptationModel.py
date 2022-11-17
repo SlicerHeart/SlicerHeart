@@ -5,8 +5,6 @@
 import vtk, slicer
 import numpy as np
 import logging
-import HeartValveLib
-import SmoothCurve
 import operator
 
 
@@ -85,7 +83,7 @@ class CoaptationModel:
     numberOfBasePoints = self.baseLine.GetCurve().GetNumberOfPoints()
     numberOfMarginPoints = self.marginLine.GetCurve().GetNumberOfPoints()
     if numberOfBasePoints == 0 or numberOfMarginPoints == 0:
-      self.surfaceModelNode.SetAndObservePolyData(None)
+      self.surfaceModelNode.SetAndObservePolyData(vtk.vtkPolyData())
       return
 
     boundaryPoints = vtk.vtkPoints()

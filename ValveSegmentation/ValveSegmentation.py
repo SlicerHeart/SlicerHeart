@@ -45,7 +45,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     try:
       global HeartValveLib
       import HeartValveLib
-      import HeartValveLib.SmoothCurve
     except ImportError as exc:
       logging.error("{}: {}".format(self.moduleName, exc.message))
 
@@ -980,7 +979,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     logging.debug("Reloading ValveSegmentation")
 
     packageName = 'HeartValveLib'
-    submoduleNames = ['LeafletModel', 'SmoothCurve', 'ValveRoi', 'ValveModel', 'HeartValves']
+    submoduleNames = ['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves']
     import imp
     f, filename, description = imp.find_module(packageName)
     package = imp.load_module(packageName, f, filename, description)
