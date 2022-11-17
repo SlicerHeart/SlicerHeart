@@ -1,7 +1,5 @@
-import HeartValveLib
 import math
 import numpy as np
-import SmoothCurve
 
 
 class PapillaryModel:

@@ -140,15 +140,17 @@ class MeasurementPresetMitralValve(MeasurementPreset):
     if not mitralValveModel:
       return
 
+    from HeartValveLib.util import getFarthestCurvePointIndexToPosition
+
     if fieldId == 'APoint':  # A point (farthest from P)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')
       if pointP is not None:
-        [pointAPosition, pointAId] = mitralValveModel.annulusContourCurve.getFarthestPoint(pointP)
+        pointAPosition = getFarthestCurvePointIndexToPosition(mitralValveModel.annulusContourCurve, pointP)
         mitralValveModel.setAnnulusMarkupLabel('A', pointAPosition)
     elif fieldId == 'PPoint':  # P point (farthest from A)
       pointA = mitralValveModel.getAnnulusMarkupPositionByLabel('A')
       if pointA is not None:
-        [pointPPosition, pointPId] = mitralValveModel.annulusContourCurve.getFarthestPoint(pointA)
+        pointPPosition = getFarthestCurvePointIndexToPosition(mitralValveModel.annulusContourCurve, pointA)
         mitralValveModel.setAnnulusMarkupLabel('P', pointPPosition)
     elif fieldId == 'PmPoint':  # PM point (on the other side of the P-A line from AL, P-A orthogonal to AL-PM)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')
@@ -158,7 +160,7 @@ class MeasurementPresetMitralValve(MeasurementPreset):
         defaultAlPmPlaneNormal = pointP - pointA
         defaultAlPmPlanePosition = pointAl
         pmAlVector = pointAl - HeartValveLib.getPointProjectionToLine(pointAl, pointP, pointA)
-        [pointPm, pointAlDummy] = self.getCurveIntersectionApPointsWithPlane(mitralValveModel, defaultAlPmPlanePosition, defaultAlPmPlaneNormal, pmAlVector)
+        [pointPm, _] = self.getCurveIntersectionApPointsWithPlane(mitralValveModel, defaultAlPmPlanePosition, defaultAlPmPlaneNormal, pmAlVector)
         mitralValveModel.setAnnulusMarkupLabel('PM', pointPm)
     elif fieldId == 'AlPoint':  # AL point (on the other side of the P-A line from PM, P-A orthogonal to PM-AL)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')
@@ -168,7 +170,7 @@ class MeasurementPresetMitralValve(MeasurementPreset):
         defaultAlPmPlaneNormal = pointP - pointA
         defaultAlPmPlanePosition = pointPm
         alPmVector = pointPm - HeartValveLib.getPointProjectionToLine(pointPm, pointP, pointA)
-        [pointAl, pointPmDummy] = self.getCurveIntersectionApPointsWithPlane(mitralValveModel, defaultAlPmPlanePosition, defaultAlPmPlaneNormal, alPmVector)
+        [pointAl, _] = self.getCurveIntersectionApPointsWithPlane(mitralValveModel, defaultAlPmPlanePosition, defaultAlPmPlaneNormal, alPmVector)
         mitralValveModel.setAnnulusMarkupLabel('AL', pointAl)
     elif fieldId == 'PmcPoint':  # PMC point (on the other side of the P-A line from ALC, P-A orthogonal to ALC-PMC)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')
@@ -178,7 +180,7 @@ class MeasurementPresetMitralValve(MeasurementPreset):
         defaultAlcPmcPlaneNormal = pointP - pointA
         defaultAlcPmcPlanePosition = pointAlc
         pmcAlcVector = pointAlc - HeartValveLib.getPointProjectionToLine(pointAlc, pointP, pointA)
-        [pointPmc, pointAlcDummy] = self.getCurveIntersectionApPointsWithPlane(mitralValveModel, defaultAlcPmcPlanePosition, defaultAlcPmcPlaneNormal, pmcAlcVector)
+        [pointPmc, _] = self.getCurveIntersectionApPointsWithPlane(mitralValveModel, defaultAlcPmcPlanePosition, defaultAlcPmcPlaneNormal, pmcAlcVector)
         mitralValveModel.setAnnulusMarkupLabel('PMC', pointPmc)
     elif fieldId == 'AlcPoint':  # ALC point (on the other side of the P-A line from PMC, P-A orthogonal to PMC-ALC)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')
