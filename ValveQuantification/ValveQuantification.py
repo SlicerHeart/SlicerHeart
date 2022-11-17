@@ -1,7 +1,5 @@
 import vtk, qt, ctk, slicer
-import HeartValveLib
 from slicer.ScriptedLoadableModule import *
-import HeartValveLib.SmoothCurve
 from ValveQuantificationLib.MeasurementPreset import *
 import ValveQuantificationLib
 
@@ -94,7 +92,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     print("Reloading ValveQuantification")
 
     packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'SmoothCurve', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
+    submoduleNames=['LeafletModel', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
 
     self.reloadPackageWithSubmodules(packageName, submoduleNames)
 
@@ -759,12 +757,13 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           pointPositionAnnulus = valveModel.getAnnulusMarkupPositionByLabel(field[FIELD_NAME])
           if pointPositionAnnulus is None:
             # landmark is not present, add it
-            pointPos = valveModel.annulusContourCurve.getPointAlongCurve(0)
+            from HeartValveLib.util import getPositionAlongCurve
+            pointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, 0)
             valveModel.setAnnulusMarkupLabel(field[FIELD_NAME], pointPos)
             positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
             sliderWasBlocked = positionSlider.blockSignals(True)
             positionSlider.minimum = 0
-            positionSlider.maximum = valveModel.annulusContourCurve.getCurveLengthWorld()
+            positionSlider.maximum = valveModel.annulusContourCurve.GetCurveLengthWorld()
             positionSlider.value = 0
             positionSlider.blockSignals(sliderWasBlocked)
             self.onInputFieldValueChanged(inputFieldIndex, 0)

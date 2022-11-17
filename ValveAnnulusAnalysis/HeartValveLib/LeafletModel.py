@@ -8,7 +8,6 @@ import math
 import numpy as np
 import vtk.util.numpy_support as VN
 import vtkSegmentationCorePython as vtkSegmentationCore
-import SmoothCurve
 
 
 class LeafletModel:
@@ -382,7 +381,7 @@ class LeafletModel:
 
   def createSurfaceBoundaryFromCurve(self, valvePlanePosition, valvePlaneNormal, curve):
     """
-    :param curve SmoothCurve that will be used to generate surface boundary curve
+    :param curve MarkupsCurve that will be used to generate surface boundary curve
     """
     self.setValvePlanePosition(valvePlanePosition)
     self.setValvePlaneNormal(valvePlaneNormal)

@@ -48,9 +48,9 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     self.leafletSurfaceBoundaryMarkupNode = None
     self.leafletSurfaceBoundaryMarkupNodeObserver = None
     self.coaptationBaseLineMarkupNode = None
-    self.coaptationBaseLineMarkupNodeObserver = None
+    self.coaptationBaseLineMarkupNodeObservers = []
     self.coaptationMarginLineMarkupNode = None
-    self.coaptationMarginLineMarkupNodeObserver = None
+    self.coaptationMarginLineMarkupNodeObservers = []
 
     self.inverseVolumeRendering = False
 
@@ -463,42 +463,48 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def setAndObserveCoaptationBaseLineMarkupNode(self, coaptationBaseLineMarkupNode):
     logging.debug("Observe coaptation base node: {0}".format(coaptationBaseLineMarkupNode.GetName() if coaptationBaseLineMarkupNode else "None"))
-    if coaptationBaseLineMarkupNode == self.coaptationBaseLineMarkupNode and self.coaptationBaseLineMarkupNodeObserver:
+    if coaptationBaseLineMarkupNode == self.coaptationBaseLineMarkupNode and self.coaptationBaseLineMarkupNodeObservers:
       # no change and node is already observed
       logging.debug("Already observed")
       return
     # Remove observer to old node
-    if self.coaptationBaseLineMarkupNode and self.coaptationBaseLineMarkupNodeObserver:
-      self.coaptationBaseLineMarkupNode.RemoveObserver(self.coaptationBaseLineMarkupNodeObserver)
-      self.coaptationBaseLineMarkupNodeObserver = None
+    if self.coaptationBaseLineMarkupNode and self.coaptationBaseLineMarkupNodeObservers:
+      for obs in self.coaptationBaseLineMarkupNodeObservers:
+        self.coaptationBaseLineMarkupNode.RemoveObserver(obs)
+      self.coaptationBaseLineMarkupNodeObservers = []
     # Set and observe new node
     self.coaptationBaseLineMarkupNode = coaptationBaseLineMarkupNode
     if self.coaptationBaseLineMarkupNode:
-      self.coaptationBaseLineMarkupNodeObserver = \
-        self.coaptationBaseLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-                                                      self.onCoaptationLineMarkupNodeModified)
+      slot = self.onCoaptationLineMarkupNodeModified
+      self.coaptationBaseLineMarkupNodeObservers = [
+        self.coaptationBaseLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointAddedEvent, slot),
+        self.coaptationBaseLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent, slot),
+        self.coaptationBaseLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointRemovedEvent, slot)
+      ]
 
-    # Update model
     self.onCoaptationLineMarkupNodeModified()
 
   def setAndObserveCoaptationMarginLineMarkupNode(self, coaptationMarginLineMarkupNode):
     logging.debug("Observe coaptation margin node: {0}".format(coaptationMarginLineMarkupNode.GetName() if coaptationMarginLineMarkupNode else "None"))
-    if coaptationMarginLineMarkupNode == self.coaptationMarginLineMarkupNode and self.coaptationMarginLineMarkupNodeObserver:
+    if coaptationMarginLineMarkupNode == self.coaptationMarginLineMarkupNode and self.coaptationMarginLineMarkupNodeObservers:
       # no change and node is already observed
       logging.debug("Already observed")
       return
     # Remove observer to old node
-    if self.coaptationMarginLineMarkupNode and self.coaptationMarginLineMarkupNodeObserver:
-      self.coaptationMarginLineMarkupNode.RemoveObserver(self.coaptationMarginLineMarkupNodeObserver)
-      self.coaptationMarginLineMarkupNodeObserver = None
+    if self.coaptationMarginLineMarkupNode and self.coaptationMarginLineMarkupNodeObservers:
+      for obs in self.coaptationMarginLineMarkupNodeObservers:
+        self.coaptationMarginLineMarkupNode.RemoveObserver(obs)
+      self.coaptationMarginLineMarkupNodeObservers = []
     # Set and observe new node
     self.coaptationMarginLineMarkupNode = coaptationMarginLineMarkupNode
     if self.coaptationMarginLineMarkupNode:
-      self.coaptationMarginLineMarkupNodeObserver = \
-        self.coaptationMarginLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-                                                        self.onCoaptationLineMarkupNodeModified)
+      slot = self.onCoaptationLineMarkupNodeModified
+      self.coaptationMarginLineMarkupNodeObservers = [
+        self.coaptationMarginLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointAddedEvent, slot),
+        self.coaptationMarginLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent, slot),
+        self.coaptationMarginLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointRemovedEvent, slot)
+      ]
 
-    # Update model
     self.onCoaptationLineMarkupNodeModified()
 
   def getSelectedCoaptationModel(self):
@@ -581,19 +587,21 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     if self.getNumberOfControlPoints(baseLineMarkupNode) == 0:
       return
 
-    selectedBaseLinePointPosition = [0,0,0,1]
-    baseLineMarkupNode.GetNthFiducialWorldCoordinates(pointIndex, selectedBaseLinePointPosition)
+    selectedBaseLinePointPosition = [0,0,0]
+    baseLineMarkupNode.GetNthControlPointPositionWorld(pointIndex, selectedBaseLinePointPosition)
 
-    baseLineCurvePointId = selectedCoaptationModel.baseLine.getCurvePointIndexFromControlPointIndex(pointIndex)
-    directionVector_Probe = np.append(selectedCoaptationModel.baseLine.getDirectionVector(baseLineCurvePointId),0)
+    baseLineCurvePointId = selectedCoaptationModel.baseLine.GetCurvePointIndexFromControlPointIndex(pointIndex)
+    directionVector = [0,0,0]
+    selectedCoaptationModel.baseLine.GetCurveDirectionAtPointIndexWorld(baseLineCurvePointId, directionVector)
+    directionVector_Probe = np.append(directionVector, 0)
     probeToRasMatrix = vtk.vtkMatrix4x4()
     self.valveModel.getProbeToRasTransformNode().GetMatrixTransformToParent(probeToRasMatrix)
-    directionVector_Ras = probeToRasMatrix.MultiplyPoint(directionVector_Probe)
 
     import math
     orthoRotationDeg = math.atan2(directionVector_Probe[0], directionVector_Probe[1])/math.pi*180.0
 
-    self.valveModel.setSlicePositionAndOrientation(axialSlice, orthogonalSlice1, orthogonalSlice2, selectedBaseLinePointPosition, orthoRotationDeg)
+    self.valveModel.setSlicePositionAndOrientation(axialSlice, orthogonalSlice1, orthogonalSlice2,
+                                                   np.append(selectedBaseLinePointPosition, 1), orthoRotationDeg)
 
   def removeCoaptationSurface(self):
     selectedCoaptationModel = self.getSelectedCoaptationModel()

@@ -3,7 +3,8 @@ import HeartValveLib
 from HeartValveLib.util import (
   getSampledInterpolatedPointsAsArray,
   getClosestPointPositionAlongCurve,
-  getClosestCurvePointIndexToPosition
+  getClosestCurvePointIndexToPosition,
+  getFarthestCurvePointIndexToPosition
 )
 
 import vtk
@@ -500,12 +501,12 @@ class MeasurementPresetCavc(MeasurementPreset):
     if fieldId=='LPoint': # L point (farthest from R)
       pointR = cavcValveModel.getAnnulusMarkupPositionByLabel('R')
       if pointR is not None:
-        [pointLPosition, pointLId] = cavcValveModel.annulusContourCurve.getFarthestPoint(pointR)
+        pointLPosition = getFarthestCurvePointIndexToPosition(cavcValveModel.annulusContourCurve, pointR)
         cavcValveModel.setAnnulusMarkupLabel('L', pointLPosition)
     elif fieldId=='RPoint': # R point (farthest from L)
       pointL = cavcValveModel.getAnnulusMarkupPositionByLabel('L')
       if pointL is not None:
-        [pointRPosition, pointRId] = cavcValveModel.annulusContourCurve.getFarthestPoint(pointL)
+        pointRPosition = getFarthestCurvePointIndexToPosition(cavcValveModel.annulusContourCurve, pointL)
         cavcValveModel.setAnnulusMarkupLabel('R', pointRPosition)
     elif fieldId=='MpPoint': # MP point (on the other side of the L-R line from MA, L-R orthogonal to MA-MP)
       pointL = cavcValveModel.getAnnulusMarkupPositionByLabel('L')

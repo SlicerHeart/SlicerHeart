@@ -11,7 +11,6 @@ set(MODULE_PYTHON_SCRIPTS
   HeartValveLib/HeartValvesSubjectHierarchyPlugin
   HeartValveLib/ValveRoi
   HeartValveLib/LeafletModel
-  HeartValveLib/SmoothCurve
   HeartValveLib/ValveModel
   HeartValveLib/PapillaryModel
   HeartValveLib/CoaptationModel
