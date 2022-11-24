@@ -570,14 +570,6 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     colorTableRangeMm = float(self.parameterNode.GetParameter("ColorTableRangeMm"))
     colorNode = self.parameterNode.GetNodeReference('DisplacementToColorNode')
 
-    colorWidget = slicer.modules.colors.widgetRepresentation()
-    colorWidget.setCurrentColorNode(colorNode)
-    ctkScalarBarWidget = slicer.util.findChildren(colorWidget, name='VTKScalarBar')[0]
-    ctkScalarBarWidget.setDisplay(1)
-    ctkScalarBarWidget.setTitle("Radial\nCompression\n")
-    ctkScalarBarWidget.setMaxNumberOfColors(256)
-    ctkScalarBarWidget.setLabelsFormat('%4.1f mm')
-
     colorMap = colorNode.GetColorTransferFunction()
     colorMap.RemoveAllPoints()
     colorMap.AddRGBPoint(colorTableRangeMm * 0.0, 0.0, 0.0, 1.0)
@@ -1025,6 +1017,10 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
           model.GetDisplayNode().SetScalarRangeFlag(model.GetDisplayNode().UseColorNodeScalarRange)
           model.GetDisplayNode().AutoScalarRangeOff()
           model.GetDisplayNode().SetScalarRange(0, colorTableRangeMm)
+          colorLegendDisplayNode = slicer.modules.colors.logic().AddDefaultColorLegendDisplayNode(model)
+          colorLegendDisplayNode.SetTitleText("Radial\nCompression\n")
+          colorLegendDisplayNode.SetMaxNumberOfColors(256)
+          colorLegendDisplayNode.SetLabelFormat('%4.1f mm')
 
 
   def createModelNode(self, name, color):
@@ -1356,7 +1352,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
           deformedHandlesNode.SetNthFiducialPosition(handleID, pointOnVessel)
         except:
           # Legacy API
-          deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, pointOnVessel)
+          deformedHandlesNode.SetNthControlPointPosition(handleID, pointOnVessel)
       else:
         # Check if handle point is outside of vessel walls; only deform (shrink) if it is. Device should not be expanded to fit
         # vessel walls because most/all RVOT devices cannot be expanded beyond their native form; they can only be compressed.
@@ -1371,9 +1367,9 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
         except:
           # Legacy API
           if distanceVesselToCenterline < distanceDeviceToCenterline:
-            deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, pointOnVessel)
+            deformedHandlesNode.SetNthControlPointPosition(handleID, pointOnVessel)
           else:
-            deformedHandlesNode.SetNthFiducialPositionFromArray(handleID, originalHandlePoint)
+            deformedHandlesNode.SetNthControlPointPosition(handleID, originalHandlePoint)
 
     deformedHandlesNode.EndModify(wasModifying)
 
