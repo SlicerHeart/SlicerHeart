@@ -586,6 +586,8 @@ def main(argv):
   parser.add_argument("-ph", "--phases", metavar="PHASE_SHORTNAME", type=str, nargs="+", required=True,
                       help="cardiac phases which will be exported")
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG, "--export_annulus_coordinates", action='store_true')
+  parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_1, "--annulus_curve_point_coordinates", action='store_true')
+  parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_2, "--annulus_control_point_coordinates", action='store_true')
   parser.add_argument(QuantificationResultsExportRule.CMD_FLAG, "--export_quantification_results", action='store_true')
   parser.add_argument(ValveLandmarkCoordinatesExportRule.CMD_FLAG, "--export_landmark_coordinates", action='store_true')
   parser.add_argument(PapillaryAnalysisResultsExportRule.CMD_FLAG, "--export_papillary_results", action='store_true')
@@ -621,6 +623,8 @@ def main(argv):
   if args.export_quantification_results:
     logic.addRule(QuantificationResultsExportRule)
   if args.export_annulus_coordinates:
+    AnnulusContourCoordinatesExportRule.EXPORT_CURVE_POINT_COORDINATES = args.annulus_curve_point_coordinates
+    AnnulusContourCoordinatesExportRule.EXPORT_CONTROL_POINT_COORDINATES = args.annulus_control_point_coordinates
     logic.addRule(AnnulusContourCoordinatesExportRule)
   if args.export_landmark_coordinates:
     logic.addRule(ValveLandmarkCoordinatesExportRule)
