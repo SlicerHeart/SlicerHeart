@@ -728,15 +728,14 @@ class ValveModel:
       self.annulusContourCurve.EndModify(wasModify)
 
     def hasStoredAnnulusContour(self):
-      originalPoints = self.heartValveNode.GetAttribute("AnnulusContourCoordinates")
-      return originalPoints is not None
+      return self.annulusContourCurve.GetAttribute("AnnulusContourCoordinates") is not None
 
     def storeAnnulusContour(self):
       arr = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurve)
-      self.heartValveNode.SetAttribute("AnnulusContourCoordinates", str(arr.tobytes()))
+      self.annulusContourCurve.SetAttribute("AnnulusContourCoordinates", str(arr.tobytes()))
 
     def restoreAnnulusContour(self):
-      originalPoints = self.heartValveNode.GetAttribute("AnnulusContourCoordinates")
+      originalPoints = self.annulusContourCurve.GetAttribute("AnnulusContourCoordinates")
       if not originalPoints:
         return
       import numpy as np
