@@ -496,15 +496,15 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
     shNode.RemoveItemAttribute(valveNodeItemId,
                                slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelAttributeName())
 
-    # replace deprecated annulus SmoothCurves
-    annulusContourModel = scriptedModuleNode.GetNodeReference("AnnulusContourModel")
-    annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
-    annulusPoints = None
-    if annulusContourNode and annulusContourModel:
-      annulusPoints = slicer.util.arrayFromMarkupsControlPoints(annulusContourNode)
-      slicer.mrmlScene.RemoveNode(annulusContourNode)
-      slicer.mrmlScene.RemoveNode(annulusContourModel)
+    unsmoothedAnnulusPoints = scriptedModuleNode.GetAttribute("AnnulusContourCoordinates")
+    hasUnsmoothedAnnulusPoints = unsmoothedAnnulusPoints is not None
+    if hasUnsmoothedAnnulusPoints:
+      annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
+      annulusContourNode.SetAttribute("AnnulusContourCoordinates", unsmoothedAnnulusPoints)
+      scriptedModuleNode.RemoveAttribute("AnnulusContourCoordinates")
 
+    # replace deprecated annulus SmoothCurves
+    updateLegacyAnnulusCurveNode(scriptedModuleNode)
     removeEmptyLeafletSegments(scriptedModuleNode)
     updateLegacyPapillaryMuscleNodes(scriptedModuleNode)
     updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode)
@@ -512,17 +512,6 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
 
     valveModel = getValveModel(scriptedModuleNode)
     if valveModel is not None:
-      # set annulus contour settings
-      if annulusPoints is not None:
-        annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
-        slicer.mrmlScene.RemoveNode(annulusContourNode)
-        valveModel.setAnnulusContourMarkupNode(valveModel.createAnnulusContourMarkupNode())
-        annulusMarkupNode = valveModel.annulusContourCurve
-        slicer.util.updateMarkupsControlPointsFromArray(annulusMarkupNode, annulusPoints)
-        annulusMarkupNode.SetLocked(True)
-        for ptIdx in range(annulusMarkupNode.GetNumberOfControlPoints()):
-          annulusMarkupNode.SetNthControlPointVisibility(ptIdx, False)
-
       annulusLabelsMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
       if annulusLabelsMarkupNode:
         annulusLabelsMarkupNode.SetLocked(True)
@@ -655,6 +644,8 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
 
 
 def updateLegacyCoaptationModelNodes(scriptedModuleNode):
+  logging.debug(f"updateLegacyCoaptationModelNodes for {scriptedModuleNode.GetName()}")
+
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
 
@@ -706,6 +697,7 @@ def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diame
 
 
 def removeEmptyLeafletSegments(scriptedModuleNode):
+  logging.debug(f"removeEmptyLeafletSegments from {scriptedModuleNode.GetName()}")
   leafletSegmentationNode = scriptedModuleNode.GetNodeReference("LeafletSegmentation")
   from SegmentStatisticsPlugins import LabelmapSegmentStatisticsPlugin
   labelStatisticsPlugin = LabelmapSegmentStatisticsPlugin()
@@ -724,7 +716,30 @@ def removeEmptyLeafletSegments(scriptedModuleNode):
   slicer.mrmlScene.RemoveNode(parameterNode)
 
 
+def updateLegacyAnnulusCurveNode(scriptedModuleNode):
+  logging.debug(f"updateLegacyAnnulusCurveNode for {scriptedModuleNode.GetName()}")
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+
+  annulusContourModel = scriptedModuleNode.GetNodeReference("AnnulusContourModel")
+  annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
+  from HeartValveLib.ValveModel import ValveModel
+  if annulusContourModel:
+    annulusMarkupNode = \
+      markupsCurveFromMarkupsFiducialNode(annulusContourNode, 'vtkMRMLMarkupsClosedCurveNode',
+                                          diameter=ValveModel.ANNULUS_CONTOUR_RADIUS*2,
+                                          color=annulusContourModel.GetDisplayNode().GetColor())
+    scriptedModuleNode.SetNodeReferenceID("AnnulusContourPoints", annulusMarkupNode.GetID())
+    moveNodeToHeartValveFolder(valveNodeItemId, annulusMarkupNode)
+    annulusMarkupNode.SetLocked(True)
+    for ptIdx in range(annulusMarkupNode.GetNumberOfControlPoints()):
+      annulusMarkupNode.SetNthControlPointVisibility(ptIdx, False)
+    slicer.mrmlScene.RemoveNode(annulusContourModel)
+    slicer.mrmlScene.RemoveNode(annulusContourNode)
+
+
 def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode):
+  logging.debug(f"updateLegacyLeafletSurfaceBoundaryNodes for {scriptedModuleNode.GetName()}")
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
 
@@ -767,6 +782,8 @@ def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
 
 
 def updateLegacyPapillaryMuscleNodes(scriptedModuleNode):
+  logging.debug(f"updateLegacyPapillaryMuscleNodes for {scriptedModuleNode.GetName()}")
+
   # replace papillary muscle SmoothCurves
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
