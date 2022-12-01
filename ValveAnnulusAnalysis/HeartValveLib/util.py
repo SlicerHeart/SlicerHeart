@@ -276,6 +276,11 @@ def getClosestCurvePointIndexToPosition(markupsCurveNode, position):
     toWorldCoordinates(markupsCurveNode, position)
   )
 
+def getClosestControlPointIndexToPositionWorld(markupsCurveNode, position):
+  return markupsCurveNode.GetClosestControlPointIndexToPositionWorld(
+    toWorldCoordinates(markupsCurveNode, position)
+  )
+
 
 def getFarthestCurvePointIndexToPosition(markupsCurveNode, position):
   import numpy as np
