@@ -676,12 +676,23 @@ def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diame
   dNode.Copy(markupsFiducialNode.GetDisplayNode())
   markupsCurveNode.Copy(markupsFiducialNode)
   markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
+  removeStorageNode(markupsCurveNode)
   dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
   if diameter:
     dNode.SetLineDiameter(diameter)
   if color:
     dNode.SetSelectedColor(color)
   return markupsCurveNode
+
+
+def removeStorageNode(node):
+  if node.GetStorageNode():
+    slicer.mrmlScene.RemoveNode(node.GetStorageNode())
+  if node.GetStorageNodeID():
+    storageNode = slicer.mrmlScene.GetNodeByID(node.GetStorageNodeID())
+    if storageNode:
+      slicer.mrmlScene.RemoveNode(storageNode)
+    node.SetAndObserveStorageNodeID(None)
 
 
 def removeEmptyLeafletSegments(scriptedModuleNode):
