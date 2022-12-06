@@ -673,6 +673,9 @@ def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diame
   markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass(markupsClass)
   markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
   dNode = markupsCurveNode.GetDisplayNode()
+  if not dNode:
+    markupsCurveNode.CreateDefaultDisplayNodes()
+    dNode = markupsCurveNode.GetDisplayNode()
   dNode.Copy(markupsFiducialNode.GetDisplayNode())
   markupsCurveNode.Copy(markupsFiducialNode)
   markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
