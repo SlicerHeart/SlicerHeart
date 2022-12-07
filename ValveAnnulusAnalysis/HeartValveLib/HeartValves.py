@@ -1,6 +1,11 @@
+import os
+import vtk
+import slicer
 import HeartValveLib
 from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
-import vtk, qt, ctk, slicer
+from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
+from HeartValveLib.util import getAllSegmentIDs
+
 import logging
 
 # Dictionary that stores a ValveModel Python object for each MRML node in the scene.
@@ -33,7 +38,6 @@ def setup(usPresetsScenePath):
 
 
 def getTerminologyFile():
-  import os
   moduleDir = os.path.dirname(slicer.modules.valveannulusanalysis.path)
   terminologyFile = os.path.join(moduleDir, 'Resources', 'SlicerHeartSegmentationCategoryTypeModifier.json')
   return terminologyFile
@@ -43,23 +47,22 @@ def getValveModel(heartValveNode):
   if heartValveNode is None:
     return None
 
-  if heartValveNode in ValveModels.keys():
-    return ValveModels[heartValveNode]
+  try:
+    valveModel = ValveModels[heartValveNode]
+  except KeyError:
+    from HeartValveLib.ValveModel import ValveModel
+    valveModel = ValveModel()
+    valveModel.setHeartValveNode(heartValveNode)
 
-  from HeartValveLib.ValveModel import ValveModel
-  valveModel = ValveModel()
-  valveModel.setHeartValveNode(heartValveNode)
+    # For legacy scenes
+    setSequenceBrowserNodeDisplayIndex(valveModel)
 
-  # For legacy scenes
-  setSequenceBrowserNodeDisplayIndex(valveModel)
-
-  ValveModels[heartValveNode] = valveModel
+    ValveModels[heartValveNode] = valveModel
   return valveModel
 
 
 def setHeartOrientationmarker(viewNodeId):
   import slicer
-  import os
   viewNode = slicer.mrmlScene.GetNodeByID(viewNodeId)
   if HeartOrientationMarkerType == "axes":
     viewNode.SetOrientationMarkerType(slicer.vtkMRMLAbstractViewNode.OrientationMarkerTypeAxes)
@@ -252,7 +255,7 @@ def showSlices(show):
     return
 
   # If slice views are linked then changing properties would repeatedly change
-  # properites in all the views, so we temporarily disable slice linking
+  # properties in all the views, so we temporarily disable slice linking
   viewNames = ['Red', 'Yellow', 'Green']
   [oldLink, oldHotLink] = HeartValveLib.setSliceViewsLink(viewNames, False, False)
   for viewName in viewNames:
@@ -331,7 +334,6 @@ def registerCustomVrPresets(usPresetsScenePath):
   """
   Set volume rendering presets from Resources/VrPresets/US-VrPresets.mrml
   """
-  import os
 
   if not os.path.isfile(usPresetsScenePath):
     logging.warning('Volume rendering presets are not found at {0}'.format(usPresetsScenePath))
@@ -428,13 +430,7 @@ def copyNodeContentToNewScriptedModuleNode(oldDataNode, shNode):
 
 def useCurrentValveVolumeAsLeafletVolume(valveModel):
   goToAnalyzedFrame(valveModel)
-  volumeNode = valveModel.getValveVolumeNode()
-  if not volumeNode:
-    appLogic = slicer.app.applicationLogic()
-    selNode = appLogic.GetSelectionNode()
-    if selNode.GetActiveVolumeID():
-      volumeNode = slicer.mrmlScene.GetNodeByID(selNode.GetActiveVolumeID())
-      valveModel.setValveVolumeNode(volumeNode)
+  volumeNode = getOrSetValveVolumeNode(valveModel)
   leafletVolumeNode = valveModel.getLeafletVolumeNode()
   name = f"{valveModel.heartValveNode.GetName()}-segmented"
   if leafletVolumeNode is None:
@@ -450,7 +446,20 @@ def useCurrentValveVolumeAsLeafletVolume(valveModel):
     leafletVolumeNode.SetAndObserveDisplayNodeID(leafletVolumeNodeOriginalDisplayNodeId)
 
 
+def getOrSetValveVolumeNode(valveModel):
+  volumeNode = valveModel.getValveVolumeNode()
+  if not volumeNode:
+    appLogic = slicer.app.applicationLogic()
+    selNode = appLogic.GetSelectionNode()
+    if selNode.GetActiveVolumeID():
+      volumeNode = slicer.mrmlScene.GetNodeByID(selNode.GetActiveVolumeID())
+      valveModel.setValveVolumeNode(volumeNode)
+  return volumeNode
+
+
 def updateLegacyHeartValveNodes(unused1=None, unused2=None):
+  import time
+  startTime = time.time()
   logging.debug("updateLegacyHeartValveNodes")
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
 
@@ -475,51 +484,22 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
     # Save old->new node ID mapping
     newShItemNodeIds[legacyShNode.GetID()] = newHeartValveNode.GetID()
 
+  heartValves = list(getAllModuleSpecificScriptableNodes("HeartValve"))
   # Update HeartValve nodes
-  for scriptedModuleNode in slicer.util.getNodesByClass('vtkMRMLScriptedModuleNode'):
-    if scriptedModuleNode.GetAttribute("ModuleName") != "HeartValve":
-      continue
-    # fix icons
+  updateLegacyAnnulusCurveNode(heartValves)
+  removeEmptyLeafletSegments(heartValves)
+  updateLegacyPapillaryMuscleNodes(heartValves)
+  updateLegacyLeafletSurfaceBoundaryNodes(heartValves)
+  updateLegacyCoaptationModelNodes(heartValves)
+  ensureLeafletVolumeAssociatedWithSegmentations(heartValves)
+
+  # fix icons
+  for scriptedModuleNode in heartValves:
     valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
     shNode.RemoveItemAttribute(valveNodeItemId,
                                slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelAttributeName())
 
-    unsmoothedAnnulusPoints = scriptedModuleNode.GetAttribute("AnnulusContourCoordinates")
-    hasUnsmoothedAnnulusPoints = unsmoothedAnnulusPoints is not None
-    if hasUnsmoothedAnnulusPoints:
-      annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
-      annulusContourNode.SetAttribute("AnnulusContourCoordinates", unsmoothedAnnulusPoints)
-      scriptedModuleNode.RemoveAttribute("AnnulusContourCoordinates")
-
-    # replace deprecated annulus SmoothCurves
-    updateLegacyAnnulusCurveNode(scriptedModuleNode)
-    removeEmptyLeafletSegments(scriptedModuleNode)
-    updateLegacyPapillaryMuscleNodes(scriptedModuleNode)
-    updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode)
-    updateLegacyCoaptationModelNodes(scriptedModuleNode)
-
-    valveModel = getValveModel(scriptedModuleNode)
-    if valveModel is not None:
-      annulusLabelsMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
-      if annulusLabelsMarkupNode:
-        annulusLabelsMarkupNode.SetLocked(True)
-
-      # ensure heart valve is parent in subject hierarchy
-      segNode = valveModel.getLeafletSegmentationNode()
-      shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
-      valveModel.updateValveNodeNames()
-
-      # ensure master volume node of segmentation is not the sequence proxy and was extracted from the set frame index
-      fixedVolumeNode = valveModel.getLeafletVolumeNode()
-      if fixedVolumeNode is not None:
-        slicer.mrmlScene.RemoveNode(fixedVolumeNode)
-      useCurrentValveVolumeAsLeafletVolume(valveModel)
-      fixedVolumeNode = valveModel.getLeafletVolumeNode()
-      segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
-      logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
-                    f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
-
-    # Convert heart valve measurement nodes
+  # Convert heart valve measurement nodes
   legacyShNodes = slicer.util.getNodesByClass("vtkMRMLSubjectHierarchyLegacyNode")
   for legacyShNode in legacyShNodes:
     if legacyShNode.GetAttribute("ModuleName") != "HeartValveMeasurement":
@@ -608,7 +588,6 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
   for storageNode in storageNodes:
     if storageNode.GetWriteStateAsString() != 'SkippedNoData':
       continue
-    import os.path
     if not os.path.isfile(storageNode.GetFileName()):
       continue
     storageNode.SetWriteState(slicer.vtkMRMLModelStorageNode.Idle)
@@ -630,147 +609,243 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
       modelStorageNode.ReadData(orientationMarkerNode)
       slicer.mrmlScene.RemoveNode(modelStorageNode)
 
-
-def updateLegacyCoaptationModelNodes(scriptedModuleNode):
-  logging.debug(f"updateLegacyCoaptationModelNodes for {scriptedModuleNode.GetName()}")
-
-  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
-
-  numCoaptationBaseLineModels = scriptedModuleNode.GetNumberOfNodeReferences("CoaptationBaseLineModel")
-  numCoaptationMarginLineModels = scriptedModuleNode.GetNumberOfNodeReferences("CoaptationMarginLineModel")
-  if numCoaptationBaseLineModels > 0 and numCoaptationMarginLineModels > 0:
-    for coaptationModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("CoaptationBaseLineModel")):
-      marginLineModelNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineModel", coaptationModelIndex)
-      marginLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
-      newMarginLineMarkupsCurveNode = \
-        markupsCurveFromMarkupsFiducialNode(marginLineMarkupNode, markupsClass='vtkMRMLMarkupsCurveNode',
-                                            diameter=0.5, color=marginLineModelNode.GetDisplayNode().GetColor())
-      scriptedModuleNode.SetNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex,
-                                               newMarginLineMarkupsCurveNode.GetID())
-      moveNodeToHeartValveFolder(valveNodeItemId, newMarginLineMarkupsCurveNode, 'CoaptationEdit')
-
-      baseLineModelNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineModel", coaptationModelIndex)
-      baseLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
-      newBaseLineMarkupsCurveNode = \
-        markupsCurveFromMarkupsFiducialNode(baseLineMarkupNode, markupsClass='vtkMRMLMarkupsCurveNode',
-                                            diameter=0.5, color=baseLineModelNode.GetDisplayNode().GetColor())
-      scriptedModuleNode.SetNthNodeReferenceID("CoaptationBaseLineMarkup", coaptationModelIndex,
-                                               newBaseLineMarkupsCurveNode.GetID())
-      moveNodeToHeartValveFolder(valveNodeItemId, newBaseLineMarkupsCurveNode, 'CoaptationEdit')
-
-  coaptationEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "CoaptationEdit")
-  if coaptationEditFolderId:
-    children = vtk.vtkCollection()
-    shNode.GetDataNodesInBranch(coaptationEditFolderId, children)
-    for childIdx in range(children.GetNumberOfItems()):
-      child = children.GetItemAsObject(childIdx)
-      if not type(child) is slicer.vtkMRMLMarkupsCurveNode:
-        slicer.mrmlScene.RemoveNode(child)
+  stopTime = time.time()
+  logging.debug(f'updateLegacyHeartValveNodes completed in {stopTime - startTime:.2f} seconds')
 
 
-def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diameter=None, color=None):
-  markupsCurveNode = slicer.mrmlScene.AddNewNodeByClass(markupsClass)
+def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diameter=0.25, glyphSize=1.0, color=None):
+  markupsCurveNode = markupsClass()
   markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
+  for idx in range(markupsFiducialNode.GetNumberOfControlPoints()):
+    markupsCurveNode.AddControlPoint(
+      markupsFiducialNode.GetNthControlPointPosition(idx),
+      markupsFiducialNode.GetNthControlPointLabel(idx)
+    )
+  slicer.mrmlScene.AddNode(markupsCurveNode)
+  markupsCurveNode.SetName(markupsFiducialNode.GetName())
   dNode = markupsCurveNode.GetDisplayNode()
   if not dNode:
     markupsCurveNode.CreateDefaultDisplayNodes()
     dNode = markupsCurveNode.GetDisplayNode()
-  dNode.Copy(markupsFiducialNode.GetDisplayNode())
-  markupsCurveNode.Copy(markupsFiducialNode)
-  markupsCurveNode.SetAndObserveDisplayNodeID(dNode.GetID())
-  removeStorageNode(markupsCurveNode)
-  dNode.SetCurveLineSizeMode(dNode.UseLineDiameter)
+  from HeartValveLib.ValveModel import ValveModel
+  if glyphSize:
+    ValveModel.setGlyphSize(markupsCurveNode, glyphSize)
   if diameter:
-    dNode.SetLineDiameter(diameter)
+    ValveModel.setLineDiameter(markupsCurveNode, diameter)
   if color:
     dNode.SetSelectedColor(color)
+  for attr in markupsFiducialNode.GetAttributeNames():
+    markupsCurveNode.SetAttribute(attr, markupsFiducialNode.GetAttribute(attr))
+  markupsCurveNode.SetDisplayVisibility(markupsFiducialNode.GetDisplayVisibility())
+  markupsCurveNode.GetDisplayNode().SetPropertiesLabelVisibility(False)
   return markupsCurveNode
 
 
-def removeStorageNode(node):
-  if node.GetStorageNode():
-    slicer.mrmlScene.RemoveNode(node.GetStorageNode())
-  if node.GetStorageNodeID():
-    storageNode = slicer.mrmlScene.GetNodeByID(node.GetStorageNodeID())
-    if storageNode:
-      slicer.mrmlScene.RemoveNode(storageNode)
-    node.SetAndObserveStorageNodeID(None)
-
-
-def removeEmptyLeafletSegments(scriptedModuleNode):
-  logging.debug(f"removeEmptyLeafletSegments from {scriptedModuleNode.GetName()}")
-  leafletSegmentationNode = scriptedModuleNode.GetNodeReference("LeafletSegmentation")
-  from SegmentStatisticsPlugins import LabelmapSegmentStatisticsPlugin
-  labelStatisticsPlugin = LabelmapSegmentStatisticsPlugin()
-  parameterNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
-  parameterNode.SetParameter("Segmentation", leafletSegmentationNode.GetID())
-  labelStatisticsPlugin.setParameterNode(parameterNode)
-  from HeartValveLib.util import getAllSegmentIDs
-  for segmentID in getAllSegmentIDs(leafletSegmentationNode):
-    if segmentID == VALVE_MASK_SEGMENT_ID:
-      continue
-    stats = labelStatisticsPlugin.computeStatistics(segmentID)
-    if stats["voxel_count"] == 0:
-      segment = leafletSegmentationNode.GetSegmentation().GetSegment(segmentID)
-      logging.debug(f"Found empty segment {segment.GetName()} for {scriptedModuleNode.GetName()}. Removing it.")
-      leafletSegmentationNode.RemoveSegment(segmentID)
-  slicer.mrmlScene.RemoveNode(parameterNode)
-
-
-def updateLegacyAnnulusCurveNode(scriptedModuleNode):
-  logging.debug(f"updateLegacyAnnulusCurveNode for {scriptedModuleNode.GetName()}")
+def updateLegacyAnnulusCurveNode(scriptedModuleNodes):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+  for scriptedModuleNode in scriptedModuleNodes:
+    logging.debug(f"updateLegacyAnnulusCurveNode for {scriptedModuleNode.GetName()}")
+    unSmoothedAnnulusPoints = scriptedModuleNode.GetAttribute("AnnulusContourCoordinates")
+    hasUnSmoothedAnnulusPoints = unSmoothedAnnulusPoints is not None
+    if hasUnSmoothedAnnulusPoints:
+      annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
+      annulusContourNode.SetAttribute("AnnulusContourCoordinates", unSmoothedAnnulusPoints)
+      scriptedModuleNode.RemoveAttribute("AnnulusContourCoordinates")
 
-  annulusContourModel = scriptedModuleNode.GetNodeReference("AnnulusContourModel")
-  annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
-  from HeartValveLib.ValveModel import ValveModel
-  if annulusContourModel:
-    annulusMarkupNode = \
-      markupsCurveFromMarkupsFiducialNode(annulusContourNode, 'vtkMRMLMarkupsClosedCurveNode',
-                                          diameter=ValveModel.ANNULUS_CONTOUR_RADIUS*2,
-                                          color=annulusContourModel.GetDisplayNode().GetColor())
-    scriptedModuleNode.SetNodeReferenceID("AnnulusContourPoints", annulusMarkupNode.GetID())
-    moveNodeToHeartValveFolder(valveNodeItemId, annulusMarkupNode)
-    annulusMarkupNode.SetLocked(True)
-    for ptIdx in range(annulusMarkupNode.GetNumberOfControlPoints()):
-      annulusMarkupNode.SetNthControlPointVisibility(ptIdx, False)
-    slicer.mrmlScene.RemoveNode(annulusContourModel)
-    slicer.mrmlScene.RemoveNode(annulusContourNode)
+    valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+
+    annulusContourModel = scriptedModuleNode.GetNodeReference("AnnulusContourModel")
+    annulusContourNode = scriptedModuleNode.GetNodeReference("AnnulusContourPoints")
+    from HeartValveLib.ValveModel import ValveModel
+    if annulusContourModel:
+      annulusMarkupNode = \
+        markupsCurveFromMarkupsFiducialNode(annulusContourNode, slicer.vtkMRMLMarkupsClosedCurveNode,
+                                            diameter=ValveModel.ANNULUS_CONTOUR_RADIUS*2,
+                                            glyphSize=ValveModel.ANNULUS_CONTOUR_MARKUP_SCALE,
+                                            color=annulusContourModel.GetDisplayNode().GetColor())
+      scriptedModuleNode.SetNodeReferenceID("AnnulusContourPoints", annulusMarkupNode.GetID())
+      moveNodeToHeartValveFolder(valveNodeItemId, annulusMarkupNode)
+      annulusMarkupNode.SetLocked(True)
+      for ptIdx in range(annulusMarkupNode.GetNumberOfControlPoints()):
+        annulusMarkupNode.SetNthControlPointVisibility(ptIdx, False)
+      slicer.mrmlScene.RemoveNode(annulusContourModel)
+      slicer.mrmlScene.RemoveNode(annulusContourNode)
 
 
-def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNode):
-  logging.debug(f"updateLegacyLeafletSurfaceBoundaryNodes for {scriptedModuleNode.GetName()}")
+def removeEmptyLeafletSegments(scriptedModuleNodes):
+  for scriptedModuleNode in scriptedModuleNodes:
+    logging.debug(f"removeEmptyLeafletSegments from {scriptedModuleNode.GetName()}")
+    leafletSegmentationNode = scriptedModuleNode.GetNodeReference("LeafletSegmentation")
+    from SegmentStatisticsPlugins import LabelmapSegmentStatisticsPlugin
+    labelStatisticsPlugin = LabelmapSegmentStatisticsPlugin()
+    parameterNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
+    parameterNode.SetParameter("Segmentation", leafletSegmentationNode.GetID())
+    labelStatisticsPlugin.setParameterNode(parameterNode)
+    for segmentID in getAllSegmentIDs(leafletSegmentationNode):
+      if segmentID == VALVE_MASK_SEGMENT_ID:
+        continue
+      stats = labelStatisticsPlugin.computeStatistics(segmentID)
+      if stats["voxel_count"] == 0:
+        segment = leafletSegmentationNode.GetSegmentation().GetSegment(segmentID)
+        logging.debug(f"Found empty segment {segment.GetName()} for {scriptedModuleNode.GetName()}. Removing it.")
+        leafletSegmentationNode.RemoveSegment(segmentID)
+    slicer.mrmlScene.RemoveNode(parameterNode)
+
+
+def updateLegacyPapillaryMuscleNodes(scriptedModuleNodes):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+  for scriptedModuleNode in scriptedModuleNodes:
+    logging.debug(f"updateLegacyPapillaryMuscleNodes for {scriptedModuleNode.GetName()}")
 
-  # leaflet surface boundary nodes
-  numLegacySurfaceBoundaries = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryModel")
-  numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
-  numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
-  if numLegacySurfaceBoundaries:
-    assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+    # replace papillary muscle SmoothCurves
+    valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
 
-    for boundaryModelIndex in range(numLegacySurfaceBoundaries):
-      boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)
-      boundaryModelNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryModel", boundaryModelIndex)
-      markupsCurveNode =\
-        markupsCurveFromMarkupsFiducialNode(boundaryMarkupNode, 'vtkMRMLMarkupsClosedCurveNode', diameter=0.25,
-                                            color=boundaryModelNode.GetDisplayNode().GetColor())
-      scriptedModuleNode.SetNthNodeReferenceID("LeafletSurfaceBoundaryMarkup", boundaryModelIndex,
-                                               markupsCurveNode.GetID())
-      moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'LeafletSurfaceEdit')
+    logging.debug(f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineModel')} Line Models vs "
+                  f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineMarkup')} Markup Models")
 
-    leafletSurfaceEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurfaceEdit")
-    if leafletSurfaceEditFolderId:
+    for papillaryModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("PapillaryLineModel")):
+      papillaryLineMarkupNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
+      papillaryLineModelNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
+      papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
+      markupsCurveNode = \
+        markupsCurveFromMarkupsFiducialNode(papillaryLineMarkupNode, slicer.vtkMRMLMarkupsCurveNode, diameter=0.5,
+                                            color=papillaryLineModelNode.GetDisplayNode().GetColor())
+      scriptedModuleNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupsCurveNode.GetID())
+      markupsCurveNode.SetName(f"{papillaryMuscleName} papillary muscle")
+
+      # add to same shfolder
+      moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'PapillaryMuscles')
+
+    # remove PapillaryMusclesEdit folder including its children
+    papMusclesEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMusclesEdit")
+    if papMusclesEditFolderId:
+      shNode.RemoveItemChildren(papMusclesEditFolderId)
+      shNode.RemoveItem(papMusclesEditFolderId)
+
+    papMusclesFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMuscles")
+    if papMusclesFolderId:
       children = vtk.vtkCollection()
-      shNode.GetDataNodesInBranch(leafletSurfaceEditFolderId, children)
+      shNode.GetDataNodesInBranch(papMusclesFolderId, children)
       for childIdx in range(children.GetNumberOfItems()):
         child = children.GetItemAsObject(childIdx)
-        if not type(child) is slicer.vtkMRMLMarkupsClosedCurveNode:
+        if type(child) is slicer.vtkMRMLModelNode:
           slicer.mrmlScene.RemoveNode(child)
 
+
+def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  for scriptedModuleNode in scriptedModuleNodes:
+    logging.debug(f"updateLegacyLeafletSurfaceBoundaryNodes for {scriptedModuleNode.GetName()}")
+    valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+
+    # leaflet surface boundary nodes
+    numLegacySurfaceBoundaries = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryModel")
+    numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
+    numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
+    if numLegacySurfaceBoundaries:
+      assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+
+      for boundaryModelIndex in range(numLegacySurfaceBoundaries):
+        boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)
+        boundaryModelNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryModel", boundaryModelIndex)
+        markupsCurveNode =\
+          markupsCurveFromMarkupsFiducialNode(boundaryMarkupNode, slicer.vtkMRMLMarkupsClosedCurveNode,
+                                              color=boundaryModelNode.GetDisplayNode().GetColor())
+        scriptedModuleNode.SetNthNodeReferenceID("LeafletSurfaceBoundaryMarkup", boundaryModelIndex,
+                                                 markupsCurveNode.GetID())
+        moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'LeafletSurfaceEdit')
+
+      leafletSurfaceEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurfaceEdit")
+      if leafletSurfaceEditFolderId:
+        children = vtk.vtkCollection()
+        shNode.GetDataNodesInBranch(leafletSurfaceEditFolderId, children)
+        for childIdx in range(children.GetNumberOfItems()):
+          child = children.GetItemAsObject(childIdx)
+          if not type(child) is slicer.vtkMRMLMarkupsClosedCurveNode:
+            slicer.mrmlScene.RemoveNode(child)
+
+      leafletSurfaceFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurface")
+      segmentationNode = scriptedModuleNode.GetNodeReference("LeafletSegmentation")
+      segmentIds = [segmentId for segmentId in getAllSegmentIDs(segmentationNode) if segmentId != VALVE_MASK_SEGMENT_ID]
+      if leafletSurfaceFolderId:
+        children = vtk.vtkCollection()
+        shNode.GetDataNodesInBranch(leafletSurfaceFolderId, children)
+        for childIdx in range(children.GetNumberOfItems()):
+          child = children.GetItemAsObject(childIdx)
+          if not child.GetAttribute('SegmentID') in segmentIds:
+            slicer.mrmlScene.RemoveNode(child)
+
+
+def updateLegacyCoaptationModelNodes(scriptedModuleNodes):
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  for scriptedModuleNode in scriptedModuleNodes:
+    logging.debug(f"updateLegacyCoaptationModelNodes for {scriptedModuleNode.GetName()}")
+
+    valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+    numCoaptationBaseLineModels = scriptedModuleNode.GetNumberOfNodeReferences("CoaptationBaseLineModel")
+    numCoaptationMarginLineModels = scriptedModuleNode.GetNumberOfNodeReferences("CoaptationMarginLineModel")
+    if numCoaptationBaseLineModels > 0 and numCoaptationMarginLineModels > 0:
+      for coaptationModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("CoaptationBaseLineModel")):
+        marginLineModelNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineModel", coaptationModelIndex)
+        marginLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
+        newMarginLineMarkupsCurveNode = \
+          markupsCurveFromMarkupsFiducialNode(marginLineMarkupNode, markupsClass=slicer.vtkMRMLMarkupsCurveNode,
+                                              color=marginLineModelNode.GetDisplayNode().GetColor())
+        scriptedModuleNode.SetNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex,
+                                                 newMarginLineMarkupsCurveNode.GetID())
+        moveNodeToHeartValveFolder(valveNodeItemId, newMarginLineMarkupsCurveNode, 'CoaptationEdit')
+
+        baseLineModelNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineModel", coaptationModelIndex)
+        baseLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
+        newBaseLineMarkupsCurveNode = \
+          markupsCurveFromMarkupsFiducialNode(baseLineMarkupNode, markupsClass=slicer.vtkMRMLMarkupsCurveNode,
+                                              color=baseLineModelNode.GetDisplayNode().GetColor())
+        scriptedModuleNode.SetNthNodeReferenceID("CoaptationBaseLineMarkup", coaptationModelIndex,
+                                                 newBaseLineMarkupsCurveNode.GetID())
+        moveNodeToHeartValveFolder(valveNodeItemId, newBaseLineMarkupsCurveNode, 'CoaptationEdit')
+
+    coaptationEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "CoaptationEdit")
+    if coaptationEditFolderId:
+      children = vtk.vtkCollection()
+      shNode.GetDataNodesInBranch(coaptationEditFolderId, children)
+      for childIdx in range(children.GetNumberOfItems()):
+        child = children.GetItemAsObject(childIdx)
+        if not type(child) is slicer.vtkMRMLMarkupsCurveNode:
+          slicer.mrmlScene.RemoveNode(child)
+
+
+def ensureLeafletVolumeAssociatedWithSegmentations(scriptedModuleNodes):
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  for scriptedModuleNode in scriptedModuleNodes:
+    valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
+    valveModel = getValveModel(scriptedModuleNode)
+    if not valveModel:
+      continue
+
+    getOrSetValveVolumeNode(valveModel)
+
+    annulusLabelsMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
+    if annulusLabelsMarkupNode:
+      annulusLabelsMarkupNode.SetLocked(True)
+
+    # ensure heart valve is parent in subject hierarchy
+    segNode = valveModel.getLeafletSegmentationNode()
+    shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
+    valveModel.updateValveNodeNames()
+
+    # ensure master volume node of segmentation is not the sequence proxy and was extracted from the set frame index
+    if valveModel.getValveVolumeSequenceIndex() < 0:
+      logging.warning(f"No ValveVolumeSequenceIndex set for HeartValve with name {scriptedModuleNode.GetName()}")
+      continue
+
+    fixedVolumeNode = valveModel.getLeafletVolumeNode()
+    if fixedVolumeNode is not None:
+      slicer.mrmlScene.RemoveNode(fixedVolumeNode)
+    useCurrentValveVolumeAsLeafletVolume(valveModel)
+    fixedVolumeNode = valveModel.getLeafletVolumeNode()
+    segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
+    logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
+                  f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
 
 def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -781,45 +856,6 @@ def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
   else:
     folderItemId = valveNodeItemId
   shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
-
-
-def updateLegacyPapillaryMuscleNodes(scriptedModuleNode):
-  logging.debug(f"updateLegacyPapillaryMuscleNodes for {scriptedModuleNode.GetName()}")
-
-  # replace papillary muscle SmoothCurves
-  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-  valveNodeItemId = shNode.GetItemByDataNode(scriptedModuleNode)
-
-  logging.debug(f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineModel')} Line Models vs "
-                f"{scriptedModuleNode.GetNumberOfNodeReferences('PapillaryLineMarkup')} Markup Models")
-
-  for papillaryModelIndex in range(scriptedModuleNode.GetNumberOfNodeReferences("PapillaryLineModel")):
-    papillaryLineMarkupNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex)
-    papillaryLineModelNode = scriptedModuleNode.GetNthNodeReference("PapillaryLineModel", papillaryModelIndex)
-    papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
-    markupsCurveNode = \
-      markupsCurveFromMarkupsFiducialNode(papillaryLineMarkupNode, 'vtkMRMLMarkupsCurveNode', diameter=0.5,
-                                          color=papillaryLineModelNode.GetDisplayNode().GetColor())
-    scriptedModuleNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupsCurveNode.GetID())
-    markupsCurveNode.SetName(f"{papillaryMuscleName} papillary muscle")
-
-    # add to same shfolder
-    moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'PapillaryMuscles')
-
-  # remove PapillaryMusclesEdit folder including its children
-  papMusclesEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMusclesEdit")
-  if papMusclesEditFolderId:
-    shNode.RemoveItemChildren(papMusclesEditFolderId)
-    shNode.RemoveItem(papMusclesEditFolderId)
-
-  papMusclesFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMuscles")
-  if papMusclesFolderId:
-    children = vtk.vtkCollection()
-    shNode.GetDataNodesInBranch(papMusclesFolderId, children)
-    for childIdx in range(children.GetNumberOfItems()):
-      child = children.GetItemAsObject(childIdx)
-      if type(child) is slicer.vtkMRMLModelNode:
-        slicer.mrmlScene.RemoveNode(child)
 
 
 def getPlaneIntersectionPoint(axialNode, ortho1Node, ortho2Node):

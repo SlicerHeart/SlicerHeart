@@ -533,7 +533,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     if not self.valveModel:
       return
 
-    intersectionPoint = self.logic.getPlaneIntersectionPoint(self.axialSlice, self.orthogonalSlice1, self.orthogonalSlice2)
+    intersectionPoint = HeartValveLib.getPlaneIntersectionPoint(self.axialSlice, self.orthogonalSlice1, self.orthogonalSlice2)
     axialSliceToRasTransformNode = self.valveModel.getAxialSliceToRasTransformNode()
     axialSliceToRasTransformMatrix = vtk.vtkMatrix4x4()
     axialSliceToRasTransformNode.GetMatrixTransformToParent(axialSliceToRasTransformMatrix)
@@ -920,71 +920,6 @@ class ValveAnnulusAnalysisLogic(ScriptedLoadableModuleLogic):
 
   def __init__(self):
     ScriptedLoadableModuleLogic.__init__(self)
-
-  def getPlaneIntersectionPoint(self, axialNode, ortho1Node, ortho2Node):
-    """
-    Compute the center of rotation (common intersection point of the three planes)
-    http://mathworld.wolfram.com/Plane-PlaneIntersection.html
-    Copied from ValveViewLogic to remove dependency on SlicerHeart extension.
-    """
-
-    #axialNode = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeRed')
-    #ortho1Node = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeYellow')
-    #ortho2Node = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeGreen')
-
-    axialSliceToRas = axialNode.GetSliceToRAS()
-    n1 = [axialSliceToRas.GetElement(0,2),axialSliceToRas.GetElement(1,2),axialSliceToRas.GetElement(2,2)]
-    x1 = [axialSliceToRas.GetElement(0,3),axialSliceToRas.GetElement(1,3),axialSliceToRas.GetElement(2,3)]
-
-    ortho1SliceToRas = ortho1Node.GetSliceToRAS()
-    n2 = [ortho1SliceToRas.GetElement(0,2),ortho1SliceToRas.GetElement(1,2),ortho1SliceToRas.GetElement(2,2)]
-    x2 = [ortho1SliceToRas.GetElement(0,3),ortho1SliceToRas.GetElement(1,3),ortho1SliceToRas.GetElement(2,3)]
-
-    ortho2SliceToRas = ortho2Node.GetSliceToRAS()
-    n3 = [ortho2SliceToRas.GetElement(0,2),ortho2SliceToRas.GetElement(1,2),ortho2SliceToRas.GetElement(2,2)]
-    x3 = [ortho2SliceToRas.GetElement(0,3),ortho2SliceToRas.GetElement(1,3),ortho2SliceToRas.GetElement(2,3)]
-
-    # Computed intersection point of all planes
-    x = [0,0,0]
-
-    n2_xp_n3 = [0,0,0]
-    x1_dp_n1 = vtk.vtkMath.Dot(x1,n1)
-    vtk.vtkMath.Cross(n2,n3,n2_xp_n3)
-    vtk.vtkMath.MultiplyScalar(n2_xp_n3, x1_dp_n1)
-    vtk.vtkMath.Add(x,n2_xp_n3,x)
-
-    n3_xp_n1 = [0,0,0]
-    x2_dp_n2 = vtk.vtkMath.Dot(x2,n2)
-    vtk.vtkMath.Cross(n3,n1,n3_xp_n1)
-    vtk.vtkMath.MultiplyScalar(n3_xp_n1, x2_dp_n2)
-    vtk.vtkMath.Add(x,n3_xp_n1,x)
-
-    n1_xp_n2 = [0,0,0]
-    x3_dp_n3 = vtk.vtkMath.Dot(x3,n3)
-    vtk.vtkMath.Cross(n1,n2,n1_xp_n2)
-    vtk.vtkMath.MultiplyScalar(n1_xp_n2, x3_dp_n3)
-    vtk.vtkMath.Add(x,n1_xp_n2,x)
-
-    normalMatrix = vtk.vtkMatrix3x3()
-    normalMatrix.SetElement(0,0,n1[0])
-    normalMatrix.SetElement(1,0,n1[1])
-    normalMatrix.SetElement(2,0,n1[2])
-    normalMatrix.SetElement(0,1,n2[0])
-    normalMatrix.SetElement(1,1,n2[1])
-    normalMatrix.SetElement(2,1,n2[2])
-    normalMatrix.SetElement(0,2,n3[0])
-    normalMatrix.SetElement(1,2,n3[1])
-    normalMatrix.SetElement(2,2,n3[2])
-    normalMatrixDeterminant = normalMatrix.Determinant()
-
-    if abs(normalMatrixDeterminant)>0.01:
-      # there is an intersection point
-      vtk.vtkMath.MultiplyScalar(x, 1/normalMatrixDeterminant)
-    else:
-      # no intersection point can be determined, use just the position of the axial slice
-      x = x1
-
-    return x
 
 
 class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
