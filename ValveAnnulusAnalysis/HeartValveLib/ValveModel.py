@@ -103,6 +103,7 @@ class ValveModel:
 
       self.updateLeafletModelsFromSegmentation()
       self.updateCoaptationModels()
+      self.updatePapillaryModels()
 
     def moveNodeToHeartValveFolder(self, node, subfolderName=None):
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
