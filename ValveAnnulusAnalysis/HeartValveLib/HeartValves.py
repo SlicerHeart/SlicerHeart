@@ -761,7 +761,7 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
         shNode.GetDataNodesInBranch(leafletSurfaceEditFolderId, children)
         for childIdx in range(children.GetNumberOfItems()):
           child = children.GetItemAsObject(childIdx)
-          if not type(child) is slicer.vtkMRMLMarkupsClosedCurveNode:
+          if type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]:
             slicer.mrmlScene.RemoveNode(child)
 
       leafletSurfaceFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurface")
@@ -810,7 +810,7 @@ def updateLegacyCoaptationModelNodes(scriptedModuleNodes):
       shNode.GetDataNodesInBranch(coaptationEditFolderId, children)
       for childIdx in range(children.GetNumberOfItems()):
         child = children.GetItemAsObject(childIdx)
-        if not type(child) is slicer.vtkMRMLMarkupsCurveNode:
+        if type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]:
           slicer.mrmlScene.RemoveNode(child)
 
 
