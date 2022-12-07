@@ -38,7 +38,7 @@ class PapillaryModel:
 
   def getMuscleLength(self):
     markupsNode = self.getPapillaryLineMarkupNode()
-    if markupsNode and markupsNode.GetNumberOfMarkups() >= 2:
+    if markupsNode and markupsNode.GetNumberOfControlPoints() >= 2:
       muscleTipPointIndex = markupsNode.GetCurvePointIndexFromControlPointIndex(1)
       return markupsNode.GetCurveLengthBetweenStartEndPointsWorld(0, muscleTipPointIndex)
     return None
@@ -80,4 +80,4 @@ class PapillaryModel:
 
   def hasMusclePointsPlaced(self):
     markupsNode = self.getPapillaryLineMarkupNode()
-    return markupsNode and not markupsNode.GetNumberOfMarkups() < 3
+    return markupsNode and not markupsNode.GetNumberOfControlPoints() < 3

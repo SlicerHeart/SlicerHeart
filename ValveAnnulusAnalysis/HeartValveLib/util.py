@@ -3,6 +3,21 @@
 #
 
 
+
+def timer(func):
+  """ This decorator can be used for profiling a method/function by printing the elapsed time after execution.
+  """
+  def _new_function(*args, **kwargs):
+    import time
+    startTime = time.time()
+    x = func(*args, **kwargs)
+    duration = time.time() - startTime
+    print(f"{func.__name__} ran in: {duration:.2f} seconds")
+    return x
+
+  return _new_function
+
+
 def setAllControlPointsVisibility(markupsNode, visible):
   wasModify = markupsNode.StartModify()
   for ptIdx in range(markupsNode.GetNumberOfControlPoints()):
