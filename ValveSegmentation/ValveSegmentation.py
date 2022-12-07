@@ -464,7 +464,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     segmentationNode = self.valveModel.getLeafletSegmentationNode()
     segmentation = segmentationNode.GetSegmentation()
     valveMaskSegment = segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID)
-    leafletMaskOrientedImageData = self.getLeafletVolumeClippedAxisAligned()
+    leafletMaskOrientedImageData = self.logic.getLeafletVolumeClippedAxisAligned(self.valveModel)
     if valveMaskSegment:
       self._updateMaskSegment(leafletMaskOrientedImageData, segmentationNode)
     else:
@@ -493,7 +493,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
   def _createNewMaskSegment(self, segmentationNode):
     import vtkSegmentationCorePython as vtkSegmentationCore
-    leafletMaskOrientedImageData = self.getLeafletVolumeClippedAxisAligned()
+    leafletMaskOrientedImageData = self.logic.getLeafletVolumeClippedAxisAligned(self.valveModel)
     valveMaskSegment = vtkSegmentationCore.vtkSegment()
     valveMaskSegment.SetName("Annulus mask")
     valveMaskSegment.AddRepresentation(
@@ -665,107 +665,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeGrey")
       slicer.mrmlScene.AddNode(displayNode)
       outputVolume.SetAndObserveDisplayNodeID(displayNode.GetID())
-
-  def getLeafletVolumeClippedAxisAligned(self):
-    """
-    :returns vtkOrientedImageData (defined in the Probe coordinate system) on success. None on failure.
-    """
-    import vtkSegmentationCorePython as vtkSegmentationCore
-
-    valveVolumeNode = self.valveModel.getValveVolumeNode()
-    if not valveVolumeNode:
-      logging.error('createLeafletSegmentationAxisAligned failed: valve volume node is not selected')
-      return None
-
-    leafletVolumeClippedAxisAlignedNode = slicer.vtkMRMLScalarVolumeNode()
-    leafletVolumeClippedAxisAlignedNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveVolumeEdited"))
-
-    # leafletVolumeClippedAxisAlignedNode will be used as a reference volume
-    # (that defines the output geometry) and also as output volume
-    # (where the resampled input volume is copied to)
-
-    volumeSpacing = 0.3
-
-    volumeToAxialSlice = vtk.vtkMatrix4x4()
-    slicer.vtkMRMLTransformNode.GetMatrixTransformBetweenNodes(valveVolumeNode.GetParentTransformNode(),
-                                                               self.valveModel.getAxialSliceToRasTransformNode(),
-                                                               volumeToAxialSlice)
-
-    leafletBounds_AxialSlice = [0, 0, 0, 0, 0, 0]
-    clippingEnabled = True
-    if clippingEnabled:
-      leafletClippingModel = self.getLeafletClippingModelNode()
-      volumeToAxialSliceTransformFilter = vtk.vtkTransformPolyDataFilter()
-      volumeToAxialSliceTransformFilter.SetInputConnection(leafletClippingModel.GetPolyDataConnection())
-      volumeToAxialSliceTransform = vtk.vtkTransform()
-      volumeToAxialSliceTransform.SetMatrix(volumeToAxialSlice)
-      volumeToAxialSliceTransformFilter.SetTransform(volumeToAxialSliceTransform)
-      volumeToAxialSliceTransformFilter.Update()
-      volumeToAxialSliceTransformFilter.GetOutput().GetBounds(leafletBounds_AxialSlice)
-    else:
-      # volumeBounds_Ijk = [0, -1, 0, -1, 0, -1]
-      volumeBounds_Ijk = valveVolumeNode.GetImageData().GetExtent()
-      volumeCorners_Ijk = [[volumeBounds_Ijk[0], volumeBounds_Ijk[2], volumeBounds_Ijk[4]],
-                           [volumeBounds_Ijk[0], volumeBounds_Ijk[2], volumeBounds_Ijk[5]],
-                           [volumeBounds_Ijk[0], volumeBounds_Ijk[3], volumeBounds_Ijk[4]],
-                           [volumeBounds_Ijk[0], volumeBounds_Ijk[3], volumeBounds_Ijk[5]],
-                           [volumeBounds_Ijk[1], volumeBounds_Ijk[2], volumeBounds_Ijk[4]],
-                           [volumeBounds_Ijk[1], volumeBounds_Ijk[2], volumeBounds_Ijk[5]],
-                           [volumeBounds_Ijk[1], volumeBounds_Ijk[3], volumeBounds_Ijk[4]],
-                           [volumeBounds_Ijk[1], volumeBounds_Ijk[3], volumeBounds_Ijk[5]]]
-      ijkToAxialSliceTransform = vtk.vtkTransform()
-      valveVolumeIjkToRasMatrix = vtk.vtkMatrix4x4()
-      valveVolumeNode.GetIJKToRASMatrix(valveVolumeIjkToRasMatrix)
-      ijkToAxialSliceTransform.Concatenate(valveVolumeIjkToRasMatrix)
-      ijkToAxialSliceTransform.Concatenate(volumeToAxialSlice)
-      leafletBoundingBox_AxialSlice = vtk.vtkBoundingBox()
-      for volumeCorner_Ijk in volumeCorners_Ijk:
-        volumeCorner_AxialSlice = [0, 0, 0]
-        ijkToAxialSliceTransform.TransformPoint(volumeCorner_Ijk, volumeCorner_AxialSlice)
-        leafletBoundingBox_AxialSlice.AddPoint(volumeCorner_AxialSlice)
-      leafletBoundingBox_AxialSlice.GetBounds(leafletBounds_AxialSlice)
-
-    # leafletVolumeClippedAxisAligned is in the AxialSlice coordinate system
-    leafletVolumeClippedAxisAligned = vtkSegmentationCore.vtkOrientedImageData()
-    leafletVolumeClippedAxisAligned.SetDimensions(
-      int((leafletBounds_AxialSlice[1] - leafletBounds_AxialSlice[0] + 2) / volumeSpacing),
-      int((leafletBounds_AxialSlice[3] - leafletBounds_AxialSlice[2] + 2) / volumeSpacing),
-      int((leafletBounds_AxialSlice[5] - leafletBounds_AxialSlice[4] + 2) / volumeSpacing))
-    leafletVolumeClippedAxisAligned.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 1)
-    leafletVolumeClippedAxisAligned.SetSpacing(volumeSpacing, volumeSpacing, volumeSpacing)
-    leafletVolumeClippedAxisAligned.SetOrigin(leafletBounds_AxialSlice[0] - 1, leafletBounds_AxialSlice[2] - 1,
-                                              leafletBounds_AxialSlice[4] - 1)
-    volumeToAxialSliceDirections = vtk.vtkMatrix4x4()
-    leafletVolumeClippedAxisAligned.SetDirectionMatrix(volumeToAxialSliceDirections)
-
-    axisAlignedVolumeIjkToAxialSlice = vtk.vtkMatrix4x4()
-    axisAlignedVolumeIjkToVolume = vtk.vtkMatrix4x4()
-    leafletVolumeClippedAxisAligned.GetImageToWorldMatrix(axisAlignedVolumeIjkToAxialSlice)
-    axialSliceToVolume = vtk.vtkMatrix4x4()
-    vtk.vtkMatrix4x4.Invert(volumeToAxialSlice, axialSliceToVolume)
-    vtk.vtkMatrix4x4.Multiply4x4(axialSliceToVolume, axisAlignedVolumeIjkToAxialSlice, axisAlignedVolumeIjkToVolume)
-    leafletVolumeClippedAxisAligned.SetGeometryFromImageToWorldMatrix(axisAlignedVolumeIjkToVolume)
-
-    segmentationNode = self.valveModel.getLeafletSegmentationNode()
-    segmentationNode.SetAndObserveTransformNodeID(valveVolumeNode.GetParentTransformNode().GetID())
-
-    # self.copySegmentation(valveVolumeNode, leafletVolumeClippedAxisAlignedNode, 'uchar', 'Linear', False)
-    vtkSegmentationCore.vtkOrientedImageDataResample.FillImage(leafletVolumeClippedAxisAligned, 1,
-                                                               leafletVolumeClippedAxisAligned.GetExtent())
-
-    if clippingEnabled:
-      self.valveModel.valveRoi.clipOrientedImageWithModel(leafletVolumeClippedAxisAligned,
-                                                          segmentationNode.GetParentTransformNode(),
-                                                          leafletVolumeClippedAxisAligned,
-                                                          segmentationNode.GetParentTransformNode())
-
-    # Match window/level of the full volume
-    # windowLevelMin = valveVolumeNode.GetDisplayNode().GetWindowLevelMin()
-    # windowLevelMax = valveVolumeNode.GetDisplayNode().GetWindowLevelMax()
-    # displayNode.SetAutoWindowLevel(False)
-    # displayNode.SetWindowLevelMinMax(windowLevelMin, windowLevelMax)
-
-    return leafletVolumeClippedAxisAligned
 
   def copySegmentation(self, sourceLabelNode, destinationLabelNode, pixelType, interpolationMethod, invertTransform):
 
@@ -1016,6 +915,107 @@ class ValveSegmentationLogic(ScriptedLoadableModuleLogic):
     node.SetName(slicer.mrmlScene.GetUniqueNameByString(self.moduleName))
     return node
 
+  @staticmethod
+  def getLeafletVolumeClippedAxisAligned(valveModel):
+    """
+    :returns vtkOrientedImageData (defined in the Probe coordinate system) on success. None on failure.
+    """
+    import vtkSegmentationCorePython as vtkSegmentationCore
+
+    valveVolumeNode = valveModel.getValveVolumeNode()
+    if not valveVolumeNode:
+      logging.error('createLeafletSegmentationAxisAligned failed: valve volume node is not selected')
+      return None
+
+    leafletVolumeClippedAxisAlignedNode = slicer.vtkMRMLScalarVolumeNode()
+    leafletVolumeClippedAxisAlignedNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveVolumeEdited"))
+
+    # leafletVolumeClippedAxisAlignedNode will be used as a reference volume
+    # (that defines the output geometry) and also as output volume
+    # (where the resampled input volume is copied to)
+
+    volumeSpacing = 0.3
+
+    volumeToAxialSlice = vtk.vtkMatrix4x4()
+    slicer.vtkMRMLTransformNode.GetMatrixTransformBetweenNodes(valveVolumeNode.GetParentTransformNode(),
+                                                               valveModel.getAxialSliceToRasTransformNode(),
+                                                               volumeToAxialSlice)
+
+    leafletBounds_AxialSlice = [0, 0, 0, 0, 0, 0]
+    clippingEnabled = True
+    if clippingEnabled:
+      leafletClippingModel = valveModel.getValveRoiModelNode()
+      volumeToAxialSliceTransformFilter = vtk.vtkTransformPolyDataFilter()
+      volumeToAxialSliceTransformFilter.SetInputConnection(leafletClippingModel.GetPolyDataConnection())
+      volumeToAxialSliceTransform = vtk.vtkTransform()
+      volumeToAxialSliceTransform.SetMatrix(volumeToAxialSlice)
+      volumeToAxialSliceTransformFilter.SetTransform(volumeToAxialSliceTransform)
+      volumeToAxialSliceTransformFilter.Update()
+      volumeToAxialSliceTransformFilter.GetOutput().GetBounds(leafletBounds_AxialSlice)
+    else:
+      # volumeBounds_Ijk = [0, -1, 0, -1, 0, -1]
+      volumeBounds_Ijk = valveVolumeNode.GetImageData().GetExtent()
+      volumeCorners_Ijk = [[volumeBounds_Ijk[0], volumeBounds_Ijk[2], volumeBounds_Ijk[4]],
+                           [volumeBounds_Ijk[0], volumeBounds_Ijk[2], volumeBounds_Ijk[5]],
+                           [volumeBounds_Ijk[0], volumeBounds_Ijk[3], volumeBounds_Ijk[4]],
+                           [volumeBounds_Ijk[0], volumeBounds_Ijk[3], volumeBounds_Ijk[5]],
+                           [volumeBounds_Ijk[1], volumeBounds_Ijk[2], volumeBounds_Ijk[4]],
+                           [volumeBounds_Ijk[1], volumeBounds_Ijk[2], volumeBounds_Ijk[5]],
+                           [volumeBounds_Ijk[1], volumeBounds_Ijk[3], volumeBounds_Ijk[4]],
+                           [volumeBounds_Ijk[1], volumeBounds_Ijk[3], volumeBounds_Ijk[5]]]
+      ijkToAxialSliceTransform = vtk.vtkTransform()
+      valveVolumeIjkToRasMatrix = vtk.vtkMatrix4x4()
+      valveVolumeNode.GetIJKToRASMatrix(valveVolumeIjkToRasMatrix)
+      ijkToAxialSliceTransform.Concatenate(valveVolumeIjkToRasMatrix)
+      ijkToAxialSliceTransform.Concatenate(volumeToAxialSlice)
+      leafletBoundingBox_AxialSlice = vtk.vtkBoundingBox()
+      for volumeCorner_Ijk in volumeCorners_Ijk:
+        volumeCorner_AxialSlice = [0, 0, 0]
+        ijkToAxialSliceTransform.TransformPoint(volumeCorner_Ijk, volumeCorner_AxialSlice)
+        leafletBoundingBox_AxialSlice.AddPoint(volumeCorner_AxialSlice)
+      leafletBoundingBox_AxialSlice.GetBounds(leafletBounds_AxialSlice)
+
+    # leafletVolumeClippedAxisAligned is in the AxialSlice coordinate system
+    leafletVolumeClippedAxisAligned = vtkSegmentationCore.vtkOrientedImageData()
+    leafletVolumeClippedAxisAligned.SetDimensions(
+      int((leafletBounds_AxialSlice[1] - leafletBounds_AxialSlice[0] + 2) / volumeSpacing),
+      int((leafletBounds_AxialSlice[3] - leafletBounds_AxialSlice[2] + 2) / volumeSpacing),
+      int((leafletBounds_AxialSlice[5] - leafletBounds_AxialSlice[4] + 2) / volumeSpacing))
+    leafletVolumeClippedAxisAligned.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 1)
+    leafletVolumeClippedAxisAligned.SetSpacing(volumeSpacing, volumeSpacing, volumeSpacing)
+    leafletVolumeClippedAxisAligned.SetOrigin(leafletBounds_AxialSlice[0] - 1, leafletBounds_AxialSlice[2] - 1,
+                                              leafletBounds_AxialSlice[4] - 1)
+    volumeToAxialSliceDirections = vtk.vtkMatrix4x4()
+    leafletVolumeClippedAxisAligned.SetDirectionMatrix(volumeToAxialSliceDirections)
+
+    axisAlignedVolumeIjkToAxialSlice = vtk.vtkMatrix4x4()
+    axisAlignedVolumeIjkToVolume = vtk.vtkMatrix4x4()
+    leafletVolumeClippedAxisAligned.GetImageToWorldMatrix(axisAlignedVolumeIjkToAxialSlice)
+    axialSliceToVolume = vtk.vtkMatrix4x4()
+    vtk.vtkMatrix4x4.Invert(volumeToAxialSlice, axialSliceToVolume)
+    vtk.vtkMatrix4x4.Multiply4x4(axialSliceToVolume, axisAlignedVolumeIjkToAxialSlice, axisAlignedVolumeIjkToVolume)
+    leafletVolumeClippedAxisAligned.SetGeometryFromImageToWorldMatrix(axisAlignedVolumeIjkToVolume)
+
+    segmentationNode = valveModel.getLeafletSegmentationNode()
+    segmentationNode.SetAndObserveTransformNodeID(valveVolumeNode.GetParentTransformNode().GetID())
+
+    # self.copySegmentation(valveVolumeNode, leafletVolumeClippedAxisAlignedNode, 'uchar', 'Linear', False)
+    vtkSegmentationCore.vtkOrientedImageDataResample.FillImage(leafletVolumeClippedAxisAligned, 1,
+                                                               leafletVolumeClippedAxisAligned.GetExtent())
+
+    if clippingEnabled:
+      valveModel.valveRoi.clipOrientedImageWithModel(leafletVolumeClippedAxisAligned,
+                                                     segmentationNode.GetParentTransformNode(),
+                                                     leafletVolumeClippedAxisAligned,
+                                                     segmentationNode.GetParentTransformNode())
+
+    # Match window/level of the full volume
+    # windowLevelMin = valveVolumeNode.GetDisplayNode().GetWindowLevelMin()
+    # windowLevelMax = valveVolumeNode.GetDisplayNode().GetWindowLevelMax()
+    # displayNode.SetAutoWindowLevel(False)
+    # displayNode.SetWindowLevelMinMax(windowLevelMin, windowLevelMax)
+
+    return leafletVolumeClippedAxisAligned
 
 class ValveSegmentationTest(ScriptedLoadableModuleTest):
   """
