@@ -149,14 +149,8 @@ def getAllSegmentNames(segmentationNode):
 
 def getAllSegments(segmentationNode):
   segmentation = segmentationNode.GetSegmentation()
+  from HeartValveLib.util import getAllSegmentIDs
   return [segmentation.GetSegment(segmentID) for segmentID in getAllSegmentIDs(segmentationNode)]
-
-
-def getAllSegmentIDs(segmentationNode):
-  segmentIDs = vtk.vtkStringArray()
-  segmentation = segmentationNode.GetSegmentation()
-  segmentation.GetSegmentIDs(segmentIDs)
-  return [segmentIDs.GetValue(idx) for idx in range(segmentIDs.GetNumberOfValues())]
 
 
 def showOnlySegmentWithSegmentID(segmentationNode, segmentID):
@@ -165,6 +159,7 @@ def showOnlySegmentWithSegmentID(segmentationNode, segmentID):
 
 
 def hideAllSegments(segmentationNode):
+  from HeartValveLib.util import getAllSegmentIDs
   for segmentID in getAllSegmentIDs(segmentationNode):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, False)
 
@@ -186,6 +181,7 @@ def getLeafletOrderDefinition(valveType):
 
 
 def checkAndSortSegments(segmentationNode, valveType):
+  from HeartValveLib.util import getAllSegmentIDs
   expectedOrder = getLeafletOrderDefinition(valveType)
   segmentIDs = getAllSegmentIDs(segmentationNode)
   segmentNames = getAllSegmentNames(segmentationNode)

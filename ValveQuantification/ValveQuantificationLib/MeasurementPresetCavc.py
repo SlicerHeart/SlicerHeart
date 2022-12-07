@@ -1,5 +1,12 @@
 import numpy as np
 import HeartValveLib
+from HeartValveLib.util import (
+  getSampledInterpolatedPointsAsArray,
+  getClosestPointPositionAlongCurve,
+  getClosestCurvePointIndexToPosition,
+  getFarthestCurvePointIndexToPosition
+)
+
 import vtk
 import slicer
 from ValveQuantificationLib.MeasurementPreset import *
@@ -19,19 +26,21 @@ class MeasurementPresetCavc(MeasurementPreset):
     coaptationCenterPoints = None
 
     for coaptationModel in coaptationModels:
-      basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
+      basePoints = coaptationModel.baseLine.GetCurve().GetPoints()
       numberOfBasePoints = basePoints.GetNumberOfPoints()
       if not numberOfBasePoints:
         continue
 
-      # Find which end of the coaptation base line is farther from the annulus contour
+      # Find which end of the coaptation baseline is farther from the annulus contour
       # (that will be the center point)
       firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
-      [closestAnnulusPointToFirstPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(
-        firstCoaptationLinePoint)
+      closestAnnulusPointToFirstPoint = \
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, firstCoaptationLinePoint)
+
       firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint - firstCoaptationLinePoint)
       lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
-      [closestAnnulusPointToLastPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(lastCoaptationLinePoint)
+      closestAnnulusPointToLastPoint = \
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, lastCoaptationLinePoint)
       lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint - lastCoaptationLinePoint)
 
       if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
@@ -52,10 +61,12 @@ class MeasurementPresetCavc(MeasurementPreset):
 
   @staticmethod
   def getAnnulusContourSplitSidesStartIndices(valveModel, pointMA, pointMP, pointL):
-    [_, closestPointIdMA] = valveModel.annulusContourCurve.getClosestPoint(pointMA)
-    [_, closestPointIdMP] = valveModel.annulusContourCurve.getClosestPoint(pointMP)
-    [_, closestPointIdL] = valveModel.annulusContourCurve.getClosestPoint(pointL)
-    interpolatedPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusContourCurve = valveModel.annulusContourCurve
+    closestPointIdMA = getClosestCurvePointIndexToPosition(annulusContourCurve, pointMA)
+    closestPointIdMP = getClosestCurvePointIndexToPosition(annulusContourCurve, pointMP)
+    closestPointIdL = getClosestCurvePointIndexToPosition(annulusContourCurve, pointL)
+
+    interpolatedPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     # Determine which side is left/right
     numberOfInterpolatedPoints = interpolatedPoints.shape[1]
     closestPointIdMP_WrappedAround = \
@@ -72,7 +83,7 @@ class MeasurementPresetCavc(MeasurementPreset):
 
   @staticmethod
   def getAnnulusCurvePoints(valveModel, startEndPointIndex):
-    interpolatedPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    interpolatedPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
     if startEndPointIndex[0] < startEndPointIndex[1]:
       # Segment between MA and MP point without wrapping around
       curvePoints = interpolatedPoints[:, startEndPointIndex[0]:startEndPointIndex[1] + 1]
@@ -84,7 +95,7 @@ class MeasurementPresetCavc(MeasurementPreset):
     curvePoints = np.c_[curvePoints, curvePoints[:, 0]]
     # resample so that the long connection between the start and end point is has
     # sufficient number of points (to make it count during plane fitting)
-    annulusPoints = valveModel.annulusContourCurve.getSampledInterpolatedPointsAsArray(
+    annulusPoints = getSampledInterpolatedPointsAsArray(
       curvePoints, samplingDistance=0.1, closedCurve=True)
     return annulusPoints
 
@@ -235,13 +246,24 @@ class MeasurementPresetCavc(MeasurementPreset):
     for coaptationModel in coaptationModels:
       coaptationModel.updateSurface()
 
-      totalBaselineLengths.append(coaptationModel.baseLine.getCurveLength())
-      totalMarginLineLengths.append(coaptationModel.marginLine.getCurveLength())
+      totalBaselineLengths.append(coaptationModel.baseLine.GetCurveLengthWorld())
+      totalMarginLineLengths.append(coaptationModel.marginLine.GetCurveLengthWorld())
       distances.extend(coaptationModel.getBaseLineMarginLineDistances())
 
       appendSurface.AddInputData(coaptationModel.surfaceModelNode.GetPolyData())
-      appendBaseLines.AddInputData(coaptationModel.baseLine.curveModelNode.GetPolyData())
-      appendMarginLines.AddInputData(coaptationModel.marginLine.curveModelNode.GetPolyData())
+      from HeartValveLib.util import createTubeModelFromPointArray
+      baseLineModel = \
+        createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.baseLine), loop=False,
+                                      radius=coaptationModel.markupGlyphScale / 6.0)[0]
+      appendBaseLines.AddInputData(baseLineModel.GetPolyData())
+      slicer.mrmlScene.RemoveNode(baseLineModel)
+
+      marginLineModel = \
+        createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(coaptationModel.marginLine), loop=False,
+                                      radius=coaptationModel.markupGlyphScale / 6.0)[0]
+      appendMarginLines.AddInputData(marginLineModel.GetPolyData())
+      slicer.mrmlScene.RemoveNode(marginLineModel)
+
     appendSurface.Update()
     appendBaseLines.Update()
     appendMarginLines.Update()
@@ -330,13 +352,13 @@ class MeasurementPresetCavc(MeasurementPreset):
 
   def addAnnulusCurveLengthMeasurements(self, valveModel):
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'L', valveModel, 'MA'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'L', 'MA'))
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MA', valveModel, 'R'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MA', 'R'))
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'R', valveModel, 'MP'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'R', 'MP'))
     self.addMeasurement(
-      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MP', valveModel, 'L'))
+      self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'MP', 'L'))
 
   def addAngleForAC_LC_R(self, aorticValveModel, valveModel):
     [aorticPlanePosition, _] = aorticValveModel.getAnnulusContourPlane()
@@ -445,8 +467,7 @@ class MeasurementPresetCavc(MeasurementPreset):
   def createAnnulusCurveModel(self, valveModel, annulusPoints, curveSideName):
     curveName = "Annulus contour " + curveSideName
     modelNode = \
-      self.createCurveModel(curveName, annulusPoints, valveModel.annulusContourCurve.tubeRadius,
-                            valveModel.getBaseColor(), valveModel.annulusContourCurve.tubeResolution)
+      self.createCurveModel(curveName, annulusPoints, valveModel.getAnnulusContourRadius(), valveModel.getBaseColor(), 20)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, modelNode)
 
   def onInputFieldChanged(self, fieldId, inputValveModels, inputFieldValues, computeDependentValues = False):
@@ -480,12 +501,12 @@ class MeasurementPresetCavc(MeasurementPreset):
     if fieldId=='LPoint': # L point (farthest from R)
       pointR = cavcValveModel.getAnnulusMarkupPositionByLabel('R')
       if pointR is not None:
-        [pointLPosition, pointLId] = cavcValveModel.annulusContourCurve.getFarthestPoint(pointR)
+        pointLPosition = getFarthestCurvePointIndexToPosition(cavcValveModel.annulusContourCurve, pointR)
         cavcValveModel.setAnnulusMarkupLabel('L', pointLPosition)
     elif fieldId=='RPoint': # R point (farthest from L)
       pointL = cavcValveModel.getAnnulusMarkupPositionByLabel('L')
       if pointL is not None:
-        [pointRPosition, pointRId] = cavcValveModel.annulusContourCurve.getFarthestPoint(pointL)
+        pointRPosition = getFarthestCurvePointIndexToPosition(cavcValveModel.annulusContourCurve, pointL)
         cavcValveModel.setAnnulusMarkupLabel('R', pointRPosition)
     elif fieldId=='MpPoint': # MP point (on the other side of the L-R line from MA, L-R orthogonal to MA-MP)
       pointL = cavcValveModel.getAnnulusMarkupPositionByLabel('L')
@@ -574,26 +595,26 @@ def cutModel(modelNode, planeNode, cappingOn=True):
   return outputNegativeModelNode, outputPositiveModelNode
 
 
-def getControlPointsWorldAsArray(smoothCurve):
-  nOfControlPoints = smoothCurve.controlPointsMarkupNode.GetNumberOfFiducials() if smoothCurve.controlPointsMarkupNode else 0
+def getControlPointsWorldAsArray(markupsCurve):
+  nOfControlPoints = markupsCurve.GetNumberOfControlPoints() if markupsCurve else 0
   points = np.zeros([3, nOfControlPoints])
   pos = [0.0, 0.0, 0.0]
   for i in range(0, nOfControlPoints):
-    smoothCurve.controlPointsMarkupNode.GetNthControlPointPositionWorld(i, pos)
+    markupsCurve.GetNthControlPointPositionWorld(i, pos)
     points[0, i] = pos[0]
     points[1, i] = pos[1]
     points[2, i] = pos[2]
   return points
 
 
-def setControlPointsWorldFromArray(coaptationModel, controlPointsArray):
-  coaptationModel.controlPointsMarkupNode.RemoveAllMarkups()
-  wasModifying = coaptationModel.controlPointsMarkupNode.StartModify()
+def setControlPointsWorldFromArray(markupsNode, controlPointsArray):
+  markupsNode.RemoveAllMarkups()
+  wasModifying = markupsNode.StartModify()
   for controlPointPos in controlPointsArray:
-    fidIndex = coaptationModel.controlPointsMarkupNode.AddControlPointWorld(vtk.vtkVector3d(controlPointPos))
+    fidIndex = markupsNode.AddControlPointWorld(vtk.vtkVector3d(controlPointPos))
     # Deselect it because usually only one markup point is selected
-    coaptationModel.controlPointsMarkupNode.SetNthFiducialSelected(fidIndex, False)
-  coaptationModel.controlPointsMarkupNode.EndModify(wasModifying)
+    markupsNode.SetNthControlPointSelected(fidIndex, False)
+  markupsNode.EndModify(wasModifying)
 
 
 def getAbovePlaneIndicator(pointsArray, planePosition, planeNormal):
@@ -631,10 +652,10 @@ def getIntersectionPos(planeOrigin, planeNormal, p1, p2):
   return intersection
 
 
-def getLeftCoaptationPointsIncludingIntersection(smoothCurve, planeNode):
+def getLeftCoaptationPointsIncludingIntersection(markupsNode, planeNode):
   # order is from above plane towards below plane
   # left to right
-  controlPoints = getControlPointsWorldAsArray(smoothCurve).transpose()
+  controlPoints = getControlPointsWorldAsArray(markupsNode).transpose()
   planeNormal = getPointPosition(planeNode.GetNormalWorld)
   planeOrigin = getPointPosition(planeNode.GetOriginWorld)
 

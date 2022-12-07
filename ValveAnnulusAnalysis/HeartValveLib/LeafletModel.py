@@ -8,16 +8,21 @@ import math
 import numpy as np
 import vtk.util.numpy_support as VN
 import vtkSegmentationCorePython as vtkSegmentationCore
-import SmoothCurve
 
 
 class LeafletModel:
 
+  @property
+  def surfaceBoundary(self):
+    return self.getSurfaceBoundaryMarkupNode()
+
+  @surfaceBoundary.setter
+  def surfaceBoundary(self, node):
+    self.setSurfaceBoundaryMarkupNode(node)
+
   def __init__(self):
     self.markupGlyphScale = 0.5
-    self.surfaceBoundary = SmoothCurve.SmoothCurve()
-    self.surfaceBoundary.closed = True
-    self.surfaceBoundary.setTubeRadius(self.markupGlyphScale/2.0)
+    self.boundaryMarkupNode = None
     self.surfaceModelNode = None
     self.segmentationNode = None
     self.segmentId = None
@@ -36,24 +41,17 @@ class LeafletModel:
     self.updateSurface()
 
   def setSurfaceBoundaryMarkupNode(self, surfaceBoundaryMarkupNode):
-    self.surfaceBoundary.setControlPointsMarkupNode(surfaceBoundaryMarkupNode)
+    self.boundaryMarkupNode = surfaceBoundaryMarkupNode
     self.updateSurface()
 
   def getSurfaceBoundaryMarkupNode(self):
-    return self.surfaceBoundary.controlPointsMarkupNode
-
-  def setSurfaceBoundaryModelNode(self, surfaceBoundaryModelNode):
-    self.surfaceBoundary.setCurveModelNode(surfaceBoundaryModelNode)
-
-  def getSurfaceBoundaryModelNode(self):
-    return self.surfaceBoundary.curveModelNode
+    return self.boundaryMarkupNode
 
   def updateSurface(self):
-    self.surfaceBoundary.updateCurve()
     self.extractSurfaceByBoundary()
 
   def getValvePlanePosition(self):
-    arrayAsString = self.surfaceBoundary.controlPointsMarkupNode.GetAttribute("ValvePlanePosition")
+    arrayAsString = self.boundaryMarkupNode.GetAttribute("ValvePlanePosition")
     if not arrayAsString:
       return None
     # for example: arrayAsString = "0.32 0.45 0.11"
@@ -61,13 +59,13 @@ class LeafletModel:
 
   def setValvePlanePosition(self, valvePlanePosition):
     if valvePlanePosition is None:
-      self.surfaceBoundary.controlPointsMarkupNode.RemoveAttribute("ValvePlanePosition")
+      self.boundaryMarkupNode.RemoveAttribute("ValvePlanePosition")
     else:
       arrayAsString = ' '.join([str(x) for x in valvePlanePosition])
-      self.surfaceBoundary.controlPointsMarkupNode.SetAttribute("ValvePlanePosition", arrayAsString)
+      self.boundaryMarkupNode.SetAttribute("ValvePlanePosition", arrayAsString)
 
   def getValvePlaneNormal(self):
-    arrayAsString = self.surfaceBoundary.controlPointsMarkupNode.GetAttribute("ValvePlaneNormal")
+    arrayAsString = self.boundaryMarkupNode.GetAttribute("ValvePlaneNormal")
     if not arrayAsString:
       return None
     # for example: arrayAsString = "0.32 0.45 0.11"
@@ -75,21 +73,20 @@ class LeafletModel:
 
   def setValvePlaneNormal(self, valvePlaneNormal):
     if valvePlaneNormal is None:
-      self.surfaceBoundary.controlPointsMarkupNode.RemoveAttribute("ValvePlaneNormal")
+      self.boundaryMarkupNode.RemoveAttribute("ValvePlaneNormal")
     else:
       arrayAsString = ' '.join([str(x) for x in valvePlaneNormal])
-      self.surfaceBoundary.controlPointsMarkupNode.SetAttribute("ValvePlaneNormal", arrayAsString)
+      self.boundaryMarkupNode.SetAttribute("ValvePlaneNormal", arrayAsString)
 
   def getSelectLargestRegion(self):
-    selectLargestRegion = self.surfaceBoundary.controlPointsMarkupNode.GetAttribute("SelectLargestRegion")
+    selectLargestRegion = self.boundaryMarkupNode.GetAttribute("SelectLargestRegion")
     if selectLargestRegion is None:
       # Use largest region by default
       return True
     return selectLargestRegion.lower()=='true'
 
   def setSelectLargestRegion(self, selectLargestRegion):
-    self.surfaceBoundary.controlPointsMarkupNode.SetAttribute(
-      "SelectLargestRegion", 'true' if selectLargestRegion else 'false')
+    self.boundaryMarkupNode.SetAttribute("SelectLargestRegion", 'true' if selectLargestRegion else 'false')
     self.updateSurface()
 
   def getNumberOfControlPoints(self, markupsNode):
@@ -102,10 +99,10 @@ class LeafletModel:
     Update model to enclose all points in the input markup list
     """
 
-    inputMarkup = self.surfaceBoundary.controlPointsMarkupNode
+    inputMarkup = self.boundaryMarkupNode
     numberOfPoints = self.getNumberOfControlPoints(inputMarkup)
     fullLeafletPolydata = self.getLeafletPolydata()
-    if not fullLeafletPolydata or fullLeafletPolydata.GetNumberOfCells() == 0 or not inputMarkup or numberOfPoints<3:
+    if not fullLeafletPolydata or fullLeafletPolydata.GetNumberOfCells() == 0 or not inputMarkup or numberOfPoints < 3:
       # empty input mesh
       if self.surfaceModelNode.GetPolyData() and self.surfaceModelNode.GetPolyData().GetNumberOfCells() > 0:
         # existing mesh is not empty
@@ -167,7 +164,7 @@ class LeafletModel:
         loc = vtk.vtkPointLocator()
         loc.SetDataSet(cleanedPart)
         foundClosestPointId = loc.FindClosestPoint(closestPoint)
-        if foundClosestPointId >=0 and foundClosestPointId < cleanedPart.GetPoints().GetNumberOfPoints():
+        if foundClosestPointId >= 0 and foundClosestPointId < cleanedPart.GetPoints().GetNumberOfPoints():
           nearestPointOnLeafletSurface = np.array(cleanedPart.GetPoints().GetPoint(foundClosestPointId))
           closestDistances.append(np.linalg.norm(nearestPointOnLeafletSurface-closestPoint))
         else:
@@ -394,7 +391,7 @@ class LeafletModel:
 
   def createSurfaceBoundaryFromCurve(self, valvePlanePosition, valvePlaneNormal, curve):
     """
-    :param curve SmoothCurve that will be used to generate surface boundary curve
+    :param curve MarkupsCurve that will be used to generate surface boundary curve
     """
     self.setValvePlanePosition(valvePlanePosition)
     self.setValvePlaneNormal(valvePlaneNormal)
@@ -414,28 +411,19 @@ class LeafletModel:
       return
 
     boundaryMarkups = self.getSurfaceBoundaryMarkupNode()
-    try:
-      # Current API (Slicer-4.13 February 2022)
-      boundaryMarkups.RemoveAllControlPoints()
-    except:
-      # Legacy API
-      boundaryMarkups.RemoveAllMarkups()
+    boundaryMarkups.RemoveAllControlPoints()
 
     loc = vtk.vtkPointLocator()
     loc.SetDataSet(segmentPolydata)
 
-    numberOfCurvePoints = curve.curvePoints.GetNumberOfPoints()
-    pos = [0.0, 0.0, 0.0]
+    numberOfCurvePoints = curve.GetCurve().GetNumberOfPoints()
+    pos = np.zeros(3)
     for pointIndex in range(numberOfCurvePoints):
-      curve.curvePoints.GetPoint(pointIndex, pos)
+      curve.GetCurve().GetPoint(pointIndex, pos)
       pos += (pos - valvePlanePosition) * 0.2
 
       closestPointId = loc.FindClosestPoint(pos)
       if 0 <= closestPointId < segmentPolydata.GetPoints().GetNumberOfPoints():
         nearestPointOnLeafletSurface = segmentPolydata.GetPoints().GetPoint(closestPointId)
-        try:
-          # Current API (Slicer-4.13 February 2022)
-          boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
-        except:
-          # Legacy API
-          boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
+        boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1],
+                                        nearestPointOnLeafletSurface[2])

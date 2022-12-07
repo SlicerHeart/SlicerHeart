@@ -1,7 +1,5 @@
 import vtk, qt, ctk, slicer
-import HeartValveLib
 from slicer.ScriptedLoadableModule import *
-import HeartValveLib.SmoothCurve
 from ValveQuantificationLib.MeasurementPreset import *
 import ValveQuantificationLib
 
@@ -94,7 +92,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     print("Reloading ValveQuantification")
 
     packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'SmoothCurve', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
+    submoduleNames=['LeafletModel', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
 
     self.reloadPackageWithSubmodules(packageName, submoduleNames)
 
@@ -529,8 +527,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         if valveId:
           # point is constrained to the annulus contour, show slider to allow adjustment
           if pointPositionAnnulus is not None:
-            [_, closestPointIdOnAnnulusCurve] = valveModel.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
-            pointDistanceAlongCurve = valveModel.annulusContourCurve.getCurveLength(closestPointIdOnAnnulusCurve)
+            from HeartValveLib.util import getClosestCurvePointIndexToPosition
+            annulusContourCurve = valveModel.annulusContourCurve
+            closestPointIdOnAnnulusCurve = \
+              getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
+            pointDistanceAlongCurve = \
+              annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
             valueSlider.minimum = pointDistanceAlongCurve-20
             valueSlider.maximum = pointDistanceAlongCurve+20
             valueSlider.value = pointDistanceAlongCurve
@@ -633,8 +635,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         # landmark is present
         if positionSlider.minimum == positionSlider.maximum:
           # Previously it was not present, update slider
-          [_, closestPointIdOnAnnulusCurve] = valveModel.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
-          pointDistanceAlongCurve = valveModel.annulusContourCurve.getCurveLength(closestPointIdOnAnnulusCurve)
+          from HeartValveLib.util import getClosestCurvePointIndexToPosition
+          annulusContourCurve = valveModel.annulusContourCurve
+          closestPointIdOnAnnulusCurve = \
+            getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
+          pointDistanceAlongCurve = \
+            annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
           wasBlocked = positionSlider.blockSignals(True)
           positionSlider.minimum = pointDistanceAlongCurve-20
           positionSlider.maximum = pointDistanceAlongCurve+20
@@ -687,7 +693,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups()
     else:
       # Point placement completed add new markup on the contour
-      if self.pointFieldMarkupsNode[fieldIndex].GetNumberOfMarkups()==0:
+      if self.pointFieldMarkupsNode[fieldIndex].GetNumberOfControlPoints()==0:
         # duplicate update event
         return
 
@@ -706,7 +712,9 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       pointPositionAnnulus = worldToProbeTransform.TransformDoublePoint(pointPositionWorld[0:3])
 
       if field[FIELD_ON_ANNULUS_CONTOUR] is True:
-        [closestPointOnAnnulusCurve, _] = valveModel.annulusContourCurve.getClosestPoint(pointPositionAnnulus)
+        from HeartValveLib.util import getClosestPointPositionAlongCurve
+        closestPointOnAnnulusCurve = \
+          getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, pointPositionAnnulus)
         pointPosition = closestPointOnAnnulusCurve
       else:
         # NB: no snapping or restriction
@@ -722,8 +730,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     if field[FIELD_TYPE]==FIELD_TYPE_POINT:
       valveModel = self.inputValveModels[field[FIELD_VALVE_ID]]
       if value is not None:
-        updatedPointPos = valveModel.annulusContourCurve.getPointAlongCurve(value)
-        valveModel.setAnnulusMarkupLabel(field[FIELD_NAME], updatedPointPos)
+        from HeartValveLib.util import getPositionAlongCurve
+        updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, value)
+        valveModel.setAnnulusMarkupLabel(
+          field[FIELD_NAME],
+          updatedPointPos
+        )
       else:
         valveModel.removeAnnulusMarkupLabel(field[FIELD_NAME])
     else:
@@ -745,12 +757,13 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           pointPositionAnnulus = valveModel.getAnnulusMarkupPositionByLabel(field[FIELD_NAME])
           if pointPositionAnnulus is None:
             # landmark is not present, add it
-            pointPos = valveModel.annulusContourCurve.getPointAlongCurve(0)
+            from HeartValveLib.util import getPositionAlongCurve
+            pointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, 0)
             valveModel.setAnnulusMarkupLabel(field[FIELD_NAME], pointPos)
             positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
             sliderWasBlocked = positionSlider.blockSignals(True)
             positionSlider.minimum = 0
-            positionSlider.maximum = valveModel.annulusContourCurve.getCurveLength()
+            positionSlider.maximum = valveModel.annulusContourCurve.GetCurveLengthWorld()
             positionSlider.value = 0
             positionSlider.blockSignals(sliderWasBlocked)
             self.onInputFieldValueChanged(inputFieldIndex, 0)
