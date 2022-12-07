@@ -693,7 +693,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         self.pointFieldMarkupsNode[fieldIndex].RemoveAllMarkups()
     else:
       # Point placement completed add new markup on the contour
-      if self.pointFieldMarkupsNode[fieldIndex].GetNumberOfMarkups()==0:
+      if self.pointFieldMarkupsNode[fieldIndex].GetNumberOfControlPoints()==0:
         # duplicate update event
         return
 
