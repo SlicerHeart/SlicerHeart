@@ -1404,7 +1404,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
         vesselLumenModelNode.GetDisplayNode().SliceIntersectionVisibilityOn()
       else:
-        vesselLumenModelNode.GetDisplayNode().SetVisibility2DOn()
+        vesselLumenModelNode.GetDisplayNode().SetVisibility2D(True)
       shNode.SetItemParent(shNode.GetItemByDataNode(vesselLumenModelNode), centerlineFolderShItem)
       self.setVesselModelNode(vesselLumenModelNode)
     slicer.modules.segmentations.logic().ExportSegmentToRepresentationNode(
