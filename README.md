@@ -43,7 +43,36 @@ If you have any questions about installing or using SlicerHeart modules please [
   - Andras Lasso, <email>lasso@queensu.ca</email>
 - License: [BSD 3-Clause License](LICENSE)
 
-# How to cite
+# Frequently asked questions
+
+## How to bundle the SlicerHeart extension in a Slicer custom application ?
+
+A snippet like the following should be added in the custom application `CMakeLists.txt`.
+
+Make sure to replace `<SHA>` with a valid value.
+
+Note the inclusion of `SuperBuildPrerequisites.cmake` CMake module after the call to `FetchContent_Populate`.
+
+```cmake
+# Add remote extension source directories
+
+# SlicerHeart
+set(extension_name "SlicerHeart")
+set(${extension_name}_SOURCE_DIR "${CMAKE_BINARY_DIR}/${extension_name}")
+FetchContent_Populate(${extension_name}
+  SOURCE_DIR     ${${extension_name}_SOURCE_DIR}
+  GIT_REPOSITORY https://github.com/SlicerHeart/SlicerHeart.git
+  GIT_TAG        <SHA>
+  GIT_PROGRESS   1
+  QUIET
+  )
+message(STATUS "Remote - ${extension_name} [OK]")
+list(APPEND Slicer_EXTENSION_SOURCE_DIRS ${${extension_name}_SOURCE_DIR})
+
+include(${SlicerHeart_SOURCE_DIR}/SuperBuildPrerequisites.cmake)
+```
+
+## How to cite
 
 If you utilized SlicerHeart, please cite the following paper when referring to SlicerHeart in your publication:
 
