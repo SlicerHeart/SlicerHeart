@@ -110,7 +110,6 @@ vtkMRMLSequenceNode* vtkSlicerGeUsMovieReaderLogic::LoadGeUsMovieFile(char* file
   }
   const DataElement& movieGroupLevel2Seq = movieGroupLevel1SeqItem1DataSet.GetDataElement(movieGroupLevel2Tag);
   SmartPointer<SequenceOfItems> movieGroupLevel2SeqItems = movieGroupLevel2Seq.GetValueAsSQ();
-  size_t movieGroupLevel2SeqItemsCount = movieGroupLevel2SeqItems->GetNumberOfItems();
   if (movieGroupLevel2SeqItems->GetNumberOfItems() < 1)
   {
     vtkErrorMacro("vtkSlicerGeUsMovieReaderLogic::LoadGeUsMovieFile failed: movieGroupLevel2SeqItems expected to have items");
