@@ -33,6 +33,7 @@ if(${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR} VERSION_LESS 5.0)
   message(STATUS "ITK version: ${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR}.${ITK_VERSION_PATCH}. ITK filters are not built.")
   set(SlicerHeart_BUILD_ITK_FILTERS OFF)
 endif()
+mark_as_superbuild(SlicerHeart_BUILD_ITK_FILTERS)
 
 #-----------------------------------------------------------------------------
 # SuperBuild setup
@@ -50,38 +51,75 @@ endif()
 
 #-----------------------------------------------------------------------------
 # Extension modules
-add_subdirectory(ValveView)
-add_subdirectory(Philips4dUsDicomPatcher)
-# add_subdirectory(Philips4dUsReader) # Disabled until fixing the gdcm build errors
-add_subdirectory(KretzFileReader)
-add_subdirectory(GeUsMovieReader)
-add_subdirectory(DicomUltrasoundPlugin)
-add_subdirectory(CardiacDeviceSimulator)
-add_subdirectory(AsdVsdDeviceSimulator)
-add_subdirectory(TCAVValveSimulator)
-add_subdirectory(ValveAnnulusAnalysis)
-add_subdirectory(ValveClipDeviceSimulator)
-add_subdirectory(ValvePapillaryAnalysis)
-add_subdirectory(ValveQuantification)
-add_subdirectory(TomTecUcdPlugin)
-add_subdirectory(CartoExport)
-add_subdirectory(BafflePlanner)
-if (SlicerHeart_BUILD_ITK_FILTERS)
-  add_subdirectory(PhaseSymmetryFilter)
+set(slicerheart_modules
+  ValveView
+  Philips4dUsDicomPatcher
+#   Philips4dUsReader # Disabled until fixing the gdcm build errors
+  KretzFileReader
+  GeUsMovieReader
+  DicomUltrasoundPlugin
+  CardiacDeviceSimulator
+  AsdVsdDeviceSimulator
+  TCAVValveSimulator
+  ValveAnnulusAnalysis
+  ValveClipDeviceSimulator
+  ValvePapillaryAnalysis
+  ValveQuantification
+  TomTecUcdPlugin
+  CartoExport
+  BafflePlanner
+  ConformalTextureMapping
+  Reconstruct4DCineMRI
+  EchoVolumeRender
+  ValveBatchExport
+  LeafletMoldGenerator
+  ValveSegmentation
+  LeafletAnalysis
+  )
+if(SlicerHeart_BUILD_ITK_FILTERS)
+  list(APPEND slicerheart_modules
+    PhaseSymmetryFilter
+    )
 endif()
-add_subdirectory(ConformalTextureMapping)
-if (WIN32)
+if(WIN32)
   # Image3dAPI only works on Windows
   # (see https://github.com/MedicalUltrasound/Image3dAPI)
-  add_subdirectory(UltrasoundImage3dReader)
+  list(APPEND slicerheart_modules
+    UltrasoundImage3dReader
+    )
 endif()
-add_subdirectory(Reconstruct4DCineMRI)
-add_subdirectory(EchoVolumeRender)
-add_subdirectory(ValveBatchExport)
-add_subdirectory(LeafletMoldGenerator)
-add_subdirectory(ValveSegmentation)
-add_subdirectory(LeafletAnalysis)
-## NEXT_MODULE
+
+# Allow to check if a given SlicerHeart module should be enabled or disabled.
+#
+# Definitions:
+#
+# * A SlicerHeart module is a module whose source code is found under one of the
+#   "SlicerHeart/*" subdirectories.
+#
+# * Enabling (or disabling) a module means that it will (or will not) be built.
+#
+# * Building a module means that the corresponding directory is added using the add_subdirectory
+#   CMake command and that the associated CMakeLists.txt is processed.
+#
+# By default, all SlicerHeart modules are assumed to be enabled. Then, based on
+# build options or variables describing the system (e.g WIN32), module may be disabled.
+#
+# Setting these variables allows to explicitly disable or enable modules
+# ignoring effect of the CMake variables or build options:
+# * SlicerHeart_MODULES_DISABLED
+# * SlicerHeart_MODULES_ENABLED
+#
+include(SlicerCheckModuleEnabled)
+macro(slicerheart_is_module_enabled module_name output_var)
+  _slicer_is_module_enabled("SlicerHeart_MODULES" ${module_name} ${output_var})
+endmacro()
+
+foreach(module ${slicerheart_modules})
+  slicerheart_is_module_enabled(${module} _build_module)
+  if(_build_module)
+    add_subdirectory(${module})
+  endif()
+endforeach()
 
 #-----------------------------------------------------------------------------
 set(EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS)
