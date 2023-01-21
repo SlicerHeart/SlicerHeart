@@ -266,7 +266,6 @@ vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *file
         points_Cartesian->Allocate(numberOfPoints);
         double phiAnglesRadCentre = vtkMath::Pi() / 2.0;
         double thetaAnglesRadCentre = vtkMath::Pi() / 2.0;
-        const double transducerCenterPosition_Spherical[3] = { 0, double(numj) / 2.0, double(numk) / 2.0 };
         for (unsigned int k_Spherical = 0; k_Spherical < numk; k_Spherical++)
         {
           double phi = phiAnglesRad[k_Spherical] - phiAnglesRadCentre;
