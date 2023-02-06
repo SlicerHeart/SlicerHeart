@@ -554,7 +554,10 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def updateAnnulusContourPreviewModel(self):
     if not self.annulusContourPreviewActive:
       return
-    self.annulusContourPreviewControlPoints.Copy(self.valveModel.getAnnulusContourMarkupNode())
+
+    annulusContourMarkupPositionsArray = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.getAnnulusContourMarkupNode())
+    slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourPreviewControlPoints, annulusContourMarkupPositionsArray)
+
     self.annulusContourPreviewCurve.updateCurve()
     if self.ui.smoothContourCheckbox.checked:
       self.annulusContourPreviewCurve.smoothCurveFourier(self.ui.smoothContourFourierCoefficientsSpinBox.value,
@@ -572,6 +575,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       self.getAnnulusContourModelNode().GetDisplayNode().SetVisibility(not self.annulusContourPreviewActive)
     annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.curveModelNode.GetDisplayNode()
     if not annulusContourPreviewDisplayNode:
+      if not self.annulusContourPreviewCurve.curveModelNode.GetScene():
+        slicer.mrmlScene.AddNode(self.annulusContourPreviewCurve.curveModelNode)
       self.annulusContourPreviewCurve.curveModelNode.CreateDefaultDisplayNodes()
       annulusContourPreviewDisplayNode = self.annulusContourPreviewCurve.curveModelNode.GetDisplayNode()
     annulusContourPreviewDisplayNode.SetVisibility(self.annulusContourPreviewActive)
@@ -915,6 +920,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
     slicer.mrmlScene.Clear(0)
+    self.mitral4dUsSequencePath = r"c:\tmp\CTCardioSeq.seq.nrrd"
 
   def runTest(self):
     """Run as few or as many tests as needed here.
@@ -934,4 +940,142 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     your test should break so they know that the feature is needed.
     """
 
-    self.delayDisplay("No tests are implemented")
+    self.delayDisplay("Start test_ValveAnnulusAnalysis1.")
+    valveVolumePath = self.mitral4dUsSequencePath
+
+    import time
+    import numpy as np
+    import ValveModel
+    import HeartValveLib
+
+    ################################
+    # TODO: these are needed during test development only
+
+    slicer.util.selectModule('ValveAnnulusAnalysis')
+    slicer.mrmlScene.Clear(0)
+    slicer.app.processEvents()
+    valveVolumePath = r"c:\tmp\CTCardioSeq.seq.nrrd"
+    valveType = "mitral"
+    cardiacCyclePhase = "mid-systole"
+    analyzedFrame = 3
+    probePosition = "TTE apical"
+    # Get this by calling:
+    # arrayFromTransformMatrix(getNode('AxialSliceToRasTransform'))
+    axialSliceToRasTransformMatrixArray = np.array([[ -0.843708 ,   0.201982 ,   0.497353 ,   2.06546  ],
+          [  0.529546 ,   0.464991 ,   0.709481 , -15.2707   ],
+          [ -0.0879624,   0.861966 ,  -0.499276 ,   5.07062  ],
+          [  0.       ,   0.       ,   0.       ,   1.       ]])
+    # Get this by calling
+    # arrayFromMarkupsControlPoints(getNode("AnnulusContourMarkup"))
+    annulusMarkupControlPointsArray = np.array([[  -9.33410719,   10.98653177, 1764.50800388],
+          [  -6.10978386,    6.30833859, 1770.26486783],
+          [  -9.19402331,    2.04822121, 1774.11110058],
+          [  -9.25165751,    6.97609621, 1784.25719563],
+          [ -13.98503259,    4.96038398, 1788.5729537 ],
+          [ -18.95881005,    8.93632905, 1792.28388357],
+          [ -20.5294456 ,   16.88700379, 1794.63485967],
+          [ -22.99856624,   23.75385234, 1788.84881724],
+          [ -16.5752839 ,   30.46000121, 1786.85720757],
+          [ -11.1990685 ,   34.92520958, 1779.87715607],
+          [  -2.96596805,   29.28224397, 1778.21043772],
+          [   2.36253717,   23.56772078, 1776.15384207]])
+
+    def delayDisplay(text):
+        print(text)
+        slicer.util.delayDisplay(text)
+
+    ################################
+
+    sequencesLogic = slicer.util.getModuleLogic('Sequences')
+
+    sequencesLogic = slicer.util.getModuleLogic('Sequences')
+    valveAnnulusAnalysisGui = slicer.util.getModuleGui('ValveAnnulusAnalysis')
+
+    axialSlice = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeRed')
+    orthogonalSlice1 = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeYellow')
+    orthogonalSlice2 = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeGreen')
+
+
+    # -------------------------------------------
+    delayDisplay("Load image sequence")
+
+    valveVolumeSequence = slicer.util.loadNodeFromFile(valveVolumePath, 'SequenceFile')    
+    valveVolumeSequenceBrowser = sequencesLogic.GetFirstBrowserNodeForSequenceNode(valveVolumeSequence)
+    valveVolume = valveVolumeSequenceBrowser.GetProxyNode(valveVolumeSequence)
+
+    # -------------------------------------------
+    delayDisplay("Setup heart valve node")
+
+    slicer.app.processEvents()
+    heartValveNode = valveAnnulusAnalysisGui.ui.heartValveSelector.addNode()
+    slicer.app.processEvents()
+
+    # It is not clear why the combobox does not update
+    #print(heartValveNode)
+    #valveAnnulusAnalysisGui.ui.heartValveSelector.setCurrentNode(None)
+    #valveAnnulusAnalysisGui.ui.heartValveSelector.setCurrentNode(heartValveNode)
+    #valveAnnulusAnalysisGui.onHeartValveSelect(heartValveNode)
+
+    valveAnnulusAnalysisGui.ui.valveTypeSelector.currentText = valveType
+    valveAnnulusAnalysisGui.ui.cardiacCyclePhaseSelector.currentText = cardiacCyclePhase
+
+    # -------------------------------------------
+    delayDisplay("Select analysis frame")
+
+    # Simulate some frame browsing
+    for frameIndex in range(10):
+        valveVolumeSequenceBrowser.SetSelectedItemNumber(frameIndex)
+        slicer.app.processEvents()
+        time.sleep(0.3)
+
+    # Jump to the analysis frame prescribed for this test
+    valveVolumeSequenceBrowser.SetSelectedItemNumber(analyzedFrame)
+    valveAnnulusAnalysisGui.ui.useCurrentFrameButton.click()
+
+    # -------------------------------------------
+    delayDisplay("Set image orientation")
+
+    # Simulate some manual orientation changes
+    valveAnnulusAnalysisGui.ui.probePositionSelector.currentText = probePosition
+    lrSlider = slicer.util.findChild(valveAnnulusAnalysisGui.ui.axialSliceToRasTransformOrientationSliderWidget, "LRSlider")
+    paSlider = slicer.util.findChild(valveAnnulusAnalysisGui.ui.axialSliceToRasTransformOrientationSliderWidget, "PASlider")
+    isSlider = slicer.util.findChild(valveAnnulusAnalysisGui.ui.axialSliceToRasTransformOrientationSliderWidget, "ISSlider")
+    for angle in range(10):
+        lrSlider.value += 0.6
+        paSlider.value -= 1.1
+        isSlider.value += 0.3
+        slicer.app.processEvents()
+        time.sleep(0.1)
+
+    # Jump to the slice positions and orientations prescribed for this test
+    # set axialSliceToRasTransform 
+    axialSliceToRasTransformNode = heartValveNode.GetNodeReference("AxialSliceToRasTransform")
+    slicer.util.updateTransformMatrixFromArray(axialSliceToRasTransformNode, axialSliceToRasTransformMatrixArray)
+    # update slice view positions and orientations accordingly
+    sliceIntersectionPosition = axialSliceToRasTransformMatrixArray[0:3,3]
+    valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
+    valveModel.setSlicePositionAndOrientation(axialSlice, orthogonalSlice1, orthogonalSlice2, sliceIntersectionPosition, 0)
+
+    # -------------------------------------------
+    delayDisplay("Specify contour points")
+
+    valveAnnulusAnalysisGui.ui.contouringCollapsibleButton.collapsed = False
+
+    # Place control points
+    annulusMarkupNode = heartValveNode.GetNodeReference("AnnulusContourPoints")
+    for pointPosition in annulusMarkupControlPointsArray:
+        annulusMarkupNode.AddControlPoint(pointPosition)
+        slicer.app.processEvents()
+        time.sleep(0.5)
+
+    # -------------------------------------------
+    delayDisplay("Adjust contour")
+
+    delayDisplay("Enable smoothing preview")
+    valveAnnulusAnalysisGui.ui.contourAdjustmentCollapsibleButton.collapsed = False
+    valveAnnulusAnalysisGui.ui.smoothContourPreviewCheckbox.checked = True
+
+    delayDisplay("Enable smoothing preview")
+    valveAnnulusAnalysisGui.ui.resampleContourButton.click()
+
+    self.delayDisplay("Completed test_ValveAnnulusAnalysis1.")
