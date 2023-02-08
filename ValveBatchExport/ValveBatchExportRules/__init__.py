@@ -4,6 +4,7 @@ from .PapillaryAnalysisResults import *
 from .AnnulusContourCoordinates import *
 from .ValveLandmarkCoordinates import *
 from .ValveVolume import *
+from .VolumeFrame import *
 from .LeafletSegmentation import *
 from .ValveLeafletSurfaces import *
 from .ValveLandmarks import *
