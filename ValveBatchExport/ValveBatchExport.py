@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import argparse
 import vtk, qt, ctk, slicer
+
 from slicer.ScriptedLoadableModule import *
 from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
 from HeartValveLib.helpers import getAllFilesWithExtension, isMRBFile
@@ -76,6 +77,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
                              ValveBatchExportPlugin(ValveLandmarkLabelsExportRule, False),
                              ValveBatchExportPlugin(ValveLandmarksExportRule, False),
                              ValveBatchExportPlugin(ValveVolumeExportRule, False),
+                             ValveBatchExportPlugin(ValveVolumeFrameExportRule, False),
                              ValveBatchExportPlugin(QuantificationResultsExportRule),
                              ValveBatchExportPlugin(PapillaryAnalysisResultsExportRule),
                              ValveBatchExportPlugin(LeafletSegmentationExportRule, False),
@@ -592,6 +594,7 @@ def main(argv):
   parser.add_argument(ValveLandmarkCoordinatesExportRule.CMD_FLAG, "--export_landmark_coordinates", action='store_true')
   parser.add_argument(PapillaryAnalysisResultsExportRule.CMD_FLAG, "--export_papillary_results", action='store_true')
   parser.add_argument(ValveVolumeExportRule.CMD_FLAG, "--export_image_volume", action='store_true')
+  parser.add_argument(ValveVolumeFrameExportRule.CMD_FLAG, "--export_valve_volume_frame", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG, "--export_leaflet_segmentation", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_1, "--individual_segmentation_files", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG, "--valve_landmark_labels", action='store_true')
@@ -634,6 +637,8 @@ def main(argv):
     logic.addRule(ValveLandmarksExportRule)
   if args.export_image_volume:
     logic.addRule(ValveVolumeExportRule)
+  if args.export_valve_volume_frame:
+    logic.addRule(ValveVolumeFrameExportRule)
   if args.export_leaflet_segmentation:
     if args.individual_segmentation_files:
       LeafletSegmentationExportRule.ONE_FILE_PER_SEGMENT = True

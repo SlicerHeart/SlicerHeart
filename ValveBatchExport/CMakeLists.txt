@@ -14,6 +14,7 @@ set(MODULE_PYTHON_SCRIPTS
   ValveBatchExportRules/AnnulusContourModel
   ValveBatchExportRules/ValveLandmarkCoordinates
   ValveBatchExportRules/ValveVolume
+  ValveBatchExportRules/VolumeFrame
   ValveBatchExportRules/LeafletSegmentation
   ValveBatchExportRules/ValveLandmarks
   ValveBatchExportRules/ValveLandmarkLabels
