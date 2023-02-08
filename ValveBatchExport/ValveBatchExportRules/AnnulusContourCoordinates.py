@@ -131,8 +131,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
       closestPointPositionOnAnnulusCurve = [0.0, 0.0, 0.0]
       valveModel.annulusContourCurve.GetNthControlPointPosition(closestControlPointIdOnAnnulusCurve, 
                                                                 closestPointPositionOnAnnulusCurve)
-      if np.linalg.norm(
-          np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > valveModel.getAnnulusContourRadius() * 1.5:
+      if np.linalg.norm(np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > valveModel.getAnnulusContourRadius() * 1.5:
         # it is not a label on the annulus (for example, centroid), ignore it
         continue
       self.controlResultsTableNode.SetCellText(startingRowIndex + closestControlPointIdOnAnnulusCurve, 7, label.strip())
