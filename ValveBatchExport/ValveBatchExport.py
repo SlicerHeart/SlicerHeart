@@ -1,8 +1,8 @@
-import logging
-from pathlib import Path
 import sys
 import argparse
-import vtk, qt, ctk, slicer
+from __main__ import qt, ctk, slicer
+
+import Testing
 from slicer.ScriptedLoadableModule import *
 from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
 from HeartValveLib.helpers import getAllFilesWithExtension, isMRBFile
@@ -120,6 +120,16 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.exportOptionsFrameLayout = qt.QFormLayout()
     self.exportOptionsFrame.setLayout(self.exportOptionsFrameLayout)
 
+    self.preferredFormatCombobox = qt.QComboBox()
+    for fileType in ImageValveBatchExportRule.FILE_FORMAT_OPTIONS:
+      self.preferredFormatCombobox.addItem(fileType)
+
+    def onPreferredFormatChanged(idx):
+      ImageValveBatchExportRule.FILE_FORMAT = self.preferredFormatCombobox.currentText
+
+    self.exportOptionsFrameLayout.addRow("Preferred output format", self.preferredFormatCombobox)
+    self.preferredFormatCombobox.currentIndexChanged.connect(onPreferredFormatChanged)
+
     # add ui of export plugins here
     for exportPlugin in self.registeredExportPlugins:
       self.exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
@@ -165,6 +175,32 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow(self.progressbar)
 
     self._exportRunning = False
+
+  def onReload(self):
+    logging.debug(f"Reloading {self.moduleName}")
+    def reload(packageName, submoduleNames):
+      import imp
+      f, filename, description = imp.find_module(packageName)
+      package = imp.load_module(packageName, f, filename, description)
+      for submoduleName in submoduleNames:
+        f, filename, description = imp.find_module(submoduleName, package.__path__)
+        try:
+          imp.load_module(packageName + '.' + submoduleName, f, filename, description)
+        finally:
+          f.close()
+
+    reload('ValveBatchExportRules', [
+      'utils', 'base', 'constants', 'AnnulusContour', 'AnnulusContourCoordinates', 'LeafletSegmentation',
+      'PapillaryAnalysisResults', 'QuantificationResults', 'ValveLandmarkCoordinates', 'ValveLandmarkLabels',
+      'ValveLandmarks', 'ValveVolume'
+    ])
+
+    # import ValveBatchExportRules
+    # import importlib
+    # importlib.reload(ValveBatchExportRules)
+    # importlib.reload(Testing)
+    reload("Testing", ["test_utils", "test_AnnulusContour"])
+    ScriptedLoadableModuleWidget.onReload(self)
 
   def onNumParallelProcessesChanged(self, val):
     self.logic.numParallelProcesses = int(val)
@@ -371,7 +407,8 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
 
   def onProcessesCompleted(self):
     for rule in self._exportRules:
-      rule.mergeTables(list(self._inputData.values()), self.outputDirPath)
+      if isinstance(rule, QuantitativeValveBatchExportRule):
+        rule.mergeTables(list(self._inputData.values()), self.outputDirPath)
     self.addLog(f'\nExport completed.')
     if self.completedCallback:
       self.completedCallback()
@@ -388,8 +425,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       proceeds = []
       # iterate over all rules and check if all data is available
       for rule in self._exportRules:
-        if not rule.OUTPUT_CSV_FILES:
-          self.addLog(f"{rule} has no output csv files assigned. Proceeding...")
+        if not isinstance(rule, QuantitativeValveBatchExportRule):
           proceeds.append(True)
           continue
         allExist = all((Path(outputDirPath) / csvFileName).exists() for csvFileName in rule.OUTPUT_CSV_FILES)
@@ -422,9 +458,6 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
 
     for rule in self._exportRules:
       rule.processScene(filePath)
-
-    for rule in self._exportRules:
-      rule.afterProcessScene(filePath)
 
     slicer.mrmlScene.Clear(False)
 
@@ -556,14 +589,35 @@ class ValveBatchExportTest(ScriptedLoadableModuleTest):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
     slicer.mrmlScene.Clear(0)
+    import SampleData
+    self.cardioSequence = SampleData.downloadSample('CTCardioSeq')
+    self.cardioVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
+
+    self.heartValveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode", "HeartValve")
+    self.heartValveNode.SetAttribute("ModuleName", "HeartValve")
+    self.valveModel = HeartValveLib.HeartValves.getValveModel(self.heartValveNode)
+    self.valveModel.setValveVolumeNode(self.cardioVolumeNode)
+    self.valveModel.setValveType('tricuspid')
 
   def runTest(self):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_ValveBatchExport1()
+    self.test_ValveBatchExportRule()
+    self.test_QuantitativeValveBatchExportRule()
+    self.test_ImageValveBatchExportRule()
 
-  def test_ValveBatchExport1(self):
+
+    import importlib
+    importlib.reload(Testing)
+
+    suite = unittest.TestLoader().loadTestsFromModule(Testing)
+    unittest.TextTestRunner(verbosity=2).run(suite)
+
+    # suite = unittest.TestLoader().loadTestsFromModule(utils)
+    # unittest.TextTestRunner(verbosity=2).run(suite)
+
+  def test_ValveBatchExportRule(self):
     """ Ideally you should have several levels of tests.  At the lowest level
     tests should exercise the functionality of the logic with different inputs
     (both valid and invalid).  At higher levels your tests should emulate the
@@ -574,8 +628,37 @@ class ValveBatchExportTest(ScriptedLoadableModuleTest):
     module.  For example, if a developer removes a feature that you depend on,
     your test should break so they know that the feature is needed.
     """
-    # TODO: implement tests
-    pass
+
+    ValveBatchExportRule.setPhasesToExport(["MS", "ES"])
+    self.assertListEqual(ValveBatchExportRule.EXPORT_PHASES, ["MS", "ES"])
+
+    rule = ValveBatchExportRule()
+    self.assertEqual(len(rule.usedNames), 0)
+
+    with self.assertRaises(ValveBatchExportRule.NoAssociatedFrameNumberFound):
+      ValveBatchExportRule.getAssociatedFrameNumber(self.valveModel)
+    self.valveModel.setValveVolumeSequenceIndex(3)
+
+    self.assertEqual(ValveBatchExportRule.getAssociatedFrameNumber(self.valveModel), 3)
+
+    valveModelName = rule.generateValveModelName("ABC.mrb", self.valveModel)
+    self.assertEqual(valveModelName, "ABC_tricuspid_frame_3_UN")
+
+    valveModelName = rule.generateValveModelName("ABC.mrb", self.valveModel)
+    self.assertEqual(valveModelName, "ABC_tricuspid_frame_3_UN_1")
+
+    valveModelName = rule.generateValveModelName("ABC.mrb", self.valveModel, "suffix")
+    self.assertEqual(valveModelName, "ABC_tricuspid_frame_3_UN_suffix")
+
+    rule.generateUniqueName("ABC")
+    for idx in range(5):
+      self.assertEqual(rule.generateUniqueName("ABC"), f"ABC_{idx+1}")
+
+  def test_QuantitativeValveBatchExportRule(self):
+    rule = QuantitativeValveBatchExportRule()
+
+  def test_ImageValveBatchExportRule(self):
+    rule = ImageValveBatchExportRule()
 
 
 def main(argv):

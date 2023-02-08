@@ -3,28 +3,24 @@ import qt
 import vtk
 import logging
 import slicer
-from HeartValveLib.helpers import getAllHeartValveModelNodes, getSpecificHeartValveModelNodes
+from HeartValveLib.helpers import (
+  getAllHeartValveModelNodes,
+  getSpecificHeartValveModelNodes
+)
+
 from typing import Union
 
 
 class ValveBatchExportPlugin(qt.QWidget):
 
-  _RULE_CLASS = None
-
   @property
   def activated(self):
     return self.checkbox.checked
 
-  def __init__(self, ruleClass=None, checked=True):
+  def __init__(self, ruleClass, checked=True):
     qt.QWidget.__init__(self)
-
-    if ruleClass:
-      assert issubclass(ruleClass, ValveBatchExportRule)
-      self._RULE_CLASS = ruleClass
-
-    self._checked =  checked
-
-    assert self._RULE_CLASS is not None
+    self.logic = ruleClass
+    self._checked = checked
     self.setup()
 
   def setup(self):
@@ -32,27 +28,27 @@ class ValveBatchExportPlugin(qt.QWidget):
 
     self.checkbox = qt.QCheckBox()
     self.checkbox.checked = self._checked
-    self.checkbox.setToolTip(self._RULE_CLASS.DETAILED_DESCRIPTION)
+    self.checkbox.setToolTip(self.logic.DETAILED_DESCRIPTION)
 
     self.layout().addWidget(self.checkbox)
 
-    if self._RULE_CLASS.USER_INTERFACE is True:
-      import ctk
-      self.collapsibleButton = ctk.ctkCollapsibleButton()
-      self.collapsibleButton.text = "Options"
-      self.collapsibleButton.collapsed = 1
-      self.collapsibleButton.setEnabled(self._checked)
-      layout = qt.QGridLayout()
-      self.collapsibleButton.setLayout(layout)
-      self.layout().addWidget(self.collapsibleButton)
-      self.checkbox.stateChanged.connect(lambda c: self.collapsibleButton.setEnabled(c))
-      self._RULE_CLASS.setupUI(layout)
-
   def getRuleClass(self):
-    return self._RULE_CLASS
+    return self.logic
 
   def getDescription(self):
-    return self._RULE_CLASS.BRIEF_USE
+    return self.logic.BRIEF_USE
+
+  def getOptionsLayout(self):
+    import ctk
+    self.collapsibleButton = ctk.ctkCollapsibleButton()
+    self.collapsibleButton.text = "Options"
+    self.collapsibleButton.collapsed = 1
+    self.collapsibleButton.setEnabled(self._checked)
+    layout = qt.QGridLayout()
+    self.collapsibleButton.setLayout(layout)
+    self.layout().addWidget(self.collapsibleButton)
+    self.checkbox.stateChanged.connect(lambda c: self.collapsibleButton.setEnabled(c))
+    return layout
 
 
 class ValveBatchExportRule(object):
@@ -62,10 +58,8 @@ class ValveBatchExportRule(object):
 
   BRIEF_USE = ""
   DETAILED_DESCRIPTION = ""
-  USER_INTERFACE = False
 
   EXPORT_PHASES = [] # empty means all phases will be exported
-  OUTPUT_CSV_FILES = []
 
   CMD_FLAG = None  # Necessary when running export via python script
   OTHER_FLAGS = []  # changed at runtime for additional options
@@ -77,10 +71,64 @@ class ValveBatchExportRule(object):
       raise cls.NoAssociatedFrameNumberFound(f"No associated frame found for {valveModel.getCardiacCyclePhase()}")
     return frameNumber
 
-  def generateValveModelName(self, filename, valveType, cardiacCyclePhaseName, frameNumber=None, suffix=""):
+  @classmethod
+  def setPhasesToExport(cls, phases : list):
+    logging.debug("Phases to export set to: %s" % phases)
+    cls.EXPORT_PHASES = phases
+
+  def __init__(self):
+    self.logCallback = None
+    self.outputDir = None      # TODO: need to check when exporting if output dir was set and existing
+    self.usedNames = set()
+
+  def generateValveModelName(self, sceneFileName, valveModel, suffix=""):
+    frameNumber = self.getAssociatedFrameNumber(valveModel)
+    filename, _ = os.path.splitext(os.path.basename(sceneFileName))
+    valveType = valveModel.getValveType()
+    cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
     frame = f"frame_{frameNumber}" if frameNumber is not None and frameNumber > -1 else ""
     return self.generateUniqueName("_".join(filter(lambda c: c != "",
                                                    [filename, valveType, frame, cardiacCyclePhaseName, suffix])))
+
+  def getHeartValveModelNodes(self):
+    if self.EXPORT_PHASES:
+      return getSpecificHeartValveModelNodes(self.EXPORT_PHASES)
+    else:
+      return getAllHeartValveModelNodes()
+
+  def addLog(self, text):
+    logging.info(text)
+    if self.logCallback:
+      self.logCallback(text)
+
+  def generateUniqueName(self, name):
+    if name in self.usedNames:
+      nameCounter = 1
+      while True:
+        uniqueName = f"{name}_{nameCounter}"
+        if uniqueName not in self.usedNames:
+          break
+        nameCounter += 1
+    else:
+      uniqueName = name
+    self.usedNames.add(uniqueName)
+    return uniqueName
+
+  def processStart(self):
+    pass
+
+  def processScene(self, sceneFileName):
+    """Scene is loaded and some rules might have been already processed the scene.
+    All scene modifications should happen in this method."""
+    pass
+
+  def processEnd(self):
+    pass
+
+
+class QuantitativeValveBatchExportRule(ValveBatchExportRule):
+
+  OUTPUT_CSV_FILES = []
 
   @staticmethod
   def addRowData(tableNode, *args):
@@ -99,11 +147,6 @@ class ValveBatchExportRule(object):
     for col in columns:
       tableNode.AddColumn().SetName(col)
     return tableNode
-
-  @classmethod
-  def setPhasesToExport(cls, phases):
-    logging.debug("Phases to export set to: %s" % phases)
-    cls.EXPORT_PHASES = phases
 
   @staticmethod
   def getTableNode(measurementNode, identifier):
@@ -165,39 +208,6 @@ class ValveBatchExportRule(object):
   def saveCSV(df, outputFile):
     df.to_csv(str(outputFile), index=False)
 
-  def __init__(self):
-    self.logCallback = None
-    self.outputDir = None
-    self.usedNames = set()
-
-  @classmethod
-  def setupUI(cls, layout):
-    raise NotImplementedError("Method needs to be implemented if class member `USER_INTERFACE` set to True")
-
-  def getHeartValveModelNodes(self):
-    if self.EXPORT_PHASES:
-      return getSpecificHeartValveModelNodes(self.EXPORT_PHASES)
-    else:
-      return getAllHeartValveModelNodes()
-
-  def addLog(self, text):
-    logging.info(text)
-    if self.logCallback:
-      self.logCallback(text)
-
-  def generateUniqueName(self, name):
-    if name in self.usedNames:
-      nameCounter = 1
-      while True:
-        uniqueName = f"{name}_{nameCounter}"
-        if uniqueName not in self.usedNames:
-          break
-        nameCounter += 1
-    else:
-      uniqueName = name
-    self.usedNames.add(uniqueName)
-    return uniqueName
-
   def writeTableNodeToCsv(self, tableNode, filename, useStringDelimiter = False):
     """
     Write table node to CSV file
@@ -219,34 +229,11 @@ class ValveBatchExportRule(object):
     """
     pass
 
-  def processStart(self):
-    pass
 
-  def processScene(self, sceneFileName):
-    """Scene is loaded but and some rules might have been already processed the scene.
-    All scene modifications should happen in this method."""
-    pass
+class ImageValveBatchExportRule(ValveBatchExportRule):
 
-  def afterProcessScene(self, sceneFileName):
-    """Scene is loaded and all processing completed.
-    No processing should be performed in this method."""
-    pass
-
-  def processEnd(self):
-    pass
+  FILE_FORMAT_OPTIONS = [".nrrd",
+                         ".nii.gz"]
+  FILE_FORMAT = ".nrrd"
 
 
-def getNewSegmentationNode(masterVolumeNode):
-  segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode')
-  segmentationNode.CreateDefaultDisplayNodes()
-  segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(masterVolumeNode)
-  return segmentationNode
-
-
-def createLabelNodeFromVisibleSegments(segmentationNode, valveModel, labelNodeName):
-  labelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", labelNodeName)
-  probeToRasTransform = valveModel.getProbeToRasTransformNode()
-  labelNode.SetAndObserveTransformNodeID(probeToRasTransform.GetID())
-  segmentationsLogic = slicer.modules.segmentations.logic()
-  segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode, valveModel.getValveVolumeNode())
-  return labelNode

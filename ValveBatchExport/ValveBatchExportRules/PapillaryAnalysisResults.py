@@ -4,11 +4,14 @@ import logging
 from pathlib import Path
 from collections import OrderedDict
 
-from .base import ValveBatchExportRule
-from HeartValveLib.helpers import getSpecificHeartValveMeasurementNodes, getAllHeartValveModelNodes
+from .base import QuantitativeValveBatchExportRule
+from HeartValveLib.helpers import (
+  getSpecificHeartValveMeasurementNodes,
+  getAllHeartValveModelNodes
+)
 
 
-class PapillaryAnalysisResultsExportRule(ValveBatchExportRule):
+class PapillaryAnalysisResultsExportRule(QuantitativeValveBatchExportRule):
 
   BRIEF_USE = "Valve papillary analysis results (.csv)"
   DETAILED_DESCRIPTION = """

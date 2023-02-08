@@ -1,30 +1,18 @@
 import qt
 import os
 import slicer
-import vtk
-from .base import ValveBatchExportRule, getNewSegmentationNode, createLabelNodeFromVisibleSegments
+from .base import (
+  ImageValveBatchExportRule,
+  ValveBatchExportPlugin
+)
+from .utils import getLabelFromLandmarkPositions
+from .constants import VALVE_COMMISSURAL_LANDMARKS, VALVE_QUADRANT_LANDMARKS
 
 
-VALVE_COMMISSURAL_LANDMARKS = {
-  "mitral": ['PMC', 'ALC'],
-  "tricuspid": ['ASC', 'PSC', 'APC'],
-  "cavc": ['SRC', 'SLC', 'IRC', 'ILC'],
-  "lavv": ['ALC', 'PMC', 'SIC']
-}
+class ValveLandmarkLabelsExportRule(ImageValveBatchExportRule):
 
-VALVE_QUADRANT_LANDMARKS = {
-  "mitral": ['A', 'P', 'PM', 'AL'],
-  "tricuspid": ['A', 'P', 'S', 'L'],
-  "cavc": ['R', 'L', 'MA', 'MP'],
-  "lavv": []
-}
-
-
-class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
-
-  BRIEF_USE = "Valve landmark labels (.nrrd)"
+  BRIEF_USE = "Valve landmark labels"
   DETAILED_DESCRIPTION = "Export valve landmarks as segmentation blob"
-  USER_INTERFACE = True
 
   CMD_FLAG = "-ll"
   CMD_FLAG_QUADRANTS = "-llq"
@@ -36,57 +24,10 @@ class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
   EXPORT_COMMISSURAL_LANDMARKS = True
   ONE_FILE_PER_LANDMARK = False
 
-  @classmethod
-  def setupUI(cls, layout):
-    separateCheckbox = qt.QCheckBox("One file per landmark")
-    quadrantCheckbox = qt.QCheckBox("Quadrant Landmarks (e.g. A,P,S,L)")
-    commissuralCheckbox = qt.QCheckBox("Commissural Landmarks (e.g. ASC,PSC,APC)")
-
-    def onQuadrantCheckboxModified(checked):
-      cls.EXPORT_QUADRANT_LANDMARKS = checked
-      if checked:
-        cls.OTHER_FLAGS.append(cls.CMD_FLAG_QUADRANTS)
-      else:
-        if cls.CMD_FLAG_QUADRANTS in cls.OTHER_FLAGS:
-          cls.OTHER_FLAGS.remove(cls.CMD_FLAG_QUADRANTS)
-
-    def onCommissuresCheckboxModified(checked):
-      cls.EXPORT_COMMISSURAL_LANDMARKS = checked
-      if checked:
-        cls.OTHER_FLAGS.append(cls.CMD_FLAG_COMMISSURES)
-      else:
-        if cls.CMD_FLAG_COMMISSURES in cls.OTHER_FLAGS:
-          cls.OTHER_FLAGS.remove(cls.CMD_FLAG_COMMISSURES)
-
-    def onSeparateCheckboxModified(checked):
-      cls.ONE_FILE_PER_LANDMARK = checked
-      if checked:
-        cls.OTHER_FLAGS.append(cls.CMD_FLAG_SEPARATE_FILES)
-      else:
-        if cls.CMD_FLAG_SEPARATE_FILES in cls.OTHER_FLAGS:
-          cls.OTHER_FLAGS.remove(cls.CMD_FLAG_SEPARATE_FILES)
-
-    separateCheckbox.stateChanged.connect(onSeparateCheckboxModified)
-    quadrantCheckbox.checked = cls.ONE_FILE_PER_LANDMARK
-
-    quadrantCheckbox.stateChanged.connect(onQuadrantCheckboxModified)
-    quadrantCheckbox.checked = cls.EXPORT_QUADRANT_LANDMARKS
-
-    commissuralCheckbox.stateChanged.connect(onCommissuresCheckboxModified)
-    commissuralCheckbox.checked = cls.EXPORT_COMMISSURAL_LANDMARKS
-
-    layout.addWidget(separateCheckbox)
-    layout.addWidget(quadrantCheckbox)
-    layout.addWidget(commissuralCheckbox)
-
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      fileExtension = "seg.nrrd"
+      valveType = valveModel.getValveType()
+      valveModelName = self.generateValveModelName(sceneFileName, valveModel)
 
       if self.ONE_FILE_PER_LANDMARK:
         lms = []
@@ -101,7 +42,7 @@ class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
             continue
           labelNode = getLabelFromLandmarkPositions(lm, [pos], valveModel)
           slicer.util.saveNode(labelNode,
-                               os.path.join(self.outputDir, f"{valveModelName}_landmark_{lm}.{fileExtension}"))
+                               os.path.join(self.outputDir, f"{valveModelName}_landmark_{lm}.seg{self.FILE_FORMAT}"))
       else:
         if self.EXPORT_QUADRANT_LANDMARKS:
           positions = valveModel.getAnnulusMarkupPositionsByLabels(VALVE_QUADRANT_LANDMARKS[valveType])
@@ -109,40 +50,64 @@ class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
           if positions:
             labelNode = getLabelFromLandmarkPositions("quadrant_landmarks", positions, valveModel)
             slicer.util.saveNode(labelNode, os.path.join(self.outputDir,
-                                                         f"{valveModelName}_quadrant_landmarks.{fileExtension}"))
+                                                         f"{valveModelName}_quadrant_landmarks.seg{self.FILE_FORMAT}"))
         if self.EXPORT_COMMISSURAL_LANDMARKS:
           positions = valveModel.getAnnulusMarkupPositionsByLabels(VALVE_COMMISSURAL_LANDMARKS[valveType])
           positions = list(filter(lambda pos: pos is not None, positions))
           if positions:
             labelNode = getLabelFromLandmarkPositions("commissural_landmarks", positions, valveModel)
             slicer.util.saveNode(labelNode, os.path.join(self.outputDir,
-                                                         f"{valveModelName}_commissural_landmarks.{fileExtension}"))
+                                                         f"{valveModelName}_commissural_landmarks.seg{self.FILE_FORMAT}"))
 
 
-def getLabelFromLandmarkPositions(name, positions, valveModel):
-  import random
-  segNode = getNewSegmentationNode(valveModel.getValveVolumeNode())
-  probeToRasTransform = valveModel.getProbeToRasTransformNode()
-  segNode.SetAndObserveTransformNodeID(probeToRasTransform.GetID())
-  color = [random.uniform(0.0,1.0), random.uniform(0.0,1.0), random.uniform(0.0,1.0)]
+class ValveLandmarkLabelsExportRuleWidget(ValveBatchExportPlugin):
 
-  sphereSegment = slicer.vtkSegment()
-  sphereSegment.SetName(name)
-  sphereSegment.SetColor(*color)
+  def __init__(self, checked=False):
+    ValveBatchExportPlugin.__init__(self, ValveLandmarkLabelsExportRule, checked)
 
-  append = vtk.vtkAppendPolyData()
-  for pos in positions:
-    sphere = vtk.vtkSphereSource()
-    sphere.SetCenter(*pos)
-    sphere.SetRadius(1)
-    append.AddInputConnection(sphere.GetOutputPort())
-  append.Update()
+  def setup(self):
+    ValveBatchExportPlugin.setup(self)
+    layout = self.getOptionsLayout()
 
-  sphereSegment.AddRepresentation(
-    slicer.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(), append.GetOutput())
-  segNode.GetSegmentation().AddSegment(sphereSegment)
+    logic = self.logic
 
+    separateCheckbox = qt.QCheckBox("One file per landmark")
+    quadrantCheckbox = qt.QCheckBox("Quadrant Landmarks (e.g. A,P,S,L)")
+    commissuralCheckbox = qt.QCheckBox("Commissural Landmarks (e.g. ASC,PSC,APC)")
 
-  labelNode = createLabelNodeFromVisibleSegments(segNode, valveModel, name)
-  slicer.mrmlScene.RemoveNode(segNode)
-  return labelNode
+    def onQuadrantCheckboxModified(checked):
+      logic.EXPORT_QUADRANT_LANDMARKS = checked
+      if checked:
+        logic.OTHER_FLAGS.append(logic.CMD_FLAG_QUADRANTS)
+      else:
+        if logic.CMD_FLAG_QUADRANTS in logic.OTHER_FLAGS:
+          logic.OTHER_FLAGS.remove(logic.CMD_FLAG_QUADRANTS)
+
+    def onCommissuresCheckboxModified(checked):
+      logic.EXPORT_COMMISSURAL_LANDMARKS = checked
+      if checked:
+        logic.OTHER_FLAGS.append(logic.CMD_FLAG_COMMISSURES)
+      else:
+        if logic.CMD_FLAG_COMMISSURES in logic.OTHER_FLAGS:
+          logic.OTHER_FLAGS.remove(logic.CMD_FLAG_COMMISSURES)
+
+    def onSeparateCheckboxModified(checked):
+      logic.ONE_FILE_PER_LANDMARK = checked
+      if checked:
+        logic.OTHER_FLAGS.append(logic.CMD_FLAG_SEPARATE_FILES)
+      else:
+        if logic.CMD_FLAG_SEPARATE_FILES in logic.OTHER_FLAGS:
+          logic.OTHER_FLAGS.remove(logic.CMD_FLAG_SEPARATE_FILES)
+
+    separateCheckbox.stateChanged.connect(onSeparateCheckboxModified)
+    quadrantCheckbox.checked = logic.ONE_FILE_PER_LANDMARK
+
+    quadrantCheckbox.stateChanged.connect(onQuadrantCheckboxModified)
+    quadrantCheckbox.checked = logic.EXPORT_QUADRANT_LANDMARKS
+
+    commissuralCheckbox.stateChanged.connect(onCommissuresCheckboxModified)
+    commissuralCheckbox.checked = logic.EXPORT_COMMISSURAL_LANDMARKS
+
+    layout.addWidget(separateCheckbox)
+    layout.addWidget(quadrantCheckbox)
+    layout.addWidget(commissuralCheckbox)

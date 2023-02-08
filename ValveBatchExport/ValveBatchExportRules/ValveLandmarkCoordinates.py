@@ -1,8 +1,8 @@
 import os
-from .base import ValveBatchExportRule
+from .base import QuantitativeValveBatchExportRule
 
 
-class ValveLandmarkCoordinatesExportRule(ValveBatchExportRule):
+class ValveLandmarkCoordinatesExportRule(QuantitativeValveBatchExportRule):
 
   BRIEF_USE = "Valve landmark points 3D coordinates (.csv)"
   DETAILED_DESCRIPTION = "Export 3D coordinates of valve landmark points."
@@ -25,7 +25,7 @@ class ValveLandmarkCoordinatesExportRule(ValveBatchExportRule):
       annulusMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
       numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()
       filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
+      valveType = valveModel.getValveType()
       cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
       for markupIndex in range(numberOfMarkups):
         markupLabel = valveModel.getAnnulusLabelsMarkupNode().GetNthFiducialLabel(markupIndex)

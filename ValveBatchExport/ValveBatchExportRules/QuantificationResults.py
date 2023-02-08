@@ -4,11 +4,13 @@ import slicer
 from pathlib import Path
 
 from collections import OrderedDict
-from .base import ValveBatchExportRule
-from HeartValveLib.helpers import getSpecificHeartValveMeasurementNodes, getAllFilesWithExtension
+from .base import QuantitativeValveBatchExportRule
+from HeartValveLib.helpers import (
+  getSpecificHeartValveMeasurementNodes
+)
 
 
-class QuantificationResultsExportRule(ValveBatchExportRule):
+class QuantificationResultsExportRule(QuantitativeValveBatchExportRule):
 
   BRIEF_USE = "Valve quantification results (.csv)"
   DETAILED_DESCRIPTION = """Export results computed in Valve quantification module. All metrics will be 

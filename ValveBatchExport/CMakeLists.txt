@@ -7,11 +7,12 @@ set(MODULE_PYTHON_SCRIPTS
   HeartValveBatchAnalysis/__init__
   HeartValveBatchAnalysis/annulus_shape_analysis
   ValveBatchExportRules/__init__
+  ValveBatchExportRules/constants
   ValveBatchExportRules/base
   ValveBatchExportRules/QuantificationResults
   ValveBatchExportRules/PapillaryAnalysisResults
   ValveBatchExportRules/AnnulusContourCoordinates
-  ValveBatchExportRules/AnnulusContourModel
+  ValveBatchExportRules/AnnulusContour
   ValveBatchExportRules/ValveLandmarkCoordinates
   ValveBatchExportRules/ValveVolume
   ValveBatchExportRules/LeafletSegmentation
