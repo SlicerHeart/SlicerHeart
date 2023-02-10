@@ -514,7 +514,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
 
   @depthRange.setter
   def depthRange(self, valueRange):
-    self._setRenderingParameterValue("depthRange", value)
+    self._setRenderingParameterValue("depthRange", valueRange)
 
   @property
   def depthDarkening(self):
@@ -530,7 +530,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
 
   @depthColoringRange.setter
   def depthColoringRange(self, valueRange):
-    self._setRenderingParameterValue("depthColoringRange", value)
+    self._setRenderingParameterValue("depthColoringRange", valueRange)
 
   @property
   def brightnessScale(self):
