@@ -20,6 +20,10 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/Icons/CAVC.png
+  Resources/Icons/Mitral.png
+  Resources/Icons/PDA.png
+  Resources/Icons/Tricuspid.png
   Resources/UI/${MODULE_NAME}.ui
   Resources/VrPresets/CT-EndoVascular.png
   Resources/VrPresets/US-Green.png

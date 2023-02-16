@@ -29,8 +29,74 @@ class ValveAnnulusAnalysis(ScriptedLoadableModule):
     self.parent.acknowledgementText = """This file was originally developed by Andras Lasso, PerkLab."""
     slicer.app.connect("startupCompleted()", self.initializeHeartValveLib)
 
+  def registerSampleData(self):
+    """
+    Add data sets to Sample Data module.
+    """
+    # It is always recommended to provide sample data for users to make it easy to try the module,
+    # but if no sample data is available then this method (and associated startupCompeted signal connection) can be removed.
+
+    import SampleData
+    iconsPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons')
+
+    # To ensure that the source code repository remains small (can be downloaded and installed quickly)
+    # it is recommended to store data sets that are larger than a few MB in a Github release.
+
+    SampleData.SampleDataLogic.registerCustomSampleDataSource(
+        category='SlicerHeart',
+        sampleName='Mitral',
+        thumbnailFileName=os.path.join(iconsPath, 'Mitral.png'),
+        uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/Mitral_US.seq.nrrd',
+          'https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/Mitral_f06_Leaflets.seg.nrrd'],
+        checksums=['SHA256:dfec24e4aa3820fc00a5303b80ea25a38784fc2ba3210a99c141a85136380042',
+          'SHA256:67d43571d9266e8b056e14f5bd4099e5fffdcaf871786720a9d45b601be12814'],
+        fileNames=['Mitral_US.seq.nrrd', 'Mitral_f06_Leaflets.seg.nrrd'],
+        loadFileType=['SequenceFile', 'SegmentationFile'],
+        nodeNames=['Mitral_US', 'Mitral_f06_Leaflets']
+    )
+
+    SampleData.SampleDataLogic.registerCustomSampleDataSource(
+        category='SlicerHeart',
+        sampleName='Tricuspid',
+        thumbnailFileName=os.path.join(iconsPath, 'Tricuspid.png'),
+        uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/Tricuspid_US.seq.nrrd',
+          'https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/Tricuspid_f09_Leaflets.seg.nrrd'],
+        checksums=['SHA256:3286a9ddb1971bc7a02d2d0518f975071d14edb1c6c2c631347215e311704ca9',
+          'SHA256:4e65fb43b8fc78de9e143d86476d617eb7d5ea34379519754d035ff60ed4a15a'],
+        fileNames=['Tricuspid_US.seq.nrrd', 'Tricuspid_f09_Leaflets.seg.nrrd'],
+        loadFileType=['SequenceFile', 'SegmentationFile'],
+        nodeNames=['Tricuspid_US', 'Tricuspid_f09_Leaflets']
+    )
+
+    SampleData.SampleDataLogic.registerCustomSampleDataSource(
+        category='SlicerHeart',
+        sampleName='CAVC',
+        thumbnailFileName=os.path.join(iconsPath, 'CAVC.png'),
+        uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/CAVC_US.seq.nrrd',
+          'https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/CAVC_f08_Leaflets.seg.nrrd'],
+        checksums=['SHA256:d035de8092356949b71a95ee23acb45228f4b68548e9b53f79db76e452347fc7',
+          'SHA256:6c42fd0f07c7affe83a2cda020edb23cf8ff98e40af8d69fc7d6db7726f99934'],
+        fileNames=['CAVC_US.seq.nrrd', 'CAVC_f08_Leaflets.seg.nrrd'],
+        loadFileType=['SequenceFile', 'SegmentationFile'],
+        nodeNames=['CAVC_US', 'CAVC_f08_Leaflets']
+    )
+
+    SampleData.SampleDataLogic.registerCustomSampleDataSource(
+        category='SlicerHeart',
+        sampleName='PDA',
+        thumbnailFileName=os.path.join(iconsPath, 'PDA.png'),
+        uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/PDA_CT.nrrd',
+          'https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/PDA_vasculature.seg.nrrd'],
+        checksums=['SHA256:00dfd092e10fcddc009671361b808da9324a3f122e72c27dc50d280f4e7ef242',
+          'SHA256:e0ec4321cfafdf12093c1148a49e4f6f799ec72709275c815b0694819baa1385'],
+        fileNames=['PDA_CT.nrrd', 'PDA_vasculature.seg.nrrd'],
+        loadFileType=['VolumeFile', 'SegmentationFile'],
+        nodeNames=['PDA_CT', 'PDA_vasculature']
+    )
+
   def initializeHeartValveLib(self):
     """Perform initializations that can only be performed when Slicer has started up"""
+    self.registerSampleData()
     moduleDir = os.path.dirname(self.parent.path)
     usPresetsScenePath = os.path.join(moduleDir, 'Resources/VrPresets', 'US-VrPresets.mrml')
     HeartValveLib.setup(usPresetsScenePath)
