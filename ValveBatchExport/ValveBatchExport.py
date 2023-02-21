@@ -5,7 +5,7 @@ import argparse
 import vtk, qt, ctk, slicer
 
 from slicer.ScriptedLoadableModule import *
-from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
+from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS, VALVE_TYPE_PRESETS
 from HeartValveLib.helpers import getAllFilesWithExtension, isMRBFile
 from ValveBatchExportRules import *
 from collections import deque
@@ -108,8 +108,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
       exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
 
     self.setupPhaseSelectionSection()
-    exportOptionsFrameLayout.addRow("Phases (if available)", self.phaseSelectionWidget)
-
+    self.setupValveTypeSelectionSection()
 
     from multiprocessing import cpu_count
     self.ui.parallelProcessesSpinBox.maximum = cpu_count()
@@ -123,36 +122,42 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
 
     self.ui.statusLabel.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
 
-    self.ui.progressbar = qt.QProgressBar()
-
     self._exportRunning = False
 
   def onNumParallelProcessesChanged(self, val):
     self.logic.numParallelProcesses = int(val)
 
   def progressUpdate(self, value, maximum):
-    self.ui.progressbar.setValue(value)
     self.ui.progressbar.setMaximum(maximum)
+    self.ui.progressbar.setValue(value)
 
   def setupPhaseSelectionSection(self):
     self.phaseCheckboxes = []
-    self.phaseSelectionWidget = qt.QWidget()
-    self.phaseSelectionWidget.setLayout(qt.QGridLayout())
-    self.phaseSelectionWidget.layout().setSpacing(0)
-    self.phaseSelectionWidget.layout().setMargin(0)
+    layout = self.ui.phaseSelectionWidget.layout()
 
-    maxCols = 5
+    maxCols = 3
     for idx, (phaseName, phaseAttributes) in enumerate(CARDIAC_CYCLE_PHASE_PRESETS.items()):
       checkbox = qt.QCheckBox(phaseAttributes['shortname'])
       checkbox.setProperty('name', phaseAttributes['shortname'])
       checkbox.setToolTip(f"{phaseName}({phaseAttributes['shortname']})")
       checkbox.checked = True
       self.phaseCheckboxes.append(checkbox)
-      self.phaseSelectionWidget.layout().addWidget(checkbox, idx // maxCols, idx % maxCols)
+      layout.addWidget(checkbox, idx // maxCols, idx % maxCols)
+    self.ui.phaseSelectionButton.clicked.connect(self.onPhasesSelectionButtonClicked)
 
-    button = qt.QPushButton("Select/Deselect All")
-    self.phaseSelectionWidget.layout().addWidget(button, idx // maxCols + 1, 0, 1, maxCols)
-    button.clicked.connect(self.onPhasesSelectionButtonClicked)
+  def setupValveTypeSelectionSection(self):
+    self.valveTypeCheckboxes = []
+    layout = self.ui.valveTypeSelectionWidget.layout()
+
+    maxCols = 2
+    for idx, phaseName in enumerate(VALVE_TYPE_PRESETS.keys()):
+      checkbox = qt.QCheckBox(phaseName)
+      checkbox.setProperty('name', phaseName)
+      checkbox.setToolTip(f"{phaseName}")
+      checkbox.checked = True
+      self.valveTypeCheckboxes.append(checkbox)
+      layout.addWidget(checkbox, idx // maxCols, idx % maxCols)
+    self.ui.valveTypeSelectionButton.clicked.connect(self.onValveTypeSelectionButtonClicked)
 
   def onPhasesSelectionButtonClicked(self):
     uncheckedFound = any(checkbox.checked is False for checkbox in self.phaseCheckboxes)
@@ -160,6 +165,13 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
 
   def getCheckedPhases(self):
     return [checkbox.property('name') for checkbox in self.phaseCheckboxes if checkbox.checked is True]
+
+  def onValveTypeSelectionButtonClicked(self):
+    uncheckedFound = any(checkbox.checked is False for checkbox in self.valveTypeCheckboxes)
+    deque(map(lambda checkbox: checkbox.setChecked(uncheckedFound), self.valveTypeCheckboxes))
+
+  def getCheckedValveTypes(self):
+    return [checkbox.property('name') for checkbox in self.valveTypeCheckboxes if checkbox.checked is True]
 
   def onExportButtonClicked(self):
     if self._exportRunning:
@@ -184,6 +196,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.ui.outputDirSelector.addCurrentPathToHistory()
     self.ui.statusLabel.plainText = ''
     ValveBatchExportRule.setPhasesToExport(self.getCheckedPhases())
+    ValveBatchExportRule.setValveTypesToExport(self.getCheckedValveTypes())
     self.logic.clearRules()
     for registeredPlugin in self.registeredExportPlugins:
       if registeredPlugin.activated:
@@ -251,7 +264,6 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self.addLog('Export started...')
     self.addLog(f'Input directory: {inputDirPath}')
     self.addLog(f'Output directory: {outputDirPath}')
-
     self.outputDirPath = outputDirPath
     self.examineInputs(inputDirPath)
 
@@ -294,6 +306,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       args.append(rule.CMD_FLAG)
       args.extend(rule.OTHER_FLAGS)
     args.extend(["-ph", *ValveBatchExportRule.EXPORT_PHASES])
+    args.extend(["-vt", *ValveBatchExportRule.EXPORT_VALVE_TYPES])
     return args
 
   def resetExport(self):
@@ -546,6 +559,8 @@ def main(argv):
                       help="data output directory")
   parser.add_argument("-ph", "--phases", metavar="PHASE_SHORTNAME", type=str, nargs="+", required=True,
                       help="cardiac phases which will be exported")
+  parser.add_argument("-vt", "--valve_types", type=str, nargs="+", required=True,
+                      help="valve types which will be exported")
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG, "--export_annulus_coordinates", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_1, "--annulus_curve_point_coordinates", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_2, "--annulus_control_point_coordinates", action='store_true')
@@ -581,6 +596,7 @@ def main(argv):
   logic = ValveBatchExportLogic()
 
   ValveBatchExportRule.EXPORT_PHASES = args.phases
+  ValveBatchExportRule.EXPORT_VALVE_TYPES = args.valve_types
 
   if args.export_quantification_results:
     logic.addRule(QuantificationResultsExportRule)
