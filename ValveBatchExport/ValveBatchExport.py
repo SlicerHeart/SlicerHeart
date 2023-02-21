@@ -93,78 +93,37 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
+    uiWidget = slicer.util.loadUI(self.resourcePath('UI/ValveBatchExport.ui'))
+    self.layout.addWidget(uiWidget)
+    self.ui = slicer.util.childWidgetVariables(uiWidget)
+
     self.logic = ValveBatchExportLogic(logCallback=self.addLog,
                                        progressCallback=self.progressUpdate,
                                        completedCallback=self._resetExport)
 
-    # Instantiate and connect widgets ...
-
-    parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    parametersCollapsibleButton.text = "Parameters"
-    self.layout.addWidget(parametersCollapsibleButton)
-
-    # Layout within the dummy collapsible button
-    parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
-
-    self.inputDirSelector = ctk.ctkPathLineEdit()
-    self.inputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-    self.inputDirSelector.settingKey = 'ValveBatchExportInputDir'
-    self.inputDirSelector.setToolTip("Directory containing scene (.mrb) files with heart valves.")
-    parametersFormLayout.addRow("Input directory:", self.inputDirSelector)
-
-    self.outputDirSelector = ctk.ctkPathLineEdit()
-    self.outputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-    self.outputDirSelector.settingKey = 'ValveBatchExportOutputDir'
-    self.outputDirSelector.setToolTip("Directory that will contain exported data.")
-    parametersFormLayout.addRow("Output directory:", self.outputDirSelector)
-
-    self.exportOptionsFrame = qt.QGroupBox("Export options")
-    self.exportOptionsFrameLayout = qt.QFormLayout()
-    self.exportOptionsFrame.setLayout(self.exportOptionsFrameLayout)
+    exportOptionsFrameLayout = self.ui.exportOptionsFrame.layout()
 
     # add ui of export plugins here
     for exportPlugin in self.registeredExportPlugins:
-      self.exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
+      exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
 
     self.setupPhaseSelectionSection()
-    self.exportOptionsFrameLayout.addRow("Phases (if available)", self.phaseSelectionWidget)
+    exportOptionsFrameLayout.addRow("Phases (if available)", self.phaseSelectionWidget)
 
-    parametersFormLayout.addRow(self.exportOptionsFrame)
 
     from multiprocessing import cpu_count
-    self.parallelProcessesSpinBox = ctk.ctkDoubleSpinBox()
-    self.parallelProcessesSpinBox.minimum = 1
-    self.parallelProcessesSpinBox.maximum = cpu_count()
-    self.parallelProcessesSpinBox.decimals = 0
-    self.parallelProcessesSpinBox.value = self.logic.numParallelProcesses
-    self.parallelProcessesSpinBox.valueChanged.connect(self.onNumParallelProcessesChanged)
+    self.ui.parallelProcessesSpinBox.maximum = cpu_count()
+    self.ui.parallelProcessesSpinBox.value = self.logic.numParallelProcesses
+    self.ui.parallelProcessesSpinBox.valueChanged.connect(self.onNumParallelProcessesChanged)
 
-    self.minProcessesButton = qt.QPushButton("min")
-    self.minProcessesButton.toolTip = "Minimum number of processes"
-    self.minProcessesButton.clicked.connect(lambda : self.parallelProcessesSpinBox.setValue(1))
+    self.ui.minProcessesButton.clicked.connect(lambda : self.ui.parallelProcessesSpinBox.setValue(1))
+    self.ui.maxProcessesButton.clicked.connect(lambda : self.ui.parallelProcessesSpinBox.setValue(cpu_count()))
 
-    self.maxProcessesButton = qt.QPushButton("max")
-    self.maxProcessesButton.toolTip = "Maximum number of parallel processes"
-    self.maxProcessesButton.clicked.connect(lambda : self.parallelProcessesSpinBox.setValue(cpu_count()))
+    self.ui.exportButton.clicked.connect(self.onExportButtonClicked)
 
-    hbox = qt.QHBoxLayout()
-    hbox.addWidget(self.parallelProcessesSpinBox)
-    hbox.addWidget(self.minProcessesButton)
-    hbox.addWidget(self.maxProcessesButton)
-    parametersFormLayout.addRow("Parallel processes", hbox)
+    self.ui.statusLabel.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
 
-    self.exportButton = qt.QPushButton("Start Export")
-    self.exportButton.toolTip = \
-      "Iterate through all the scene files in the input directory and write results to the output directory"
-    parametersFormLayout.addRow(self.exportButton)
-    self.exportButton.clicked.connect(self.onExportButtonClicked)
-
-    self.statusLabel = qt.QPlainTextEdit()
-    self.statusLabel.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
-    parametersFormLayout.addRow(self.statusLabel)
-
-    self.progressbar = qt.QProgressBar()
-    parametersFormLayout.addRow(self.progressbar)
+    self.ui.progressbar = qt.QProgressBar()
 
     self._exportRunning = False
 
@@ -172,8 +131,8 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.logic.numParallelProcesses = int(val)
 
   def progressUpdate(self, value, maximum):
-    self.progressbar.setValue(value)
-    self.progressbar.setMaximum(maximum)
+    self.ui.progressbar.setValue(value)
+    self.ui.progressbar.setMaximum(maximum)
 
   def setupPhaseSelectionSection(self):
     self.phaseCheckboxes = []
@@ -219,30 +178,30 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
         slicer.app.restoreOverrideCursor()
 
   def _startExport(self):
-    self.exportButton.text = "Stop Export"
+    self.ui.exportButton.text = "Stop Export"
     self._exportRunning = True
-    self.inputDirSelector.addCurrentPathToHistory()
-    self.outputDirSelector.addCurrentPathToHistory()
-    self.statusLabel.plainText = ''
+    self.ui.inputDirSelector.addCurrentPathToHistory()
+    self.ui.outputDirSelector.addCurrentPathToHistory()
+    self.ui.statusLabel.plainText = ''
     ValveBatchExportRule.setPhasesToExport(self.getCheckedPhases())
     self.logic.clearRules()
     for registeredPlugin in self.registeredExportPlugins:
       if registeredPlugin.activated:
         self.logic.addRule(registeredPlugin.getRuleClass())
-    outputDir = self.outputDirSelector.currentPath
+    outputDir = self.ui.outputDirSelector.currentPath
     if not outputDir:
-      outputDir = self.inputDirSelector.currentPath
-    self.logic.exportDir(self.inputDirSelector.currentPath, outputDir)
+      outputDir = self.ui.inputDirSelector.currentPath
+    self.logic.exportDir(self.ui.inputDirSelector.currentPath, outputDir)
 
   def _resetExport(self):
-    self.exportButton.text = "Start Export"
+    self.ui.exportButton.text = "Start Export"
     self._exportRunning = False
     self._hasErrors = False
 
   def addLog(self, text):
     """Append text to log window
     """
-    self.statusLabel.appendPlainText(text)
+    self.ui.statusLabel.appendPlainText(text)
     slicer.app.processEvents() # force update
 
 
