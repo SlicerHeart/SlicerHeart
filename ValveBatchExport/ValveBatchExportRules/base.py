@@ -78,7 +78,8 @@ class ValveBatchExportRule(object):
   DETAILED_DESCRIPTION = ""
   USER_INTERFACE = False
 
-  EXPORT_PHASES = [] # empty means all phases will be exported
+  EXPORT_PHASES = []        # empty means all phases will be exported
+  EXPORT_VALVE_TYPES = []   # empty means all valve types will be exported
   IMAGE_FILE_EXTENSION = "nrrd"
   OUTPUT_CSV_FILES = []
 
@@ -126,6 +127,11 @@ class ValveBatchExportRule(object):
       raise ValueError(f"Unsupported image file extension: {imageFileExtension}")
     logging.debug("Image file extension set to: %s" % imageFileExtension)
     cls.IMAGE_FILE_EXTENSION = imageFileExtension
+
+  @classmethod
+  def setValveTypesToExport(cls, valveTypes):
+    logging.debug("Valve types to export set to: %s" % valveTypes)
+    cls.EXPORT_VALVE_TYPES = valveTypes
 
   @staticmethod
   def getTableNode(measurementNode, identifier):
@@ -197,10 +203,11 @@ class ValveBatchExportRule(object):
     raise NotImplementedError("Method needs to be implemented if class member `USER_INTERFACE` set to True")
 
   def getHeartValveModelNodes(self):
-    if self.EXPORT_PHASES:
-      return getSpecificHeartValveModelNodes(self.EXPORT_PHASES)
+    valveModels = getSpecificHeartValveModelNodes(self.EXPORT_PHASES) if self.EXPORT_PHASES else getAllHeartValveModelNodes()
+    if self.EXPORT_VALVE_TYPES:
+      return list(filter(lambda vm: vm.getValveType() in self.EXPORT_VALVE_TYPES, valveModels))
     else:
-      return getAllHeartValveModelNodes()
+      return valveModels
 
   def addLog(self, text):
     logging.info(text)
