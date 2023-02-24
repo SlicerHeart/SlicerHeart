@@ -47,7 +47,7 @@ public:
   /// Load KRETZ volume from file
   /// \param filename Path and filename of the KRETZ file
   /// \param scanConvert Boolean flag which is set to true by default, to convert the volume to a Cartesian coordinate system
-  vtkMRMLScalarVolumeNode* LoadKretzFile(char* filename, char* nodeName = NULL, bool scanConvert = true, double outputSpacing[3] = NULL, unsigned long int fileOffset=0);
+  vtkMRMLScalarVolumeNode* LoadKretzFile(const char* filename, const char* nodeName = NULL, bool scanConvert = true, double outputSpacing[3] = NULL, unsigned long int fileOffset=0);
 
 protected:
 

@@ -126,7 +126,7 @@ bool qSlicerKretzFileReaderPlugin::load(const IOProperties& properties)
   double outputSpacingVector[3] = { outputSpacing, outputSpacing, outputSpacing };
 
   QApplication::setOverrideCursor(QCursor(Qt::BusyCursor)); 
-  vtkMRMLNode* loadedVolumeNode = d->Logic->LoadKretzFile(fileName.toLatin1().data(), name.toLatin1().data(), scanConvert, outputSpacingVector);
+  vtkMRMLNode* loadedVolumeNode = d->Logic->LoadKretzFile(fileName.toStdString().c_str(), name.toStdString().c_str(), scanConvert, outputSpacingVector);
   QApplication::restoreOverrideCursor();
 
   if (!loadedVolumeNode)

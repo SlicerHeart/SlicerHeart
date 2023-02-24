@@ -112,7 +112,7 @@ void writeTestOutput(const char* filename, vtkStructuredGrid* dataset)
 }
 
 //----------------------------------------------------------------------------
-vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(char *filename, char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/, unsigned long int fileOffset /*=0*/)
+vtkMRMLScalarVolumeNode* vtkSlicerKretzFileReaderLogic::LoadKretzFile(const char *filename, const char* nodeName /*=NULL*/, bool scanConvert /*=true*/, double outputSpacing[3] /*=NULL*/, unsigned long int fileOffset /*=0*/)
 {
   std::ifstream readFileStream;
   readFileStream.open(filename, std::ios::binary);
