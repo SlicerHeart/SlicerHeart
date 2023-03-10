@@ -831,7 +831,6 @@ def ensureLeafletVolumeAssociatedWithSegmentations(scriptedModuleNodes):
     # ensure heart valve is parent in subject hierarchy
     segNode = valveModel.getLeafletSegmentationNode()
     shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
-    valveModel.updateValveNodeNames()
 
     # ensure master volume node of segmentation is not the sequence proxy and was extracted from the set frame index
     if valveModel.getValveVolumeSequenceIndex() < 0:
@@ -840,8 +839,18 @@ def ensureLeafletVolumeAssociatedWithSegmentations(scriptedModuleNodes):
 
     fixedVolumeNode = valveModel.getLeafletVolumeNode()
     if fixedVolumeNode is not None:
-      slicer.mrmlScene.RemoveNode(fixedVolumeNode)
-    useCurrentValveVolumeAsLeafletVolume(valveModel)
+      goToAnalyzedFrame(valveModel)
+      volumeNode = getOrSetValveVolumeNode(valveModel)
+      import numpy as np
+      if not np.array_equal(slicer.util.array(volumeNode.GetID()),
+                            slicer.util.array(fixedVolumeNode.GetID())):
+        slicer.mrmlScene.RemoveNode(fixedVolumeNode)
+        fixedVolumeNode = None
+
+    if fixedVolumeNode is None :
+      useCurrentValveVolumeAsLeafletVolume(valveModel)
+
+    valveModel.updateValveNodeNames()
     fixedVolumeNode = valveModel.getLeafletVolumeNode()
     segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
     logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
