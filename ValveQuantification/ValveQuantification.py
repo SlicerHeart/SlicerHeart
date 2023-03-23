@@ -884,24 +884,33 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
   def setUp(self):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
-    slicer.mrmlScene.Clear(0)
+    pass
 
   def runTest(self):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_ValveQuantification1()
+    self.test_ValveQuantificationMitral()
 
-  def test_ValveQuantification1(self):
-    """ Ideally you should have several levels of tests.  At the lowest level
-    tests should exercise the functionality of the logic with different inputs
-    (both valid and invalid).  At higher levels your tests should emulate the
-    way the user would interact with your code and confirm that it still works
-    the way you intended.
-    One of the most important features of the tests is that it should alert other
-    developers when their changes will have an impact on the behavior of your
-    module.  For example, if a developer removes a feature that you depend on,
-    your test should break so they know that the feature is needed.
-    """
+  def test_ValveQuantificationMitral(self):
 
-    self.delayDisplay("No tests are implemented")
+    presetName = "Mitral valve"
+
+    heartValveNode = None
+    for scriptedModuleNode in slicer.util.getNodesByClass('vtkMRMLScriptedModuleNode'):
+      if scriptedModuleNode.GetAttribute("ModuleName") == "HeartValve":
+        heartValveNode = scriptedModuleNode
+        break
+
+    self.delayDisplay("Start test_ValveQuantificationMitral.")
+
+    valveQuantificationGui = slicer.modules.ValveQuantificationWidget
+    
+    measurementNode = valveQuantificationGui.heartValveMeasurementSelector.addNode()
+
+    valveQuantificationGui.heartValveMeasurementSelector.setCurrentNode(measurementNode)
+    valveQuantificationGui.presetSelector.currentText = presetName
+    valveQuantificationGui.inputValveNodeSelectors[0].setCurrentNode(heartValveNode)
+
+
+    self.delayDisplay("Completed test_ValveQuantificationMitral.")
