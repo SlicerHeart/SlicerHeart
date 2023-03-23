@@ -986,7 +986,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
     slicer.mrmlScene.Clear(0)
-    self.mitral4dUsSequencePath = r"c:\tmp\CTCardioSeq.seq.nrrd"
 
   def runTest(self):
     """Run as few or as many tests as needed here.
@@ -1007,7 +1006,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     """
 
     self.delayDisplay("Start test_ValveAnnulusAnalysis1.")
-    valveVolumePath = self.mitral4dUsSequencePath
 
     import time
     import numpy as np
@@ -1020,39 +1018,41 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     slicer.util.selectModule('ValveAnnulusAnalysis')
     slicer.mrmlScene.Clear(0)
     slicer.app.processEvents()
-    valveVolumePath = r"c:\tmp\CTCardioSeq.seq.nrrd"
+    sampleDataName = "Mitral"
+
     valveType = "mitral"
     cardiacCyclePhase = "mid-systole"
-    analyzedFrame = 3
+    analyzedFrame = 5
     probePosition = "TTE apical"
+
     # Get this by calling:
     # arrayFromTransformMatrix(getNode('AxialSliceToRasTransform'))
-    axialSliceToRasTransformMatrixArray = np.array([[ -0.843708 ,   0.201982 ,   0.497353 ,   2.06546  ],
-          [  0.529546 ,   0.464991 ,   0.709481 , -15.2707   ],
-          [ -0.0879624,   0.861966 ,  -0.499276 ,   5.07062  ],
-          [  0.       ,   0.       ,   0.       ,   1.       ]])
+    # then replace translation position by valve center position
+    axialSliceToRasTransformMatrixArray = np.array([[-0.9868942 , -0.0809964 , -0.13957089,  -9.8],
+        [-0.15818841,  0.65649567,  0.73755669,  -9.9],
+        [ 0.03188845,  0.74996838, -0.66070422,  13.7],
+        [ 0.        ,  0.        ,  0.        ,  1.        ]])
+
     # Get this by calling
     # arrayFromMarkupsControlPoints(getNode("AnnulusContourMarkup"))
-    annulusMarkupControlPointsArray = np.array([[  -9.33410719,   10.98653177, 1764.50800388],
-          [  -6.10978386,    6.30833859, 1770.26486783],
-          [  -9.19402331,    2.04822121, 1774.11110058],
-          [  -9.25165751,    6.97609621, 1784.25719563],
-          [ -13.98503259,    4.96038398, 1788.5729537 ],
-          [ -18.95881005,    8.93632905, 1792.28388357],
-          [ -20.5294456 ,   16.88700379, 1794.63485967],
-          [ -22.99856624,   23.75385234, 1788.84881724],
-          [ -16.5752839 ,   30.46000121, 1786.85720757],
-          [ -11.1990685 ,   34.92520958, 1779.87715607],
-          [  -2.96596805,   29.28224397, 1778.21043772],
-          [   2.36253717,   23.56772078, 1776.15384207]])
+    annulusMarkupControlPointsArray = np.array([[ 86.98819733,  84.78613281,  99.99595642],
+        [ 87.25099182,  92.59313202,  96.04943085],
+        [ 91.62657166, 100.28668976,  95.93429565],
+        [ 99.54394531, 103.84978485,  97.02439117],
+        [108.43112183, 102.99208069,  97.06322479],
+        [116.29380035,  98.95796204,  96.59480286],
+        [119.3833847 ,  90.8775177 ,  95.25667572],
+        [117.54264832,  82.43365479,  93.17087555],
+        [111.96864319,  75.6263504 ,  92.28639984],
+        [104.68697357,  72.24358368,  95.78388977],
+        [ 98.42464447,  73.57678986, 101.90380859],
+        [ 91.8348999 ,  78.74420166, 104.18357086]])
 
     def delayDisplay(text):
         print(text)
         slicer.util.delayDisplay(text)
 
     ################################
-
-    sequencesLogic = slicer.util.getModuleLogic('Sequences')
 
     sequencesLogic = slicer.util.getModuleLogic('Sequences')
     valveAnnulusAnalysisGui = slicer.util.getModuleGui('ValveAnnulusAnalysis')
@@ -1065,23 +1065,24 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     # -------------------------------------------
     delayDisplay("Load image sequence")
 
-    valveVolumeSequence = slicer.util.loadNodeFromFile(valveVolumePath, 'SequenceFile')    
+    import SampleData
+    SampleData.SampleDataLogic().downloadSample(sampleDataName)
+
+    # Remove the leaflet segmentation (we don't use it)
+    segmentationNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLSegmentationNode")
+    slicer.mrmlScene.RemoveNode(segmentationNode)
+
+    valveVolumeSequence = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLSequenceNode")
     valveVolumeSequenceBrowser = sequencesLogic.GetFirstBrowserNodeForSequenceNode(valveVolumeSequence)
     valveVolume = valveVolumeSequenceBrowser.GetProxyNode(valveVolumeSequence)
 
     # -------------------------------------------
     delayDisplay("Setup heart valve node")
 
-    slicer.app.processEvents()
     heartValveNode = valveAnnulusAnalysisGui.ui.heartValveSelector.addNode()
-    slicer.app.processEvents()
 
-    # It is not clear why the combobox does not update
-    #print(heartValveNode)
-    #valveAnnulusAnalysisGui.ui.heartValveSelector.setCurrentNode(None)
-    #valveAnnulusAnalysisGui.ui.heartValveSelector.setCurrentNode(heartValveNode)
-    #valveAnnulusAnalysisGui.onHeartValveSelect(heartValveNode)
-
+    valveAnnulusAnalysisGui = slicer.modules.ValveAnnulusAnalysisWidget
+    valveAnnulusAnalysisGui.ui.heartValveSelector.setCurrentNode(heartValveNode)
     valveAnnulusAnalysisGui.ui.valveTypeSelector.currentText = valveType
     valveAnnulusAnalysisGui.ui.cardiacCyclePhaseSelector.currentText = cardiacCyclePhase
 
@@ -1101,15 +1102,21 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     # -------------------------------------------
     delayDisplay("Set image orientation")
 
-    # Simulate some manual orientation changes
+
     valveAnnulusAnalysisGui.ui.probePositionSelector.currentText = probePosition
+
+    # Set valve center
+    sliceIntersectionPosition = axialSliceToRasTransformMatrixArray[0:3,3]
+    slicer.modules.markups.logic().JumpSlicesToLocation(*sliceIntersectionPosition, False)
+
+    # Simulate some manual orientation changes
     lrSlider = slicer.util.findChild(valveAnnulusAnalysisGui.ui.axialSliceToRasTransformOrientationSliderWidget, "LRSlider")
     paSlider = slicer.util.findChild(valveAnnulusAnalysisGui.ui.axialSliceToRasTransformOrientationSliderWidget, "PASlider")
     isSlider = slicer.util.findChild(valveAnnulusAnalysisGui.ui.axialSliceToRasTransformOrientationSliderWidget, "ISSlider")
     for angle in range(10):
-        lrSlider.value += 0.6
-        paSlider.value -= 1.1
-        isSlider.value += 0.3
+        lrSlider.value += 1
+        paSlider.value -= 0.2
+        #isSlider.value += 0.3
         slicer.app.processEvents()
         time.sleep(0.1)
 
@@ -1118,7 +1125,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     axialSliceToRasTransformNode = heartValveNode.GetNodeReference("AxialSliceToRasTransform")
     slicer.util.updateTransformMatrixFromArray(axialSliceToRasTransformNode, axialSliceToRasTransformMatrixArray)
     # update slice view positions and orientations accordingly
-    sliceIntersectionPosition = axialSliceToRasTransformMatrixArray[0:3,3]
     valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
     valveModel.setSlicePositionAndOrientation(axialSlice, orthogonalSlice1, orthogonalSlice2, sliceIntersectionPosition, 0)
 
@@ -1143,5 +1149,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
 
     delayDisplay("Enable smoothing preview")
     valveAnnulusAnalysisGui.ui.resampleContourButton.click()
+
+    valveAnnulusAnalysisGui.ui.displayCollapsibleButton.collapsed = False
 
     self.delayDisplay("Completed test_ValveAnnulusAnalysis1.")
