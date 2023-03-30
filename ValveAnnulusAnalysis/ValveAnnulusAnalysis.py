@@ -806,7 +806,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def onDeleteLastFiducialClicked(self):
     numberOfPoints = self.getNumberOfDefinedControlPoints(self.annulusMarkupNode)
-    self.annulusMarkupNode.RemoveMarkup(numberOfPoints-1)
+    self.annulusMarkupNode.RemoveNthControlPoint(numberOfPoints-1)
     if numberOfPoints<=1:
         self.ui.deleteLastFiducialButton.setEnabled(False)
         self.ui.deleteAllFiducialsButton.setEnabled(False)
@@ -1046,7 +1046,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
 
     # Get this setting the valve orientation sliders and then calling:
     #   arrayFromTransformMatrix(getNode('AxialSliceToRasTransform_1'))
-    # then replace translation values by valve center position
     axialSliceToRasTransformMatrixArray = np.array([[-0.69571977, -0.3869726 , -0.60516677, 15.09743333],
        [-0.5315348 ,  0.84402519,  0.07135991, -1.35907367],
        [ 0.48316164,  0.3713134 , -0.79289388, 26.04229844],

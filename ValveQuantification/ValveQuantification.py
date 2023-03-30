@@ -754,6 +754,9 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
             positionSlider.value = 0
             positionSlider.blockSignals(sliderWasBlocked)
             self.onInputFieldValueChanged(inputFieldIndex, 0)
+        else:
+          # TODO: initialize slider
+          pass
       else:
         self.onInputFieldValueChanged(inputFieldIndex, None) # remove
 
@@ -892,25 +895,87 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
     self.setUp()
     self.test_ValveQuantificationMitral()
 
-  def test_ValveQuantificationMitral(self):
+  def getHeartValveNode(self, nameFragment):
+    """Find heart valve node in the scene that contins the specified name fragment in its name"""
 
-    presetName = "Mitral valve"
-
-    heartValveNode = None
     for scriptedModuleNode in slicer.util.getNodesByClass('vtkMRMLScriptedModuleNode'):
-      if scriptedModuleNode.GetAttribute("ModuleName") == "HeartValve":
-        heartValveNode = scriptedModuleNode
-        break
+      if scriptedModuleNode.GetAttribute("ModuleName") != "HeartValve":
+        continue
+      if nameFragment not in scriptedModuleNode.GetName():
+        continue
+      # Found
+      return scriptedModuleNode
+
+    # Not found
+    return None
+
+
+  def test_ValveQuantificationMitral(self):
 
     self.delayDisplay("Start test_ValveQuantificationMitral.")
 
+    presetName = "Mitral valve"
+
+    mitralValveNode = self.getHeartValveNode("Mitral")
+    self.assertIsNotNone(mitralValveNode)
+
+    aorticValveNode = self.getHeartValveNode("Aortic")
+    self.assertIsNotNone(aorticValveNode)
+
+    valveNodes = [mitralValveNode, aorticValveNode]
+
+    # Obtained by copying AnnulusLabelsMarkup points from markups module's control points table,
+    # using only the point label and coordinates values.
+    referencePoints = [["A", [-94.850341796875, -76.15013122558594, 104.09174346923828], 93.2],
+                       ["P", [-113.81173706054688, -100.89620971679688, 96.8191146850586], None],
+                       ["PM", [-88.52909851074219, -95.75225830078125, 95.63932800292969], 16.6],
+                       ["AL", [-116.85599517822266, -81.13494110107422, 92.84961700439453], None]]
+
+    self.runSingleCase(presetName, valveNodes, referencePoints)
+
+  def runSingleCase(self, presetName, valveNodes, referencePoints):
+
     valveQuantificationGui = slicer.modules.ValveQuantificationWidget
-    
+
+    self.delayDisplay("Create new measurement.")
     measurementNode = valveQuantificationGui.heartValveMeasurementSelector.addNode()
-
     valveQuantificationGui.heartValveMeasurementSelector.setCurrentNode(measurementNode)
-    valveQuantificationGui.presetSelector.currentText = presetName
-    valveQuantificationGui.inputValveNodeSelectors[0].setCurrentNode(heartValveNode)
 
+    self.delayDisplay("Select measurement type.")
+    valveQuantificationGui.presetSelector.currentText = presetName
+
+    self.delayDisplay("Select input valves.")
+    for nodeSelectorIndex, heartValveNode in enumerate(valveNodes):
+      valveQuantificationGui.inputValveNodeSelectors[nodeSelectorIndex].setCurrentNode(heartValveNode)
+
+    self.delayDisplay("Set reference points.")
+    valveQuantificationGui.fieldsCollapsibleButton.collapsed = False
+    for pointLabel, pointCoordinate, sliderPosition in referencePoints:
+      self.delayDisplay(f"Define reference point {pointLabel}")
+
+      # Find reference point index
+      foundPoint = False
+      for pointIndex in range(len(valveQuantificationGui.inputReferenceNameLabels)):
+        if valveQuantificationGui.inputReferenceNameLabels[pointIndex].text == f"{pointLabel} point":
+          foundPoint = True
+          break
+      self.assertTrue(foundPoint, f"Reference point {pointLabel} not found")
+
+      #valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].checked = True
+      slicer.app.processEvents()
+      valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].click()
+      slicer.app.processEvents()
+      if sliderPosition is not None:
+        valveQuantificationGui.inputReferenceValueSliders[pointIndex].value = sliderPosition
+
+      #valveQuantificationGui.inputReferencePointPlaceWidgets = []
+      #valveQuantificationGui.inputReferenceResetButtons = []
+      #valveQuantificationGui.inputReferenceValueSliders[pointIndex].value += 5 + pointIndex * 0.3
+
+      # slicer.modules.ValveQuantificationWidget.inputReferenceRequiredCheckBoxes[0].click()
+      # slicer.modules.ValveQuantificationWidget.inputReferenceValueSliders[0].value = 93
+
+    self.delayDisplay("Compute results.")
+    valveQuantificationGui.outputCollapsibleButton.collapsed = False
 
     self.delayDisplay("Completed test_ValveQuantificationMitral.")

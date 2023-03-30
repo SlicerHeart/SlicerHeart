@@ -551,7 +551,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     marginLineMarkups = selectedCoaptationModel.getMarginLineMarkupNode()
     baseLineMarkups = selectedCoaptationModel.getBaseLineMarkupNode()
     while self.getNumberOfControlPoints(marginLineMarkups) > self.getNumberOfControlPoints(baseLineMarkups):
-      marginLineMarkups.RemoveMarkup(self.getNumberOfControlPoints(marginLineMarkups) - 1)
+      marginLineMarkups.RemoveNthControlPoint(self.getNumberOfControlPoints(marginLineMarkups) - 1)
 
   def autoAdvanceOrDeactivateMarginLinePlacement(self):
     selectedCoaptationModel = self.getSelectedCoaptationModel()

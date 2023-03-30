@@ -938,7 +938,7 @@ class ValveModel:
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
       if annulusMarkupIndex<0:
         return
-      self.getAnnulusLabelsMarkupNode().RemoveMarkup(annulusMarkupIndex)
+      self.getAnnulusLabelsMarkupNode().RemoveNthControlPoint(annulusMarkupIndex)
 
     def setAnnulusMarkupLabel(self, label, position):
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
