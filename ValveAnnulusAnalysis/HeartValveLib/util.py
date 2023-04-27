@@ -133,7 +133,7 @@ def smoothCurveFourier(markupsNode, numberOfFourierCoefficients, controlPointDis
 
   samplingDistance = 1.0 # Fourier-smoothed curve will be computed using this resolution
   interpolatedPoints = getSampledInterpolatedPointsAsArray(interpolatedPoints, samplingDistance)
-  if interpolatedPoints.size == 0:
+  if len(interpolatedPoints) == 0:
     logging.warning("smoothCurveFourier failed: no points are available")
     return
 

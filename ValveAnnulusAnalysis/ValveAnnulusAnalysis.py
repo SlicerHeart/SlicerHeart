@@ -139,6 +139,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     markupsLogic = slicer.modules.markups.logic()
     self.annulusContourPreviewCurve = markupsLogic.AddNewMarkupsNode('vtkMRMLMarkupsClosedCurveNode')
+    # Prevent the node from being removed when scene is closed
+    self.annulusContourPreviewCurve.SetSingletonTag("ValveAnnulusAnalysis.AnnulusContourPreviewCurve")
     self.annulusContourPreviewCurve.SetSaveWithScene(False)
     self.annulusContourPreviewCurve.SetHideFromEditors(True)
     markupsDisplayNode = self.annulusContourPreviewCurve.GetDisplayNode()
@@ -630,12 +632,21 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def updateAnnulusContourPreviewModel(self):
     if not self.annulusContourPreviewActive:
       return
+
+    # Copy control points from annulus contour
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve)
+    if not len(annulusControlPoints):
+      return
+    slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourPreviewCurve, annulusControlPoints)
+
     if self.ui.smoothContourCheckbox.checked:
+      # Smooth and resample
       from HeartValveLib.util import smoothCurveFourier
       smoothCurveFourier(self.annulusContourPreviewCurve,
                          self.ui.smoothContourFourierCoefficientsSpinBox.value,
                          self.ui.resampleSamplingDistanceSpinBox.value)
     else:
+      # Only resample
       self.annulusContourPreviewCurve.ResampleCurveWorld(self.ui.resampleSamplingDistanceSpinBox.value)
 
   def setAnnulusContourPreviewActive(self, active):
@@ -879,15 +890,19 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     ScriptedLoadableModuleWidget.onReload(self)
 
   def onResampleContourClicked(self):
-    self.ui.smoothContourPreviewCheckbox.setChecked(False)
     if not self.valveModel.annulusContourCurve.GetNumberOfControlPoints():
+      self.ui.smoothContourPreviewCheckbox.setChecked(False)
       return
+
+    # Do not uncheck yet, to still show the preview contour while asking confirmation
     if self.valveModel.hasStoredAnnulusContour():
       if slicer.util.confirmYesNoDisplay("Found previously stored annulus contour points. "
                                          "Do you want to overwrite them with the currently listed coordinates?"):
         self.valveModel.storeAnnulusContour()
     else:
       self.valveModel.storeAnnulusContour()
+    self.ui.smoothContourPreviewCheckbox.setChecked(False)
+
     if self.ui.smoothContourCheckbox.checked:
       self.valveModel.smoothAnnulusContour(self.ui.smoothContourFourierCoefficientsSpinBox.value,
                                            self.ui.resampleSamplingDistanceSpinBox.value)
@@ -1044,7 +1059,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     import numpy as np
     import ValveModel
     import HeartValveLib
-        
+
     ################################
 
     valveAnnulusAnalysisGui = slicer.modules.ValveAnnulusAnalysisWidget
@@ -1097,7 +1112,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
         time.sleep(0.1)
 
     # Jump to the slice positions and orientations prescribed for this test
-    # set axialSliceToRasTransform 
+    # set axialSliceToRasTransform
     axialSliceToRasTransformNode = heartValveNode.GetNodeReference("AxialSliceToRasTransform")
     slicer.util.updateTransformMatrixFromArray(axialSliceToRasTransformNode, axialSliceToRasTransformMatrixArray)
     # update slice view positions and orientations accordingly
