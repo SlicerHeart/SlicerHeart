@@ -663,7 +663,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
         importlib.reload(submodule)
       importlib.reload(package)
 
-    reload('HeartValveLib', ['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves'])
+    reload('HeartValveLib', ['LeafletModel', 'ValveRoi', 'ValveModel', 'ValveSeries', 'HeartValves'])
 
     ScriptedLoadableModuleWidget.onReload(self)
 
