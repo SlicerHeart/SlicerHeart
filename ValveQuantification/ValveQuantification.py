@@ -92,7 +92,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     print("Reloading ValveQuantification")
 
     packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
+    submoduleNames=['LeafletModel', 'ValveModel', 'ValveSeries', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
 
     self.reloadPackageWithSubmodules(packageName, submoduleNames)
 

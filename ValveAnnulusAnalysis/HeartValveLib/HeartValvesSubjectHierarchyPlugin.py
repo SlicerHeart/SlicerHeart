@@ -22,7 +22,10 @@ class HeartValvesSubjectHierarchyPlugin(AbstractScriptedSubjectHierarchyPlugin):
     self.HeartValvesAction.connect("triggered()", self.onCalculateStatistics)
 
   def canAddNodeToSubjectHierarchy(self, node, parentItemID = None):
-    if node is not None and node.IsA("vtkMRMLScriptedModuleNode"):
+    if node is None:
+      return 0.0
+    
+    if node.IsA("vtkMRMLScriptedModuleNode"):
       if node.GetAttribute("ModuleName") == "HeartValve":
         return 0.9
       if node.GetAttribute("ModuleName") == "HeartValveMeasurement":
@@ -31,6 +34,10 @@ class HeartValvesSubjectHierarchyPlugin(AbstractScriptedSubjectHierarchyPlugin):
         return 0.9
       if node.GetAttribute("ModuleName") == "ValveFEMExport":
         return 0.9
+    if node.IsA("vtkMRMLSequenceBrowserNode"):
+      if node.GetAttribute("ModuleName") == "HeartValve":
+        return 0.9
+      
     return 0.0
 
   def canOwnSubjectHierarchyItem(self, itemID):
@@ -69,6 +76,9 @@ class HeartValvesSubjectHierarchyPlugin(AbstractScriptedSubjectHierarchyPlugin):
       elif associatedNode.GetAttribute("ModuleName")=="CardiacDeviceAnalysis":
         iconPath = os.path.join(os.path.dirname(__file__), '../../CardiacModelGenerator/Resources/Icons/CardiacModelGenerator.png')
       elif associatedNode.GetAttribute("ModuleName")=="ValveFEMExport":
+        iconPath = os.path.join(os.path.dirname(__file__), '../Resources/Icons/ValveAnnulusAnalysis.png')
+    if associatedNode is not None and associatedNode.IsA("vtkMRMLSequenceBrowserNode"):
+      if associatedNode.GetAttribute("ModuleName")=="HeartValve":
         iconPath = os.path.join(os.path.dirname(__file__), '../Resources/Icons/ValveAnnulusAnalysis.png')
     if iconPath and os.path.exists(iconPath):
       return qt.QIcon(iconPath)
@@ -125,6 +135,13 @@ class HeartValvesSubjectHierarchyPlugin(AbstractScriptedSubjectHierarchyPlugin):
       self.HeartValvesAction.visible = True
 
   def tooltip(self, itemID):
+    pluginHandlerSingleton = slicer.qSlicerSubjectHierarchyPluginHandler.instance()
+    shNode = pluginHandlerSingleton.subjectHierarchyNode()
+    associatedNode = shNode.GetItemDataNode(itemID)
+    if associatedNode is not None and associatedNode.IsA("vtkMRMLSequenceBrowserNode"):
+      if associatedNode.GetAttribute("ModuleName")=="HeartValve":
+        return "Heart valve series"
+    # Default
     return "Heart valve"
 
   def setDisplayVisibility(self, itemID, visible):

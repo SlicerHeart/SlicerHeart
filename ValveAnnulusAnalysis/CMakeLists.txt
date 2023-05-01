@@ -12,6 +12,7 @@ set(MODULE_PYTHON_SCRIPTS
   HeartValveLib/ValveRoi
   HeartValveLib/LeafletModel
   HeartValveLib/ValveModel
+  HeartValveLib/ValveBrowser
   HeartValveLib/PapillaryModel
   HeartValveLib/CoaptationModel
   HeartValveLib/Constants
