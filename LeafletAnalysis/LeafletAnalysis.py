@@ -613,7 +613,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     logging.debug("Reloading LeafletAnalysis")
 
     packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves']
+    submoduleNames=['LeafletModel', 'ValveRoi', 'ValveModel', 'ValveSeries', 'HeartValves']
     import imp
     f, filename, description = imp.find_module(packageName)
     package = imp.load_module(packageName, f, filename, description)

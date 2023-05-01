@@ -192,7 +192,7 @@ class ValveModel:
         logging.warning("Volume sequence node has no browser node")
         return 0
       return volumeSequenceBrowserNode.GetSelectedItemNumber()
-
+    
     def setValveVolumeNode(self, valveVolumeNode):
       if not self.heartValveNode:
         logging.error("setValveVolumeNode failed: invalid heartValveNode")

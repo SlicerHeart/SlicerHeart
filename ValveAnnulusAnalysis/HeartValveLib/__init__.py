@@ -5,6 +5,7 @@ from LeafletModel import *
 from CoaptationModel import *
 from PapillaryModel import *
 from ValveModel import *
+from ValveBrowser import *
 from HeartValves import *
 from ValveRoi import *
 from Constants import *

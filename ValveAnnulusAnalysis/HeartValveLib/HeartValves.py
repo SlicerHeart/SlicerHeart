@@ -8,6 +8,10 @@ from HeartValveLib.util import getAllSegmentIDs
 
 import logging
 
+# Dictionary that stores a ValveBrowser Python object for each valve browser MRML node in the scene.
+# These Python objects are shared between multiple modules.
+ValveBrowsers = {}
+
 # Dictionary that stores a ValveModel Python object for each MRML node in the scene.
 # These Python objects are shared between multiple modules.
 ValveModels = {}
@@ -41,6 +45,21 @@ def getTerminologyFile():
   moduleDir = os.path.dirname(slicer.modules.valveannulusanalysis.path)
   terminologyFile = os.path.join(moduleDir, 'Resources', 'SlicerHeartSegmentationCategoryTypeModifier.json')
   return terminologyFile
+
+
+def getValveBrowser(valveBrowserNode):
+  if valveBrowserNode is None:
+    return None
+
+  try:
+    valveBrowser = ValveBrowsers[valveBrowserNode]
+  except KeyError:
+    from HeartValveLib.ValveBrowser import ValveBrowser
+    valveBrowser = ValveBrowser()
+    valveBrowser.setValveBrowserNode(valveBrowserNode)
+
+    ValveBrowsers[valveBrowserNode] = valveBrowser
+  return valveBrowser
 
 
 def getValveModel(heartValveNode):
