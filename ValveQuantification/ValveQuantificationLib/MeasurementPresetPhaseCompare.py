@@ -138,7 +138,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
 
     # Common labels specified for phase comparison
     # For example, CAVC curve has many 6 points but we only want to use 4 of them for phase comparison chords.
-    phaseComparePointLabels = valveModel1.valveTypePresets[valveModel1.getValveType()]["phaseComparePointLabels"]
+    phaseComparePointLabels = valveModel1.valveTypePreset["phaseComparePointLabels"]
     if phaseComparePointLabels:
       return list(set(commonLabels) & set(phaseComparePointLabels))
     else:

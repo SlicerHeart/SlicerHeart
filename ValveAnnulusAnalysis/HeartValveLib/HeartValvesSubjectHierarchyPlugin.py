@@ -79,7 +79,7 @@ class HeartValvesSubjectHierarchyPlugin(AbstractScriptedSubjectHierarchyPlugin):
         iconPath = os.path.join(os.path.dirname(__file__), '../Resources/Icons/ValveAnnulusAnalysis.png')
     if associatedNode is not None and associatedNode.IsA("vtkMRMLSequenceBrowserNode"):
       if associatedNode.GetAttribute("ModuleName")=="HeartValve":
-        iconPath = os.path.join(os.path.dirname(__file__), '../Resources/Icons/ValveAnnulusAnalysis.png')
+        iconPath = os.path.join(os.path.dirname(__file__), '../Resources/Icons/ValveBrowser.png')
     if iconPath and os.path.exists(iconPath):
       return qt.QIcon(iconPath)
     # Item unknown by plugin

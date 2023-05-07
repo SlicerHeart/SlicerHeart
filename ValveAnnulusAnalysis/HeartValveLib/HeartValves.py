@@ -56,7 +56,7 @@ def getValveBrowser(valveBrowserNode):
   except KeyError:
     from HeartValveLib.ValveBrowser import ValveBrowser
     valveBrowser = ValveBrowser()
-    valveBrowser.setValveBrowserNode(valveBrowserNode)
+    valveBrowser.valveBrowserNode = valveBrowserNode
 
     ValveBrowsers[valveBrowserNode] = valveBrowser
   return valveBrowser
@@ -302,7 +302,7 @@ def setSliceViewsLink(viewNames, link, hotlink):
   return oldLink, oldHotLink
 
 
-def setupDefaultSliceOrientation(resetFov=False, valveModel=None, orthoRotationDeg=0,
+def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, orthoRotationDeg=0,
                                  axialSliceName='Red', ortho1SliceName='Yellow', ortho2SliceName='Green',
                                  show3DSliceName='Red'):
   """Sets up views for a specific valve.
@@ -315,10 +315,10 @@ def setupDefaultSliceOrientation(resetFov=False, valveModel=None, orthoRotationD
 
   [oldLink, oldHotLink] = setSliceViewsLink([axialSliceName, ortho1SliceName, ortho2SliceName], False, False)
 
-  valveModel.setSliceOrientations(layoutManager.sliceWidget(axialSliceName).sliceLogic().GetSliceNode(),
-                                  layoutManager.sliceWidget(ortho1SliceName).sliceLogic().GetSliceNode(),
-                                  layoutManager.sliceWidget(ortho2SliceName).sliceLogic().GetSliceNode(),
-                                  orthoRotationDeg)
+  valveModelOrBrowser.setSliceOrientations(layoutManager.sliceWidget(axialSliceName).sliceLogic().GetSliceNode(),
+                                           layoutManager.sliceWidget(ortho1SliceName).sliceLogic().GetSliceNode(),
+                                           layoutManager.sliceWidget(ortho2SliceName).sliceLogic().GetSliceNode(),
+                                           orthoRotationDeg)
 
   for sliceViewName in [axialSliceName, ortho1SliceName, ortho2SliceName]:
     sliceLogic = layoutManager.sliceWidget(sliceViewName).sliceLogic()

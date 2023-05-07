@@ -327,3 +327,13 @@ def getAllSegmentIDs(segmentationNode):
   segmentation = segmentationNode.GetSegmentation()
   segmentation.GetSegmentIDs(segmentIDs)
   return [segmentIDs.GetValue(idx) for idx in range(segmentIDs.GetNumberOfValues())]
+
+
+def createMatrixFromString(transformMatrixString):
+  import vtk
+  transformMatrix = vtk.vtkMatrix4x4()
+  transformMatrixArray = list(map(float, filter(None, transformMatrixString.split(' '))))
+  for r in range(4):
+    for c in range(4):
+      transformMatrix.SetElement(r, c, transformMatrixArray[r * 4 + c])
+  return transformMatrix

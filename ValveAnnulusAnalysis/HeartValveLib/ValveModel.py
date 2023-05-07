@@ -9,7 +9,7 @@ import PapillaryModel
 import ValveRoi
 import logging
 import HeartValves
-from Constants import *
+import Constants
 from helpers import getBinaryLabelmapRepresentation
 
 
@@ -41,11 +41,7 @@ class ValveModel:
       # List of PapillaryModel objects, one for each papillary muscle
       self.papillaryModels = []
 
-      self.probePositionPresets = PROBE_POSITION_PRESETS
-
-      self.valveTypePresets = VALVE_TYPE_PRESETS
-
-      self.cardiacCyclePhasePresets = CARDIAC_CYCLE_PHASE_PRESETS
+      self.cardiacCyclePhasePresets = Constants.CARDIAC_CYCLE_PHASE_PRESETS
 
     def setHeartValveNode(self, node):
       if self.heartValveNode == node:
@@ -66,6 +62,7 @@ class ValveModel:
 
     def setHeartValveNodeDefaults(self):
       """Initialize HeartValveNode with defaults. Already defined values are not changed."""
+
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
       if self.heartValveNode.GetHideFromEditors():
         self.heartValveNode.SetHideFromEditors(False)
@@ -78,32 +75,18 @@ class ValveModel:
       if self.getValveVolumeSequenceIndex() < 0:
         self.setValveVolumeSequenceIndex(-1)  # by default it is set to -1 (undefined)
 
-      self.getProbePosition()
+      # Initialize to default value (if not set to some other value already)
       self.getCardiacCyclePhase()
 
-      if not self.getAxialSliceToRasTransformNode():
-        logging.debug("Did not find annulus transform node, create a new one")
-        self.setAxialSliceToRasTransformNode(self.createAxialSliceToRasTransformNode())
-
-      if not self.getAnnulusContourMarkupNode():
-        logging.debug("Did not find contour markup point node, create a new one")
-        self.setAnnulusContourMarkupNode(self.createAnnulusContourMarkupNode())
-
-      if not self.getAnnulusLabelsMarkupNode():
-        logging.debug("Did not find label markup node, create a new one")
-        self.setAnnulusLabelsMarkupNode(self.createAnnulusLabelsMarkupNode())
-
-      if not self.getValveRoiModelNode():
-        logging.debug("Did not find ROI model node, create a new one")
-        self.setValveRoiModelNode(self.createValveRoiModelNode())
-
-      if not self.getLeafletSegmentationNode():
-        logging.debug("Did not find leaflet segmentation node, create a new one")
-        self.setLeafletSegmentationNode(self.createLeafletSegmentationNode())
-
-      self.updateLeafletModelsFromSegmentation()
-      self.updateCoaptationModels()
-      self.updatePapillaryModels()
+    def initializeNewTimePoint(self):
+      """This method is called after a new time point is added."""
+      # By default all properties are copied from the previous time point.
+      # The cardiac cycle phase is unique, so reset it to "unknown".
+      self.setCardiacCyclePhase("unknown")
+      annulusContourMarkupsNode = self.getAnnulusContourMarkupNode()
+      if annulusContourMarkupsNode:
+        annulusContourMarkupsNode.RemoveAllControlPoints()
+        self.storeAnnulusContour()
 
     def moveNodeToHeartValveFolder(self, node, subfolderName=None):
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -116,70 +99,33 @@ class ValveModel:
         folderItemId = valveNodeItemId
       shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
 
-    def getDefaultAxialSliceToRasTransformMatrix(self):
-      axialSliceToRas = vtk.vtkMatrix4x4()
-      probePosition = self.getProbePosition()
-      probePositionPreset = self.probePositionPresets[probePosition]
-      axialSliceToRas.DeepCopy(createMatrixFromString(probePositionPreset['axialSliceToRasTransformMatrix']))
-      return axialSliceToRas
-
-    def createAxialSliceToRasTransformNode(self):
-      axialSliceToRasTransformNode = slicer.vtkMRMLLinearTransformNode()
-      axialSliceToRasTransformNode.SetName(slicer.mrmlScene.GetUniqueNameByString("AxialSliceToRasTransform"))
-      axialSliceToRasTransformNode.SetMatrixTransformToParent(self.getDefaultAxialSliceToRasTransformMatrix())
-
-      slicer.mrmlScene.AddNode(axialSliceToRasTransformNode)
-      # prevent the node from showing up in SH, as it is not something that users would need to manipulate
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      shNode.SetItemAttribute(shNode.GetItemByDataNode(axialSliceToRasTransformNode),
-                              slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(),
-                              "1")
-      self.moveNodeToHeartValveFolder(axialSliceToRasTransformNode)
-      return axialSliceToRasTransformNode
-
-    def setAxialSliceToRasTransformNode(self, axialSliceToRasTransformNode):
+    def getValveBrowserNode(self):
       if not self.heartValveNode:
-        logging.error("setAxialSliceToRasTransformNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("AxialSliceToRasTransform",
-                                             axialSliceToRasTransformNode.GetID() if axialSliceToRasTransformNode else None)
+        raise RuntimeError("getValveBrowserNode failed: invalid self.heartValveNode")
+      valveBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(self.heartValveNode)
+      return valveBrowserNode
+    
+    def getValveBrowser(self):
+      valveBrowserNode = self.getValveBrowserNode()
+      if not valveBrowserNode:
+        raise RuntimeError("getValveBrowserModel failed: invalid valveBrowserNode")
+      valveBrowser = HeartValves.getValveBrowser(valveBrowserNode)
+      return valveBrowser
+
+    def getDefaultAxialSliceToRasTransformMatrix(self):
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      return valveBrowser.defaultAxialSliceToRasTransformMatrix
 
     def getAxialSliceToRasTransformNode(self):
-      return self.heartValveNode.GetNodeReference("AxialSliceToRasTransform") if self.heartValveNode else None
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      return valveBrowser.axialSliceToRasTransformNode
 
     def getProbeToRasTransformNode(self):
-      valveVolumeNode = self.getValveVolumeNode()
-      if not valveVolumeNode:
-        return None
-      return valveVolumeNode.GetParentTransformNode()
-
-    def updateProbeToRasTransform(self):
-      """Compute ProbeToRasTransform from volume and probe position
-      and store it in ProbeToRasTransformNode"""
-
-      # Check inputs
-      probeToRasTransformNode = self.getProbeToRasTransformNode()
-      valveVolumeNode = self.getValveVolumeNode()
-      if not probeToRasTransformNode or not valveVolumeNode:
-        return
-      if not valveVolumeNode.GetImageData():
-        logging.warning('updateProbeToRasTransform failed: valve volume does not contain a valid image')
-        return
-
-      # Compute probeToRasTransform so that it centers the volume and orients it approximately
-      # correctly in the RAS coordinate system
-      valveVolumeExtent = valveVolumeNode.GetImageData().GetExtent()
-      valveVolumeCenterIjk = [(valveVolumeExtent[component*2+1]-valveVolumeExtent[component*2]+1)/2.0 for component in range(3)]
-      valveVolumeCenterIjk.append(1)
-      ijkToRasMatrix = vtk.vtkMatrix4x4()
-      valveVolumeNode.GetIJKToRASMatrix(ijkToRasMatrix)
-      valveVolumeCenterRas = ijkToRasMatrix.MultiplyPoint(valveVolumeCenterIjk)
-      probeToRasTransform = vtk.vtkTransform()
-      probeToRasTransformMatrix = vtk.vtkMatrix4x4()
-      self.getDefaultProbeToRasOrientation(probeToRasTransformMatrix)
-      probeToRasTransform.SetMatrix(probeToRasTransformMatrix)
-      probeToRasTransform.Translate(-valveVolumeCenterRas[0],-valveVolumeCenterRas[1],-valveVolumeCenterRas[2])
-      probeToRasTransformNode.SetMatrixTransformToParent(probeToRasTransform.GetMatrix())
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      return valveBrowser.probeToRasTransformNode
 
     def getDisplayedValveVolumeSequenceIndex(self):
       """Get currently displayed item index of valve volume sequence"""
@@ -193,25 +139,20 @@ class ValveModel:
         return 0
       return volumeSequenceBrowserNode.GetSelectedItemNumber()
     
-    def setValveVolumeNode(self, valveVolumeNode):
-      if not self.heartValveNode:
-        logging.error("setValveVolumeNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("ValveVolume", valveVolumeNode.GetID() if valveVolumeNode else None)
+    def applyProbeToRasTransformToNode(self, nodeToApplyTo=None):
+      if nodeToApplyTo is not None:
+        probeToRasTransformNode = self.getProbeToRasTransformNode()
+        nodeToApplyTo.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
 
-      # Create probeToRasTransformNode if does not exist yet
-      probeToRasTransformNodeId = None
-      if valveVolumeNode:
-        if not valveVolumeNode.GetParentTransformNode():
-          probeToRasTransformNode = slicer.vtkMRMLLinearTransformNode()
-          probeToRasTransformNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ProbeToRasTransform"))
-          slicer.mrmlScene.AddNode(probeToRasTransformNode)
-          valveVolumeNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID())
-        #slicer.vtkMRMLSubjectHierarchyNode.CreateSubjectHierarchyNode(
-        #  valveVolumeNode.GetScene(), slicer.vtkMRMLSubjectHierarchyNode.GetAssociatedSubjectHierarchyNode(valveVolumeNode),
-        #  None, valveVolumeNode.GetName(), valveVolumeNode)
-        self.updateProbeToRasTransform()
-        HeartValves.setSequenceBrowserNodeDisplayIndex(self)
+    def setValveVolumeNode(self, valveVolumeNode):
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      valveBrowser.valveVolumeNode = valveVolumeNode
+    
+    def onProbeToRasTransformNodeChanged(self):
+      # Called when a different node is set as probeToRasTransform
+      if not self.heartValveNode:
+        return
 
       # Put valve under probeToRas transform (Probe coordinate system)
       self.applyProbeToRasTransformToNode(self.getAnnulusContourMarkupNode())
@@ -225,13 +166,10 @@ class ValveModel:
       self.updateLeafletModelsFromSegmentation()
       self.updateCoaptationModels()
 
-    def applyProbeToRasTransformToNode(self, nodeToApplyTo=None):
-      if nodeToApplyTo is not None:
-        probeToRasTransformNode = self.getProbeToRasTransformNode()
-        nodeToApplyTo.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
-
     def getValveVolumeNode(self):
-      return self.heartValveNode.GetNodeReference("ValveVolume") if self.heartValveNode else None
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      return valveBrowser.valveVolumeNode
 
     def setLeafletVolumeNode(self, clippedValveVolumeNode):
       if not self.heartValveNode:
@@ -269,7 +207,9 @@ class ValveModel:
       self.heartValveNode.SetNodeReferenceID("AnnulusContourPoints",
                                              annulusContourMarkupNode.GetID() if annulusContourMarkupNode else None)
       self.applyProbeToRasTransformToNode(annulusContourMarkupNode)
-      self.moveNodeToHeartValveFolder(annulusContourMarkupNode)
+      if annulusContourMarkupNode:
+        self.moveNodeToHeartValveFolder(annulusContourMarkupNode)
+        self.getValveBrowser().makeTimeSequence(annulusContourMarkupNode)
       self.valveRoi.setAnnulusContourCurve(annulusContourMarkupNode)
 
     def createAnnulusContourMarkupNode(self):
@@ -319,8 +259,17 @@ class ValveModel:
 
     def getValveVolumeSequenceIndex(self):
       """"Get item index of analyzed valve volume in the volume sequence. Returns -1 if index value is undefined."""
-      indexStr = self.heartValveNode.GetAttribute("ValveVolumeSequenceIndex")
-      return int(indexStr) if indexStr is not None else -1
+      valveBrowser = self.getValveBrowser()
+      valveItemIndex, indexValue = valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      if indexValue is None:
+        # no time points in the valve sequence
+        return -1
+      volumeSequenceNode = valveBrowser.volumeSequenceNode
+      if not volumeSequenceNode:
+        # no volume sequence is selected
+        return -1
+      volumeIndex = volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
+      return volumeIndex
 
     def setValveVolumeSequenceIndex(self, index):
       if not self.heartValveNode:
@@ -416,7 +365,7 @@ class ValveModel:
       if papillaryLineMarkupNode:
         papillaryMuscleName = papillaryLineMarkupNode.GetName().replace(" papillary muscle", "")
       else:
-        papillaryMuscleName = self.valveTypePresets[self.getValveType()]["papillaryNames"][papillaryModelIndex]
+        papillaryMuscleName = self.valveTypePreset["papillaryNames"][papillaryModelIndex]
       if not papillaryLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode')
         #markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
@@ -442,7 +391,7 @@ class ValveModel:
       return None
 
     def updatePapillaryModels(self):
-      papillaryMuscleNames = self.valveTypePresets[self.getValveType()]["papillaryNames"]
+      papillaryMuscleNames = self.valveTypePreset["papillaryNames"]
       numberOfPapillaryModels = len(papillaryMuscleNames)
 
       # Remove all orphan papillary models
@@ -696,17 +645,13 @@ class ValveModel:
       interpolatedPoints = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurve).T
       planePosition, planeNormal = planeFit(interpolatedPoints)
 
-      valveTypeName = self.heartValveNode.GetAttribute("ValveType")
-      if not valveTypeName:
-        valveTypeName = "unknown"
-      valveType = self.valveTypePresets[valveTypeName]
 
       probeToRasMatrix = vtk.vtkMatrix4x4()
       slicer.vtkMRMLTransformNode.GetMatrixTransformBetweenNodes(self.getProbeToRasTransformNode(), None, probeToRasMatrix)
       planeNormal_Probe = np.append(planeNormal, 0)
       planeNormal_Ras = probeToRasMatrix.MultiplyPoint(planeNormal_Probe)
 
-      if valveType["approximateFlowDirection"] == "posterior":
+      if self.valveTypePreset["approximateFlowDirection"] == "posterior":
         # heart posterior direction in RAS: [0,-1,0]
         approximateFlowDirection_Ras = [0,-1,0]
       else:
@@ -729,6 +674,8 @@ class ValveModel:
       self.annulusContourCurve.EndModify(wasModify)
 
     def hasStoredAnnulusContour(self):
+      if not self.annulusContourCurve:
+        return None
       return self.annulusContourCurve.GetAttribute("AnnulusContourCoordinates") is not None
 
     def storeAnnulusContour(self):
@@ -840,178 +787,49 @@ class ValveModel:
       else:
         self.getAnnulusLabelsMarkupNode().AddControlPoint(vtk.vtkVector3d(position), label)
 
-    def getDefaultProbeToRasOrientation(self, probeToRasTransformMatrix):
-      probePosition = self.getProbePosition()
-      probePositionPreset = self.probePositionPresets[probePosition]
-      probeToRasTransformMatrix.DeepCopy(createMatrixFromString(probePositionPreset['probeToRasTransformMatrix']))
+    @property
+    def probePositionPreset(self):
+      # return probe position preset object for this valve
+      return Constants.PROBE_POSITION_PRESETS[self.getProbePosition()]
 
     def setProbePosition(self, probePosition):
-      if not self.heartValveNode:
-        logging.error("setProbePosition failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetAttribute("ProbePosition", probePosition)
-      self.updateProbeToRasTransform()
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      valveBrowser.probePosition = probePosition
 
     def getProbePosition(self):
-      if not self.heartValveNode:
-        logging.error("getProbePosition failed: invalid heartValveNode")
-        return None
-      probePosition = self.heartValveNode.GetAttribute("ProbePosition")
-      if not probePosition:
-        probePosition = PROBE_POSITION_UNKNOWN
-        self.setProbePosition(probePosition)
-      return probePosition
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      return valveBrowser.probePosition
 
     def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
-
-      axialSliceToRasTransformNode = self.getAxialSliceToRasTransformNode()
-      axialSliceToRas = vtk.vtkMatrix4x4()
-      axialSliceToRasTransformNode.GetMatrixTransformToParent(axialSliceToRas)
-
-      paraAxialOrientationCode = 0
-
-      # Axial (red) - not rotated by orthoRotationDeg
-      axialNode.SetSliceToRASByNTP(
-        axialSliceToRas.GetElement(0, 2), axialSliceToRas.GetElement(1, 2), axialSliceToRas.GetElement(2, 2),
-        axialSliceToRas.GetElement(0, 0), axialSliceToRas.GetElement(1, 0), axialSliceToRas.GetElement(2, 0),
-        axialSliceToRas.GetElement(0, 3), axialSliceToRas.GetElement(1, 3), axialSliceToRas.GetElement(2, 3),
-        paraAxialOrientationCode)
-
-      # Rotate around Z axis
-      axialSliceToRasRotated = vtk.vtkMatrix4x4()
-      rotationTransform = vtk.vtkTransform()
-      rotationTransform.RotateZ(orthoRotationDeg)
-      vtk.vtkMatrix4x4.Multiply4x4(axialSliceToRas, rotationTransform.GetMatrix(), axialSliceToRasRotated)
-
-      rotationTransform = vtk.vtkTransform()
-      probePositionPreset = self.probePositionPresets[self.getProbePosition()]
-
-      # Ortho1 (yellow)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho1SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      ortho1Node.SetSliceToRASByNTP(
-        rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-        rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-        rotatedSliceToRas.GetElement(0, 3), rotatedSliceToRas.GetElement(1, 3), rotatedSliceToRas.GetElement(2, 3),
-        paraAxialOrientationCode)
-
-      # Ortho2 (green)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho2SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      ortho2Node.SetSliceToRASByNTP(
-        rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-        rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-        rotatedSliceToRas.GetElement(0, 3), rotatedSliceToRas.GetElement(1, 3), rotatedSliceToRas.GetElement(2, 3),
-        paraAxialOrientationCode)
+      # this is now implemented in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      valveBrowser.setSliceOrientations(axialNode, ortho1Node, ortho2Node, orthoRotationDeg)
 
     def setSlicePositionAndOrientation(self, axialNode, ortho1Node, ortho2Node, position, orthoRotationDeg, axialSliceToRas=None):
-
-      if axialSliceToRas is None:
-        axialSliceToRasTransformNode = self.getAxialSliceToRasTransformNode()
-        axialSliceToRas = vtk.vtkMatrix4x4()
-        axialSliceToRasTransformNode.GetMatrixTransformToParent(axialSliceToRas)
-
-      paraAxialOrientationCode = 0
-
-      # Axial (red) - not rotated by orthoRotationDeg
-      if axialNode:
-        axialNode.SetSliceToRASByNTP(
-          axialSliceToRas.GetElement(0, 2), axialSliceToRas.GetElement(1, 2), axialSliceToRas.GetElement(2, 2),
-          axialSliceToRas.GetElement(0, 0), axialSliceToRas.GetElement(1, 0), axialSliceToRas.GetElement(2, 0),
-          position[0], position[1], position[2],
-          paraAxialOrientationCode)
-
-      # Rotate around Z axis
-      axialSliceToRasRotated = vtk.vtkMatrix4x4()
-      rotationTransform = vtk.vtkTransform()
-      # import math
-      # orthoRotationDeg = math.atan2(directionVector[1], directionVector[0])/math.pi*180.0
-      rotationTransform.RotateZ(orthoRotationDeg)
-      vtk.vtkMatrix4x4.Multiply4x4(axialSliceToRas, rotationTransform.GetMatrix(), axialSliceToRasRotated)
-
-      rotationTransform = vtk.vtkTransform()
-      probePositionPreset = self.probePositionPresets[self.getProbePosition()]
-
-      # Ortho1 (yellow)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho1SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      if ortho1Node:
-        ortho1Node.SetSliceToRASByNTP(
-          rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-          rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-          position[0], position[1], position[2],
-          paraAxialOrientationCode)
-
-      # Ortho2 (green)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho2SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      if ortho2Node:
-        ortho2Node.SetSliceToRASByNTP(
-          rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-          rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-          position[0], position[1], position[2],
-          paraAxialOrientationCode)
-
+      # this is now implemented in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      valveBrowser.setSlicePositionAndOrientation(axialNode, ortho1Node, ortho2Node, position, orthoRotationDeg, axialSliceToRas)
+  
     def updateValveNodeNames(self):
-      valveType = self.heartValveNode.GetAttribute("ValveType")
-      if not valveType:
-        valveType = "unknown"
-      valveName = valveType[0].upper()+valveType[1:]
-      cardiacCyclePhase = self.heartValveNode.GetAttribute("CardiacCyclePhase")
-      if not cardiacCyclePhase:
-        cardiacCyclePhase = "unknown"
-      cardiacCyclePhaseName = self.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
-      volumeSequenceIndex = self.getVolumeSequenceIndexAsDisplayedString(self.getValveVolumeSequenceIndex())
-      volumeSequenceIndex = f"_f{volumeSequenceIndex}" if not volumeSequenceIndex == "NA" else ""
+      # Placeholder for now, we'll see if sequence browser can fully take care of node renames
+      pass
 
-      # heart valve name
-      heartValveNodeName = f"{valveName}Valve-{cardiacCyclePhaseName}{volumeSequenceIndex}"
-      currentNodeName = self.heartValveNode.GetName()
-      if not currentNodeName.startswith(heartValveNodeName): # need to update
-        self.heartValveNode.SetName(slicer.mrmlScene.GetUniqueNameByString(heartValveNodeName))
-
-      # segmentation node name
-      segmentationNodeName = f"{valveName}Valve-Segmentation-{cardiacCyclePhaseName}{volumeSequenceIndex}"
-      leafletSegmentation = self.getLeafletSegmentationNode()
-      if not leafletSegmentation:
-        return
-      currentNodeName = leafletSegmentation.GetName()
-      if not currentNodeName.startswith(segmentationNodeName):  # need to update
-        leafletSegmentation.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentationNodeName))
-
-      leafletVolumeNode = self.getLeafletVolumeNode()
-      if leafletVolumeNode is not None:
-        leafletVolumeNode.SetName(f"{self.heartValveNode.GetName()}-segmented")
+    @property
+    def valveTypePreset(self):
+      # return preset object of this valve type
+      return Constants.VALVE_TYPE_PRESETS[self.getValveType()]
 
     def setValveType(self, valveType):
-      if not self.heartValveNode:
-        logging.error("setValveType failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetAttribute("ValveType", valveType)
-      self.updateValveNodeNames()
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      valveBrowser.valveType = valveType
 
     def getValveType(self):
-      valveType = self.heartValveNode.GetAttribute("ValveType")
-      if not valveType:
-        valveType = "unknown"
-        self.setValveType(valveType)
-      return valveType
+      # this property is now stored in the valve sequence
+      valveBrowser = self.getValveBrowser()
+      return valveBrowser.valveType
 
     def setCardiacCyclePhase(self, cardiacCyclePhase):
       if not self.heartValveNode:
@@ -1030,8 +848,7 @@ class ValveModel:
     def getCardiacCyclePhase(self):
       cardiacCyclePhase = self.heartValveNode.GetAttribute("CardiacCyclePhase")
       if not cardiacCyclePhase:
-        cardiacCyclePhase = "unknown"
-        self.setCardiacCyclePhase(cardiacCyclePhase)
+        self.initializeNewTimePoint()
       return cardiacCyclePhase
 
     def getBaseColor(self):
@@ -1516,12 +1333,8 @@ def getPointProjectionToLine(point, lineStart, lineEnd):
 
 
 def createMatrixFromString(transformMatrixString):
-  transformMatrix = vtk.vtkMatrix4x4()
-  transformMatrixArray = list(map(float, filter(None, transformMatrixString.split(' '))))
-  for r in range(4):
-    for c in range(4):
-      transformMatrix.SetElement(r, c, transformMatrixArray[r * 4 + c])
-  return transformMatrix
+  from HeartValveLib.util import createMatrixFromString
+  return createMatrixFromString(transformMatrixString)
 
 
 def createVtkMatrixFromArray(transformArray):
