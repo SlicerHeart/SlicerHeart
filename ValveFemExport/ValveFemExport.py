@@ -709,7 +709,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     :param chordsDensity: in chords per mm2, 0.17 is a good number
     :return:
     """
-
     baseName = leafletRegionBoundaryNode.GetName()
 
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
@@ -739,7 +738,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     regionArea = sum(cellAreas)
     numberOfChords = int(regionArea * chordsDensity)
     logging.info(f"Number of chords for region {leafletRegionBoundaryNode.GetName()}: {numberOfChords}")
-    if numberOfChords>100:
+    if numberOfChords > 100:
       if not slicer.util.confirmYesNoDisplay(f"The number of chords for region {leafletRegionBoundaryNode.GetName()} is very high ({numberOfChords}). Are you sure that the model scale is correct?"):
         return
 
@@ -769,28 +768,28 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
 
     for endPointIndex, endPoint_World in enumerate(pointPositions):
-        # Create line
-        chordName = "{0}-{2:02d}".format(baseName,papillaryMuscleTipsPointLabel,endPointIndex)
-        line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
-        #line.SetLocked(True)  # it is left unlocked to allow the user to rearrange the points to achieve more uniform sampling
-        line.CreateDefaultDisplayNodes()
-        line.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
-        line.GetDisplayNode().SetPropertiesLabelVisibility(False)
-        line.GetDisplayNode().SetPointLabelsVisibility(False)
-        line.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
-        line.GetDisplayNode().UseGlyphScaleOff()
-        line.GetDisplayNode().SetGlyphSize(0.5)
-        line.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
-        line.AddControlPointWorld(vtk.vtkVector3d(papillaryMuscleTipPosition), papillaryMuscleTipsPointLabel)
-        line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
-        # Put under subject hierarchy folder
-        shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
-        # Add chord to the table
-        rowIndex = chordTableNode.AddEmptyRow()
-        chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
-        chordStartPositionArray.SetTuple3(rowIndex, papillaryMuscleTipPosition[0], papillaryMuscleTipPosition[1], papillaryMuscleTipPosition[2])
-        chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
-        chordNameArray.SetValue(rowIndex, chordName)
+      # Create line
+      chordName = f'{baseName}-{endPointIndex:02d}'
+      line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
+      #line.SetLocked(True)  # it is left unlocked to allow the user to rearrange the points to achieve more uniform sampling
+      line.CreateDefaultDisplayNodes()
+      line.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
+      line.GetDisplayNode().SetPropertiesLabelVisibility(False)
+      line.GetDisplayNode().SetPointLabelsVisibility(False)
+      line.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
+      line.GetDisplayNode().UseGlyphScaleOff()
+      line.GetDisplayNode().SetGlyphSize(0.5)
+      line.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
+      line.AddControlPointWorld(vtk.vtkVector3d(papillaryMuscleTipPosition), papillaryMuscleTipsPointLabel)
+      line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
+      # Put under subject hierarchy folder
+      shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
+      # Add chord to the table
+      rowIndex = chordTableNode.AddEmptyRow()
+      chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
+      chordStartPositionArray.SetTuple3(rowIndex, papillaryMuscleTipPosition[0], papillaryMuscleTipPosition[1], papillaryMuscleTipPosition[2])
+      chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
+      chordNameArray.SetValue(rowIndex, chordName)
 
     slicer.mrmlScene.RemoveNode(curveCut)
     slicer.mrmlScene.RemoveNode(leafletRegionModelNode)
@@ -798,7 +797,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
     """Requires boundaryCurveNode curve to be sampled uniformly"""
-
     # Prepare transform object
 
     # points on the warped boundary curve
@@ -1097,7 +1095,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         lastTimestamp = timestamp
 
     return tessellatedModelNode
-
 
   def createLeafletSurfaces(self, parameterNode, leafletsFolderItemId, logCallback=None):
     # Install geomdl - NURBS modeling package
