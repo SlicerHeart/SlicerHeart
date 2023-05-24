@@ -136,6 +136,126 @@
           }
         ],
         "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Cardiac Anatomy",
+        "CodingSchemeDesignator": "SCT",
+        "showAnatomy": false,
+        "CodeValue": "123037004",
+        "Type": [
+          {
+            "CodeMeaning": "Cardiac vasculature",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "7156",
+            "UMLSConceptUID": "C0007226",
+            "CodeValue": "113257007",
+            "contextGroupName": "VascularSegmentationTypes",
+            "SNOMEDCTConceptID": "113257007",
+            "paired": "U",
+            "recommendedDisplayRGBValue": [213, 99, 79]
+          },
+          {
+            "CodeMeaning": "Common atrium",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010",
+            "UMLSConceptUID": "C0392482",
+            "CodeValue": "253276007",
+            "contextGroupName": "CardiovascularAnatomicLocations",
+            "SNOMEDCTConceptID": "253276007",
+            "recommendedDisplayRGBValue": [170, 0, 255]
+          },
+          {
+            "CodeMeaning": "Left atrium",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010",
+            "UMLSConceptUID": "C0225860",
+            "CodeValue": "82471001",
+            "contextGroupName": "CardiovascularAnatomicLocations",
+            "SNOMEDCTConceptID": "82471001",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [244, 67, 54]
+          },
+          {
+            "CodeMeaning": "Right atrium",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010",
+            "UMLSConceptUID": "C0225844",
+            "CodeValue": "73829009",
+            "contextGroupName": "CardiovascularAnatomicLocations",
+            "SNOMEDCTConceptID": "73829009",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [0, 166, 147]
+          },
+          {
+            "CodeMeaning": "Single left ventricle",
+            "CodingSchemeDesignator": "SCT",
+            "CodeValue": "109426009",
+            "SNOMEDCTConceptID": "109426009",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [200, 0, 0]
+          },
+          {
+            "CodeMeaning": "Single right ventricle",
+            "CodingSchemeDesignator": "SCT",
+            "CodeValue": "109425008",
+            "SNOMEDCTConceptID": "109425008",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [0, 100, 200]
+          },
+          {
+            "CodeMeaning": "Left ventricle",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010,7152",
+            "UMLSConceptUID": "C0225897",
+            "CodeValue": "87878005",
+            "contextGroupName": "CardiovascularAnatomicLocations,CardiacStructureSegmentationTypes",
+            "SNOMEDCTConceptID": "87878005",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [255, 0, 0]
+          },
+          {
+            "CodeMeaning": "Right ventricle",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010,7152",
+            "UMLSConceptUID": "C0225883",
+            "CodeValue": "53085002",
+            "contextGroupName": "CardiovascularAnatomicLocations,CardiacStructureSegmentationTypes",
+            "SNOMEDCTConceptID": "53085002",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [0, 120, 255]
+          },
+          {
+            "CodeMeaning": "Aortic root",
+            "CodingSchemeDesignator": "SCT",
+            "CodeValue": "8128003",
+            "SNOMEDCTConceptID": "8128003",
+            "UMLSConceptUID": "C0549113",
+            "paired": "N",
+            "recommendedDisplayRGBValue": [20, 30, 180]
+          },
+          {
+            "CodeMeaning": "Superior vena cava",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010,6117",
+            "UMLSConceptUID": "C0042459",
+            "CodeValue": "48345005",
+            "contextGroupName": "CardiovascularAnatomicLocations,VascularAnatomy",
+            "SNOMEDCTConceptID": "48345005",
+            "paired": "U",
+            "recommendedDisplayRGBValue": [139, 0, 139]
+          },
+          {
+            "CodeMeaning": "Inferior vena cava",
+            "CodingSchemeDesignator": "SCT",
+            "cid": "3010,6117,7154",
+            "UMLSConceptUID": "C0042458",
+            "CodeValue": "64131007",
+            "contextGroupName": "CardiovascularAnatomicLocations,VascularAnatomy,AbdominalSegmentationTypes",
+            "SNOMEDCTConceptID": "64131007",
+            "paired": "U",
+            "recommendedDisplayRGBValue": [0, 0, 255]
+          }
+        ]
       }
     ]
   }
