@@ -197,6 +197,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.ui.statusLabel.plainText = ''
     ValveBatchExportRule.setPhasesToExport(self.getCheckedPhases())
     ValveBatchExportRule.setValveTypesToExport(self.getCheckedValveTypes())
+    ValveBatchExportRule.setCreateIntermediateValves(self.ui.createHeartValvesCheckBox.checked)
     self.logic.clearRules()
     for registeredPlugin in self.registeredExportPlugins:
       if registeredPlugin.activated:
@@ -307,6 +308,8 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       args.extend(rule.OTHER_FLAGS)
     args.extend(["-ph", *ValveBatchExportRule.EXPORT_PHASES])
     args.extend(["-vt", *ValveBatchExportRule.EXPORT_VALVE_TYPES])
+    if ValveBatchExportRule.CREATE_INTERMEDIATE_VALVES:
+      args.append("-civ")
     return args
 
   def resetExport(self):
@@ -561,6 +564,7 @@ def main(argv):
                       help="cardiac phases which will be exported")
   parser.add_argument("-vt", "--valve_types", type=str, nargs="+", required=True,
                       help="valve types which will be exported")
+  parser.add_argument("-civ", "--create_intermediate_valves", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG, "--export_annulus_coordinates", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_1, "--annulus_curve_point_coordinates", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_2, "--annulus_control_point_coordinates", action='store_true')
@@ -597,6 +601,7 @@ def main(argv):
 
   ValveBatchExportRule.EXPORT_PHASES = args.phases
   ValveBatchExportRule.EXPORT_VALVE_TYPES = args.valve_types
+  ValveBatchExportRule.CREATE_INTERMEDIATE_VALVES = args.create_intermediate_valves
 
   if args.export_quantification_results:
     logic.addRule(QuantificationResultsExportRule)

@@ -52,14 +52,15 @@ class ValveVolumeFrameExportRule(ValveBatchExportRule):
         # valve volume is not part of a sequence
         storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nrrd"))
         nodeToWrite = volumeNode
+        if not storageNode.WriteData(nodeToWrite):
+          self.addLog(f"  Valve volume export skipped (file writing failed) - {valveModelName}")
+        slicer.mrmlScene.RemoveNode(storageNode)
       else:  # save specific frame of the current valve model
+        ext = ".nrrd" # ".nii.gz"
         frameNumber = self.getAssociatedFrameNumber(valveModel)
         self.setSequenceFrameNumber(valveModel, frameNumber)
         valveModelName = \
           self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, suffix="volume")
-        storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nrrd"))
-        nodeToWrite = valveModel.getValveVolumeNode()
+        storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}{ext}"))
+        slicer.util.saveNode(valveModel.getValveVolumeNode(), os.path.join(self.outputDir, f"{valveModelName}{ext}"))
 
-      if not storageNode.WriteData(nodeToWrite):
-        self.addLog(f"  Valve volume export skipped (file writing failed) - {valveModelName}")
-      slicer.mrmlScene.RemoveNode(storageNode)

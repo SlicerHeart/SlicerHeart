@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import qt
-import vtk
 
 import HeartValveLib.Constants
 import slicer
@@ -54,54 +53,68 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
       valveType = valveModel.heartValveNode.GetAttribute('ValveType')
       cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
       valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
+      segNode = valveModel.getLeafletSegmentationNode()
 
-      if leafletSegmentationNode is None:
+      if segNode is None:
         self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
         continue
+
+      segmentation = segNode.GetSegmentation()
+      deletedSegments = deleteNonLeafletSegments(segNode)
+
+      for segId, segName in deletedSegments:
+        self.addLog(f"Found segment with id {segId} and name {segName}. Deleted segment for export")
+
       segmentationBounds = [0, -1, 0, -1, 0, -1]
-      leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
+      segmentation.GetBounds(segmentationBounds)
       if segmentationBounds[0] > segmentationBounds[1] or \
         segmentationBounds[2] > segmentationBounds[3] or \
         segmentationBounds[4] > segmentationBounds[5]:
         self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
         continue
 
-      if deleteValveMask(leafletSegmentationNode) is True:
-        self.addLog(
-          f"Found segment with id {HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID}. Deleted segment for export")
+      if segmentation.GetNumberOfSegments() != len(LEAFLET_ORDER[valveModel.getValveType().lower()]):
+        self.addLog(f"  Missing leaflets - {valveModelName}: Found segment names: {getAllSegmentNames(segNode)}")
+        continue
+
+      ext = ".nrrd" # ".nii.gz"
+
+      showAllSegments(segNode)
 
       if self.ONE_FILE_PER_SEGMENT:
-        self._saveSegmentsIntoSeparateFiles(leafletSegmentationNode, valveModelName)
+        self._saveSegmentsIntoSeparateFiles(valveModel, valveModelName, ext)
       else:
-        if leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 1:
-          self.addLog("Sorting individual leaflets")
-          m = checkAndSortSegments(leafletSegmentationNode, valveModel.getValveType()) # sort segments
-          if m:
-            self.addLog(m)
-          outputFileName = f"{valveModelName}_leaflets.seg.nrrd"
-        else:
-          self.addLog("Only single segmentation found")
-          outputFileName = f"{valveModelName}_whole_valve.seg.nrrd"
+        self.addLog("Sorting individual leaflets")
+        m = checkAndSortSegments(segNode, valveModel.getValveType())
+        if m:
+          self.addLog(m)  # sort segments
 
-        storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationStorageNode")
-        storageNode.SetFileName(os.path.join(self.outputDir, outputFileName))
+        self._saveSegmentsIntoOneFile(valveModel, valveModelName, ext)
 
-        if not storageNode.WriteData(leafletSegmentationNode):
-          self.addLog(f"  Leaflet segmentation export skipped (file writing failed) - {valveModelName}")
-        slicer.mrmlScene.RemoveNode(storageNode)
+  def _saveSegmentsIntoOneFile(self, valveModel, prefix, ext):
+    segmentationNode = valveModel.getLeafletSegmentationNode()
+    showOnlySegmentsWithKeywordInNameOrID(segmentationNode)
+    labelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+    slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode,
+                                                                             valveModel.getLeafletVolumeNode())
+    outputFileName = f"{prefix}_leaflets.seg{ext}"
+    slicer.util.saveNode(labelNode, os.path.join(self.outputDir, outputFileName))
+    slicer.mrmlScene.RemoveNode(labelNode)
 
-  def _saveSegmentsIntoSeparateFiles(self, segmentationNode, prefix):
+  def _saveSegmentsIntoSeparateFiles(self, valveModel, prefix, fileExtension):
+    segmentationNode = valveModel.getLeafletSegmentationNode()
     segmentationsLogic = slicer.modules.segmentations.logic()
 
     from HeartValveLib.util import getAllSegmentIDs
+    labelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
     for segmentID in getAllSegmentIDs(segmentationNode):
-      labelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
       showOnlySegmentWithSegmentID(segmentationNode, segmentID)
-      segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode)
+      segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode,
+                                                             valveModel.getLeafletVolumeNode())
       segmentName = segmentationNode.GetSegmentation().GetSegment(segmentID).GetName()
-      filename = f"{prefix}_{segmentName.replace(' ', '_')}.nii.gz"
+      filename = f"{prefix}_{segmentName.replace(' ', '_')}{fileExtension}"
       slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename))
+    slicer.mrmlScene.RemoveNode(labelNode)
 
 
 def getAllSegmentNames(segmentationNode):
@@ -117,6 +130,20 @@ def getAllSegments(segmentationNode):
 def showOnlySegmentWithSegmentID(segmentationNode, segmentID):
   hideAllSegments(segmentationNode)
   segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, True)
+  
+  
+def showOnlySegmentsWithKeywordInNameOrID(segmentationNode, keyword="leaflet"):
+  from HeartValveLib.util import getAllSegmentIDs
+  for segment, segmentID in zip(getAllSegments(segmentationNode), getAllSegmentIDs(segmentationNode)):
+    segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID,
+                                                           isKeywordInSegmentNameOrID(segmentationNode, segmentID,
+                                                                                      keyword))
+
+
+def showAllSegments(segmentationNode):
+  from HeartValveLib.util import getAllSegmentIDs
+  for segmentID in getAllSegmentIDs(segmentationNode):
+    segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, True)
 
 
 def hideAllSegments(segmentationNode):
@@ -125,13 +152,25 @@ def hideAllSegments(segmentationNode):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, False)
 
 
-def deleteValveMask(segmentationNode):
+def deleteNonLeafletSegments(segmentationNode, keyword="leaflet"):
   segmentation = segmentationNode.GetSegmentation()
-  valveMaskSegment = segmentationNode.GetSegmentation().GetSegment(HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID)
-  if valveMaskSegment:
-    segmentation.RemoveSegment(valveMaskSegment)
-    return True
-  return False
+  deletedSegments = []
+  from HeartValveLib.util import getAllSegmentIDs
+  for segmentID in getAllSegmentIDs(segmentationNode):
+    segment = segmentation.GetSegment(segmentID)
+    if isKeywordInSegmentNameOrID(segmentationNode, segmentID, keyword):
+      continue
+    deletedSegments.append([segmentID, segment.GetName()])
+    segmentation.RemoveSegment(segment)
+  return deletedSegments
+
+
+def isKeywordInSegmentNameOrID(segmentationNode, segmentID, keyword):
+  segmentation = segmentationNode.GetSegmentation()
+  segment = segmentation.GetSegment(segmentID)
+  segmentName = segment.GetName()
+  return any(keyword.lower() in n for n in [segmentID.lower(), segmentName.lower()])
+
 
 
 def getLeafletOrderDefinition(valveType):

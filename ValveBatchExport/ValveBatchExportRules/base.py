@@ -66,6 +66,7 @@ class ValveBatchExportRule(object):
 
   EXPORT_PHASES = []        # empty means all phases will be exported
   EXPORT_VALVE_TYPES = []   # empty means all valve types will be exported
+  CREATE_INTERMEDIATE_VALVES = False
   OUTPUT_CSV_FILES = []
 
   CMD_FLAG = None  # Necessary when running export via python script
@@ -110,6 +111,11 @@ class ValveBatchExportRule(object):
   def setValveTypesToExport(cls, valveTypes):
     logging.debug("Valve types to export set to: %s" % valveTypes)
     cls.EXPORT_VALVE_TYPES = valveTypes
+
+  @classmethod
+  def setCreateIntermediateValves(cls, enabled):
+    logging.debug(f"Set creation of intermediate heart valves to {enabled}")
+    cls.CREATE_INTERMEDIATE_VALVES = enabled
 
   @staticmethod
   def getTableNode(measurementNode, identifier):
@@ -181,13 +187,34 @@ class ValveBatchExportRule(object):
     raise NotImplementedError("Method needs to be implemented if class member `USER_INTERFACE` set to True")
 
   def getHeartValveModelNodes(self):
-    valveModels = getSpecificHeartValveModelNodes(self.EXPORT_PHASES) if self.EXPORT_PHASES else getAllHeartValveModelNodes()
-    if self.EXPORT_VALVE_TYPES:
-      return list(filter(lambda vm: vm.getValveType() in self.EXPORT_VALVE_TYPES, valveModels))
-    else:
-      return valveModels
+    allValveModels = getAllHeartValveModelNodes()
+    valveModels = getSpecificHeartValveModelNodes(self.EXPORT_PHASES) if self.EXPORT_PHASES else allValveModels
 
-  def addLog(self, text):
+    # # remove valve models that don't have a sequence frame assigned
+    # for idx in reversed(range(len(valveModels))):
+    #   vm = valveModels[idx]
+    #   if not vm.getValveVolumeSequenceIndex() > -1:
+    #     logging.warning(f"No sequence frame assigned for valve {vm.heartValveNode.GetName()}. Removing from export.")
+    #     valveModels.pop(idx)
+
+    if self.EXPORT_VALVE_TYPES:
+      valveModels = list(filter(lambda vm: vm.getValveType() in self.EXPORT_VALVE_TYPES, valveModels))
+
+    if self.CREATE_INTERMEDIATE_VALVES:
+      newValves = []
+      for valveType in set([vm.getValveType() for vm in valveModels]):
+        matchingValves = list(filter(lambda vm: vm.getValveType() == valveType, valveModels))
+        frameIndices = sorted([vm.getValveVolumeSequenceIndex() for vm in matchingValves])
+        for frameIdx in range(min(frameIndices), max(frameIndices)):
+          if not frameIdx in frameIndices:
+            newValves.append(createNewHeartValveNode(matchingValves[0], frameIdx))
+      valveModels.extend(newValves)
+
+    return valveModels
+
+  def addLog(self, text=None):
+    if text is None:
+      return
     logging.info(text)
     if self.logCallback:
       self.logCallback(text)
@@ -257,3 +284,26 @@ def createLabelNodeFromVisibleSegments(segmentationNode, valveModel, labelNodeNa
   segmentationsLogic = slicer.modules.segmentations.logic()
   segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode, valveModel.getValveVolumeNode())
   return labelNode
+
+
+def createNewHeartValveNode(referenceNode, sequenceIndex, phaseName="custom1"):
+  import slicer
+  import logging
+  import HeartValveLib
+  logging.info(f"creating new heart valve for frame {sequenceIndex + 1}")
+  newNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
+  newNode.SetAttribute("ModuleName", "HeartValve")
+  slicer.modules.valveannulusanalysis.widgetRepresentation()
+  valveAnnulusAnalysis = slicer.modules.ValveAnnulusAnalysisWidget
+  valveAnnulusAnalysis.onHeartValveSelect(newNode)
+  valveModel = HeartValveLib.HeartValves.getValveModel(newNode)
+  valveModel.setValveType(referenceNode.getValveType())
+  valveModel.setValveVolumeSequenceIndex(sequenceIndex)
+  valveModel.setCardiacCyclePhase(phaseName)
+  valveModel.setProbePosition(referenceNode.getProbePosition())
+  valveAnnulusAnalysis.axialSliceToRasTransformNode.SetMatrixTransformToParent(
+    valveModel.getDefaultAxialSliceToRasTransformMatrix()
+  )
+  valveAnnulusAnalysis.onHeartValveSelect(newNode)
+  slicer.app.processEvents()
+  return valveModel
