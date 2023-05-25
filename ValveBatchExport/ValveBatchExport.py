@@ -90,6 +90,25 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     if not exportPluginClass in cls.registeredExportPlugins:
       cls.registeredExportPlugins.append(exportPluginClass)
 
+  def onReload(self):
+    logging.debug("Reloading ValveBatchExport")
+    self.ui.roiCollapsibleButton.collapsed = True
+
+    packageName='ValveBatchExportRules'
+    submoduleNames = ['base', 'AnnulusContourCoordinates', 'AnnulusContourModel', 'LeafletSegmentation',
+                      'PapillaryAnalysisResults', 'QuantificationResults', 'ValveLandmarkCoordinates',
+                      'ValveLandmarkLabels', 'ValveLandmarks', 'ValveVolume', 'VolumeFrame']
+    import imp
+    f, filename, description = imp.find_module(packageName)
+    package = imp.load_module(packageName, f, filename, description)
+    for submoduleName in submoduleNames:
+      f, filename, description = imp.find_module(submoduleName, package.__path__)
+      try:
+          imp.load_module(packageName+'.'+submoduleName, f, filename, description)
+      finally:
+          f.close()
+    ScriptedLoadableModuleWidget.onReload(self)
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
@@ -574,7 +593,6 @@ def main(argv):
   parser.add_argument(ValveVolumeExportRule.CMD_FLAG, "--export_image_volume", action='store_true')
   parser.add_argument(ValveVolumeFrameExportRule.CMD_FLAG, "--export_valve_volume_frame", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG, "--export_leaflet_segmentation", action='store_true')
-  parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_1, "--individual_segmentation_files", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG, "--valve_landmark_labels", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG_QUADRANTS,
                       "--valve_landmark_label_quadrants", action='store_true')
@@ -620,8 +638,6 @@ def main(argv):
   if args.export_valve_volume_frame:
     logic.addRule(ValveVolumeFrameExportRule)
   if args.export_leaflet_segmentation:
-    if args.individual_segmentation_files:
-      LeafletSegmentationExportRule.ONE_FILE_PER_SEGMENT = True
     logic.addRule(LeafletSegmentationExportRule)
   if args.valve_annulus_contour:
     AnnulusContourModelExportRule.EXPORT_ANNULUS_AS_MODEL = args.valve_annulus_contour_model
