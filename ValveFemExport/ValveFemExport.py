@@ -706,7 +706,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     :param parameterNode:
     :param leafletRegionBoundaryNode:
-    :param chordsDensity: in chords per mm2, 0.17 is a good number
+    :param chordsDensity: in chords per cm2, 17 is a good number
     :return:
     """
     baseName = leafletRegionBoundaryNode.GetName()
@@ -746,15 +746,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     import random
     cellIds = random.choices(list(range(len(cellAreas))), weights=cellAreas, k=numberOfChords)
 
-    #leafletRegionMesh = leafletRegionModelNode.GetMesh()
     pointPositions = []
     for cellId in cellIds:
       cell = leafletRegionMesh.GetCell(cellId)
       # randomly choose one of the point of the triangle cell
       pointPositions.append(leafletRegionMesh.GetPoint(cell.GetPointIds().GetId(random.randint(0, cell.GetNumberOfPoints()-1))))
-
-    #chordEndPoints = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "C")
-    #slicer.util.updateMarkupsControlPointsFromArray(chordEndPoints, np.array(pointPositions))
 
     # Get papillary muscle tip position
     papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
@@ -1003,17 +999,17 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     os.remove(tempSurfaceFilePath)
 
     if trim_curve:
-        # Get trim points
-        eventTimes.append(('get trim points', time.time()))
-        timer=vtk.vtkTimerLog()
-        trimModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
-        trimModel.SetToolName("Curve cut")
-        trimModel.SetNodeReferenceID("CurveCut.InputModel", tessellatedModelNode.GetID())
-        trimModel.SetNodeReferenceID("CurveCut.InputCurve", boundaryCurveNode.GetID())
-        trimModel.SetNodeReferenceID("CurveCut.OutputInside", tessellatedModelNode.GetID())
-        trimModelTool = slicer.vtkSlicerDynamicModelerCurveCutTool()
-        trimModelTool.Run(trimModel)
-        slicer.mrmlScene.RemoveNode(trimModel)
+      # Get trim points
+      eventTimes.append(('get trim points', time.time()))
+      timer=vtk.vtkTimerLog()
+      trimModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
+      trimModel.SetToolName("Curve cut")
+      trimModel.SetNodeReferenceID("CurveCut.InputModel", tessellatedModelNode.GetID())
+      trimModel.SetNodeReferenceID("CurveCut.InputCurve", boundaryCurveNode.GetID())
+      trimModel.SetNodeReferenceID("CurveCut.OutputInside", tessellatedModelNode.GetID())
+      trimModelTool = slicer.vtkSlicerDynamicModelerCurveCutTool()
+      trimModelTool.Run(trimModel)
+      slicer.mrmlScene.RemoveNode(trimModel)
 
     mesh = tessellatedModelNode.GetPolyData()
 
