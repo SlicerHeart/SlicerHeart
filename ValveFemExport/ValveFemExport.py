@@ -1,10 +1,14 @@
 import os
-import unittest
 import logging
-import vtk, qt, ctk, slicer
+import math
+import qt
+import vtk
+import slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 import numpy as np
+
+import HeartValveLib
 
 #
 # ValveFemExport
@@ -125,10 +129,6 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     for curvePlaceWidget in curvePlaceWidgets:
       slicer.util.findChild(curvePlaceWidget, "MoreButton").hide()
-      #curvePlaceWidget.buttonsVisible = False
-      #curvePlaceWidget.colorButton().show()
-      #curvePlaceWidget.placeButton().show()
-      #curvePlaceWidget.deleteButton().show()
 
     # Connections
     self.ui.parameterNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setParameterNode)
@@ -265,16 +265,6 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       g = int(color[1] * 255)
       b = int(color[2] * 255)
       markupsSelector.setStyleSheet("QLineEdit {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
-      #markupsSelector.setStyleSheet("ctkCollapsibleGroupBox {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
-      #markupsSelector.setStyleSheet("qMRMLNodeComboBox {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
-
-    # # Update buttons states and tooltips
-    # if self._parameterNode.GetNodeReference("InputVolume") and self._parameterNode.GetNodeReference("OutputVolume"):
-    #   self.ui.applyButton.toolTip = "Compute output volume"
-    #   self.ui.applyButton.enabled = True
-    # else:
-    #   self.ui.applyButton.toolTip = "Select input and output volume nodes"
-    #   self.ui.applyButton.enabled = False
 
     leafletRegionsFolderId = self.logic.getSubjectHierarchyLeafletRegionsSubfolder(self._parameterNode)
     self.ui.leafletRegionBoundaryTreeView.setRootItem(leafletRegionsFolderId)
@@ -340,7 +330,6 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   def onHeartValveImport(self):
     heartValveNode = self._parameterNode.GetNodeReference("HeartValve")
-    import HeartValveLib
     valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
     wasModified = self._parameterNode.StartModify()
 
@@ -519,7 +508,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     Initialize parameter node with default settings.
     """
-
     if not parameterNode.GetParameter("LeafletSurfaceNurbsResolution"):
       parameterNode.SetParameter("LeafletSurfaceNurbsResolution", "20")
     if not parameterNode.GetParameter("LeafletSurfaceMeshResolution"):
@@ -802,11 +790,10 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # points on the unit disk
     surfaceTransformSourceCurvePoints = vtk.vtkPoints()
     surfaceTransformSourceCurvePoints.SetNumberOfPoints(numberOfCurveLandmarkPoints)
-    import math
     angleIncrement = 2.0 * math.pi / float(numberOfCurveLandmarkPoints)
     for pointIndex in range(numberOfCurveLandmarkPoints):
-        angle = float(pointIndex) * angleIncrement
-        surfaceTransformSourceCurvePoints.SetPoint(pointIndex, math.cos(angle), math.sin(angle), 0)
+      angle = float(pointIndex) * angleIncrement
+      surfaceTransformSourceCurvePoints.SetPoint(pointIndex, math.cos(angle), math.sin(angle), 0)
 
     # Compute TPS transform
     surfaceTransform = vtk.vtkThinPlateSplineTransform()
@@ -836,7 +823,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def createTransformToWorldXYPlane(surfaceModelNode, xDirection=None):
-    import HeartValveLib
     # Create transform node that transforms the surface model to the XY plane (in world coordinate system)
     medialSurfaceNodePoints = slicer.util.arrayFromModelPoints(surfaceModelNode)
     if surfaceModelNode.GetParentTransformNode():
@@ -885,7 +871,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     curveLengthMm = boundaryCurveNode.GetCurveLengthWorld()
     # subtract a little bit (0.1 = 10th of a sampling distance) to make sure we don't go over the curve length
     # because we could then get one less sample point
-    samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints-0.1)
+    samplingDistance = curveLengthMm / (numberOfCurveLandmarkPoints - 0.1)
     boundaryCurveNode.ResampleCurveWorld(samplingDistance)
     boundaryCurveNode.SetNumberOfPointsPerInterpolatingSegment(3)
     boundaryCurveNode.SetCurveTypeToCardinalSpline()  # make sure the curve is not constrained anymore
@@ -912,20 +898,17 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     boundaryCurveNode.HardenTransform()
 
     # Create points array that the NURBS will fit to by cutting the leaflet with XZ planes
-    import numpy as np
-    bounds=np.zeros(6)
+    bounds = np.zeros(6)
     medialSurfaceNode.GetBounds(bounds)
     # we will make the NURBS rectangular control point grid a bit bigger than the input surface
     # to avoid artifacts on the boundary
-    margin = (bounds[1]-bounds[0])*0.10
-
-    import math
+    margin = (bounds[1]-bounds[0]) * 0.10
 
     medialSurfaceLocalizer = vtk.vtkModifiedBSPTree()
     medialSurfaceLocalizer.SetDataSet(medialSurfaceNode.GetPolyData())
     medialSurfaceLocalizer.BuildLocator()
 
-    tri=vtk.vtkTriangleFilter()
+    tri = vtk.vtkTriangleFilter()
     tri.SetInputData(warpedRectangleModelNode.GetPolyData())
     tri.Update()
 
@@ -942,36 +925,35 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     intersectionPoints = vtk.vtkPoints()
     intersectionCellIds = vtk.vtkIdList()
     for vindex in range(size_v):
-        for uindex in range(size_u):
-            intersectingLineStart = [
-                bounds[0]-margin+(bounds[1]-bounds[0]+2*margin)*uindex/(size_u-1),
-                bounds[2]-margin+(bounds[3]-bounds[2]+2*margin)*vindex/(size_v-1),
-                bounds[5]+margin]
-            intersectingLineEnd = [
-                intersectingLineStart[0],
-                intersectingLineStart[1],
-                bounds[4]-margin]
+      for uindex in range(size_u):
+        intersectingLineStart = [
+          bounds[0]-margin+(bounds[1]-bounds[0]+2*margin)*uindex/(size_u-1),
+          bounds[2]-margin+(bounds[3]-bounds[2]+2*margin)*vindex/(size_v-1),
+          bounds[5]+margin]
+        intersectingLineEnd = [
+          intersectingLineStart[0],
+          intersectingLineStart[1],
+          bounds[4]-margin]
+        intersectionPoints.Reset()
+        medialSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
+        if intersectionPoints.GetNumberOfPoints() > 0:
+          closestPoint = intersectionPoints.GetPoint(0)
+        else:
+            # no intersection point, take it from the warped rectangular surface
             intersectionPoints.Reset()
-            medialSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
+            warpedSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
             if intersectionPoints.GetNumberOfPoints() > 0:
-                closestPoint = intersectionPoints.GetPoint(0)
+              closestPoint = intersectionPoints.GetPoint(0)
             else:
-                # no intersection point, take it from the warped rectangular surface
-                intersectionPoints.Reset()
-                warpedSurfaceLocalizer.IntersectWithLine(intersectingLineStart, intersectingLineEnd, 0.0, intersectionPoints, intersectionCellIds)
-                if intersectionPoints.GetNumberOfPoints() > 0:
-                    closestPoint = intersectionPoints.GetPoint(0)
-                else:
-                    #raise ValueError(f"No intersection found with warped surface at {uindex}, {vindex}. Increase rectangle margin or decrease nurbs margin.")
-                    closestPoint = np.array([0.0, 0.0, 0.0])
-                    cellObj = vtk.vtkGenericCell()
-                    cellId = vtk.mutable(0)
-                    subId = vtk.mutable(0)
-                    dist2 = vtk.mutable(0.0)
-                    targetLocation = [intersectingLineStart[0], intersectingLineStart[1], 0]
-                    warpedSurfaceClosestPointLocalizer.FindClosestPoint(targetLocation, closestPoint, cellObj, cellId, subId, dist2)
+              closestPoint = np.array([0.0, 0.0, 0.0])
+              cellObj = vtk.vtkGenericCell()
+              cellId = vtk.mutable(0)
+              subId = vtk.mutable(0)
+              dist2 = vtk.mutable(0.0)
+              targetLocation = [intersectingLineStart[0], intersectingLineStart[1], 0]
+              warpedSurfaceClosestPointLocalizer.FindClosestPoint(targetLocation, closestPoint, cellObj, cellId, subId, dist2)
 
-            points.append(closestPoint)
+        points.append(closestPoint)
 
     points = np.array(points)
 
@@ -1001,7 +983,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if trim_curve:
       # Get trim points
       eventTimes.append(('get trim points', time.time()))
-      timer=vtk.vtkTimerLog()
       trimModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
       trimModel.SetToolName("Curve cut")
       trimModel.SetNodeReferenceID("CurveCut.InputModel", tessellatedModelNode.GetID())
