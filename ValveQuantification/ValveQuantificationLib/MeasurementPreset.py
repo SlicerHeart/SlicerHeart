@@ -1753,7 +1753,9 @@ class MeasurementPreset(object):
 
       threshold = vtk.vtkThreshold()
       threshold.SetInputData(allLeafletSurfacePolyData)
-      threshold.ThresholdBetween(idx, idx)
+      threshold.SetLowerThreshold(idx)
+      threshold.SetUpperThreshold(idx)
+      threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
       threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS, arrayName)
       threshold.Update()
 

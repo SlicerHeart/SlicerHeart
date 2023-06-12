@@ -24,6 +24,20 @@ class MeasurementPresetLavv(MeasurementPreset):
 
     valveModel = inputValveModels["Lavv"]
 
-    # TODO: add measurements
+    # Annulus circumference
+    self.addMeasurement(self.getAnnulusCircumference(valveModel))
+
+    # Annulus point distances
+    self.addMeasurement(self.getDistanceBetweenPoints(valveModel, 'ALC', valveModel, 'SIC'))
+    self.addMeasurement(self.getDistanceBetweenPoints(valveModel, 'PMC', valveModel, 'SIC'))
+    self.addMeasurement(self.getDistanceBetweenPoints(valveModel, 'ALC', valveModel, 'PMC'))
+
+    planePosition, planeNormal = valveModel.getAnnulusContourPlane()
+
+    self.addAnnulusHeightMeasurements(valveModel, planePosition, planeNormal)
+
+    self.addSegmentedLeafletMeasurements(valveModel, planePosition, planeNormal)
+
+    self.addCoaptationMeasurements(valveModel)
 
     return self.metricsMessages

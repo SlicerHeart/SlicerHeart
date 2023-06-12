@@ -814,6 +814,7 @@ class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def getPointProjectedToAnnularPlane(valveModel, pointPosition):
+    import numpy as np
     annulusPlanePosition, annulusPlaneNormal = valveModel.getAnnulusContourPlane()
     point2D = np.zeros([3, 1])
     point2D[:, 0] = np.array(pointPosition)
