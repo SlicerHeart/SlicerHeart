@@ -266,7 +266,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       b = int(color[2] * 255)
       markupsSelector.setStyleSheet("QLineEdit {{ background: rgb({0}, {1}, {2}); }}".format(r, g, b))
 
-    leafletRegionsFolderId = self.logic.getSubjectHierarchyLeafletRegionsSubfolder(self._parameterNode)
+    leafletRegionsFolderId = self.logic.getSubjectHierarchyLeafletRegionBoundariesSubfolder(self._parameterNode)
     self.ui.leafletRegionBoundaryTreeView.setRootItem(leafletRegionsFolderId)
     self.ui.leafletRegionBoundaryTreeView.visible = bool(leafletRegionsFolderId)
 
@@ -397,18 +397,18 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     slicer.app.processEvents()
 
   def onAddLeafletRegionBoundary(self):
-    nodeName = slicer.mrmlScene.GetUniqueNameByString("region")
-    leafletRegionBoundaryNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsClosedCurveNode", nodeName)
+    nodeName = slicer.mrmlScene.GetUniqueNameByString("RegionBoundary")
+    leafletRegionBoundaryNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", nodeName)
     leafletRegionBoundaryNode.CreateDefaultDisplayNodes()
     displayNode = leafletRegionBoundaryNode.GetDisplayNode()
     displayNode.SetPointLabelsVisibility(False)
-    displayNode.SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
+    # displayNode.SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
     displayNode.SetGlyphTypeFromString("Sphere3D")
     displayNode.SetSelectedColor(1, 0.2, 0.7)
     displayNode.SetLineThickness(0.3)
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     newLeafletRegionBoundaryItem = shNode.GetItemByDataNode(leafletRegionBoundaryNode)
-    leafletRegionsFolderItem = self.logic.getSubjectHierarchyLeafletRegionsSubfolder(self._parameterNode, createIfNeeded=True)
+    leafletRegionsFolderItem = self.logic.getSubjectHierarchyLeafletRegionBoundariesSubfolder(self._parameterNode, createIfNeeded=True)
     shNode.SetItemParent(newLeafletRegionBoundaryItem, leafletRegionsFolderItem)
     self.ui.leafletRegionBoundaryTreeView.setCurrentItem(newLeafletRegionBoundaryItem)
     self.ui.leafletRegionBoundaryPlaceWidget.setPlaceModeEnabled(True)
@@ -559,15 +559,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     shNode.SetItemParent(folderItem, chordsFolderItemId)
     # Transform model polydata to world coordinate system
     if surfaceModel.GetParentTransformNode():
-        transformModelToWorld = vtk.vtkGeneralTransform()
-        slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(surfaceModel.GetParentTransformNode(), None, transformModelToWorld)
-        polyTransformToWorld = vtk.vtkTransformPolyDataFilter()
-        polyTransformToWorld.SetTransform(transformModelToWorld)
-        polyTransformToWorld.SetInputData(surfaceModel.GetPolyData())
-        polyTransformToWorld.Update()
-        surface_World = polyTransformToWorld.GetOutput()
+      transformModelToWorld = vtk.vtkGeneralTransform()
+      slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(surfaceModel.GetParentTransformNode(), None, transformModelToWorld)
+      polyTransformToWorld = vtk.vtkTransformPolyDataFilter()
+      polyTransformToWorld.SetTransform(transformModelToWorld)
+      polyTransformToWorld.SetInputData(surfaceModel.GetPolyData())
+      polyTransformToWorld.Update()
+      surface_World = polyTransformToWorld.GetOutput()
     else:
-        surface_World = surfaceModel.GetPolyData()
+      surface_World = surfaceModel.GetPolyData()
     pointLocator = vtk.vtkKdTreePointLocator()
     pointLocator.SetDataSet(surface_World)
     pointLocator.BuildLocator()
@@ -576,40 +576,40 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
 
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
-        endPoint_World = [0,0,0]
-        endPoints.GetNthControlPointPositionWorld(endPointIndex, endPoint_World)
-        # Snap to closest mesh point (FEM solver requires constraint to be assigned to a point, not anywhere on the surface)
-        closestMeshPointIndex = pointLocator.FindClosestPoint(endPoint_World)
-        endPoint_World = surface_World.GetPoint(closestMeshPointIndex)
-        # Find closest start point
-        closestStartPointDistance2 = 1e10
-        closestStartPoint_World = [0.0,0.0,0.0]
-        closestStartPointName = ""
-        for startPointIndex in range(startPoints.GetNumberOfControlPoints()):
-            startPoint_World = [0,0,0]
-            startPoints.GetNthControlPointPositionWorld(startPointIndex, startPoint_World)
-            currentDistance = vtk.vtkMath.Distance2BetweenPoints(startPoint_World, endPoint_World)
-            if currentDistance < closestStartPointDistance2:
-                closestStartPointDistance2 = currentDistance
-                closestStartPoint_World = startPoint_World
-                closestStartPointName = startPoints.GetNthControlPointLabel(startPointIndex)
-        # Create line
-        chordName = "{0}-{1}-{2:02d}".format(baseName,closestStartPointName,endPointIndex)
-        line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
-        line.SetLocked(True)
-        line.CreateDefaultDisplayNodes()
-        line.GetDisplayNode().SetSelectedColor(color)
-        line.GetDisplayNode().SetPropertiesLabelVisibility(False)
-        line.AddControlPointWorld(vtk.vtkVector3d(closestStartPoint_World), closestStartPointName)
-        line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
-        # Put under subject hierarchy folder
-        shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
-        # Add chord to the table
-        rowIndex = chordTableNode.AddEmptyRow()
-        chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
-        chordStartPositionArray.SetTuple3(rowIndex, closestStartPoint_World[0], closestStartPoint_World[1], closestStartPoint_World[2])
-        chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
-        chordNameArray.SetValue(rowIndex, chordName)
+      endPoint_World = [0,0,0]
+      endPoints.GetNthControlPointPositionWorld(endPointIndex, endPoint_World)
+      # Snap to closest mesh point (FEM solver requires constraint to be assigned to a point, not anywhere on the surface)
+      closestMeshPointIndex = pointLocator.FindClosestPoint(endPoint_World)
+      endPoint_World = surface_World.GetPoint(closestMeshPointIndex)
+      # Find closest start point
+      closestStartPointDistance2 = 1e10
+      closestStartPoint_World = [0.0,0.0,0.0]
+      closestStartPointName = ""
+      for startPointIndex in range(startPoints.GetNumberOfControlPoints()):
+        startPoint_World = [0,0,0]
+        startPoints.GetNthControlPointPositionWorld(startPointIndex, startPoint_World)
+        currentDistance = vtk.vtkMath.Distance2BetweenPoints(startPoint_World, endPoint_World)
+        if currentDistance < closestStartPointDistance2:
+          closestStartPointDistance2 = currentDistance
+          closestStartPoint_World = startPoint_World
+          closestStartPointName = startPoints.GetNthControlPointLabel(startPointIndex)
+      # Create line
+      chordName = "{0}-{1}-{2:02d}".format(baseName,closestStartPointName,endPointIndex)
+      line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
+      line.SetLocked(True)
+      line.CreateDefaultDisplayNodes()
+      line.GetDisplayNode().SetSelectedColor(color)
+      line.GetDisplayNode().SetPropertiesLabelVisibility(False)
+      line.AddControlPointWorld(vtk.vtkVector3d(closestStartPoint_World), closestStartPointName)
+      line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
+      # Put under subject hierarchy folder
+      shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
+      # Add chord to the table
+      rowIndex = chordTableNode.AddEmptyRow()
+      chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
+      chordStartPositionArray.SetTuple3(rowIndex, closestStartPoint_World[0], closestStartPoint_World[1], closestStartPoint_World[2])
+      chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
+      chordNameArray.SetValue(rowIndex, chordName)
 
   def removeSubjectHierarchyOutputFolder(self, parameterNode):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -624,13 +624,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
     return outputFolderItemId
 
-  def getSubjectHierarchyLeafletRegionsSubfolder(self, parameterNode, createIfNeeded=False):
+  def getSubjectHierarchyLeafletRegionBoundariesSubfolder(self, parameterNode, createIfNeeded=False):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     # Get/create output folder
     parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
-    leafletRegionsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflet regions")
+    leafletRegionsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflet region boundaries")
     if not leafletRegionsFolderItemId and createIfNeeded:
-      leafletRegionsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflet regions")
+      leafletRegionsFolderItemId = shNode.CreateFolderItem(parameterNodeItemId, "Leaflet region boundaries")
     return leafletRegionsFolderItemId
 
   def createSubjectHierarchyOutputSubfolder(self, parameterNode, subfolderName):
@@ -677,8 +677,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     slicer.app.pauseRender()
     try:
       # Divide by 100 because chordsDensity is in length unit (mm)
-      chordsDensity = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "17") / 100.0
-      leafletRegionsFolderItem = self.getSubjectHierarchyLeafletRegionsSubfolder(parameterNode)
+      chordsDensityMm3 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "17") / 100.0
+      leafletRegionsFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
       leafletRegionNodes = vtk.vtkCollection()
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
       shNode.GetDataNodesInBranch(leafletRegionsFolderItem, leafletRegionNodes, "vtkMRMLMarkupsClosedCurveNode")
@@ -686,7 +686,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         leafletRegionBoundaryNode = leafletRegionNodes.GetItemAsObject(regionIndex)
         if logCallback:
           logCallback(f"Creating chord bundles for {leafletRegionBoundaryNode.GetName()}...")
-        self.createChordBundleFromRegion(parameterNode, leafletRegionBoundaryNode, chordsDensity, chordsFolderItemId)
+        self.createChordBundleFromRegion(parameterNode, leafletRegionBoundaryNode, chordsDensityMm3, chordsFolderItemId)
     finally:
       slicer.app.resumeRender()
 
