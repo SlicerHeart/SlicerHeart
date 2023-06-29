@@ -782,8 +782,9 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       else:
         return index - leafletGridResolution[0] + increment
 
-    def controlPointIndex(u, v):
-      return v * leafletGridResolution[0] + u
+    def controlPointIndex(u, v, gridResolution=None):
+      gridResolution = gridResolution if gridResolution else leafletGridResolution
+      return v * gridResolution[0] + u
 
     # Create temporary grid surface markup containing only the defined region
     regionGridResolution = (subtractWrappingGridIndices(leftUGridIndex, rightUGridIndex) + 1, maxVGridIndex - minVGridIndex + 1)
@@ -809,20 +810,35 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     regionAreaMm2 = massProperties.GetSurfaceArea()
 
     # Get number of chords placed for region
-    numberOfChords = int(regionAreaMm2 * chordsPerMm2)
+    numberOfChords = int(regionAreaMm2 * chordsPerMm2 + 0.5)
 
-    # slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
-    # slicer.mrmlScene.RemoveNode(regionModelNode)
+    #
+    # Distribute points
+    #
 
-
-
-    # Create folder for the chords for the current region
+    # # Create folder for the chords for the current region
     # shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     # folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
     # shNode.SetItemParent(folderItem, chordsFolderItemId)
 
+    chordGridResolutionV = int((numberOfChords * regionGridResolution[1]) / regionGridResolution[0])
+    chordGridResolutionU = math.ceil(numberOfChords / chordGridResolutionV)
+    # fidsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode', f'{baseName} Fids')
 
+    regionGridStep = np.array([regionGridResolution[0] / chordGridResolutionU, regionGridResolution[1] / chordGridResolutionV])
+    regionGridStart = regionGridStep / 2
 
+    for v in range(chordGridResolutionV):
+      for u in range(chordGridResolutionU):
+        regionGridPos = np.round(regionGridStart + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
+        pos = np.zeros(3)
+        regionGridSurfaceNode.GetNthControlPointPosition(controlPointIndex(int(regionGridPos[0]), int(regionGridPos[1]), regionGridResolution), pos)
+        # fidIndex = fidsNode.AddControlPointWorld(pos)
+        # fidsNode.SetNthControlPointLabel(fidIndex, f'({int(regionGridPos[0])}, {int(regionGridPos[1])}): {controlPointIndex(int(regionGridPos[0]), int(regionGridPos[1]), regionGridResolution)}')
+
+    # Remove temporary nodes
+    slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
+    slicer.mrmlScene.RemoveNode(regionModelNode)
 
 
     return
