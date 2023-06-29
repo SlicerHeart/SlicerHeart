@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>369</width>
+    <width>386</width>
     <height>720</height>
    </rect>
   </property>
@@ -760,18 +760,18 @@
       <item row="4" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
-         <string>Leaflet surface model:</string>
+         <string>Leaflet NURBS surface:</string>
         </property>
        </widget>
       </item>
       <item row="4" column="1">
-       <widget class="qMRMLNodeComboBox" name="leafletSurfaceModelNodeSelector">
+       <widget class="qMRMLNodeComboBox" name="leafletNURBSSurfaceNodeSelector">
         <property name="toolTip">
          <string>Pick the output to the algorithm.</string>
         </property>
         <property name="nodeTypes">
          <stringlist>
-          <string>vtkMRMLModelNode</string>
+          <string>vtkMRMLMarkupsGridSurfaceNode</string>
          </stringlist>
         </property>
         <property name="showChildNodeTypes">
@@ -866,28 +866,6 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>ctkCollapsibleButton</class>
-   <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkCollapsibleGroupBox</class>
-   <extends>QGroupBox</extends>
-   <header>ctkCollapsibleGroupBox.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkPathLineEdit</class>
-   <extends>QWidget</extends>
-   <header>ctkPathLineEdit.h</header>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
-  </customwidget>
-  <customwidget>
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
@@ -913,6 +891,28 @@
    <class>qMRMLSubjectHierarchyTreeView</class>
    <extends>QTreeView</extends>
    <header>qMRMLSubjectHierarchyTreeView.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
@@ -1592,7 +1592,7 @@
   <connection>
    <sender>ValveFemExport</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>leafletSurfaceModelNodeSelector</receiver>
+   <receiver>leafletNURBSSurfaceNodeSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">

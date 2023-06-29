@@ -1,3 +1,4 @@
+import collections
 import os
 import logging
 import math
@@ -146,7 +147,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     for nodeSelector, nodeReferenceRole in self.nodeSelectors:
       nodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
-    self.ui.leafletSurfaceModelNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
+    self.ui.leafletNURBSSurfaceNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.ui.papillaryMuscleTipPointComboBox.connect('currentTextChanged(QString)', self.updateParameterNodeFromGUI)
 
     # Initial GUI update
@@ -273,9 +274,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
-      wasBlocked = self.ui.leafletSurfaceModelNodeSelector.blockSignals(True)
-      self.ui.leafletSurfaceModelNodeSelector.setCurrentNode(leafletRegionBoundaryNode.GetNodeReference("LeafletSurfaceModel"))
-      self.ui.leafletSurfaceModelNodeSelector.blockSignals(wasBlocked)
+      wasBlocked = self.ui.leafletNURBSSurfaceNodeSelector.blockSignals(True)
+      self.ui.leafletNURBSSurfaceNodeSelector.setCurrentNode(leafletRegionBoundaryNode.GetNodeReference("LeafletNURBSSurface"))
+      self.ui.leafletNURBSSurfaceNodeSelector.blockSignals(wasBlocked)
       wasBlocked = self.ui.papillaryMuscleTipPointComboBox.blockSignals(True)
       self.ui.papillaryMuscleTipPointComboBox.currentText = leafletRegionBoundaryNode.GetAttribute("PapillaryMuscleTipPoint")
       self.ui.papillaryMuscleTipPointComboBox.blockSignals(wasBlocked)
@@ -320,8 +321,8 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
-      leafletRegionBoundaryNode.SetNodeReferenceID("LeafletSurfaceModel", self.ui.leafletSurfaceModelNodeSelector.currentNodeID)
-      leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletSurfaceModelNodeSelector.currentNode())
+      leafletRegionBoundaryNode.SetNodeReferenceID("LeafletNURBSSurface", self.ui.leafletNURBSSurfaceNodeSelector.currentNodeID)
+      # leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletNURBSSurfaceNodeSelector.currentNode())
       leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
 
     slicer.util.updateNodeFromParameterEditWidgets(self.parameterEditWidgets, self._parameterNode)
@@ -676,27 +677,156 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       raise ValueError("Invalid papillary muscle tips node")
     slicer.app.pauseRender()
     try:
-      # Divide by 100 because chordsDensity is in length unit (mm)
-      chordsDensityMm3 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "17") / 100.0
-      leafletRegionsFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
+      leafletRegionBoundariesFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
       leafletRegionNodes = vtk.vtkCollection()
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      shNode.GetDataNodesInBranch(leafletRegionsFolderItem, leafletRegionNodes, "vtkMRMLMarkupsClosedCurveNode")
+      shNode.GetDataNodesInBranch(leafletRegionBoundariesFolderItem, leafletRegionNodes, "vtkMRMLMarkupsLineNode")
+
+      # Collect NURBS grid (u,v) coordinates for top line points
+      regionBoundaryInnerPointIndices = {}
+      minVGridIndex = -1
+      leafletNURBSSurfaceNode = None
       for regionIndex in range(leafletRegionNodes.GetNumberOfItems()):
         leafletRegionBoundaryNode = leafletRegionNodes.GetItemAsObject(regionIndex)
+        linePoint0Pos = np.zeros(3)
+        leafletRegionBoundaryNode.GetNthControlPointPosition(0, linePoint0Pos)
+        linePoint1Pos = np.zeros(3)
+        leafletRegionBoundaryNode.GetNthControlPointPosition(1, linePoint1Pos)
+
+        if leafletNURBSSurfaceNode and leafletNURBSSurfaceNode != leafletRegionBoundaryNode.GetNodeReference("LeafletNURBSSurface"):  # Sanity check
+          raise RuntimeError('More than one leaflet NURBS surface are used to define the leaflet regions')
+        leafletNURBSSurfaceNode = leafletRegionBoundaryNode.GetNodeReference("LeafletNURBSSurface")
+        nurbsGridResolution = leafletNURBSSurfaceNode.GetGridResolution()
+
+        minDist0Index = (np.Inf, -1)  # Tuple: (distanceMm, controlPointIndex)
+        minDist1Index = (np.Inf, -1)  # Tuple: (distanceMm, controlPointIndex)
+        currentControlPointPos = np.zeros(3)
+        for i in range(leafletNURBSSurfaceNode.GetNumberOfControlPoints()):
+          leafletNURBSSurfaceNode.GetNthControlPointPosition(i, currentControlPointPos)
+          dist = np.linalg.norm(currentControlPointPos - linePoint0Pos)
+          if minDist0Index[0] > dist:
+            minDist0Index = (dist, i)
+          dist = np.linalg.norm(currentControlPointPos - linePoint1Pos)
+          if minDist1Index[0] > dist:
+            minDist1Index = (dist, i)
+
+        # Use the point that is not on the border
+        if minDist0Index[1] // nurbsGridResolution[0] == 0 or minDist0Index[1] // nurbsGridResolution[0] + 1 == nurbsGridResolution[1]:
+          regionBoundaryInnerPointIndices[leafletRegionBoundaryNode] = minDist1Index[1]
+          minVGridIndex = minDist0Index[1] // nurbsGridResolution[0]  # Remember border V index
+        else:
+          regionBoundaryInnerPointIndices[leafletRegionBoundaryNode] = minDist0Index[1]
+          minVGridIndex = minDist1Index[1] // nurbsGridResolution[0]  # Remember border V index
+
+      # Get maximum of v coordinates (use that for the parametric rectangles). Also order u coordinates in ascending order
+      maxVGridIndex = -1
+      linesOrderedByGridU = {}
+      for regionBoundaryLineNode, pointIndex in regionBoundaryInnerPointIndices.items():
+        leafletNurbsNode = regionBoundaryLineNode.GetNodeReference("LeafletNURBSSurface")
+        nurbsGridResolution = leafletNurbsNode.GetGridResolution()
+        pointGridIndex = (pointIndex % nurbsGridResolution[0], pointIndex // nurbsGridResolution[0])
+        if pointGridIndex[1] > maxVGridIndex:
+          maxVGridIndex = pointGridIndex[1]
+        linesOrderedByGridU[pointGridIndex[0]] = regionBoundaryLineNode
+
+      linesOrderedByGridU = collections.OrderedDict(sorted(linesOrderedByGridU.items()))
+
+      if minVGridIndex > maxVGridIndex:  # Swap min and max V if the border V grid index is not 0
+        (minVGridIndex, maxVGridIndex) = (maxVGridIndex, minVGridIndex)
+
+      # logging.error(f'ZZZ\n{linesOrderedByGridU}')
+      # logging.error(f'ZZZ Min, Max V: {maxVGridIndex}')
+
+      def nextIndex(idx):
+        return idx + 1 if idx < leafletRegionNodes.GetNumberOfItems() - 1 else 0
+
+      # Create and distribute points in each rectangle region
+      for regionIndex in range(leafletRegionNodes.GetNumberOfItems()):
+        leftUGridIndex = list(linesOrderedByGridU.keys())[regionIndex]
+        rightUGridIndex = list(linesOrderedByGridU.keys())[nextIndex(regionIndex)]
         if logCallback:
-          logCallback(f"Creating chord bundles for {leafletRegionBoundaryNode.GetName()}...")
-        self.createChordBundleFromRegion(parameterNode, leafletRegionBoundaryNode, chordsDensityMm3, chordsFolderItemId)
+          logCallback(f"Creating chord bundles for region {regionIndex + 1} / {leafletRegionNodes.GetNumberOfItems()}...")
+        self.createChordBundleFromRegion(parameterNode, leafletNURBSSurfaceNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+
     finally:
       slicer.app.resumeRender()
 
-  def createChordBundleFromRegion(self, parameterNode, leafletRegionBoundaryNode, chordsDensity, chordsFolderItemId):
+  def createChordBundleFromRegion(self, parameterNode, leafletNurbsSurfaceNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
     :param parameterNode:
-    :param leafletRegionBoundaryNode:
-    :param chordsDensity: in chords per cm2, 17 is a good number
+    :param leafletNURBSSurfaceNode: Leaflet NURBS surface node on which the chord and bundle endpoints are defined
+    :param leftUGridIndex: "Left" U grid index (defined on NURBS grid) for the region parametric rectangle
+    :param rightUGridIndex: "Right" U grid index (defined on NURBS grid) for the region parametric rectangle
+    :param minVGridIndex: Minimum V grid index (defined on NURBS grid) for the region parametric rectangle
+    :param maxVGridIndex: Maximum V grid index (defined on NURBS grid) for the region parametric rectangle
+    :param chordsFolderItemId:
     :return:
     """
+    # Get variables used for calculation
+    chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "6") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
+    baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} -> {rightUGridIndex})'
+    leafletGridResolution = leafletNurbsSurfaceNode.GetGridResolution()
+
+    logging.error(f'ZZZ createChordBundleFromRegion: baseName: "{baseName}", U: {leftUGridIndex}->{rightUGridIndex}, V: {minVGridIndex}->{maxVGridIndex}')
+
+    # Utility functions to manage wrapped around grid surface
+    def subtractWrappingGridIndices(leftIndex, rightIndex):
+      if leftIndex >= rightIndex:
+        return leftIndex - rightIndex
+      else:
+        return leafletGridResolution[0] - rightIndex + leftIndex
+
+    def incrementWrappingGridIndex(index, increment=1):
+      if index < leafletGridResolution[0] - increment:
+        return index + increment
+      else:
+        return index - leafletGridResolution[0] + increment
+
+    def controlPointIndex(u, v):
+      return v * leafletGridResolution[0] + u
+
+    # Create temporary grid surface markup containing only the defined region
+    regionGridResolution = (subtractWrappingGridIndices(leftUGridIndex, rightUGridIndex) + 1, maxVGridIndex - minVGridIndex + 1)
+    regionGridPoints = vtk.vtkPoints()
+    regionGridPoints.SetNumberOfPoints(regionGridResolution[0] * regionGridResolution[1])
+    currentPos = np.zeros(3)
+    for v in range(regionGridResolution[1]):
+      for u in range(regionGridResolution[0]):
+        leafletControlPointIndex = controlPointIndex(incrementWrappingGridIndex(leftUGridIndex, u), minVGridIndex + v)
+        leafletNurbsSurfaceNode.GetNthControlPointPosition(leafletControlPointIndex, currentPos)
+        regionGridPoints.SetPoint(v * regionGridResolution[0] + u, currentPos[0], currentPos[1], currentPos[2])
+
+    regionGridSurfaceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsGridSurfaceNode', f'{baseName} Temp')
+    regionGridSurfaceNode.SetGridResolution(regionGridResolution)
+    regionGridSurfaceNode.SetControlPointPositionsWorld(regionGridPoints)
+
+    # Calculate region area
+    regionModelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', f'{baseName} Temp Model')
+    regionGridSurfaceNode.SetOutputSurfaceModelNodeID(regionModelNode.GetID())
+    massProperties = vtk.vtkMassProperties()
+    massProperties.SetInputData(regionModelNode.GetPolyData())
+    massProperties.Update()
+    regionAreaMm2 = massProperties.GetSurfaceArea()
+
+    # Get number of chords placed for region
+    numberOfChords = int(regionAreaMm2 * chordsPerMm2)
+
+    # slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
+    # slicer.mrmlScene.RemoveNode(regionModelNode)
+
+
+
+    # Create folder for the chords for the current region
+    # shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    # folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
+    # shNode.SetItemParent(folderItem, chordsFolderItemId)
+
+
+
+
+
+    return
+
     baseName = leafletRegionBoundaryNode.GetName()
 
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
@@ -723,8 +853,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     leafletRegionMesh = meshQuality.GetOutput()
     leafletRegionModelNode.SetAndObserveMesh(leafletRegionMesh)
     cellAreas = slicer.util.arrayFromModelCellData(leafletRegionModelNode, 'Quality')
-    regionArea = sum(cellAreas)
-    numberOfChords = int(regionArea * chordsDensity)
+    regionAreaMm2 = sum(cellAreas)
+    numberOfChords = int(regionAreaMm2 * chordsDensity)
     logging.info(f"Number of chords for region {leafletRegionBoundaryNode.GetName()}: {numberOfChords}")
     if numberOfChords > 100:
       if not slicer.util.confirmYesNoDisplay(f"The number of chords for region {leafletRegionBoundaryNode.GetName()} is very high ({numberOfChords}). Are you sure that the model scale is correct?"):
