@@ -150,6 +150,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.leafletNURBSSurfaceNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.ui.papillaryMuscleTipPointComboBox.connect('currentTextChanged(QString)', self.updateParameterNodeFromGUI)
 
+    #TODO: Temporarily hide muscle tip combobox and label
+    self.ui.label_4.visible = False
+    self.ui.papillaryMuscleTipPointComboBox.visible = False
+
     # Initial GUI update
     self.updateGUIFromParameterNode()
 
@@ -321,6 +325,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
+      #TODO: Do not set these references (the leaflet is the same for each region, the papillary muscle is found automatically)
       leafletRegionBoundaryNode.SetNodeReferenceID("LeafletNURBSSurface", self.ui.leafletNURBSSurfaceNodeSelector.currentNodeID)
       # leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletNURBSSurfaceNodeSelector.currentNode())
       leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
@@ -812,90 +817,50 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Get number of chords placed for region
     numberOfChords = int(regionAreaMm2 * chordsPerMm2 + 0.5)
 
-    #
     # Distribute points
-    #
-
-    # # Create folder for the chords for the current region
-    # shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    # folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
-    # shNode.SetItemParent(folderItem, chordsFolderItemId)
-
     chordGridResolutionV = int((numberOfChords * regionGridResolution[1]) / regionGridResolution[0])
     chordGridResolutionU = math.ceil(numberOfChords / chordGridResolutionV)
-    # fidsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode', f'{baseName} Fids')
 
     regionGridStep = np.array([regionGridResolution[0] / chordGridResolutionU, regionGridResolution[1] / chordGridResolutionV])
     regionGridStart = regionGridStep / 2
 
+    pointPositions = []
+    meanRegionPoint = np.zeros(3)
     for v in range(chordGridResolutionV):
       for u in range(chordGridResolutionU):
         regionGridPos = np.round(regionGridStart + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
         pos = np.zeros(3)
         regionGridSurfaceNode.GetNthControlPointPosition(controlPointIndex(int(regionGridPos[0]), int(regionGridPos[1]), regionGridResolution), pos)
-        # fidIndex = fidsNode.AddControlPointWorld(pos)
-        # fidsNode.SetNthControlPointLabel(fidIndex, f'({int(regionGridPos[0])}, {int(regionGridPos[1])}): {controlPointIndex(int(regionGridPos[0]), int(regionGridPos[1]), regionGridResolution)}')
+        pointPositions.append(pos)
+        meanRegionPoint += pos
 
     # Remove temporary nodes
     slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
     slicer.mrmlScene.RemoveNode(regionModelNode)
 
-
-    return
-
-    baseName = leafletRegionBoundaryNode.GetName()
-
+    # Create folder for the chords for the current region
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
     shNode.SetItemParent(folderItem, chordsFolderItemId)
 
-    # Get leaflet region
-    leafletModelNode = leafletRegionBoundaryNode.GetNodeReference("LeafletSurfaceModel")
-    if not leafletModelNode:
-      raise ValueError("Invalid leaflet surface model")
-    curveCut = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLDynamicModelerNode")
-    curveCut.SetToolName("Curve cut")
-    curveCut.SetNodeReferenceID("CurveCut.InputCurve", leafletRegionBoundaryNode.GetID())
-    curveCut.SetNodeReferenceID("CurveCut.InputModel", leafletModelNode.GetID())
-    leafletRegionModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")  # this node will store the hollow model
-    curveCut.SetNodeReferenceID("CurveCut.OutputInside", leafletRegionModelNode.GetID())
-    slicer.modules.dynamicmodeler.logic().RunDynamicModelerTool(curveCut)
-
-    # Get area of each cell of the leaflet region to weigh the cell sampling with it
-    meshQuality = vtk.vtkMeshQuality()
-    meshQuality.SetInputData(leafletRegionModelNode.GetPolyData())
-    meshQuality.SetTriangleQualityMeasureToArea()
-    meshQuality.Update()
-    leafletRegionMesh = meshQuality.GetOutput()
-    leafletRegionModelNode.SetAndObserveMesh(leafletRegionMesh)
-    cellAreas = slicer.util.arrayFromModelCellData(leafletRegionModelNode, 'Quality')
-    regionAreaMm2 = sum(cellAreas)
-    numberOfChords = int(regionAreaMm2 * chordsDensity)
-    logging.info(f"Number of chords for region {leafletRegionBoundaryNode.GetName()}: {numberOfChords}")
-    if numberOfChords > 100:
-      if not slicer.util.confirmYesNoDisplay(f"The number of chords for region {leafletRegionBoundaryNode.GetName()} is very high ({numberOfChords}). Are you sure that the model scale is correct?"):
-        return
-
-    # Randomly sample cell, with using the area as weighing factor
-    import random
-    cellIds = random.choices(list(range(len(cellAreas))), weights=cellAreas, k=numberOfChords)
-
-    pointPositions = []
-    for cellId in cellIds:
-      cell = leafletRegionMesh.GetCell(cellId)
-      # randomly choose one of the point of the triangle cell
-      pointPositions.append(leafletRegionMesh.GetPoint(cell.GetPointIds().GetId(random.randint(0, cell.GetNumberOfPoints()-1))))
-
-    # Get papillary muscle tip position
+    # Automatically find closest papillary muscle tip point for region
     papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
-    papillaryMuscleTipsPointLabel = leafletRegionBoundaryNode.GetAttribute("PapillaryMuscleTipPoint")
-    papillaryMuscleTipPosition = np.zeros(3)
-    for i in range(papillaryMuscleTipsNode.GetNumberOfControlPoints()):
-      if papillaryMuscleTipsNode.GetNthControlPointLabel(i) == papillaryMuscleTipsPointLabel:
-        # found the muscle tip point in the list
-        papillaryMuscleTipsNode.GetNthControlPointPositionWorld(i, papillaryMuscleTipPosition)
+    if not papillaryMuscleTipsNode:
+      raise RuntimeError('Failed to find papillary muscle tips node')
 
-    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
+    meanRegionPoint /= chordGridResolutionU * chordGridResolutionV
+    minDistanceToMeanPoint = (np.inf, -1)
+    for i in range(papillaryMuscleTipsNode.GetNumberOfControlPoints()):
+      pos = np.zeros(3)
+      papillaryMuscleTipsNode.GetNthControlPointPosition(i, pos)
+      if np.linalg.norm(pos - meanRegionPoint) < minDistanceToMeanPoint[0]:
+        minDistanceToMeanPoint = (np.linalg.norm(pos - meanRegionPoint), i)
+
+    closestPapillatyMuscleTipPos = np.zeros(3)
+    papillaryMuscleTipsNode.GetNthControlPointPosition(minDistanceToMeanPoint[1], closestPapillatyMuscleTipPos)
+
+    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = \
+      self.createChordTable(baseName, chordsFolderItemId)
 
     for endPointIndex, endPoint_World in enumerate(pointPositions):
       # Create line
@@ -903,26 +868,23 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
       #line.SetLocked(True)  # it is left unlocked to allow the user to rearrange the points to achieve more uniform sampling
       line.CreateDefaultDisplayNodes()
-      line.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
+      # line.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
       line.GetDisplayNode().SetPropertiesLabelVisibility(False)
       line.GetDisplayNode().SetPointLabelsVisibility(False)
       line.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
       line.GetDisplayNode().UseGlyphScaleOff()
       line.GetDisplayNode().SetGlyphSize(0.5)
       line.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
-      line.AddControlPointWorld(vtk.vtkVector3d(papillaryMuscleTipPosition), papillaryMuscleTipsPointLabel)
+      line.AddControlPointWorld(vtk.vtkVector3d(closestPapillatyMuscleTipPos), papillaryMuscleTipsNode.GetNthControlPointLabel(minDistanceToMeanPoint[1]))
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
       # Put under subject hierarchy folder
       shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
       # Add chord to the table
       rowIndex = chordTableNode.AddEmptyRow()
       chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
-      chordStartPositionArray.SetTuple3(rowIndex, papillaryMuscleTipPosition[0], papillaryMuscleTipPosition[1], papillaryMuscleTipPosition[2])
+      chordStartPositionArray.SetTuple3(rowIndex, closestPapillatyMuscleTipPos[0], closestPapillatyMuscleTipPos[1], closestPapillatyMuscleTipPos[2])
       chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
       chordNameArray.SetValue(rowIndex, chordName)
-
-    slicer.mrmlScene.RemoveNode(curveCut)
-    slicer.mrmlScene.RemoveNode(leafletRegionModelNode)
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
