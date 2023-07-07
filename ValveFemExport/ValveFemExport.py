@@ -739,9 +739,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       if minVGridIndex > maxVGridIndex:  # Swap min and max V if the border V grid index is not 0
         (minVGridIndex, maxVGridIndex) = (maxVGridIndex, minVGridIndex)
 
-      # logging.error(f'ZZZ\n{linesOrderedByGridU}')
-      # logging.error(f'ZZZ Min, Max V: {maxVGridIndex}')
-
       def nextIndex(idx):
         return idx + 1 if idx < leafletRegionNodes.GetNumberOfItems() - 1 else 0
 
@@ -769,10 +766,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     # Get variables used for calculation
     chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "6") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
-    baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} -> {rightUGridIndex})'
+    baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
     leafletGridResolution = leafletNurbsSurfaceNode.GetGridResolution()
-
-    logging.error(f'ZZZ createChordBundleFromRegion: baseName: "{baseName}", U: {leftUGridIndex}->{rightUGridIndex}, V: {minVGridIndex}->{maxVGridIndex}')
 
     # Utility functions to manage wrapped around grid surface
     def subtractWrappingGridIndices(leftIndex, rightIndex):
@@ -862,19 +857,23 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = \
       self.createChordTable(baseName, chordsFolderItemId)
 
+    # Get leaflet surface normals
+    leafletModelNode = leafletNurbsSurfaceNode.GetOutputSurfaceModelNode()
+    normalsFilter = vtk.vtkPolyDataNormals()
+    normalsFilter.SetInputConnection(leafletModelNode.GetPolyDataConnection())
+    normalsFilter.Update()
+    normalsArray = slicer.util.arrayFromModelPointData(leafletModelNode, 'Normals')
+
+    # Build locator for leaflet
+    chordEndPointLocator = vtk.vtkPointLocator()
+    chordEndPointLocator.SetDataSet(leafletModelNode.GetPolyData())
+
+    # Create all chords and chord branches
     for endPointIndex, endPoint_World in enumerate(pointPositions):
       # Create line
       chordName = f'{baseName}-{endPointIndex:02d}'
       line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
-      #line.SetLocked(True)  # it is left unlocked to allow the user to rearrange the points to achieve more uniform sampling
-      line.CreateDefaultDisplayNodes()
-      # line.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
-      line.GetDisplayNode().SetPropertiesLabelVisibility(False)
-      line.GetDisplayNode().SetPointLabelsVisibility(False)
-      line.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
-      line.GetDisplayNode().UseGlyphScaleOff()
-      line.GetDisplayNode().SetGlyphSize(0.5)
-      line.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
+      self.setupChordLine(line)
       line.AddControlPointWorld(vtk.vtkVector3d(closestPapillatyMuscleTipPos), papillaryMuscleTipsNode.GetNthControlPointLabel(minDistanceToMeanPoint[1]))
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
       # Put under subject hierarchy folder
@@ -885,6 +884,109 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       chordStartPositionArray.SetTuple3(rowIndex, closestPapillatyMuscleTipPos[0], closestPapillatyMuscleTipPos[1], closestPapillatyMuscleTipPos[2])
       chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
       chordNameArray.SetValue(rowIndex, chordName)
+
+      # Create chord branching
+      self.createChordBranching(line, leafletNurbsSurfaceNode, folderItem, normalsArray, chordEndPointLocator)
+
+  def setupChordLine(self, chordLineNode):
+    chordLineNode.SetLocked(True)  # it was left unlocked to allow the user to rearrange the points to achieve more uniform sampling, but with branching it is too complicated for manual modifications
+    chordLineNode.CreateDefaultDisplayNodes()
+    # chordLineNode.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
+    chordLineNode.GetDisplayNode().SetPropertiesLabelVisibility(False)
+    chordLineNode.GetDisplayNode().SetPointLabelsVisibility(False)
+    chordLineNode.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
+    chordLineNode.GetDisplayNode().UseGlyphScaleOff()
+    chordLineNode.GetDisplayNode().SetGlyphSize(0.5)
+    # chordLineNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
+
+  def createChordBranching(self, chordLineNode, leafletNurbsNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
+    """
+    Create branching at the valve end of a chord represented by given markups line node.
+
+      P : papillary muscle endpoint
+      |
+     ...
+      |
+      │ chord line coming from papillary muscle tip
+      │
+      C : branching point
+      │\
+      │ \
+      │  \
+      │   \
+      │    \
+      │     \
+      │  r   \
+      A───────B : radial branch endpoint
+       : central branch endpoint
+
+    """
+    if not chordLineNode or chordLineNode.GetNumberOfControlPoints() != 2:
+      raise ValueError("Invalid chord line node")
+    if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid papillary muscle tips node")
+    if not regionFolderItem:
+      raise ValueError("Invalid region folder item ID")
+
+    #TODO: To parameter node (also to UI?)
+    branchingLengthPercent = 20
+    numberOfRadialBranches = 4
+    branchingRadiusMm = 1
+
+    # Get branching point on chord line
+    pointP = np.zeros(3)
+    chordLineNode.GetNthControlPointPositionWorld(0, pointP)
+    pointA = np.zeros(3)
+    chordLineNode.GetNthControlPointPositionWorld(1, pointA)
+    vectorPA = pointA - pointP
+    pointC = pointP + vectorPA * (1 - branchingLengthPercent / 100.0)
+    chordLineNode.SetNthControlPointPositionWorld(1, pointC)
+
+    # Create folder for chord branch
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    branchesFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), f'{chordLineNode.GetName()} - branches')
+    shNode.SetItemParent(branchesFolderItem, regionFolderItem)
+
+    # Add central branch
+    branchName = f'{chordLineNode.GetName()}-central'
+    line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
+    self.setupChordLine(line)
+    line.AddControlPointWorld(pointC)
+    line.AddControlPointWorld(pointA)
+    # Put under subject hierarchy folder
+    shNode.SetItemParent(shNode.GetItemByDataNode(line), branchesFolderItem)
+
+    # Get leaflet surface normal at the chord endpoint
+    closestVertexIndex = chordEndPointLocator.FindClosestPoint(pointA)
+    leafletSurfaceNormal = leafletSurfaceNormalsArray[closestVertexIndex]
+
+    # Get perpendicular radius direction
+    vectorRadiusX = np.cross(vectorPA / np.linalg.norm(vectorPA), leafletSurfaceNormal)
+    vectorRadiusX = vectorRadiusX * branchingRadiusMm / np.linalg.norm(vectorRadiusX)
+
+    vectorRadiusY = np.cross(vectorRadiusX, leafletSurfaceNormal)
+    vectorRadiusY = vectorRadiusY * branchingRadiusMm / np.linalg.norm(vectorRadiusY)
+
+    # Add chord branch lines
+    angleIncrementRad = np.pi * 2 / numberOfRadialBranches
+    for branchIdx in range(numberOfRadialBranches):
+      angleRad = angleIncrementRad * branchIdx
+
+      # Get chord branch ideal endpoint
+      branchEndpointPos = pointA + np.sin(angleRad) * vectorRadiusX + np.cos(angleRad) * vectorRadiusY
+
+      line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", 'branch')  #TODO: Proper name and add to folder
+      # self.setupChordLine(line)
+      line.GetDisplayNode().SetPropertiesLabelVisibility(False)
+      line.GetDisplayNode().SetPointLabelsVisibility(False)
+      line.AddControlPointWorld(pointC)
+      line.AddControlPointWorld(branchEndpointPos)
+
+      # Get closest valve NURBS grid point
+
+      # Add branch to table
+      #TODO: Discuss with Stephen how the table should look like
+
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
