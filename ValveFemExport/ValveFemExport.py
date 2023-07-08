@@ -100,7 +100,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       (self.ui.leafletModelNodeComboBox3, "LeafletModel3"),
       (self.ui.leafletBoundaryMarkupsNodeComboBox3, "LeafletBoundaryMarkups3"),
       (self.ui.marginCurveNodeComboBox3, "MarginCurve3"),
-      (self.ui.secondaryCurveNodeComboBox3, "SecondaryCurve3")
+      (self.ui.secondaryCurveNodeComboBox3, "SecondaryCurve3"),
+
+      (self.ui.leafletNURBSSurfaceNodeSelector, "LeafletNURBSSurface")
       ]
 
     curvePlaceWidgets = [
@@ -325,8 +327,6 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
-      #TODO: Do not set these references (the leaflet is the same for each region, the papillary muscle is found automatically)
-      leafletRegionBoundaryNode.SetNodeReferenceID("LeafletNURBSSurface", self.ui.leafletNURBSSurfaceNodeSelector.currentNodeID)
       # leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletNURBSSurfaceNodeSelector.currentNode())
       leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
 
@@ -680,6 +680,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
     if not papillaryMuscleTips or papillaryMuscleTips.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid papillary muscle tips node")
+    leafletNURBSSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    if not leafletNURBSSurfaceNode or leafletNURBSSurfaceNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid leaflet NURBS grid surface node")
+    nurbsGridResolution = leafletNURBSSurfaceNode.GetGridResolution()
+
     slicer.app.pauseRender()
     try:
       leafletRegionBoundariesFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
@@ -690,18 +695,12 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       # Collect NURBS grid (u,v) coordinates for top line points
       regionBoundaryInnerPointIndices = {}
       minVGridIndex = -1
-      leafletNURBSSurfaceNode = None
       for regionIndex in range(leafletRegionNodes.GetNumberOfItems()):
         leafletRegionBoundaryNode = leafletRegionNodes.GetItemAsObject(regionIndex)
         linePoint0Pos = np.zeros(3)
         leafletRegionBoundaryNode.GetNthControlPointPosition(0, linePoint0Pos)
         linePoint1Pos = np.zeros(3)
         leafletRegionBoundaryNode.GetNthControlPointPosition(1, linePoint1Pos)
-
-        if leafletNURBSSurfaceNode and leafletNURBSSurfaceNode != leafletRegionBoundaryNode.GetNodeReference("LeafletNURBSSurface"):  # Sanity check
-          raise RuntimeError('More than one leaflet NURBS surface are used to define the leaflet regions')
-        leafletNURBSSurfaceNode = leafletRegionBoundaryNode.GetNodeReference("LeafletNURBSSurface")
-        nurbsGridResolution = leafletNURBSSurfaceNode.GetGridResolution()
 
         minDist0Index = (np.Inf, -1)  # Tuple: (distanceMm, controlPointIndex)
         minDist1Index = (np.Inf, -1)  # Tuple: (distanceMm, controlPointIndex)
@@ -727,8 +726,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       maxVGridIndex = -1
       linesOrderedByGridU = {}
       for regionBoundaryLineNode, pointIndex in regionBoundaryInnerPointIndices.items():
-        leafletNurbsNode = regionBoundaryLineNode.GetNodeReference("LeafletNURBSSurface")
-        nurbsGridResolution = leafletNurbsNode.GetGridResolution()
         pointGridIndex = (pointIndex % nurbsGridResolution[0], pointIndex // nurbsGridResolution[0])
         if pointGridIndex[1] > maxVGridIndex:
           maxVGridIndex = pointGridIndex[1]
@@ -748,15 +745,14 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         rightUGridIndex = list(linesOrderedByGridU.keys())[nextIndex(regionIndex)]
         if logCallback:
           logCallback(f"Creating chord bundles for region {regionIndex + 1} / {leafletRegionNodes.GetNumberOfItems()}...")
-        self.createChordBundleFromRegion(parameterNode, leafletNURBSSurfaceNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+        self.createChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
 
     finally:
       slicer.app.resumeRender()
 
-  def createChordBundleFromRegion(self, parameterNode, leafletNurbsSurfaceNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
+  def createChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
     :param parameterNode:
-    :param leafletNURBSSurfaceNode: Leaflet NURBS surface node on which the chord and bundle endpoints are defined
     :param leftUGridIndex: "Left" U grid index (defined on NURBS grid) for the region parametric rectangle
     :param rightUGridIndex: "Right" U grid index (defined on NURBS grid) for the region parametric rectangle
     :param minVGridIndex: Minimum V grid index (defined on NURBS grid) for the region parametric rectangle
@@ -764,6 +760,10 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     :param chordsFolderItemId:
     :return:
     """
+    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid leaflet NURBS grid surface node")
+
     # Get variables used for calculation
     chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "6") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
     baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
