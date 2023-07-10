@@ -582,17 +582,17 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
 
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
-      endPoint_World = [0,0,0]
+      endPoint_World = np.zeros(3)
       endPoints.GetNthControlPointPositionWorld(endPointIndex, endPoint_World)
       # Snap to closest mesh point (FEM solver requires constraint to be assigned to a point, not anywhere on the surface)
       closestMeshPointIndex = pointLocator.FindClosestPoint(endPoint_World)
       endPoint_World = surface_World.GetPoint(closestMeshPointIndex)
       # Find closest start point
-      closestStartPointDistance2 = 1e10
-      closestStartPoint_World = [0.0,0.0,0.0]
+      closestStartPointDistance2 = np.inf
+      closestStartPoint_World = np.zeros(3)
       closestStartPointName = ""
       for startPointIndex in range(startPoints.GetNumberOfControlPoints()):
-        startPoint_World = [0,0,0]
+        startPoint_World = np.zeros(3)
         startPoints.GetNthControlPointPositionWorld(startPointIndex, startPoint_World)
         currentDistance = vtk.vtkMath.Distance2BetweenPoints(startPoint_World, endPoint_World)
         if currentDistance < closestStartPointDistance2:
@@ -829,10 +829,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         pointPositions.append(pos)
         meanRegionPoint += pos
 
-    # Remove temporary nodes
-    slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
-    slicer.mrmlScene.RemoveNode(regionModelNode)
-
     # Create folder for the chords for the current region
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
@@ -886,7 +882,11 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       chordNameArray.SetValue(rowIndex, chordName)
 
       # Create chord branching
-      self.createChordBranching(line, leafletNurbsSurfaceNode, folderItem, normalsArray, chordEndPointLocator)
+      self.createChordBranching(line, leafletNurbsSurfaceNode, regionGridSurfaceNode, folderItem, normalsArray, chordEndPointLocator)
+
+    # Remove temporary nodes
+    slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
+    slicer.mrmlScene.RemoveNode(regionModelNode)
 
   def setupChordLine(self, chordLineNode):
     chordLineNode.SetLocked(True)  # it was left unlocked to allow the user to rearrange the points to achieve more uniform sampling, but with branching it is too complicated for manual modifications
@@ -899,7 +899,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordLineNode.GetDisplayNode().SetGlyphSize(0.5)
     # chordLineNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
 
-  def createChordBranching(self, chordLineNode, leafletNurbsNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
+  def createChordBranching(self, chordLineNode, leafletNurbsNode, regionGridSurfaceNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
     """
     Create branching at the valve end of a chord represented by given markups line node.
 
@@ -970,9 +970,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Add chord branch lines
     angleIncrementRad = np.pi * 2 / numberOfRadialBranches
     for branchIdx in range(numberOfRadialBranches):
-      angleRad = angleIncrementRad * branchIdx
-
       # Get chord branch ideal endpoint
+      angleRad = angleIncrementRad * branchIdx
       branchEndpointPos = pointA + np.sin(angleRad) * vectorRadiusX + np.cos(angleRad) * vectorRadiusY
 
       line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", 'branch')  #TODO: Proper name and add to folder
@@ -982,10 +981,21 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       line.AddControlPointWorld(pointC)
       line.AddControlPointWorld(branchEndpointPos)
 
-      # Get closest valve NURBS grid point
+      # Snap ideal branch endpoint position to leaflet NURBS grid (use the region NURBS to make search faster)
+      closestDistance2 = np.inf
+      closestRegionGridPoint = np.zeros(3)
+      regionGridPoint = np.zeros(3)
+      for regionGridPointIdx in range(regionGridSurfaceNode.GetNumberOfControlPoints()):
+        regionGridSurfaceNode.GetNthControlPointPositionWorld(regionGridPointIdx, regionGridPoint)
+        currentDistance2 = vtk.vtkMath.Distance2BetweenPoints(regionGridPoint, branchEndpointPos)
+        if currentDistance2 < closestDistance2 and vtk.vtkMath.Distance2BetweenPoints(regionGridPoint, pointC) > 1e-6:
+          closestDistance2 = currentDistance2
+          closestRegionGridPoint = regionGridPoint.copy()
+      line.SetNthControlPointPositionWorld(1, closestRegionGridPoint)
 
       # Add branch to table
       #TODO: Discuss with Stephen how the table should look like
+
 
 
   @staticmethod
