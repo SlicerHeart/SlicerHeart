@@ -181,6 +181,8 @@ class UltrasoundImage3dReaderFileReader(object):
         tempVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", baseName)
         nodeForStoringMetadata = tempVolumeNode
 
+      nodeForStoringMetadata.SetAttribute("DICOM.instanceUIDs", slicer.dicomDatabase.instanceForFile(filePath))
+
       # retrieve probe info
       probe = source.GetProbeInfo()
       nodeForStoringMetadata.SetAttribute("SlicerHeart.ProbeName", probe.name)
@@ -224,6 +226,7 @@ class UltrasoundImage3dReaderFileReader(object):
         maxRes = np.ctypeslib.as_ctypes(np.array([maxDimension, maxDimension, maxDimension], dtype=np.ushort))
 
         frame = source.GetFrame(frameIndex, bbox, maxRes)
+        tempVolumeNode.SetAttribute("DICOM.instanceUIDs", slicer.dicomDatabase.instanceForFile(filePath))
         tempVolumeNode.SetAttribute("SlicerHeart.FrameFormat", str(frame.format))
         voxels = self.frameTo3dArray(frame)
         slicer.util.updateVolumeFromArray(tempVolumeNode, voxels)
