@@ -968,12 +968,12 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     # Add central branch
     branchName = f'{chordLineNode.GetName()}-central'
-    line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
-    self.setupChordLine(line)
-    line.AddControlPointWorld(pointC)
-    line.AddControlPointWorld(pointA)
+    branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
+    self.setupChordLine(branchLine)
+    branchLine.AddControlPointWorld(pointC)
+    branchLine.AddControlPointWorld(pointA)
     # Put under subject hierarchy folder
-    shNode.SetItemParent(shNode.GetItemByDataNode(line), branchesFolderItem)
+    shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
 
     # Get leaflet surface normal at the chord endpoint
     closestVertexIndex = chordEndPointLocator.FindClosestPoint(pointA)
@@ -993,12 +993,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       angleRad = angleIncrementRad * branchIdx
       branchEndpointPos = pointA + np.sin(angleRad) * vectorRadiusX + np.cos(angleRad) * vectorRadiusY
 
-      line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", 'branch')  #TODO: Proper name and add to folder
-      # self.setupChordLine(line)
-      line.GetDisplayNode().SetPropertiesLabelVisibility(False)
-      line.GetDisplayNode().SetPointLabelsVisibility(False)
-      line.AddControlPointWorld(pointC)
-      line.AddControlPointWorld(branchEndpointPos)
+      branchName = f'{chordLineNode.GetName()}-{branchIdx + 1}'
+      branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
+      self.setupChordLine(branchLine)
+      branchLine.AddControlPointWorld(pointC)
+      branchLine.AddControlPointWorld(branchEndpointPos)
+      # Put under subject hierarchy folder
+      shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
 
       # Snap ideal branch endpoint position to leaflet NURBS grid (use the region NURBS to make search faster)
       closestDistance2 = np.inf
@@ -1010,7 +1011,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         if currentDistance2 < closestDistance2 and vtk.vtkMath.Distance2BetweenPoints(regionGridPoint, pointC) > 1e-6:
           closestDistance2 = currentDistance2
           closestRegionGridPoint = regionGridPoint.copy()
-      line.SetNthControlPointPositionWorld(1, closestRegionGridPoint)
+      branchLine.SetNthControlPointPositionWorld(1, closestRegionGridPoint)
 
       # Add branch to table
       #TODO: Discuss with Stephen how the table should look like
