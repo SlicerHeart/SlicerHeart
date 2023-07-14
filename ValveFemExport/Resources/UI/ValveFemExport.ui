@@ -863,7 +863,17 @@
          <item>
           <widget class="QLabel" name="label_29">
            <property name="text">
-            <string>Branches:  Length:</string>
+            <string>Branches: </string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_32">
+           <property name="text">
+            <string>Length:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
            </property>
           </widget>
          </item>
@@ -884,6 +894,9 @@
           <widget class="QLabel" name="label_31">
            <property name="text">
             <string># radial:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
            </property>
           </widget>
          </item>
@@ -907,6 +920,9 @@
           <widget class="QLabel" name="label_30">
            <property name="text">
             <string>Radius:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
            </property>
           </widget>
          </item>

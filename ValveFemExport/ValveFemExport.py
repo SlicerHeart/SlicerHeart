@@ -550,34 +550,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       shNode.RequestOwnerPluginSearch(parameterNode)
       shNode.SetItemAttribute(shNode.GetItemByDataNode(parameterNode), "ModuleName", "ValveFEMExport")
 
-  def createChordTable(self, baseName, chordsFolderItemId):
-    # Create table node for spring import into FEBio
-    chordTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
-    chordTableNode.SetName(baseName)
-    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    shNode.SetItemParent(shNode.GetItemByDataNode(chordTableNode), chordsFolderItemId)
-    chordIndexArray = vtk.vtkIntArray()
-    chordIndexArray.SetName("Index")
-    chordTableNode.AddColumn(chordIndexArray)
-    chordStartPositionArray = vtk.vtkDoubleArray()
-    chordStartPositionArray.SetName("StartPosition")
-    chordStartPositionArray.SetNumberOfComponents(3)
-    chordStartPositionArray.SetComponentName(0, "X")
-    chordStartPositionArray.SetComponentName(1, "Y")
-    chordStartPositionArray.SetComponentName(2, "Z")
-    chordTableNode.AddColumn(chordStartPositionArray)
-    chordEndPositionArray = vtk.vtkDoubleArray()
-    chordEndPositionArray.SetName("EndPosition")
-    chordEndPositionArray.SetNumberOfComponents(3)
-    chordEndPositionArray.SetComponentName(0, "X")
-    chordEndPositionArray.SetComponentName(1, "Y")
-    chordEndPositionArray.SetComponentName(2, "Z")
-    chordTableNode.AddColumn(chordEndPositionArray)
-    chordNameArray = vtk.vtkStringArray()
-    chordNameArray.SetName("Name")
-    chordTableNode.AddColumn(chordNameArray)
-    return chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray
-
   def createChordBundle(self, baseName, color, startPoints, endPoints, surfaceModel, chordsFolderItemId):
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
@@ -850,8 +822,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     # Create folder for the chords for the current region
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    folderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
-    shNode.SetItemParent(folderItem, chordsFolderItemId)
+    regionFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
+    shNode.SetItemParent(regionFolderItem, chordsFolderItemId)
 
     # Automatically find closest papillary muscle tip point for region
     papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
@@ -868,9 +840,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     closestPapillatyMuscleTipPos = np.zeros(3)
     papillaryMuscleTipsNode.GetNthControlPointPosition(minDistanceToMeanPoint[1], closestPapillatyMuscleTipPos)
-
-    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = \
-      self.createChordTable(baseName, chordsFolderItemId)
 
     # Get leaflet surface normals
     leafletModelNode = leafletNurbsSurfaceNode.GetOutputSurfaceModelNode()
@@ -892,16 +861,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       line.AddControlPointWorld(vtk.vtkVector3d(closestPapillatyMuscleTipPos), papillaryMuscleTipsNode.GetNthControlPointLabel(minDistanceToMeanPoint[1]))
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
       # Put under subject hierarchy folder
-      shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
-      # Add chord to the table
-      rowIndex = chordTableNode.AddEmptyRow()
-      chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
-      chordStartPositionArray.SetTuple3(rowIndex, closestPapillatyMuscleTipPos[0], closestPapillatyMuscleTipPos[1], closestPapillatyMuscleTipPos[2])
-      chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
-      chordNameArray.SetValue(rowIndex, chordName)
+      shNode.SetItemParent(shNode.GetItemByDataNode(line), regionFolderItem)
 
       # Create chord branching
-      self.createChordBranching(parameterNode, line, regionGridSurfaceNode, folderItem, normalsArray, chordEndPointLocator)
+      self.createChordBranching(parameterNode, line, regionGridSurfaceNode, regionFolderItem, normalsArray, chordEndPointLocator)
+
+    # Create mesh to export
+    self.createChordsMesh(regionFolderItem)
 
     # Remove temporary nodes
     slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
@@ -916,7 +882,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordLineNode.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
     chordLineNode.GetDisplayNode().UseGlyphScaleOff()
     chordLineNode.GetDisplayNode().SetGlyphSize(0.5)
-    # chordLineNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
 
   def createChordBranching(self, parameterNode, chordLineNode, regionGridSurfaceNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
     """
@@ -959,6 +924,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordLineNode.GetNthControlPointPositionWorld(1, pointA)
     vectorPA = pointA - pointP
     pointC = pointA - vectorPA / np.linalg.norm(vectorPA) * branchingLengthMm
+    # Change endpoint of the main chord line to only reach the branching point
     chordLineNode.SetNthControlPointPositionWorld(1, pointC)
 
     # Create folder for chord branch
@@ -1013,10 +979,41 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
           closestRegionGridPoint = regionGridPoint.copy()
       branchLine.SetNthControlPointPositionWorld(1, closestRegionGridPoint)
 
-      # Add branch to table
-      #TODO: Discuss with Stephen how the table should look like
+  def createChordsMesh(self, regionFolderItem):
+    """Create mesh for chords and branches for a given region for spring import into FEBio."""
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
 
+    # Create chords mesh
+    chordsMesh = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", f'Chords mesh - {shNode.GetItemName(regionFolderItem)}')
+    shNode.SetItemParent(shNode.GetItemByDataNode(chordsMesh), shNode.GetItemParent(regionFolderItem))
+    chordEndpoints = vtk.vtkPoints()
+    chordLines = vtk.vtkCellArray()
 
+    startPoint = np.zeros(3)
+    endPoint = np.zeros(3)
+    allChordsForRegion = slicer.util.getSubjectHierarchyItemChildren(regionFolderItem, True)
+    for chordItem in allChordsForRegion:
+      if shNode.GetItemLevel(chordItem) == slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelFolder():
+        continue  # Skip folders
+      chordLine = shNode.GetItemDataNode(chordItem)
+      if not chordLine.IsA('vtkMRMLMarkupsLineNode'):
+        logging.warning(f'Unexpected node type found in chords region {shNode.GetItemName(regionFolderItem)}')
+        continue
+
+      chordLine.GetNthControlPointPosition(0, startPoint)
+      chordLine.GetNthControlPointPosition(1, endPoint)
+      startPointIndex = chordEndpoints.InsertNextPoint(startPoint)
+      endPointIndex = chordEndpoints.InsertNextPoint(endPoint)
+
+      lineIdList = vtk.vtkIdList()
+      lineIdList.InsertNextId(startPointIndex)
+      lineIdList.InsertNextId(endPointIndex)
+      chordLines.InsertNextCell(lineIdList)
+
+    chordsPolyData = vtk.vtkPolyData()
+    chordsPolyData.SetPoints(chordEndpoints)
+    chordsPolyData.SetLines(chordLines)
+    chordsMesh.SetAndObservePolyData(chordsPolyData)
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
@@ -1467,7 +1464,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     slicer.app.pauseRender()
     try:
-
       os.makedirs(outputFolder, exist_ok=True)
 
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
