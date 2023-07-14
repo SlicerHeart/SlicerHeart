@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>386</width>
+    <width>396</width>
     <height>720</height>
    </rect>
   </property>
@@ -725,6 +725,32 @@
       <string>Chord bundle inputs</string>
      </property>
      <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_28">
+        <property name="text">
+         <string>Chord density:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkSliderWidget" name="chordsPerCm2Slider">
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>100.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>8.000000000000000</double>
+        </property>
+        <property name="suffix">
+         <string> chords/cm2</string>
+        </property>
+       </widget>
+      </item>
       <item row="1" column="0">
        <widget class="QLabel" name="label_27">
         <property name="text">
@@ -749,6 +775,28 @@
          </widget>
         </item>
        </layout>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="qMRMLSubjectHierarchyTreeView" name="leafletRegionBoundaryTreeView">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>120</height>
+         </size>
+        </property>
+        <property name="idColumnVisible">
+         <bool>false</bool>
+        </property>
+        <property name="transformColumnVisible">
+         <bool>false</bool>
+        </property>
+       </widget>
       </item>
       <item row="3" column="0" colspan="2">
        <layout class="QHBoxLayout" name="horizontalLayout">
@@ -791,63 +839,102 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0">
+      <item row="5" column="0" colspan="2">
+       <widget class="QFrame" name="branchesFrame">
+        <property name="frameShape">
+         <enum>QFrame::NoFrame</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+        <layout class="QHBoxLayout" name="horizontalLayout_4">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QLabel" name="label_29">
+           <property name="text">
+            <string>Branches:  Length:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="ctkDoubleSpinBox" name="branchingLengthSpinBox">
+           <property name="suffix">
+            <string>mm</string>
+           </property>
+           <property name="minimum">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>3.500000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_31">
+           <property name="text">
+            <string># radial:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="ctkDoubleSpinBox" name="numberOfRadialBranchesSpinBox">
+           <property name="decimals">
+            <number>0</number>
+           </property>
+           <property name="minimum">
+            <double>1.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>10.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>4.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_30">
+           <property name="text">
+            <string>Radius:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="ctkDoubleSpinBox" name="branchingRadiusSpinBox">
+           <property name="minimum">
+            <double>0.010000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>1.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="6" column="0">
        <widget class="QLabel" name="label_4">
         <property name="text">
          <string>Papillary muscle tip:</string>
         </property>
        </widget>
       </item>
-      <item row="5" column="1">
+      <item row="6" column="1">
        <widget class="QComboBox" name="papillaryMuscleTipPointComboBox"/>
-      </item>
-      <item row="2" column="0" colspan="2">
-       <widget class="qMRMLSubjectHierarchyTreeView" name="leafletRegionBoundaryTreeView">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="minimumSize">
-         <size>
-          <width>0</width>
-          <height>120</height>
-         </size>
-        </property>
-        <property name="idColumnVisible">
-         <bool>false</bool>
-        </property>
-        <property name="transformColumnVisible">
-         <bool>false</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_28">
-        <property name="text">
-         <string>Chord density:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="ctkSliderWidget" name="chordsPerCm2Slider">
-        <property name="decimals">
-         <number>1</number>
-        </property>
-        <property name="minimum">
-         <double>1.000000000000000</double>
-        </property>
-        <property name="maximum">
-         <double>100.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>17.000000000000000</double>
-        </property>
-        <property name="suffix">
-         <string> chords/cm2</string>
-        </property>
-       </widget>
       </item>
      </layout>
     </widget>
@@ -903,6 +990,11 @@
    <extends>QGroupBox</extends>
    <header>ctkCollapsibleGroupBox.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkDoubleSpinBox</class>
+   <extends>QWidget</extends>
+   <header>ctkDoubleSpinBox.h</header>
   </customwidget>
   <customwidget>
    <class>ctkPathLineEdit</class>

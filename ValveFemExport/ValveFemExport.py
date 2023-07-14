@@ -118,6 +118,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       (self.ui.chordsPerCm2Slider, "ChordsPerCm2"),
       (self.ui.createShellModelCheckBox, "CreateLeafletSurfaceShellModel"),
       (self.ui.createChordsCheckBox, "CreateChords"),
+      (self.ui.branchingLengthSpinBox, "BranchingLengthMm"),
+      (self.ui.numberOfRadialBranchesSpinBox, "NumberOfRadialBranches"),
+      (self.ui.branchingRadiusSpinBox, "BranchingRadiusMm"),
       ]
 
     # Create a new parameterNode
@@ -134,23 +137,26 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.util.findChild(curvePlaceWidget, "MoreButton").hide()
 
     # Connections
-    self.ui.parameterNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.setParameterNode)
-    self.ui.heartValveImportButton.connect('clicked(bool)', self.onHeartValveImport)
-    self.ui.addLeafletRegionBoundaryButton.connect('clicked(bool)', self.onAddLeafletRegionBoundary)
-    self.ui.deleteLeafletRegionBoundaryButton.connect('clicked(bool)', self.onDeleteLeafletRegionBoundary)
+    self.ui.parameterNodeSelector.currentNodeChanged.connect(self.setParameterNode)
+    self.ui.heartValveImportButton.clicked.connect(self.onHeartValveImport)
+    self.ui.addLeafletRegionBoundaryButton.clicked.connect(self.onAddLeafletRegionBoundary)
+    self.ui.deleteLeafletRegionBoundaryButton.clicked.connect(self.onDeleteLeafletRegionBoundary)
 
-    self.ui.leafletRegionBoundaryTreeView.connect("currentItemChanged(vtkIdType)", self.onLeafletRegionBoundarySelected)
-    self.ui.generateButton.connect('clicked(bool)', self.onGenerate)
-    self.ui.exportButton.connect('clicked(bool)', self.onExport)
+    self.ui.leafletRegionBoundaryTreeView.currentItemChanged.connect(self.onLeafletRegionBoundarySelected)
+    self.ui.generateButton.clicked.connect(self.onGenerate)
+    self.ui.exportButton.clicked.connect(self.onExport)
     slicer.util.addParameterEditWidgetConnections(self.parameterEditWidgets, self.updateParameterNodeFromGUI)
+    self.ui.branchingLengthSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.numberOfRadialBranchesSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.branchingRadiusSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
     for nodeSelector, nodeReferenceRole in self.nodeSelectors:
-      nodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+      nodeSelector.currentNodeChanged.connect(self.updateParameterNodeFromGUI)
 
-    self.ui.leafletNURBSSurfaceNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
-    self.ui.papillaryMuscleTipPointComboBox.connect('currentTextChanged(QString)', self.updateParameterNodeFromGUI)
+    self.ui.leafletNURBSSurfaceNodeSelector.currentNodeChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.papillaryMuscleTipPointComboBox.currentTextChanged.connect(self.updateParameterNodeFromGUI)
 
     #TODO: Temporarily hide muscle tip combobox and label
     self.ui.label_4.visible = False
@@ -276,6 +282,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     leafletRegionsFolderId = self.logic.getSubjectHierarchyLeafletRegionBoundariesSubfolder(self._parameterNode)
     self.ui.leafletRegionBoundaryTreeView.setRootItem(leafletRegionsFolderId)
     self.ui.leafletRegionBoundaryTreeView.visible = bool(leafletRegionsFolderId)
+    self.ui.branchesFrame.visible = bool(leafletRegionsFolderId)
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
@@ -288,6 +295,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.papillaryMuscleTipPointComboBox.blockSignals(wasBlocked)
 
     slicer.util.updateParameterEditWidgetsFromNode(self.parameterEditWidgets, self._parameterNode)
+    self.ui.branchingLengthSpinBox.value = float(self._parameterNode.GetParameter("BranchingLengthMm"))
+    self.ui.numberOfRadialBranchesSpinBox.value = float(self._parameterNode.GetParameter("NumberOfRadialBranches"))
+    self.ui.branchingRadiusSpinBox.value = float(self._parameterNode.GetParameter("BranchingRadiusMm"))
 
     self.updatingGUIFromParameterNode = False
 
@@ -331,6 +341,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
 
     slicer.util.updateNodeFromParameterEditWidgets(self.parameterEditWidgets, self._parameterNode)
+    self._parameterNode.SetParameter("BranchingLengthMm", str(self.ui.branchingLengthSpinBox.value))
+    self._parameterNode.SetParameter("NumberOfRadialBranches", str(self.ui.numberOfRadialBranchesSpinBox.value))
+    self._parameterNode.SetParameter("BranchingRadiusMm", str(self.ui.branchingRadiusSpinBox.value))
 
     self._parameterNode.EndModify(wasModified)
 
@@ -523,7 +536,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter("CreateChords"):
       parameterNode.SetParameter("CreateChords", "true")
     if not parameterNode.GetParameter("ChordsPerCm2"):
-        parameterNode.SetParameter("ChordsPerCm2", "17")
+        parameterNode.SetParameter("ChordsPerCm2", "8")
+    if not parameterNode.GetParameter("BranchingLengthMm"):
+        parameterNode.SetParameter("BranchingLengthMm", "3.5")
+    if not parameterNode.GetParameter("NumberOfRadialBranches"):
+        parameterNode.SetParameter("NumberOfRadialBranches", "4")
+    if not parameterNode.GetParameter("BranchingRadiusMm"):
+        parameterNode.SetParameter("BranchingRadiusMm", "1")
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     if parameterNode.GetHideFromEditors():
@@ -765,7 +784,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       raise ValueError("Invalid leaflet NURBS grid surface node")
 
     # Get variables used for calculation
-    chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "6") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
+    chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "8") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
     baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
     leafletGridResolution = leafletNurbsSurfaceNode.GetGridResolution()
 
@@ -882,7 +901,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       chordNameArray.SetValue(rowIndex, chordName)
 
       # Create chord branching
-      self.createChordBranching(line, leafletNurbsSurfaceNode, regionGridSurfaceNode, folderItem, normalsArray, chordEndPointLocator)
+      self.createChordBranching(parameterNode, line, regionGridSurfaceNode, folderItem, normalsArray, chordEndPointLocator)
 
     # Remove temporary nodes
     slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
@@ -899,7 +918,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordLineNode.GetDisplayNode().SetGlyphSize(0.5)
     # chordLineNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeToVisibleSurface)
 
-  def createChordBranching(self, chordLineNode, leafletNurbsNode, regionGridSurfaceNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
+  def createChordBranching(self, parameterNode, chordLineNode, regionGridSurfaceNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
     """
     Create branching at the valve end of a chord represented by given markups line node.
 
@@ -923,15 +942,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     if not chordLineNode or chordLineNode.GetNumberOfControlPoints() != 2:
       raise ValueError("Invalid chord line node")
+    leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid papillary muscle tips node")
     if not regionFolderItem:
       raise ValueError("Invalid region folder item ID")
 
-    #TODO: To parameter node (also to UI?)
-    branchingLengthPercent = 20
-    numberOfRadialBranches = 4
-    branchingRadiusMm = 1
+    branchingLengthMm = float(parameterNode.GetParameter("BranchingLengthMm"))
+    numberOfRadialBranches = round(float(parameterNode.GetParameter("NumberOfRadialBranches")))
+    branchingRadiusMm = float(parameterNode.GetParameter("BranchingRadiusMm"))
 
     # Get branching point on chord line
     pointP = np.zeros(3)
@@ -939,7 +958,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     pointA = np.zeros(3)
     chordLineNode.GetNthControlPointPositionWorld(1, pointA)
     vectorPA = pointA - pointP
-    pointC = pointP + vectorPA * (1 - branchingLengthPercent / 100.0)
+    pointC = pointA - vectorPA / np.linalg.norm(vectorPA) * branchingLengthMm
     chordLineNode.SetNthControlPointPositionWorld(1, pointC)
 
     # Create folder for chord branch
