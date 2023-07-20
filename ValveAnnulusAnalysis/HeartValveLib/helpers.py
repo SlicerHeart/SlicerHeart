@@ -182,3 +182,20 @@ def setValveModelDataVisibility(valveModel, **kwargs):
   for coaptModel in valveModel.coaptationModels:
     # TODO
     show = kwargs.get("coaptationModels", False)
+
+
+def createNewHeartValveNode(referenceNode, sequenceIndex, phaseName="custom1"):
+  import HeartValves
+  logging.info(f"creating new heart valve for frame {sequenceIndex + 1}")
+  newNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
+  newNode.SetAttribute("ModuleName", "HeartValve")
+  valveModel = HeartValves.getValveModel(newNode)
+  valveModel.setValveType(referenceNode.getValveType())
+  valveModel.setValveVolumeNode(referenceNode.getValveVolumeNode())
+  valveModel.setValveVolumeSequenceIndex(sequenceIndex)
+  valveModel.setCardiacCyclePhase(phaseName)
+  valveModel.setProbePosition(referenceNode.getProbePosition())
+  valveModel.getAxialSliceToRasTransformNode().SetMatrixTransformToParent(
+    valveModel.getDefaultAxialSliceToRasTransformMatrix()
+  )
+  return valveModel
