@@ -61,6 +61,17 @@ class ValveBatchExport(ScriptedLoadableModule):
       logging.warning(f"{self.__class__.__name__} requires python package 'pandas'. Installing ...")
       slicer.util.pip_install("pandas")
 
+    registerExportRule(AnnulusContourCoordinatesExportRule),
+    registerExportRule(AnnulusContourModelExportRule, False),
+    registerExportRule(ValveLandmarkCoordinatesExportRule),
+    registerExportRule(ValveLandmarkLabelsExportRule, False),
+    registerExportRule(ValveLandmarksExportRule, False),
+    registerExportRule(ValveVolumeExportRule, False),
+    registerExportRule(ValveVolumeFrameExportRule, False),
+    registerExportRule(QuantificationResultsExportRule),
+    registerExportRule(PapillaryAnalysisResultsExportRule),
+    registerExportRule(LeafletSegmentationExportRule, False),
+
 
 #
 # ValveBatchExportWidget
@@ -71,31 +82,11 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  registeredExportPlugins = [ValveBatchExportPlugin(AnnulusContourCoordinatesExportRule),
-                             ValveBatchExportPlugin(AnnulusContourModelExportRule, False),
-                             ValveBatchExportPlugin(ValveLandmarkCoordinatesExportRule),
-                             ValveBatchExportPlugin(ValveLandmarkLabelsExportRule, False),
-                             ValveBatchExportPlugin(ValveLandmarksExportRule, False),
-                             ValveBatchExportPlugin(ValveVolumeExportRule, False),
-                             ValveBatchExportPlugin(ValveVolumeFrameExportRule, False),
-                             ValveBatchExportPlugin(QuantificationResultsExportRule),
-                             ValveBatchExportPlugin(PapillaryAnalysisResultsExportRule),
-                             ValveBatchExportPlugin(LeafletSegmentationExportRule, False),
-                             ]
-
-  @classmethod
-  def registerExportPlugin(cls, exportPluginClass):
-    if not isinstance(exportPluginClass, ValveBatchExportPlugin):
-      return
-    if not exportPluginClass in cls.registeredExportPlugins:
-      cls.registeredExportPlugins.append(exportPluginClass)
-
   def onReload(self):
     logging.debug("Reloading ValveBatchExport")
-    self.ui.roiCollapsibleButton.collapsed = True
 
     packageName='ValveBatchExportRules'
-    submoduleNames = ['base', 'AnnulusContourCoordinates', 'AnnulusContourModel', 'LeafletSegmentation',
+    submoduleNames = ['AnnulusContourCoordinates', 'AnnulusContourModel', 'LeafletSegmentation',
                       'PapillaryAnalysisResults', 'QuantificationResults', 'ValveLandmarkCoordinates',
                       'ValveLandmarkLabels', 'ValveLandmarks', 'ValveVolume', 'VolumeFrame']
     import imp
@@ -107,7 +98,17 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
           imp.load_module(packageName+'.'+submoduleName, f, filename, description)
       finally:
           f.close()
+
+    # NB: reloading export plugins
+    registeredExportPlugins = [(plugin.getRuleClass(), plugin.getChecked())
+                               for plugin in registered_export_plugins.values()]
+    for ruleClass, checked in registeredExportPlugins:
+      import importlib
+      reloaded_module = importlib.reload(importlib.import_module(ruleClass.__module__))
+      registerExportRule(getattr(reloaded_module, ruleClass.__name__), checked)
+
     ScriptedLoadableModuleWidget.onReload(self)
+
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -123,7 +124,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     exportOptionsFrameLayout = self.ui.exportOptionsFrame.layout()
 
     # add ui of export plugins here
-    for exportPlugin in self.registeredExportPlugins:
+    for exportPlugin in registered_export_plugins.values():
       exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
 
     self.setupPhaseSelectionSection()
@@ -218,7 +219,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     ValveBatchExportRule.setValveTypesToExport(self.getCheckedValveTypes())
     ValveBatchExportRule.setCreateIntermediateValves(self.ui.createHeartValvesCheckBox.checked)
     self.logic.clearRules()
-    for registeredPlugin in self.registeredExportPlugins:
+    for registeredPlugin in registered_export_plugins.values():
       if registeredPlugin.activated:
         self.logic.addRule(registeredPlugin.getRuleClass())
     outputDir = self.ui.outputDirSelector.currentPath
@@ -575,6 +576,7 @@ class ValveBatchExportTest(ScriptedLoadableModuleTest):
 
 
 def main(argv):
+  # TODO: make more flexible, otherwise externally registered plugins won't be able to run in parallel
   parser = argparse.ArgumentParser(description="Valve Batch Export")
   parser.add_argument("-in", "--input_mrb", metavar="PATH", help="input .mrb file", required=True)
   parser.add_argument("-out", "--output_directory", metavar="PATH", required=True,

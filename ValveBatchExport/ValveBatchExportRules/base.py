@@ -7,6 +7,16 @@ from HeartValveLib.helpers import getAllHeartValveModelNodes, getSpecificHeartVa
 from typing import Union
 
 
+from collections import OrderedDict
+
+
+registered_export_plugins = OrderedDict()
+
+
+def registerExportRule(exportRuleClass, checked=False):
+  registered_export_plugins[exportRuleClass.__name__] = ValveBatchExportPlugin(exportRuleClass, checked)
+
+
 class ValveBatchExportPlugin(qt.QWidget):
 
   _RULE_CLASS = None
@@ -18,20 +28,16 @@ class ValveBatchExportPlugin(qt.QWidget):
   def __init__(self, ruleClass=None, checked=True):
     qt.QWidget.__init__(self)
 
-    if ruleClass:
-      assert issubclass(ruleClass, ValveBatchExportRule)
-      self._RULE_CLASS = ruleClass
-
-    self._checked =  checked
+    self._RULE_CLASS = ruleClass
 
     assert self._RULE_CLASS is not None
     self.setup()
+    self.checkbox.checked = checked
 
   def setup(self):
     self.setLayout(qt.QGridLayout())
 
     self.checkbox = qt.QCheckBox()
-    self.checkbox.checked = self._checked
     self.checkbox.setToolTip(self._RULE_CLASS.DETAILED_DESCRIPTION)
 
     self.layout().addWidget(self.checkbox)
@@ -41,7 +47,6 @@ class ValveBatchExportPlugin(qt.QWidget):
       self.collapsibleButton = ctk.ctkCollapsibleButton()
       self.collapsibleButton.text = "Options"
       self.collapsibleButton.collapsed = 1
-      self.collapsibleButton.setEnabled(self._checked)
       layout = qt.QGridLayout()
       self.collapsibleButton.setLayout(layout)
       self.layout().addWidget(self.collapsibleButton)
@@ -53,6 +58,9 @@ class ValveBatchExportPlugin(qt.QWidget):
 
   def getDescription(self):
     return self._RULE_CLASS.BRIEF_USE
+
+  def getChecked(self):
+    return self.checkbox.checked
 
 
 class ValveBatchExportRule(object):
@@ -207,6 +215,7 @@ class ValveBatchExportRule(object):
         frameIndices = sorted([vm.getValveVolumeSequenceIndex() for vm in matchingValves])
         for frameIdx in range(min(frameIndices), max(frameIndices)):
           if not frameIdx in frameIndices:
+            from HeartValveLib.helpers import createNewHeartValveNode
             newValves.append(createNewHeartValveNode(matchingValves[0], frameIdx))
       valveModels.extend(newValves)
 
@@ -284,26 +293,3 @@ def createLabelNodeFromVisibleSegments(segmentationNode, valveModel, labelNodeNa
   segmentationsLogic = slicer.modules.segmentations.logic()
   segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode, valveModel.getValveVolumeNode())
   return labelNode
-
-
-def createNewHeartValveNode(referenceNode, sequenceIndex, phaseName="custom1"):
-  import slicer
-  import logging
-  import HeartValveLib
-  logging.info(f"creating new heart valve for frame {sequenceIndex + 1}")
-  newNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
-  newNode.SetAttribute("ModuleName", "HeartValve")
-  slicer.modules.valveannulusanalysis.widgetRepresentation()
-  valveAnnulusAnalysis = slicer.modules.ValveAnnulusAnalysisWidget
-  valveAnnulusAnalysis.onHeartValveSelect(newNode)
-  valveModel = HeartValveLib.HeartValves.getValveModel(newNode)
-  valveModel.setValveType(referenceNode.getValveType())
-  valveModel.setValveVolumeSequenceIndex(sequenceIndex)
-  valveModel.setCardiacCyclePhase(phaseName)
-  valveModel.setProbePosition(referenceNode.getProbePosition())
-  valveAnnulusAnalysis.axialSliceToRasTransformNode.SetMatrixTransformToParent(
-    valveModel.getDefaultAxialSliceToRasTransformMatrix()
-  )
-  valveAnnulusAnalysis.onHeartValveSelect(newNode)
-  slicer.app.processEvents()
-  return valveModel
