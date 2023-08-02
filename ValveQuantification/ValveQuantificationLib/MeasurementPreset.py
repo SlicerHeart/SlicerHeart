@@ -1643,8 +1643,16 @@ class MeasurementPreset(object):
                            KEY_VALUE: "{:.1f}".format(np.array(allLeafletThickness).mean()),
                            KEY_UNIT: 'mm'})
 
-    allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal)
+    kernelSizeMm = 2.0
+    allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal, kernelSizeMm)
+
     if not allLeafletSurfacePolyData:
+      allLeafletSurfacePolyData = valveModel.createValveSurface(
+        planePosition, planeNormal, kernelSizeMm, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
+      )
+
+    if not allLeafletSurfacePolyData:
+      logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()}')
       return
 
     # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.

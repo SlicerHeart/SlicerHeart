@@ -1239,11 +1239,13 @@ class ValveModel:
 
       return segmentInfoSorted
 
-    def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0):
+    def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0, mergeMode=None):
       # TODO: kernelSizeMm maybe determine this using the size (diameter?) of the annulus
       """
       Create valve surface from the union of all segmented leaflets.
       """
+      if not mergeMode:
+        mergeMode = slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MAX
       import vtkSegmentationCorePython as vtkSegmentationCore
 
       # Create a temporary segment that is a union of all existing segments
@@ -1251,8 +1253,9 @@ class ValveModel:
       allLeafletsSegId = segmentationNode.GetSegmentation().AddEmptySegment()
       for leafletModel in self.leafletModels:
         leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletModel.segmentId)
-        slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(leafletSegmentLabelmap, segmentationNode,
-          allLeafletsSegId, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MAX)
+        slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+          leafletSegmentLabelmap, segmentationNode, allLeafletsSegId, mergeMode
+        )
 
       # Apply smoothing to make sure leaflets are closed
       self.smoothSegment(self.getLeafletSegmentationNode(), allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
