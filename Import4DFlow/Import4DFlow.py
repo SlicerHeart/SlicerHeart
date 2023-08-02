@@ -14,13 +14,13 @@ sortedvolumeNodeForDirection = {}
 volumeNodes = [None, None, None, None]  # x, y, z, magnitude
 unsortedVolumeNodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
 axisForDirectionCode = {
-                           #      orig z seems better
-    'v150_through': 0,     # Z axis 2   0                 1
-    'v150_inplane_ap': 1,  # X axis 0   1                 0
-    'v150_inplane_fh': 2,  # Y axis 1   2                 2
+    'v150_through': 0,
+    'v150_inplane_ap': 1,
+    'v150_inplane_fh': 2,
     'magnitude': 3,
 }
 
+# LPS to RAS conversion
 directions = [-1, -1, 1]
 
 for volumeNode in unsortedVolumeNodes:
@@ -66,21 +66,14 @@ displacementImage.SetSpacing(volumeSequenceProxyNode.GetSpacing())
 displacementImage.SetOrigin(volumeSequenceProxyNode.GetOrigin())
 gridTransform.SetDisplacementGridData(displacementImage)
 
-try:
-    if not gridTransformNode:
-        raise ValueError()
-except:
-    gridTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
+gridTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
 gridTransformNode.SetAndObserveTransformFromParent(gridTransform)
 
 displacementArray = slicer.util.arrayFromGridTransform(gridTransformNode)  # shape: (96, 160, 64, 3) = (i, j, k, c)
 
 magnitudeVolumeSequenceNode = volumeSequenceNodes[axisForDirectionCode['magnitude']]
 
-try:
-    transformSequenceNode
-except:
-    transformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "4D flow")
+transformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "4D flow")
 
 transformSequenceNode.SetIndexType(magnitudeVolumeSequenceNode.GetIndexType())
 transformSequenceNode.SetIndexName(magnitudeVolumeSequenceNode.GetIndexName())
@@ -127,10 +120,7 @@ shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlS
 volumeParentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(magnitudeVolumeNode))
 shNode.SetItemParent(shNode.GetItemByDataNode(gridTransformNode), volumeParentItemId)
 
-try:
-    transformDisplayNode
-except:
-    transformDisplayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformDisplayNode")
+transformDisplayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformDisplayNode")
 gridTransformNode.AddAndObserveDisplayNodeID(transformDisplayNode.GetID())
 transformDisplayNode.SetVisibility(True)
 transformDisplayNode.SetVisibility2D(True)
