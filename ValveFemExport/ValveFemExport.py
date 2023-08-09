@@ -813,8 +813,9 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     pointPositions = []
     meanRegionPoint = np.zeros(3)
     for v in range(chordGridResolutionV):
+      rowUOffset = -regionGridStep / 4 if v % 2 else regionGridStep / 4  # Alternating offset within grid cell for each row
       for u in range(chordGridResolutionU):
-        regionGridPos = np.round(regionGridStart + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
+        regionGridPos = np.round(regionGridStart + rowUOffset + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
         pos = np.zeros(3)
         regionGridSurfaceNode.GetNthControlPointPosition(controlPointIndex(int(regionGridPos[0]), int(regionGridPos[1]), regionGridResolution), pos)
         pointPositions.append(pos)
