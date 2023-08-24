@@ -158,6 +158,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.leafletNURBSSurfaceNodeSelector.currentNodeChanged.connect(self.updateParameterNodeFromGUI)
     self.ui.papillaryMuscleTipPointComboBox.currentTextChanged.connect(self.updateParameterNodeFromGUI)
 
+    # These connections ensure that we update parameter node when scene is closed
+    self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
+    self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+
     #TODO: Temporarily hide muscle tip combobox and label
     self.ui.label_4.visible = False
     self.ui.papillaryMuscleTipPointComboBox.visible = False
@@ -171,12 +175,41 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     """
     self.removeObservers()
 
+  def onSceneStartClose(self, caller, event):
+    """
+    Called just before the scene is closed.
+    """
+    # Parameter node will be reset, do not use it anymore
+    self.setParameterNode(None)
+
+  def onSceneEndClose(self, caller, event):
+    """
+    Called just after the scene is closed.
+    """
+    # If this module is shown while the scene is closed then recreate a new parameter node immediately
+    if self.parent.isEntered:
+      self.initializeParameterNode()
+
+  def onSceneEndImport(self, caller, event):
+    """
+    Called just after a scene is imported.
+    """
+    if self.parent.isEntered:
+      self.initializeParameterNode()
+
+  def initializeParameterNode(self):
+    """
+    Ensure parameter node exists and observed.
+    """
+    # Parameter node stores all user choices in parameter values, node selections, etc.
+    # so that when the scene is saved and reloaded, these settings are restored.
+    self.setParameterNode(self.logic.getParameterNode())
+
   def setParameterNode(self, inputParameterNode):
     """
     Adds observers to the selected parameter node. Observation is needed because when the
     parameter node is changed then the GUI must be updated immediately.
     """
-
     if inputParameterNode:
       self.logic.setDefaultParameters(inputParameterNode)
 
@@ -814,6 +847,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     meanRegionPoint = np.zeros(3)
     for v in range(chordGridResolutionV):
       rowUOffset = -regionGridStep / 4 if v % 2 else regionGridStep / 4  # Alternating offset within grid cell for each row
+      logging.error(f'ZZZ rowUOffset: {rowUOffset}')
       for u in range(chordGridResolutionU):
         regionGridPos = np.round(regionGridStart + rowUOffset + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
         pos = np.zeros(3)
