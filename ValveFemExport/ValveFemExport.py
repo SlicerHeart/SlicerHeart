@@ -288,7 +288,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
       wasBlocked = self.ui.leafletNURBSSurfaceNodeSelector.blockSignals(True)
-      self.ui.leafletNURBSSurfaceNodeSelector.setCurrentNode(leafletRegionBoundaryNode.GetNodeReference("LeafletNURBSSurface"))
+      self.ui.leafletNURBSSurfaceNodeSelector.setCurrentNode(self._parameterNode.GetNodeReference("LeafletNURBSSurface"))
       self.ui.leafletNURBSSurfaceNodeSelector.blockSignals(wasBlocked)
       wasBlocked = self.ui.papillaryMuscleTipPointComboBox.blockSignals(True)
       self.ui.papillaryMuscleTipPointComboBox.currentText = leafletRegionBoundaryNode.GetAttribute("PapillaryMuscleTipPoint")
