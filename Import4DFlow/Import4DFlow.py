@@ -38,11 +38,23 @@ Import Siemens CS 4D flow images from DICOM.
 <h2>Convert image to flow field</h2>
 
 Converts velocity component images to a "flow field" - a grid transform that stores the velocity vector for each voxel in m/s.
+<p>
+Load a Siemens cardiac 4D flow study, for example: "MR HEART W & W O IV CONTRAST" study, with 4 series
+(the 3 series contain the 3 speed components and the 4th series is the magnitude image):
+"112: CS4Dflow_R7.7_retro_post 1.6 x 1.6_P", "113: CS4Dflow_R7.7_retro_post 1.6 x 1.6_P", "114: CS4Dflow_R7.7_retro_post 1.6 x 1.6_P",
+and "115: CS4Dflow_R7.7_retro_post 1.6 x 1.6".
+<p>
+Click "Refresh" button, make sure a flow study is selected "Input flow image" and click "Convert".
 
 <h2>Export flow field to file</h2>
 
-Exports the "flow field" to a set of .nrrd files. Voxel values are in m/s.
+Exports the "flow field" to a set of .nrrd files. Make sure a "Flow field" is selected at the top of the module,
+select an output directory, and click "Export".
+
+Voxel values are in m/s.
 The file does not contain any patient information.
+
+<p>
 
 If the file is read back into Slicer as a transform, invert the transform after reading it,
 to make sure the transform is used as "transform to parent"
