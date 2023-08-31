@@ -81,6 +81,7 @@ add_subdirectory(ValveBatchExport)
 add_subdirectory(LeafletMoldGenerator)
 add_subdirectory(ValveSegmentation)
 add_subdirectory(LeafletAnalysis)
+add_subdirectory(FluoroSimulator)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
