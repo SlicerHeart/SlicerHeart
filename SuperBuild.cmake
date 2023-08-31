@@ -28,6 +28,12 @@ if (SlicerHeart_BUILD_ITK_FILTERS)
     )
 endif()
 
+# Provide a mechanism to disable/enable one or more modules.
+mark_as_superbuild(
+  SlicerHeart_MODULES_DISABLED:STRING
+  SlicerHeart_MODULES_ENABLED:STRING
+  )
+
 ExternalProject_Include_Dependencies(${proj}
   PROJECT_VAR proj
   SUPERBUILD_VAR ${EXTENSION_NAME}_SUPERBUILD
