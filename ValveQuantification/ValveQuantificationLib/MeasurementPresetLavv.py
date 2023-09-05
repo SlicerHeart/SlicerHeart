@@ -34,6 +34,8 @@ class MeasurementPresetLavv(MeasurementPreset):
 
     planePosition, planeNormal = valveModel.getAnnulusContourPlane()
 
+    # Annulus area measurements
+    self.addAnnulusAreaMeasurements(valveModel, planePosition, planeNormal)
     self.addAnnulusHeightMeasurements(valveModel, planePosition, planeNormal)
 
     self.addSegmentedLeafletMeasurements(valveModel, planePosition, planeNormal)
