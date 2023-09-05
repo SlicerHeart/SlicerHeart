@@ -211,7 +211,13 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     self._volumePropertyParameterNames = ['threshold', 'edgeSmoothing']
 
     # Shader replacement is slightly differs between VTK8/VTK9
-    self.computeColorReplacement = self.ComputeColorReplacementVTK9 if vtk.vtkVersion().GetVTKMajorVersion() >= 9 else self.ComputeColorReplacementVTK8
+    vtkVersion = vtk.VTK_MAJOR_VERSION * 100 + vtk.VTK_MINOR_VERSION
+    if vtkVersion < 900: # VTK 8.x
+      self.computeColorReplacement = self.ComputeColorReplacementVTK8
+    elif vtkVersion < 902:  # VTK 9.0-9.1
+      self.computeColorReplacement = self.ComputeColorReplacementVTK900
+    else:  # VTK >= 9.2
+      self.computeColorReplacement = self.ComputeColorReplacementVTK902
 
   def sequenceFromVolume(self, proxyNode):
     if not proxyNode:
@@ -631,8 +637,6 @@ vec3 hsv2rgb(vec3 c)
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
-uniform sampler2D in_colorTransferFunc_0[1];
-
 vec4 computeColor(vec4 scalar, float opacity)
 {
     // Get base color from color transfer function (defines darkening of transparent voxels and neutral color)
@@ -668,12 +672,18 @@ vec4 computeColor(vec4 scalar, float opacity)
     vec4 color = vec4(rgbDepthModulated, opacity);
 """
 
-  ComputeColorReplacementVTK8 = ComputeColorReplacementCommon + """
+  ComputeColorReplacementVTK8 = "uniform sampler2D in_colorTransferFunc_0[1];\n" + ComputeColorReplacementCommon + """
     return computeLighting(color, 0);
 }
 """
 
-  ComputeColorReplacementVTK9 = ComputeColorReplacementCommon + """
+  ComputeColorReplacementVTK900 = "uniform sampler2D in_colorTransferFunc_0[1];\n" + ComputeColorReplacementCommon + """
+    return computeLighting(color, 0, 0.0);
+}
+"""
+
+  # in_colorTransferFunc_0 is already included in VTK>=9.2
+  ComputeColorReplacementVTK902 = ComputeColorReplacementCommon + """
     return computeLighting(color, 0, 0.0);
 }
 """
