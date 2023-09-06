@@ -119,7 +119,10 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNodeGuiTag = None
         self._updatingGUIFromParameterNode = False
         # Dict that maps from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet.
-        # volumeNodeSet contains 'name' (displayable name of the node set) and 'volumeNodes' (list of 4 nodes: x, y, z, magnitude)
+        # volumeNodeSet contains:
+        #   - 'name': displayable name of the node set
+        #   - 'componentVolumeNodes': list of 3 volume nodes (x, y, z component)
+        #   - 'magnitudeVolumeNode' magnitude volume node
         self._volumeNodesSets = {}
 
     def setup(self) -> None:
@@ -228,7 +231,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             # Note: in the .ui file, a Qt dynamic property called "SlicerParameterName" is set on each
             # ui element that needs connection.
             self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
-            self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode) 
+            self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
             self.updateGUIFromParameterNode()
 
     def updateGUIFromParameterNode(self, caller=None, event=None):
@@ -246,7 +249,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Update node selectors and sliders
         self.ui.inputVolumeNodeSetSelector.setCurrentIndex(
             self.ui.inputVolumeNodeSetSelector.findData(self._parameterNode.inputVolumeNodeSet))
-        
+
         # Update apply button state and tooltip
         if self._parameterNode and self._parameterNode.inputVolumeNodeSet:
             self.ui.convertButton.toolTip = "Convert input flow image to flow field"
@@ -267,7 +270,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
         # All the GUI updates are done
-        self._updatingGUIFromParameterNode = False 
+        self._updatingGUIFromParameterNode = False
 
 
     def updateParameterNodeFromGUI(self, caller=None, event=None):
@@ -282,7 +285,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Modify all properties in a single batch
         with slicer.util.NodeModify(self._parameterNode):
             volumeNodeSet = self.ui.inputVolumeNodeSetSelector.currentData
-            self._parameterNode.inputVolumeNodeSet = volumeNodeSet if volumeNodeSet else ""            
+            self._parameterNode.inputVolumeNodeSet = volumeNodeSet if volumeNodeSet else ""
             self._parameterNode.exportDirectory = self.ui.exportPathLineEdit.currentPath
             #self._parameterNode.ComponentToExtract = self.ui.componentsSpinBox.value
 
@@ -303,8 +306,10 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onConvertButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to convert image to flow field.", waitCursor=True):
 
-            gridTransformNode, magnitudeVolumeNode = self.logic.convertImagesToDisplacementField(
-                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['volumeNodes'],
+            magnitudeVolumeNode = self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['magnitudeVolumeNode']
+            gridTransformNode = self.logic.convertImagesToDisplacementField(
+                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['componentVolumeNodes'],
+                magnitudeVolumeNode,
                 self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['venc'],
                 self._parameterNode.outputTransform)
 
@@ -332,7 +337,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.outputTransform.GetNodeReference("magnitudeVolume"),
                 self._parameterNode.samplingDistance,
                 self._parameterNode.outputSpeedProfileModel)
-            
+
             if not self._parameterNode.outputSpeedProfileModel:
                 self._parameterNode.outputSpeedProfileModel = outputModel
 
@@ -369,12 +374,21 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     def getParameterNode(self):
         return Import4DFlowParameterNode(super().getParameterNode())
 
+    def _getNumberOfDataNodesInSequence(self, proxyVolumeNode):
+        volumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(proxyVolumeNode)
+        if not volumeSequenceBrowserNode:
+            # not a proxy node of a sequence
+            return 1
+        volumeSequenceNode = volumeSequenceBrowserNode.GetSequenceNode(proxyVolumeNode)
+        return volumeSequenceNode.GetNumberOfDataNodes()
+
     def findVolumeNodeSets(self):
         # Map from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet:
         # {
         #   'name': 'Patient Name (study date) / 1',
-        #   'volumeNodes': [volumeNodeX, volumeNodeY, volumeNodeZ, volumeNodeMagnitude],
-        #   'venc': [150, 150, 150, 0]  # velocity encoding, in cm/sec
+        #   'componentVolumeNodes': [volumeNodeX, volumeNodeY, volumeNodeZ],
+        #   'magnitudeVolumeNode': volumeNodeMagnitude,
+        #   'venc': [150, 150, 150]  # velocity encoding, in cm/sec
         # }
         volumeNodesSets = {}
 
@@ -387,27 +401,32 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 instUidsStr = volumeNode.GetAttribute("DICOM.instanceUIDs")
                 if not instUidsStr:
                     # not loaded from DICOM
+                    logging.debug(f"{volumeNode.GetName()} has no DICOM.instanceUIDs - skip")
                     continue
                 instUids = instUidsStr.split()
                 filename = slicer.dicomDatabase.fileForInstance(instUids[0])
                 ds = pydicom.read_file(filename)
                 if (0x0051,0x1014) in ds:
                     # flow vector component image
+                    logging.debug(f"Found a flow vector component image: {volumeNode.GetName()}")
                     # The tag contains speed and direction, for example:
                     # 'v150_through', 'v150_inplane_ap', 'v150_inplane_fh'
                     speedAndDirectionCode = ds[0x0051,0x1014].value.decode().strip()
                     vencInput, directionCodeInput = speedAndDirectionCode.split('_', 1)
                     venc = float(vencInput[1:])
                     directionCode = directionCodeInput.strip()
-                elif ("SequenceName" in ds) and (ds["SequenceName"].value == 'WIP_fl3d1r2'):
+                elif ("SequenceName" in ds) and ('fl3d' in ds["SequenceName"].value):  # 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
                     # magnitude image
+                    logging.debug(f"Found a magnitude image: {volumeNode.GetName()}")
                     directionCode = 'magnitude'
                     venc = 0
                 else:
                     # something else
+                    logging.debug(f"Unknown image: {volumeNode.GetName()} - skip")
                     continue
             except Exception as e:
                 # error accessing DICOM fields
+                logging.debug(f"Error while processing image: {volumeNode.GetName()} - skip")
                 print(traceback.format_exc())
                 continue
 
@@ -418,33 +437,67 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 acquisitionNumberSuffix =  f" / {acquisitionNumber}" if acquisitionNumber > 1 else ""
                 volumeNodeSet = {
                     'name': f"{ds.PatientName.family_comma_given()} ({ds.StudyDate}){acquisitionNumberSuffix}",
-                    'volumeNodes': [None, None, None, None],  # x, y, z, magnitude
-                    'venc': [None, None, None, 0]  # velocity encoding, in cm/sec (not applicable to magnitude image)
+                    'componentVolumeNodes': [None, None, None],  # x, y, z
+                    'magnitudeVolumeNode': None,
+                    'candidateMagnitudeVolumeNodes': [],  # temporary list used only during inspection, as there may be several candidates in the study
+                    'venc': [None, None, None]  # velocity encoding, in cm/sec
                     }
                 volumeNodesSets[acquisitionID] = volumeNodeSet
 
-            volumeNodesSets[acquisitionID]['volumeNodes'][self.axisForDirectionCode[directionCode]] = volumeNode
-            volumeNodesSets[acquisitionID]['venc'][self.axisForDirectionCode[directionCode]] = venc
+            if directionCode == 'magnitude':
+                volumeNodesSets[acquisitionID]['candidateMagnitudeVolumeNodes'].append(volumeNode)
+            else:
+                volumeNodesSets[acquisitionID]['componentVolumeNodes'][self.axisForDirectionCode[directionCode]] = volumeNode
+                volumeNodesSets[acquisitionID]['venc'][self.axisForDirectionCode[directionCode]] = venc
 
         validatedVolumeNodeSets = {}
         for volumeNodesSet in volumeNodesSets:
-            volumeNodes = volumeNodesSets[volumeNodesSet]['volumeNodes']
+            volumeNodes = volumeNodesSets[volumeNodesSet]['componentVolumeNodes']
             valid = True
+            numberOfFrames = None
+
+            # Check component volumes
             for axis in range(len(volumeNodes)):
                 if not volumeNodes[axis]:
-                    logging.info(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: missing component ({axis})")
+                    logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: missing component ({axis})")
                     valid = False
                     break
-            if valid:
-                validatedVolumeNodeSets[volumeNodesSet] = volumeNodesSets[volumeNodesSet]
+                if numberOfFrames is None:
+                    numberOfFrames = self._getNumberOfDataNodesInSequence(volumeNodes[axis])
+                else:
+                    currentNumberOfFrames = self._getNumberOfDataNodesInSequence(volumeNodes[axis])
+                    if currentNumberOfFrames != numberOfFrames:
+                        logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
+                        valid = False
+                        break
+            if not valid:
+                continue
+
+            # Check/select magnitude volume
+            volumeNodes = volumeNodesSets[volumeNodesSet]['candidateMagnitudeVolumeNodes']
+            for volumeNode in volumeNodes:
+                currentNumberOfFrames = self._getNumberOfDataNodesInSequence(volumeNode)
+                if currentNumberOfFrames != numberOfFrames:
+                    logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']}: candidate magnitude volume {volumeNode.GetName()} discarded due to inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
+                    continue
+                # Found a good candidate magnitude volume, use it
+                volumeNodesSets[volumeNodesSet]['magnitudeVolumeNode'] = volumeNode
+                break
+
+            if not volumeNodesSets[volumeNodesSet]['magnitudeVolumeNode']:
+                logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: magnitude volume is not found")
+                continue
+
+            validatedVolumeNodeSets[volumeNodesSet] = volumeNodesSets[volumeNodesSet]
 
         return validatedVolumeNodeSets
 
-    def convertImagesToDisplacementField(self, volumeNodes: list, venc: list, gridTransformNode: vtkMRMLTransformNode = None) -> [vtkMRMLTransformNode, vtkMRMLScalarVolumeNode]:
+    def convertImagesToDisplacementField(self, componentVolumeNodes: list, magnitudeVolumeNode: vtkMRMLScalarVolumeNode, venc: list, gridTransformNode: vtkMRMLTransformNode = None) -> [vtkMRMLTransformNode, vtkMRMLScalarVolumeNode]:
         volumeSequenceBrowserNodes = []
         volumeSequenceNodes = []
-        for axis in range(len(volumeNodes)):
-            volumeSequenceProxyNode = volumeNodes[axis]
+        volumeNodes = componentVolumeNodes + [magnitudeVolumeNode]
+        print(volumeNodes)
+        for axis, volumeSequenceProxyNode in enumerate(volumeNodes):
             if not volumeSequenceProxyNode:
                 raise RuntimeError(f"Volume ({axis}) is invalid")
             volumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(volumeSequenceProxyNode)
@@ -493,9 +546,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         # LPS to RAS conversion
         directions = [-1, -1, 1]
 
-
         for volumeIndex in range(numberOfFrames):
-            # volumeIndex = 7
             magnitudeVoxelArray = slicer.util.arrayFromVolume(magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)).copy()
             for axis in range(3):
                 volumeSequenceNode = volumeSequenceNodes[axis]
@@ -524,8 +575,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         slicer.modules.sequences.logic().UpdateAllProxyNodes()
         gridTransformNode = transformSequenceBrowserNode.GetProxyNode(transformSequenceNode)
-
-        magnitudeVolumeNode = volumeNodes[self.axisForDirectionCode['magnitude']]
 
         # Place transform in the same subject hierarchy folder as the volume node
         shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -585,7 +634,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             slicer.mrmlScene.RemoveNode(volumeNodes[axisIndex])
             slicer.mrmlScene.RemoveNode(volumeSequenceBrowserNodes[axisIndex])
 
-        return gridTransformNode, magnitudeVolumeNode
+        return gridTransformNode
 
     def exportDisplacementFieldToFiles(self,
                                        gridTransformNode: vtkMRMLTransformNode,
@@ -607,7 +656,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
             exportedFile = f"{exportDirectory}/transform_{itemNumber:02d}.nrrd"
             slicer.util.exportNode(gridTransformNode, exportedFile)
-          
+
             # Patch the written file
             readdata, header = nrrd.read(exportedFile)
             # remove intent code (used by nifti)
