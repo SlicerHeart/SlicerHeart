@@ -38,6 +38,11 @@ class MeasurementPresetLavv(MeasurementPreset):
     self.addAnnulusAreaMeasurements(valveModel, planePosition, planeNormal)
     self.addAnnulusHeightMeasurements(valveModel, planePosition, planeNormal)
 
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'PMC', valveModel, 'ALC', oriented=True, positiveDirection_valveModel1=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'ALC', valveModel, 'SIC', oriented=True, positiveDirection_valveModel1=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'SIC', valveModel, 'PMC', oriented=True, positiveDirection_valveModel1=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurve, 'ALC', valveModel, 'PMC', oriented=True, positiveDirection_valveModel1=planeNormal))
+
     self.addSegmentedLeafletMeasurements(valveModel, planePosition, planeNormal)
 
     self.addCoaptationMeasurements(valveModel)
