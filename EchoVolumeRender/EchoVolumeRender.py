@@ -411,6 +411,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       gpuVolumeRenderingDisplayNode.SetFollowVolumeDisplayNode(volumeRenderingDisplayNode.GetFollowVolumeDisplayNode())
       gpuVolumeRenderingDisplayNode.SetIgnoreVolumeDisplayNodeThreshold(volumeRenderingDisplayNode.GetIgnoreVolumeDisplayNodeThreshold())
       gpuVolumeRenderingDisplayNode.SetUseSingleVolumeProperty(volumeRenderingDisplayNode.GetUseSingleVolumeProperty())
+      volumeNode.AddAndObserveDisplayNodeID(gpuVolumeRenderingDisplayNode.GetID())
       slicer.modules.volumerendering.logic().UpdateDisplayNodeFromVolumeNode(gpuVolumeRenderingDisplayNode, volumeNode)
       slicer.mrmlScene.RemoveNode(volumeRenderingDisplayNode)
       volumeRenderingDisplayNode = gpuVolumeRenderingDisplayNode
