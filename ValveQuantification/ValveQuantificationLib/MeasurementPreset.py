@@ -595,6 +595,10 @@ class MeasurementPreset(object):
       if not surfaceModelNode.GetPolyData():
         valveModel.updateCoaptationModels()
 
+      if not surfaceModelNode.GetPolyData():
+        self.metricsMessages.append("No coaptation model found. Skipping.")
+        continue
+
       self.addSurfaceAreaMeasurements("{} area (3D)".format(namePrefix),
                                       surfaceModelNode.GetPolyData(), valveModel)
 
