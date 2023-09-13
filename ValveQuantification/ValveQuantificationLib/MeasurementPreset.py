@@ -1656,6 +1656,16 @@ class MeasurementPreset(object):
       )
 
     if not allLeafletSurfacePolyData:
+      logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()}.')
+
+    while allLeafletSurfacePolyData is None and kernelSizeMm < 5.0:
+      kernelSizeMm += 0.5
+      logging.warning(f'Retrying with increased kernel size {kernelSizeMm}.')
+      allLeafletSurfacePolyData = valveModel.createValveSurface(
+        planePosition, planeNormal, kernelSizeMm, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
+      )
+
+    if not allLeafletSurfacePolyData:
       logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()}')
       return
 

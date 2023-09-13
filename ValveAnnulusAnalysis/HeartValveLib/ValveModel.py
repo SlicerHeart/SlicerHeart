@@ -1260,6 +1260,8 @@ class ValveModel:
       # Apply smoothing to make sure leaflets are closed
       self.smoothSegment(self.getLeafletSegmentationNode(), allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
 
+      allLeafletsNumPoints = segmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId).GetNumberOfPoints()
+
       # Temporary node, we don't add it to the scene
       allLeafletsSurfaceModelNode = slicer.vtkMRMLModelNode()
       allLeafletsSurfaceBoundaryMarkupNode = slicer.vtkMRMLMarkupsFiducialNode()
@@ -1279,7 +1281,7 @@ class ValveModel:
       # Delete temporary segment
       segmentationNode.RemoveSegment(allLeafletsSegId)
 
-      return allLeafletsSurfacePolyData
+      return allLeafletsSurfacePolyData if allLeafletsNumPoints != allLeafletsSurfacePolyData.GetNumberOfPoints() else None
 
     @staticmethod
     def setGlyphSize(markupsDisplayNode, glyphSize):
