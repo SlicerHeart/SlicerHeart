@@ -847,7 +847,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     meanRegionPoint = np.zeros(3)
     for v in range(chordGridResolutionV):
       rowUOffset = -regionGridStep / 4 if v % 2 else regionGridStep / 4  # Alternating offset within grid cell for each row
-      logging.error(f'ZZZ rowUOffset: {rowUOffset}')
+      rowUOffset[1] = 0  # We only want offset in the U direction
       for u in range(chordGridResolutionU):
         regionGridPos = np.round(regionGridStart + rowUOffset + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
         pos = np.zeros(3)
