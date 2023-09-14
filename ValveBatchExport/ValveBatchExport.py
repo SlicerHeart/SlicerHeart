@@ -86,7 +86,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     logging.debug("Reloading ValveBatchExport")
 
     packageName='ValveBatchExportRules'
-    submoduleNames = ['AnnulusContourCoordinates', 'AnnulusContourModel', 'LeafletSegmentation',
+    submoduleNames = ['base', 'AnnulusContourCoordinates', 'AnnulusContourModel', 'LeafletSegmentation',
                       'PapillaryAnalysisResults', 'QuantificationResults', 'ValveLandmarkCoordinates',
                       'ValveLandmarkLabels', 'ValveLandmarks', 'ValveVolume', 'VolumeFrame']
     import imp
@@ -217,7 +217,13 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.ui.statusLabel.plainText = ''
     ValveBatchExportRule.setPhasesToExport(self.getCheckedPhases())
     ValveBatchExportRule.setValveTypesToExport(self.getCheckedValveTypes())
-    ValveBatchExportRule.setCreateIntermediateValves(self.ui.createHeartValvesCheckBox.checked)
+    ValveBatchExportRule.setCreateIntermediateValves(
+      self.ui.intermediateRadioButton.checked if self.ui.createValvesGroupBox.checked else False
+    )
+    ValveBatchExportRule.setCreateValvesForWholeSequence(
+      self.ui.wholeSequenceRadioButton.checked if self.ui.createValvesGroupBox.checked else False
+    )
+
     self.logic.clearRules()
     for registeredPlugin in registered_export_plugins.values():
       if registeredPlugin.activated:

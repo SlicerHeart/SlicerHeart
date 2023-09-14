@@ -56,7 +56,11 @@ class ValveVolumeFrameExportRule(ValveBatchExportRule):
           self.addLog(f"  Valve volume export skipped (file writing failed) - {valveModelName}")
         slicer.mrmlScene.RemoveNode(storageNode)
       else:  # save specific frame of the current valve model
-        ext = ".nrrd" # ".nii.gz"
+        extensions = [
+          ".nrrd",
+          ".nii.gz"
+        ]
+        ext = extensions[1]
         frameNumber = self.getAssociatedFrameNumber(valveModel)
         self.setSequenceFrameNumber(valveModel, frameNumber)
         valveModelName = \

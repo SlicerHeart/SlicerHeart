@@ -75,6 +75,7 @@ class ValveBatchExportRule(object):
   EXPORT_PHASES = []        # empty means all phases will be exported
   EXPORT_VALVE_TYPES = []   # empty means all valve types will be exported
   CREATE_INTERMEDIATE_VALVES = False
+  CREATE_WHOLE_SEQUENCE_VALVES = False
   OUTPUT_CSV_FILES = []
 
   CMD_FLAG = None  # Necessary when running export via python script
@@ -124,6 +125,11 @@ class ValveBatchExportRule(object):
   def setCreateIntermediateValves(cls, enabled):
     logging.debug(f"Set creation of intermediate heart valves to {enabled}")
     cls.CREATE_INTERMEDIATE_VALVES = enabled
+
+  @classmethod
+  def setCreateValvesForWholeSequence(cls, enabled):
+    logging.debug(f"Set creation of heart valves for the whole sequence to {enabled}")
+    cls.CREATE_WHOLE_SEQUENCE_VALVES = enabled
 
   @staticmethod
   def getTableNode(measurementNode, identifier):
@@ -208,6 +214,8 @@ class ValveBatchExportRule(object):
     if self.EXPORT_VALVE_TYPES:
       valveModels = list(filter(lambda vm: vm.getValveType() in self.EXPORT_VALVE_TYPES, valveModels))
 
+    from HeartValveLib.helpers import createNewHeartValveNode, getFirstValveModelNodeMatchingSequenceIndexAndValveType
+
     if self.CREATE_INTERMEDIATE_VALVES:
       newValves = []
       for valveType in set([vm.getValveType() for vm in valveModels]):
@@ -215,10 +223,28 @@ class ValveBatchExportRule(object):
         frameIndices = sorted([vm.getValveVolumeSequenceIndex() for vm in matchingValves])
         for frameIdx in range(min(frameIndices), max(frameIndices)):
           if not frameIdx in frameIndices:
-            from HeartValveLib.helpers import createNewHeartValveNode
             newValves.append(createNewHeartValveNode(matchingValves[0], frameIdx))
       valveModels.extend(newValves)
+    elif self.CREATE_WHOLE_SEQUENCE_VALVES:
+      newValves = []
+      for valveType in set([vm.getValveType() for vm in valveModels]):
+        matchingValves = list(filter(lambda vm: vm.getValveType() == valveType, valveModels))
+        sequenceBrowser = None
+        from HeartValveLib import getSequenceBrowserNodeForMasterOutputNode
+        for valveModel in matchingValves:
+          sequenceBrowser = getSequenceBrowserNodeForMasterOutputNode(valveModel.getValveVolumeNode())
+          if sequenceBrowser:
+            break
 
+        if sequenceBrowser:
+          masterSequenceNode = sequenceBrowser.GetMasterSequenceNode()
+          for frameIdx in range(masterSequenceNode.GetNumberOfDataNodes()):
+            try:
+              getFirstValveModelNodeMatchingSequenceIndexAndValveType(frameIdx, valveType)
+            except ValueError:
+              newValves.append(createNewHeartValveNode(matchingValves[0], frameIdx))
+
+      valveModels.extend(newValves)
     return valveModels
 
   def addLog(self, text=None):

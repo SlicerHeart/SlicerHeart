@@ -36,7 +36,11 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
         self.addLog(f"  Segmentation export skipped (empty segmentation) - {valveModelName}")
         continue
 
-      ext = ".nrrd" # ".nii.gz"
+      extensions = [
+        ".nrrd",
+        ".nii.gz"
+      ]
+      ext = extensions[1]
 
       self._saveSegmentsIntoSeparateFiles(valveModel, valveModelName, ext)
 

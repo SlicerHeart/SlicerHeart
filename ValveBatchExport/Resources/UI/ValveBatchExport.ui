@@ -7,89 +7,13 @@
     <x>0</x>
     <y>0</y>
     <width>412</width>
-    <height>393</height>
+    <height>443</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_2">
-   <item row="4" column="0" colspan="3">
-    <widget class="QGroupBox" name="valveTypeSelectionWidget">
-     <property name="title">
-      <string>Valve Types (if available)</string>
-     </property>
-     <layout class="QGridLayout" name="gridLayout_4"/>
-    </widget>
-   </item>
-   <item row="11" column="0" colspan="4">
-    <widget class="QPushButton" name="exportButton">
-     <property name="toolTip">
-      <string>Iterate through all the scene files in the input directory and write results to the output directory</string>
-     </property>
-     <property name="text">
-      <string>Start Export</string>
-     </property>
-    </widget>
-   </item>
-   <item row="1" column="1" colspan="3">
-    <widget class="ctkPathLineEdit" name="outputDirSelector">
-     <property name="toolTip">
-      <string>Directory that will contain exported data.</string>
-     </property>
-     <property name="filters">
-      <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
-     </property>
-     <property name="settingKey">
-      <string>ValveBatchExportOutputDir</string>
-     </property>
-    </widget>
-   </item>
-   <item row="9" column="2">
-    <widget class="QPushButton" name="minProcessesButton">
-     <property name="toolTip">
-      <string>Minimum number of processes</string>
-     </property>
-     <property name="text">
-      <string>min</string>
-     </property>
-    </widget>
-   </item>
-   <item row="5" column="3">
-    <widget class="QCheckBox" name="createHeartValvesCheckBox">
-     <property name="toolTip">
-      <string>If checked, sequence frames that don't have a heart valve assigned, will receive a new heart valve. 
-
-Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediate frame (5 to 16) a new heart valve will be created and added to the export. </string>
-     </property>
-     <property name="text">
-      <string>Intermediate valves</string>
-     </property>
-    </widget>
-   </item>
-   <item row="9" column="3">
-    <widget class="QPushButton" name="maxProcessesButton">
-     <property name="toolTip">
-      <string>Maximum number of processes</string>
-     </property>
-     <property name="text">
-      <string>max</string>
-     </property>
-    </widget>
-   </item>
-   <item row="0" column="1" colspan="3">
-    <widget class="ctkPathLineEdit" name="inputDirSelector">
-     <property name="toolTip">
-      <string>Directory containing scene (.mrb) files with heart valves.</string>
-     </property>
-     <property name="filters">
-      <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
-     </property>
-     <property name="settingKey">
-      <string>ValveBatchExportInputDir</string>
-     </property>
-    </widget>
-   </item>
    <item row="4" column="3">
     <widget class="QGroupBox" name="phaseSelectionWidget">
      <property name="minimumSize">
@@ -120,24 +44,10 @@ Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediat
      </layout>
     </widget>
    </item>
-   <item row="1" column="0">
-    <widget class="QLabel" name="label_2">
-     <property name="text">
-      <string>Output directory:</string>
-     </property>
-    </widget>
-   </item>
-   <item row="6" column="3">
-    <widget class="QPushButton" name="phaseSelectionButton">
-     <property name="text">
-      <string>Select/Deselect All</string>
-     </property>
-    </widget>
-   </item>
-   <item row="0" column="0">
-    <widget class="QLabel" name="label">
-     <property name="text">
-      <string>Input directory:</string>
+   <item row="9" column="1">
+    <widget class="QSpinBox" name="parallelProcessesSpinBox">
+     <property name="minimum">
+      <number>1</number>
      </property>
     </widget>
    </item>
@@ -156,26 +66,6 @@ Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediat
      <layout class="QFormLayout" name="formLayout_2"/>
     </widget>
    </item>
-   <item row="9" column="1">
-    <widget class="QSpinBox" name="parallelProcessesSpinBox">
-     <property name="minimum">
-      <number>1</number>
-     </property>
-    </widget>
-   </item>
-   <item row="8" column="0" colspan="4">
-    <widget class="Line" name="line">
-     <property name="minimumSize">
-      <size>
-       <width>0</width>
-       <height>0</height>
-      </size>
-     </property>
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-    </widget>
-   </item>
    <item row="13" column="0" colspan="4">
     <widget class="QProgressBar" name="progressbar">
      <property name="maximum">
@@ -192,6 +82,129 @@ Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediat
      </property>
     </widget>
    </item>
+   <item row="1" column="1" colspan="3">
+    <widget class="ctkPathLineEdit" name="outputDirSelector">
+     <property name="toolTip">
+      <string>Directory that will contain exported data.</string>
+     </property>
+     <property name="filters">
+      <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
+     </property>
+     <property name="settingKey">
+      <string>ValveBatchExportOutputDir</string>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="3">
+    <widget class="QPushButton" name="phaseSelectionButton">
+     <property name="text">
+      <string>Select/Deselect All</string>
+     </property>
+    </widget>
+   </item>
+   <item row="8" column="0" colspan="4">
+    <widget class="Line" name="line">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>0</height>
+      </size>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="0">
+    <widget class="QLabel" name="label">
+     <property name="text">
+      <string>Input directory:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="12" column="0" colspan="4">
+    <widget class="QPlainTextEdit" name="statusLabel"/>
+   </item>
+   <item row="9" column="3">
+    <widget class="QPushButton" name="maxProcessesButton">
+     <property name="toolTip">
+      <string>Maximum number of processes</string>
+     </property>
+     <property name="text">
+      <string>max</string>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="3">
+    <widget class="QGroupBox" name="createValvesGroupBox">
+     <property name="title">
+      <string>Create Valves</string>
+     </property>
+     <property name="checkable">
+      <bool>true</bool>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout">
+      <item>
+       <widget class="QRadioButton" name="intermediateRadioButton">
+        <property name="toolTip">
+         <string>If checked, sequence frames that don't have a heart valve assigned, will receive a new heart valve. 
+
+Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediate frame (5 to 16) a new heart valve will be created and added to the export. </string>
+        </property>
+        <property name="text">
+         <string>Intermediate</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <attribute name="buttonGroup">
+         <string notr="true">buttonGroup</string>
+        </attribute>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="wholeSequenceRadioButton">
+        <property name="text">
+         <string>Whole Sequence</string>
+        </property>
+        <attribute name="buttonGroup">
+         <string notr="true">buttonGroup</string>
+        </attribute>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="1" column="0">
+    <widget class="QLabel" name="label_2">
+     <property name="text">
+      <string>Output directory:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="11" column="0" colspan="4">
+    <widget class="QPushButton" name="exportButton">
+     <property name="toolTip">
+      <string>Iterate through all the scene files in the input directory and write results to the output directory</string>
+     </property>
+     <property name="text">
+      <string>Start Export</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1" colspan="3">
+    <widget class="ctkPathLineEdit" name="inputDirSelector">
+     <property name="toolTip">
+      <string>Directory containing scene (.mrb) files with heart valves.</string>
+     </property>
+     <property name="filters">
+      <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
+     </property>
+     <property name="settingKey">
+      <string>ValveBatchExportInputDir</string>
+     </property>
+    </widget>
+   </item>
    <item row="9" column="0">
     <widget class="QLabel" name="label_3">
      <property name="text">
@@ -199,8 +212,23 @@ Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediat
      </property>
     </widget>
    </item>
-   <item row="12" column="0" colspan="4">
-    <widget class="QPlainTextEdit" name="statusLabel"/>
+   <item row="9" column="2">
+    <widget class="QPushButton" name="minProcessesButton">
+     <property name="toolTip">
+      <string>Minimum number of processes</string>
+     </property>
+     <property name="text">
+      <string>min</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="0" colspan="3">
+    <widget class="QGroupBox" name="valveTypeSelectionWidget">
+     <property name="title">
+      <string>Valve Types (if available)</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_4"/>
+    </widget>
    </item>
   </layout>
  </widget>
@@ -219,4 +247,7 @@ Example: frame 4 and frame 17 have a heart valve assigned.  For each intermediat
  </customwidgets>
  <resources/>
  <connections/>
+ <buttongroups>
+  <buttongroup name="buttonGroup"/>
+ </buttongroups>
 </ui>
