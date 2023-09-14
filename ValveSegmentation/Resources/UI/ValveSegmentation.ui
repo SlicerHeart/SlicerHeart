@@ -6,26 +6,26 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>402</width>
-    <height>661</height>
+    <width>475</width>
+    <height>658</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Heart valve:</string>
+      <string>Valve series:</string>
      </property>
     </widget>
    </item>
    <item row="0" column="1">
-    <widget class="qMRMLNodeComboBox" name="heartValveSelector">
+    <widget class="qMRMLNodeComboBox" name="heartValveBrowserSelector">
      <property name="toolTip">
       <string>Select heart valve node that will be segmented</string>
      </property>
      <property name="nodeTypes">
       <stringlist>
-       <string>vtkMRMLScriptedModuleNode</string>
+       <string>vtkMRMLSequenceBrowserNode</string>
       </stringlist>
      </property>
      <property name="showHidden">
@@ -35,7 +35,7 @@
       <bool>false</bool>
      </property>
      <property name="baseName">
-      <string>HeartValve</string>
+      <string/>
      </property>
      <property name="addEnabled">
       <bool>false</bool>
@@ -55,56 +55,7 @@
      </property>
     </widget>
    </item>
-   <item row="1" column="1">
-    <layout class="QHBoxLayout" name="horizontalLayout_3">
-     <item>
-      <widget class="qMRMLNodeComboBox" name="valveVolumeSelector">
-       <property name="enabled">
-        <bool>false</bool>
-       </property>
-       <property name="toolTip">
-        <string>Segmented heart valve volume. Selection cannot be changed in this module.</string>
-       </property>
-       <property name="nodeTypes">
-        <stringlist>
-         <string>vtkMRMLScalarVolumeNode</string>
-        </stringlist>
-       </property>
-       <property name="showChildNodeTypes">
-        <bool>false</bool>
-       </property>
-       <property name="addEnabled">
-        <bool>false</bool>
-       </property>
-       <property name="renameEnabled">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="label_10">
-       <property name="text">
-        <string>  Index:</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="valveVolumeSequenceIndexValue">
-       <property name="text">
-        <string>0</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="showSegmentedVolumeButton">
-       <property name="text">
-        <string>Show</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item row="2" column="0" colspan="2">
+   <item row="6" column="0" colspan="2">
     <widget class="ctkCheckablePushButton" name="hideSlicerHeartDataButton">
      <property name="toolTip">
       <string>Only display data from the currently selected valve. Check for automatically hiding data upon selection.</string>
@@ -120,7 +71,7 @@
      </property>
     </widget>
    </item>
-   <item row="3" column="0" colspan="2">
+   <item row="7" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
      <property name="text">
       <string>Valve region</string>
@@ -282,7 +233,7 @@
      </layout>
     </widget>
    </item>
-   <item row="6" column="0" colspan="2">
+   <item row="10" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="segmentationEditingCollapsibleButton">
      <property name="text">
       <string>Leaflet segmentation</string>
@@ -296,7 +247,7 @@
         <property name="segmentationNodeSelectorVisible">
          <bool>false</bool>
         </property>
-        <property name="masterVolumeNodeSelectorVisible">
+        <property name="sourceVolumeNodeSelectorVisible">
          <bool>true</bool>
         </property>
        </widget>
@@ -304,7 +255,7 @@
      </layout>
     </widget>
    </item>
-   <item row="9" column="0" colspan="2">
+   <item row="13" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="displaySettingsCollapsibleButton">
      <property name="text">
       <string>Display</string>
@@ -374,26 +325,100 @@
      </layout>
     </widget>
    </item>
+   <item row="3" column="1">
+    <widget class="qMRMLSequenceBrowserPlayWidget" name="heartValveBrowserPlayWidget">
+     <property name="RecordingControlsVisible">
+      <bool>false</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <layout class="QHBoxLayout" name="horizontalLayout_8">
+     <item>
+      <widget class="qMRMLSequenceBrowserSeekWidget" name="heartValveBrowserSeekWidget"/>
+     </item>
+     <item>
+      <widget class="QLabel" name="label_11">
+       <property name="text">
+        <string>Volume index:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="valveVolumeSequenceIndexValue">
+       <property name="text">
+        <string>0</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="goToAnalyzedFrameButton">
+       <property name="text">
+        <string>Go to</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="label_13">
+     <property name="text">
+      <string>Time points:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="1">
+    <widget class="qMRMLNodeComboBox" name="valveVolumeSelector">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="toolTip">
+      <string>Segmented heart valve volume. Selection cannot be changed in this module.</string>
+     </property>
+     <property name="nodeTypes">
+      <stringlist>
+       <string>vtkMRMLScalarVolumeNode</string>
+      </stringlist>
+     </property>
+     <property name="showChildNodeTypes">
+      <bool>false</bool>
+     </property>
+     <property name="addEnabled">
+      <bool>false</bool>
+     </property>
+     <property name="renameEnabled">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="1">
+    <layout class="QHBoxLayout" name="horizontalLayout_7">
+     <item>
+      <widget class="QPushButton" name="addTimePointButton">
+       <property name="text">
+        <string>Add</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="removeTimePointButton">
+       <property name="text">
+        <string>Remove</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="5" column="0">
+    <widget class="QLabel" name="label_14">
+     <property name="text">
+      <string>Segmentation:</string>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <customwidgets>
-  <customwidget>
-   <class>qMRMLNodeComboBox</class>
-   <extends>QWidget</extends>
-   <header>qMRMLNodeComboBox.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLWidget</class>
-   <extends>QWidget</extends>
-   <header>qMRMLWidget.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSegmentEditorWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSegmentEditorWidget.h</header>
-  </customwidget>
   <customwidget>
    <class>ctkCheckablePushButton</class>
    <extends>ctkPushButton</extends>
@@ -414,6 +439,33 @@
    <class>ctkSliderWidget</class>
    <extends>QWidget</extends>
    <header>ctkSliderWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentEditorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentEditorWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSequenceBrowserPlayWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSequenceBrowserPlayWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSequenceBrowserSeekWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSequenceBrowserSeekWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

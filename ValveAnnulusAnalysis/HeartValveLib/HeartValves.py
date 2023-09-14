@@ -306,7 +306,8 @@ def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, ortho
                                  axialSliceName='Red', ortho1SliceName='Yellow', ortho2SliceName='Green',
                                  show3DSliceName='Red'):
   """Sets up views for a specific valve.
-  show3DSliceName is the name of the slice that should be shown in 3D views"""
+  show3DSliceName is the name of the slice that should be shown in 3D views
+  valveModel: can be valve model or browser"""
 
   layoutManager = slicer.app.layoutManager()
   if not layoutManager:
@@ -477,6 +478,10 @@ def getOrSetValveVolumeNode(valveModel):
 
 
 def updateLegacyHeartValveNodes(unused1=None, unused2=None):
+
+  # TODO: re-enable after finishing refactoring
+  return
+
   import time
   startTime = time.time()
   logging.debug("updateLegacyHeartValveNodes")
