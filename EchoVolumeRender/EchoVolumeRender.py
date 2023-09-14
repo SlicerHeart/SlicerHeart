@@ -113,7 +113,7 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     slicer.modules.volumerendering.logic().FitROIToVolume(vrDisplayNode)
 
   def updateGui(self):
-    
+
     processingInputVolume = self.ui.processingInputVolumeSelector.currentNode()
     [browserNode, sequenceNode] = self.logic.sequenceFromVolume(processingInputVolume)
     self.ui.applyToSequenceCheckBox.enabled = (sequenceNode is not None)
@@ -184,15 +184,15 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
 #
 
 class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
-  """Implements the functionality to apply echo-specific volume 
-  rendering effects to the volume selected in the interface and 
+  """Implements the functionality to apply echo-specific volume
+  rendering effects to the volume selected in the interface and
   modify the parameters of the effects.
   """
 
   def __init__(self):
     ScriptedLoadableModuleLogic.__init__(self)
     self._inputVolumeNode = None
-    
+
     # Cached for faster access
     self.volumeRenderingDisplayNode = None
     self.shaderPropertyNode = None
@@ -227,7 +227,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       if sequenceNode:
         return [browserNode, sequenceNode]
     return [None, None]
-    
+
   def smoothVolume(self, inputVolume, outputVolume, allowSequenceSmoothing, smoothingStandardDeviation):
     """
     Run the actual algorithm
@@ -387,7 +387,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     :param volumeNode: input volume node
     :return: volume rendering display node
     """
-    
+
     # Make sure the volume node has image data
     if self.hasImageData(volumeNode) == False:
       return None
@@ -556,7 +556,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     self._setRenderingParameterValue("saturationScale", value)
 
   def updateVolumeProperty(self):
-    
+
     if not self.volumeRenderingDisplayNode:
       return
 
@@ -609,14 +609,14 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     colorTransferFunction.AddRGBPoint(rampCenter, *green)
     colorTransferFunction.AddRGBPoint(rampEnd, *green)
     colorTransferFunction.AddRGBPoint(max(volRange[1],rampEnd), *green)
-    
+
     volPropNode.GetVolumeProperty().GetScalarOpacity().DeepCopy(scalarOpacity)
-    volPropNode.GetVolumeProperty().GetRGBTransferFunction().DeepCopy(colorTransferFunction) 
+    volPropNode.GetVolumeProperty().GetRGBTransferFunction().DeepCopy(colorTransferFunction)
 
     volPropNode.EndModify(disableModify)
     volPropNode.Modified()
 
-  
+
   # Code for color shader replacement
   ComputeColorReplacementCommon = """
 
