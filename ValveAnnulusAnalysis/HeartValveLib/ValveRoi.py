@@ -209,6 +209,8 @@ class ValveRoi:
     return leafletBoundaryPoints
 
   def setRoiGeometry(self, params):
+    if not self.roiModelNode:
+      raise RuntimeError("Cannot set ROI geometry before setting a valid ROI model node")
     wasModified = self.roiModelNode.StartModify()
     for paramName in self.GEOMETRY_PARAMS:
       self.roiModelNode.SetAttribute(paramName, str(params[paramName])) # 0-100
@@ -217,8 +219,9 @@ class ValveRoi:
 
   def getRoiGeometry(self):
     params = {}
-    for paramName in self.GEOMETRY_PARAMS:
-      params[paramName] = float(self.roiModelNode.GetAttribute(paramName))
+    if self.roiModelNode:
+      for paramName in self.GEOMETRY_PARAMS:
+        params[paramName] = float(self.roiModelNode.GetAttribute(paramName))
     return params
 
   def updateRoi(self):

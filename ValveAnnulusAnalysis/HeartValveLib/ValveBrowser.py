@@ -199,7 +199,7 @@ class ValveBrowser:
     @valveVolumeNode.setter
     def valveVolumeNode(self, valveVolumeNode):
       if not self.valveBrowserNode:
-        raise RuntimeError("setAxialSliceToRasTransformNode failed: invalid valve browser node")
+        raise RuntimeError("valveVolumeNode failed: invalid valve browser node")
 
       self.valveBrowserNode.SetNodeReferenceID("ValveVolume", valveVolumeNode.GetID() if valveVolumeNode else None)
 
@@ -225,11 +225,39 @@ class ValveBrowser:
         # Make sequence browser seek widget display frame index instead of frame time
         self.volumeSequenceBrowserNode.SetIndexDisplayMode(True)
 
+      # Apply probeToRAS transform to all nodes that move with the valve volume
+
+      # Apply to clipped valve volume
+      clippedValveVolumeNode = self.clippedValveVolumeNode
+      if clippedValveVolumeNode:
+        clippedValveVolumeNode.SetAndObserveTransformNodeID(probeToRasTransformNodeId)
+
+      # Apply to nodes managed by the valveModel
       # Let the vale model know that the ProbeToRAS transform node selection changed
       # (in the future the valve model could observe browser node changes to avoid such manual notifications)
       valveModel = self.valveModel
       if valveModel:
         valveModel.onProbeToRasTransformNodeChanged()
+
+    @property
+    def clippedValveVolumeNode(self):
+      """:returns Volume that is used clipped to the valve ROI. Useful for volume rendering."""
+      if not self.valveBrowserNode:
+        return None
+      return self.valveBrowserNode.GetNodeReference("ClippedVolume")
+
+    @clippedValveVolumeNode.setter
+    def clippedValveVolumeNode(self, clippedValveVolumeNode):
+      if not self.valveBrowserNode:
+        raise RuntimeError("set clippedValveVolumeNode failed: invalid valve browser node")
+
+      self.valveBrowserNode.SetNodeReferenceID("ClippedVolume",
+                                               clippedValveVolumeNode.GetID() if clippedValveVolumeNode else None)
+
+      if clippedValveVolumeNode:
+        probeToRasTransformNode = self.probeToRasTransformNode
+        clippedValveVolumeNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
+        self.moveNodeToValveBrowserFolder(clippedValveVolumeNode)
 
     @property
     def axialSliceToRasTransformNode(self):
@@ -341,10 +369,40 @@ class ValveBrowser:
 
     def makeTimeSequence(self, proxyNode):
       """Make a time sequence from a single node and add it to this browser node"""
+      if self.valveBrowserNode.GetSequenceNode(proxyNode):
+        # It is already a sequence node
+        return
+
       sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode",
                                                         slicer.mrmlScene.GetUniqueNameByString(proxyNode.GetName()+"Sequence"))
       self.valveBrowserNode.AddProxyNode(proxyNode, sequenceNode, False)
       self.valveBrowserNode.SetSaveChanges(sequenceNode, True)
+      # Prevent automatic creation of missing items (it would clutter the scene and would be difficult to tell what information is actually specified)
+      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemDisableSaveChanges)
+
+    def addCurrentTimePointToSequence(self, sequenceNode):
+      """Make a time sequence from a single node and add it to this browser node"""
+
+      # Temporarily change missing item mode to create missing items
+      oldMissingItemMode = self.valveBrowserNode.GetMissingItemMode(sequenceNode)
+      oldSaveChanges = self.valveBrowserNode.GetSaveChanges(sequenceNode)
+
+      #self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCopyPrevious)
+      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCreateEmpty)
+      self.valveBrowserNode.SetSaveChanges(sequenceNode, True)
+      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
+
+      # Restore original missing item mode
+      self.valveBrowserNode.SetSaveChanges(sequenceNode, oldSaveChanges)
+      self.valveBrowserNode.SetMissingItemMode(sequenceNode, oldMissingItemMode)
+
+    def removeCurrentTimePointFromSequence(self, sequenceNode):
+      """Remove current tie point of a single node"""
+
+      # Remove contour from sequence
+      valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      annulusContourCurveSequenceNode.RemoveDataNodeAtValue(indexValue)
+      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
 
     def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
 
