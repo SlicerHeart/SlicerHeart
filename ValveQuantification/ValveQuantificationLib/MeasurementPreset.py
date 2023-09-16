@@ -1648,26 +1648,22 @@ class MeasurementPreset(object):
                            KEY_UNIT: 'mm'})
 
     kernelSizeMm = 2.0
+    maxKernelSizeMm = 5.0
+    name = valveModel.heartValveNode.GetName()
+
     allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal, kernelSizeMm)
-
     if not allLeafletSurfacePolyData:
-      allLeafletSurfacePolyData = valveModel.createValveSurface(
-        planePosition, planeNormal, kernelSizeMm, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
-      )
+      logging.warning(f'Could not extract valve surface from {name} with kernel size {kernelSizeMm}')
 
-    if not allLeafletSurfacePolyData:
-      logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()}.')
-
-    while allLeafletSurfacePolyData is None and kernelSizeMm < 5.0:
-      kernelSizeMm += 0.5
-      logging.warning(f'Retrying with increased kernel size {kernelSizeMm}.')
-      allLeafletSurfacePolyData = valveModel.createValveSurface(
-        planePosition, planeNormal, kernelSizeMm, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
-      )
-
-    if not allLeafletSurfacePolyData:
-      logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()}')
-      return
+      while allLeafletSurfacePolyData is None and kernelSizeMm < maxKernelSizeMm:
+        kernelSizeMm += 0.5
+        logging.warning(f'Retrying with kernel size {kernelSizeMm}.')
+        allLeafletSurfacePolyData = valveModel.createValveSurface(
+          planePosition, planeNormal, kernelSizeMm, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
+        )
+      if not allLeafletSurfacePolyData:
+        logging.warning(f'Could not extract valve surface from {name}')
+        return
 
     # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
     maxLeafletDepthMm = 60

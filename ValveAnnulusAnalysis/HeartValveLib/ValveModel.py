@@ -1257,17 +1257,24 @@ class ValveModel:
           leafletSegmentLabelmap, segmentationNode, allLeafletsSegId, mergeMode
         )
 
-      # Apply smoothing to make sure leaflets are closed
-      self.smoothSegment(self.getLeafletSegmentationNode(), allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
+      def surfaceArea(surface):
+        properties = vtk.vtkMassProperties()
+        properties.SetInputData(surface)
+        properties.Update()
+        return properties.GetSurfaceArea()
 
-      allLeafletsNumPoints = segmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId).GetNumberOfPoints()
+      # Apply smoothing to make sure leaflets are closed
+      self.smoothSegment(segmentationNode, allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
+
+      surfaceAreaBeforeExtraction = \
+        surfaceArea(segmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId))
 
       # Temporary node, we don't add it to the scene
       allLeafletsSurfaceModelNode = slicer.vtkMRMLModelNode()
       allLeafletsSurfaceBoundaryMarkupNode = slicer.vtkMRMLMarkupsFiducialNode()
 
       allLeafletsModel = LeafletModel.LeafletModel()
-      allLeafletsModel.setSegmentationNode(self.getLeafletSegmentationNode())
+      allLeafletsModel.setSegmentationNode(segmentationNode)
       allLeafletsModel.setSegmentId(allLeafletsSegId)
       allLeafletsModel.setSurfaceModelNode(allLeafletsSurfaceModelNode)
       allLeafletsModel.setSurfaceBoundaryMarkupNode(allLeafletsSurfaceBoundaryMarkupNode)
@@ -1281,7 +1288,16 @@ class ValveModel:
       # Delete temporary segment
       segmentationNode.RemoveSegment(allLeafletsSegId)
 
-      return allLeafletsSurfacePolyData if allLeafletsNumPoints != allLeafletsSurfacePolyData.GetNumberOfPoints() else None
+      surfaceAreaAfterExtraction = surfaceArea(allLeafletsSurfacePolyData)
+      success = int(surfaceAreaAfterExtraction) < int(surfaceAreaBeforeExtraction)
+
+      # NB: For debugging
+      # print("Surface Area (before extraction)", surfaceAreaBeforeExtraction)
+      # print("Surface Area (before extraction)", surfaceAreaAfterExtraction)
+
+      # print("Surface Area is smaller:", success)
+
+      return allLeafletsSurfacePolyData if success else None
 
     @staticmethod
     def setGlyphSize(markupsDisplayNode, glyphSize):
