@@ -232,7 +232,7 @@ class ValveClipBase(CardiacDeviceBase):
           # after arc
           sleeveSteeredToWorldTransform.MultiplyPoint(np.array([0,0,controlPointPositionAlongCurve - beforeArcLength - arcLength,1]), controlPointPosition)
         controlPointPosition = controlPointPosition[0:3]
-        centerlineNode.SetNthControlPointPositionWorldFromArray(controlPointIndex, controlPointPosition)
+        centerlineNode.SetNthControlPointPositionWorld(controlPointIndex, controlPointPosition)
 
       slicer.modules.markups.logic().SetAllMarkupsVisibility(centerlineNode, False) # Hide all control points
 
@@ -393,7 +393,7 @@ class ValveClipBase(CardiacDeviceBase):
           controlPointPosition = controlPointPosition[0:3]
 
           controlPointIndex = guideCurveNode.AddControlPointWorld(vtk.vtkVector3d(0, 0, 0))
-          guideCurveNode.SetNthControlPointPositionWorldFromArray(controlPointIndex, controlPointPosition)
+          guideCurveNode.SetNthControlPointPositionWorld(controlPointIndex, controlPointPosition)
           guideCurveNode.SetNthControlPointLocked(controlPointIndex, True)
           guideCurveNode.SetNthControlPointVisibility(controlPointIndex, False)
 
