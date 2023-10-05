@@ -9,13 +9,16 @@ from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 from slicer.parameterNodeWrapper import (
     parameterNodeWrapper,
-    WithinRange,
+    Default,
+    SingleStep,
+    WithinRange
 )
 
 from slicer import vtkMRMLScalarVolumeNode
 from slicer import vtkMRMLTransformNode
 from slicer import vtkMRMLMarkupsPlaneNode
 from slicer import vtkMRMLModelNode
+from slicer import vtkMRMLTableNode
 
 #
 # Import4DFlow
@@ -62,7 +65,9 @@ class Import4DFlowParameterNode:
     exportDirectory: str
     inputPlane: vtkMRMLMarkupsPlaneNode
     outputSpeedProfileModel: vtkMRMLModelNode
-    samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2
+    outputSpeedProfileTable: vtkMRMLTableNode
+    samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2  # distance unit
+    speedThreshold: Annotated[float, WithinRange(0.0, 3), SingleStep(0.01), Default(0.1)]  # m/sec
 
 #
 # Import4DFlowWidget
@@ -124,6 +129,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.convertButton.connect('clicked(bool)', self.onConvertButton)
         self.ui.exportButton.connect('clicked(bool)', self.onExportButton)
         self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
+        self.ui.showPlotButton.connect('clicked(bool)', self.onShowPlotButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -296,16 +302,21 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
-            outputModel = self.logic.sampleFlowFieldWithPlane(
+            self._parameterNode.outputSpeedProfileModel = self.logic.sampleFlowFieldWithPlane(
                 self._parameterNode.inputPlane,
                 self._parameterNode.outputTransform,
                 self._parameterNode.outputTransform.GetNodeReference("magnitudeVolume"),
                 self._parameterNode.samplingDistance,
                 self._parameterNode.outputSpeedProfileModel)
 
-            if not self._parameterNode.outputSpeedProfileModel:
-                self._parameterNode.outputSpeedProfileModel = outputModel
+            self._parameterNode.outputSpeedProfileTable = self.logic.computeSpeedProfileTable(
+                self._parameterNode.outputSpeedProfileModel,
+                self._parameterNode.speedThreshold,
+                self._parameterNode.outputSpeedProfileTable)
 
+    def onShowPlotButton(self) -> None:
+        with slicer.util.tryWithErrorDisplay("Failed to create plot."):
+            self.logic.createPlotFromTable(self._parameterNode.outputSpeedProfileTable)
 
 #
 # Import4DFlowLogic
@@ -636,67 +647,167 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
 
-    def sampleFlowFieldWithPlane(self,
-                            crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
-                            gridTransformNode: vtkMRMLTransformNode,
-                            magnitudeVolumeNode: vtkMRMLScalarVolumeNode,
-                            samplingDistanceMm: float = 2.0,
-                            samplingGridModelNode: vtkMRMLModelNode = None) -> vtkMRMLModelNode:
+    @staticmethod
+    def sampleFlowFieldWithPlane(
+            crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
+            gridTransformNode: vtkMRMLTransformNode,
+            magnitudeVolumeNode: vtkMRMLScalarVolumeNode,
+            samplingDistanceMm: float = 2.0,
+            samplingGridModelNode: vtkMRMLModelNode = None) -> vtkMRMLModelNode:
 
-        # Create sampling plane
-        planeBoundsMm = crossSectionPlaneNode.GetPlaneBounds()
-        import math
-        # Floor towards zero to get number of grid points within the plane's boundary
-        planeBoundsGrid = [math.floor(boundMm/samplingDistanceMm) if boundMm >= 0 else math.ceil(boundMm/samplingDistanceMm) for boundMm in planeBoundsMm]
-        samplingGrid_Object = vtk.vtkPlaneSource()
-        # Resolution: how many part the plane is divided into (2 means 1 dividing line in the middle)
-        samplingGrid_Object.SetXResolution(abs(planeBoundsGrid[1]-planeBoundsGrid[0]))
-        samplingGrid_Object.SetYResolution(abs(planeBoundsGrid[3]-planeBoundsGrid[2]))
-        samplingGrid_Object.SetOrigin(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
-        samplingGrid_Object.SetPoint1(planeBoundsGrid[1] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
-        samplingGrid_Object.SetPoint2(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[3] * samplingDistanceMm, 0)
+        transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
 
-        # Transform plane to world coordinate system
-        objectToWorldMatrix = vtk.vtkMatrix4x4()
-        crossSectionPlaneNode.GetObjectToWorldMatrix(objectToWorldMatrix)
-        objectToWorldTransform = vtk.vtkTransform()
-        objectToWorldTransform.SetMatrix(objectToWorldMatrix)
-        objectToWorldTransformFilter = vtk.vtkTransformPolyDataFilter()
-        objectToWorldTransformFilter.SetTransform(objectToWorldTransform)
-        objectToWorldTransformFilter.SetInputConnection(samplingGrid_Object.GetOutputPort())
+        # Temporary nodes
+        displacementImageNode = None
+        probeVolumeCliNode = None
 
-        # Save model to plane
-        modelsLogic = slicer.modules.models.logic()
-        if not samplingGridModelNode:
-            samplingGridModelNode = modelsLogic.AddModel(objectToWorldTransformFilter.GetOutputPort())
-        samplingGridModelNode.SetName("CrossSectionSamplingGrid")
-        displayNode = samplingGridModelNode.GetDisplayNode()
-        displayNode.SetColor(1, 1, 0)
-        displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
-        displayNode.BackfaceCullingOff()
-        displayNode.LightingOff()  # don't make the grid darker if it is rotated
+        try:
 
-        # Sample displacement field with the model
-        displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(gridTransformNode, magnitudeVolumeNode, False)
-        parameters = {}
-        parameters["InputVolume"] = displacementImageNode
-        parameters["InputModel"] = samplingGridModelNode
-        parameters["OutputModel"] = samplingGridModelNode
-        parameters["OutputArrayName"] = "displacement"
-        probeVolumeWithModel = slicer.modules.probevolumewithmodel
-        cliNode = slicer.cli.runSync(probeVolumeWithModel, None, parameters)
-        # Process results
-        if cliNode.GetStatus() & cliNode.ErrorsMask:
-            # error
-            errorText = cliNode.GetErrorText()
-            slicer.mrmlScene.RemoveNode(cliNode)
-            raise ValueError("CLI execution failed: " + errorText)
-        # success
-        slicer.mrmlScene.RemoveNode(cliNode)
-        slicer.mrmlScene.RemoveNode(displacementImageNode)
+            originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
+            for itemNumber in range(transformSequenceBrowserNode.GetNumberOfItems()):
+                transformSequenceBrowserNode.SetSelectedItemNumber(itemNumber)
+
+                # Create sampling plane
+                planeBoundsMm = crossSectionPlaneNode.GetPlaneBounds()
+                import math
+                # Floor towards zero to get number of grid points within the plane's boundary
+                planeBoundsGrid = [math.floor(boundMm/samplingDistanceMm) if boundMm >= 0 else math.ceil(boundMm/samplingDistanceMm) for boundMm in planeBoundsMm]
+                samplingGrid_Object = vtk.vtkPlaneSource()
+                # Resolution: how many part the plane is divided into (2 means 1 dividing line in the middle)
+                samplingGrid_Object.SetXResolution(abs(planeBoundsGrid[1]-planeBoundsGrid[0]))
+                samplingGrid_Object.SetYResolution(abs(planeBoundsGrid[3]-planeBoundsGrid[2]))
+                samplingGrid_Object.SetOrigin(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
+                samplingGrid_Object.SetPoint1(planeBoundsGrid[1] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
+                samplingGrid_Object.SetPoint2(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[3] * samplingDistanceMm, 0)
+
+                # Transform plane to world coordinate system
+                objectToWorldMatrix = vtk.vtkMatrix4x4()
+                crossSectionPlaneNode.GetObjectToWorldMatrix(objectToWorldMatrix)
+                objectToWorldTransform = vtk.vtkTransform()
+                objectToWorldTransform.SetMatrix(objectToWorldMatrix)
+                objectToWorldTransformFilter = vtk.vtkTransformPolyDataFilter()
+                objectToWorldTransformFilter.SetTransform(objectToWorldTransform)
+                objectToWorldTransformFilter.SetInputConnection(samplingGrid_Object.GetOutputPort())
+
+                # Save model to plane
+                modelsLogic = slicer.modules.models.logic()
+                if not samplingGridModelNode:
+                    samplingGridModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "CrossSectionSamplingGrid")
+                    samplingGridModelNode.CreateDefaultDisplayNodes()
+                    displayNode = samplingGridModelNode.GetDisplayNode()
+                    displayNode.SetColor(1, 1, 0)
+                    displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
+                    displayNode.BackfaceCullingOff()
+                    displayNode.LightingOff()  # don't make the grid darker if it is rotated
+
+                # Add the model to the same sequence browser as the input 4D flow field
+                modelSequenceNode = transformSequenceBrowserNode.GetSequenceNode(samplingGridModelNode)
+                if not modelSequenceNode:
+                    transformSequenceNode = transformSequenceBrowserNode.GetSequenceNode(gridTransformNode)
+                    modelSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "Cross-section model sequence")
+                    modelSequenceNode.SetIndexType(transformSequenceNode.GetIndexType())
+                    modelSequenceNode.SetIndexName(transformSequenceNode.GetIndexName())
+                    modelSequenceNode.SetIndexUnit(transformSequenceNode.GetIndexUnit())
+                    slicer.modules.sequences.logic().AddSynchronizedNode(modelSequenceNode, samplingGridModelNode, transformSequenceBrowserNode)
+                    transformSequenceBrowserNode.SetSaveChanges(modelSequenceNode, True)
+
+                objectToWorldTransformFilter.Update()
+                samplingGridModelNode.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
+
+                # Sample displacement field with the model
+                displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(gridTransformNode, magnitudeVolumeNode, False)
+                parameters = {}
+                parameters["InputVolume"] = displacementImageNode
+                parameters["InputModel"] = samplingGridModelNode
+                parameters["OutputModel"] = samplingGridModelNode
+                parameters["OutputArrayName"] = "displacement"
+                probeVolumeWithModel = slicer.modules.probevolumewithmodel
+                probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
+                # Process results
+                if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
+                    # error
+                    errorText = probeVolumeCliNode.GetErrorText()
+                    raise ValueError("Probe 4D field execution failed: " + errorText)
+
+                slicer.mrmlScene.RemoveNode(displacementImageNode)
+                displacementImageNode = None
+
+        finally:
+            # Clean up
+            if probeVolumeCliNode:
+                slicer.mrmlScene.RemoveNode(probeVolumeCliNode)
+            if displacementImageNode:
+                slicer.mrmlScene.RemoveNode(displacementImageNode)
+            transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
 
         return samplingGridModelNode
 
+    @staticmethod
+    def computeSpeedProfileTable(
+            crossSectionModelNode: vtkMRMLMarkupsPlaneNode,
+            speedThreshold: float = 0.1,
+            outputSpeedProfileTableNode: vtkMRMLTableNode = None) -> vtkMRMLTableNode:
+
+        import numpy as np
+
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(crossSectionModelNode)
+        sequenceNode = sequenceBrowserNode.GetSequenceNode(crossSectionModelNode)
+
+        timeArray = vtk.vtkDoubleArray()
+        timeArray.SetName("time")
+        speedArray = vtk.vtkDoubleArray()
+        speedArray.SetName("speed")
+
+        originalItemNumber = sequenceBrowserNode.GetSelectedItemNumber()
+        for itemNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+            sequenceBrowserNode.SetSelectedItemNumber(itemNumber)
+            speed = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'displacement')
+            valuesAboveThreshold = speed[speed>speedThreshold]
+            if len(valuesAboveThreshold) > 0:
+                averageSpeed = valuesAboveThreshold.mean()
+            else:
+                averageSpeed = np.NaN  # no values above threshold
+            # TODO: check unit of threshold and make sure consistent with GUI
+            timeArray.InsertNextValue(float(sequenceNode.GetNthIndexValue(itemNumber)))
+            speedArray.InsertNextValue(averageSpeed)
+
+        sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
+
+        if not outputSpeedProfileTableNode:
+            outputSpeedProfileTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
+
+        outputSpeedProfileTableNode.RemoveAllColumns()
+        outputSpeedProfileTable = outputSpeedProfileTableNode.GetTable()
+
+        outputSpeedProfileTable.AddColumn(timeArray)
+        outputSpeedProfileTableNode.SetColumnUnitLabel(timeArray.GetName(), "sec")  # TODO: verify if the unit is in sec
+
+        outputSpeedProfileTable.AddColumn(speedArray)
+        outputSpeedProfileTableNode.SetColumnDescription(
+            speedArray.GetName(),
+            f"Average speed in the plane cross-section above threshold {speedThreshold}")
+        outputSpeedProfileTableNode.SetColumnUnitLabel(speedArray.GetName(), "cm/sec")  # TODO: verify the unit
+
+        return outputSpeedProfileTableNode
+
+
+    @staticmethod
+    def createPlotFromTable(speedProfileTableNode: vtkMRMLTableNode) -> None:
+
+        # Create plot
+        plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode", speedProfileTableNode.GetName() + " plot")
+        plotSeriesNode.SetAndObserveTableNodeID(speedProfileTableNode.GetID())
+        plotSeriesNode.SetXColumnName(speedProfileTableNode.GetTable().GetColumnName(0))  # time
+        plotSeriesNode.SetYColumnName(speedProfileTableNode.GetTable().GetColumnName(1))  # speed
+        plotSeriesNode.SetPlotType(plotSeriesNode.PlotTypeScatter)
+        plotSeriesNode.SetColor(0, 0.6, 1.0)
+
+        # Create chart and add plot
+        plotChartNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotChartNode")
+        plotChartNode.AddAndObservePlotSeriesNodeID(plotSeriesNode.GetID())
+
+        # Show plot in layout
+        slicer.modules.plots.logic().ShowChartInLayout(plotChartNode)
 #
 # Import4DFlowTest
 #
