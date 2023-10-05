@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>325</width>
-    <height>471</height>
+    <width>334</width>
+    <height>472</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -52,7 +52,7 @@
         <string>(Create new)</string>
        </property>
        <property name="SlicerParameterName" stdset="0">
-        <string>outputTransform</string>
+        <string notr="true">outputTransform</string>
        </property>
       </widget>
      </item>
@@ -115,11 +115,7 @@
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="ctkPathLineEdit" name="exportPathLineEdit">
-        <property name="filters">
-         <set>ctkPathLineEdit::Dirs</set>
-        </property>
-       </widget>
+       <widget class="ctkPathLineEdit" name="exportPathLineEdit"/>
       </item>
       <item row="1" column="0" colspan="2">
        <widget class="QPushButton" name="exportButton">
@@ -179,7 +175,7 @@
          <bool>true</bool>
         </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>inputPlane</string>
+         <string notr="true">inputPlane</string>
         </property>
        </widget>
       </item>
@@ -193,7 +189,7 @@
       <item row="1" column="1">
        <widget class="ctkSliderWidget" name="samplingDistanceSliderWidget">
         <property name="toolTip">
-         <string>Set threshold value for computing the output image. Voxels that have intensities lower than this value will set to zero.</string>
+         <string>Distance between sampling points in the plane.</string>
         </property>
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -207,22 +203,45 @@
         <property name="value">
          <double>0.500000000000000</double>
         </property>
+        <property name="suffix">
+         <string>mm</string>
+        </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>samplingDistance</string>
+         <string notr="true">samplingDistance</string>
         </property>
        </widget>
       </item>
       <item row="2" column="0">
+       <widget class="QLabel" name="label_4">
+        <property name="text">
+         <string>Speed threshold:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="ctkSliderWidget" name="speedThresholdSliderWidget">
+        <property name="toolTip">
+         <string>Samples below this threshold will be excluded from the time plot computation.</string>
+        </property>
+        <property name="suffix">
+         <string>m/s</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string notr="true">speedThreshold</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
          <string>Output model:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
         <property name="toolTip">
-         <string>Result with inverted threshold will be written into this volume</string>
+         <string>Model node that contains speed vectors as point data</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -251,11 +270,57 @@
          <string>(Create new model)</string>
         </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>outputSpeedProfileModel</string>
+         <string notr="true">outputSpeedProfileModel</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0" colspan="2">
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_9">
+        <property name="text">
+         <string>Output speed profile table:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
+        <property name="toolTip">
+         <string>Plot series that contain average speed value vs time.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLTableNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="selectNodeUponCreation">
+         <bool>true</bool>
+        </property>
+        <property name="noneDisplay">
+         <string>(Create new time plot)</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string notr="true">outputSpeedProfileTable</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="2">
        <widget class="QPushButton" name="applyButton">
         <property name="enabled">
          <bool>true</bool>
@@ -265,6 +330,13 @@
         </property>
         <property name="text">
          <string>Apply</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0" colspan="2">
+       <widget class="QPushButton" name="showPlotButton">
+        <property name="text">
+         <string>Show plot</string>
         </property>
        </widget>
       </item>
@@ -365,8 +437,40 @@
      <y>450</y>
     </hint>
     <hint type="destinationlabel">
-     <x>240</x>
-     <y>332</y>
+     <x>306</x>
+     <y>365</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputSpeedProfileTableSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>153</x>
+     <y>454</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>180</x>
+     <y>382</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputSpeedProfileTableSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>showPlotButton</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>267</x>
+     <y>381</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>271</x>
+     <y>433</y>
     </hint>
    </hints>
   </connection>
