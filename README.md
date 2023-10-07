@@ -19,6 +19,7 @@ The extension currently includes the following features (new features are added 
   - Valve papillary analysis: allow specify papillary muscles and chords to compute angles and lengths.
   - [Valve quantification](Docs/ValveQuantification.md): automatic computation heart valve annulus, leaflet, and papillary metrics
   - Valve batch export: run valve quantification and export results for a large cohort of data.
+  - [Orifice area](Docs/OrificeArea.md): measure cross-sectional area of openings in a model, for example to quantify regurgitant orifice area.
 - Implant placement planning and assessment:
   - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
   - [ASD/VSD Device Simulator](Docs/AsdVsdDeviceSimulator.md): cardiac device  simulator for ASD/VSD device placement analysis.

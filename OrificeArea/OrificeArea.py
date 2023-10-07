@@ -26,7 +26,7 @@ class OrificeArea(ScriptedLoadableModule):
         self.parent.helpText = """
 Compute area of a hole in a surface mesh, inside the orifice boundary curve drawn on the mesh.
 
-See more information in <a href="https://github.com/SlicerHeart/SlicerHeart#orifice-area">module documentation</a>.
+See more information in <a href="https://github.com/SlicerHeart/SlicerHeart/Docs/OrificeArea.md#orifice-area">module documentation</a>.
 """
         # TODO: replace with organization, grant and thanks
         self.parent.acknowledgementText = """
