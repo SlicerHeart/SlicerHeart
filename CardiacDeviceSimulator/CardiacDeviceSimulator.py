@@ -111,6 +111,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       _, self.devicePositioningSection = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
         collapsed=True, widget=self.devicePositioningWidget)
       self.deviceWidgets.append(self.devicePositioningWidget)
+      self.devicePositioningSection.toggled.connect(self.onDevicePositioningToggled)
 
     self.deviceDeformationSection = None
     if self.DEVICE_DEFORMATION_NEEDED:
@@ -165,6 +166,17 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       if guiSection is self.deviceSelectorWidget:
         continue
       guiSection.enabled = guiEnabled
+
+  def onDevicePositioningToggled(self, toggled):
+    transformNode = self.logic.parameterNode.GetNodeReference('PositioningTransform')
+    if not transformNode:
+      return
+
+    transformNode.CreateDefaultDisplayNodes()
+    transformNode.SetDisplayVisibility(toggled)
+    dNode = transformNode.GetDisplayNode()
+    if dNode:
+      dNode.SetEditorVisibility(toggled)
 
   def onModuleSectionToggled(self, button, toggled):
 
