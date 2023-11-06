@@ -4,7 +4,7 @@ from AbstractScriptedSubjectHierarchyPlugin import *
 
 class CardiacDeviceSubjectHierarchyPlugin(AbstractScriptedSubjectHierarchyPlugin):
 
-  module_names = ["CardiacDeviceSimulator", "AsdVsdDeviceSimulator"]
+  module_names = ["CardiacDeviceSimulator", "AsdVsdDeviceSimulator", "TCAVValveSimulator"]
 
   # Necessary static member to be able to set python source to scripted subject hierarchy plugin
   filePath = __file__
