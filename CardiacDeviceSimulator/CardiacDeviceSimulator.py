@@ -36,6 +36,13 @@ class CardiacDeviceSimulator(ScriptedLoadableModule):
     for deviceClass in [HarmonyDevice, CylinderDevice, CylinderSkirtValveDevice]:
       CardiacDeviceSimulatorWidget.registerDevice(deviceClass)
 
+    def initSubjectHierarchyPlugin():
+      import CardiacDeviceSimulatorUtils.CardiacDeviceSubjectHierarchyPlugin as hvp
+      scriptedPlugin = slicer.qSlicerSubjectHierarchyScriptedPlugin(None)
+      scriptedPlugin.setPythonSource(hvp.CardiacDeviceSubjectHierarchyPlugin.filePath)
+
+    slicer.app.connect("startupCompleted()", initSubjectHierarchyPlugin)
+
 #
 # CardiacDeviceSimulatorWidget
 #
@@ -243,8 +250,6 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       shNode.RemoveItemChildren(shItem)
 
   def setParameterNode(self, parameterNode):
-    from CardiacDeviceSimulatorUtils.DeviceSelectorWidget import DeviceImplantWidget
-
     if self.parameterNode:
       self.removeObserver(self.parameterNode, CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
       self.removeObserver(self.parameterNode, CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
@@ -254,13 +259,10 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       return
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-    if self.parameterNode.GetHideFromEditors():
-      self.parameterNode.SetHideFromEditors(False)
-      shNode.RequestOwnerPluginSearch(self.parameterNode)
-      parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
-      shNode.SetItemAttribute(parameterNodeShItem, "ModuleName", self.moduleName)
-    else:
-      parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
+    self.parameterNode.SetHideFromEditors(False)
+    shNode.RequestOwnerPluginSearch(self.parameterNode)
+    parameterNodeShItem = shNode.GetItemByDataNode(self.parameterNode)
+    shNode.SetItemAttribute(parameterNodeShItem, "ModuleName", self.moduleName)
 
     self.updateDeformedModelsEnabled = False
     # Not using the parameter node for this anymore (but updateDeformedModelsEnabled member variable)
@@ -313,11 +315,9 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       transformationFolderShItem = shNode.CreateFolderItem(parameterNodeShItem, "Transformation")
       shNode.SetItemExpanded(transformationFolderShItem, False)
 
-    if not self.parameterNode.GetNodeReference('PositioningTransform'):
-      n = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "PositioningTransform")
-
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+    positioningTransform = self.parameterNode.GetNodeReference('PositioningTransform')
+    if not positioningTransform:
+      positioningTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "PositioningTransform")
 
       # set positioningMatrix to center of yellow slice (device will appear here)
       yellowSlice = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeYellow')
@@ -332,29 +332,32 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       positioningMatrix.SetElement(1, 3, y)
       positioningMatrix.SetElement(2, 3, z)
 
-      n.SetMatrixTransformToParent(positioningMatrix)
-      self.parameterNode.SetNodeReferenceID('PositioningTransform', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+      positioningTransform.SetMatrixTransformToParent(positioningMatrix)
+      self.parameterNode.SetNodeReferenceID('PositioningTransform', positioningTransform.GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(positioningTransform), transformationFolderShItem)
 
-    if not self.parameterNode.GetNodeReference('DeformingTransform'):
-      n = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "DeformingTransform")
-      n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
-      self.parameterNode.SetNodeReferenceID('DeformingTransform', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+    deformingTransform = self.parameterNode.GetNodeReference('DeformingTransform')
+    if not deformingTransform:
+      deformingTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "DeformingTransform")
+      deformingTransform.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
+      self.parameterNode.SetNodeReferenceID('DeformingTransform', deformingTransform.GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(deformingTransform), transformationFolderShItem)
 
-    if not self.parameterNode.GetNodeReference('OriginalModel'):
-      n = self.createModelNode('OriginalModel', [1,0,0])
-      dn = n.GetDisplayNode()
+    originalModel = self.parameterNode.GetNodeReference('OriginalModel')
+    if not originalModel:
+      originalModel = self.createModelNode('OriginalModel', [1,0,0])
+      dn = originalModel.GetDisplayNode()
       dn.SetRepresentation(dn.WireframeRepresentation)
-      n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
-      self.parameterNode.SetNodeReferenceID('OriginalModel', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), parameterNodeShItem)
+      originalModel.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
+      self.parameterNode.SetNodeReferenceID('OriginalModel', originalModel.GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(originalModel), parameterNodeShItem)
 
-    if not self.parameterNode.GetNodeReference('DeformedModel'):
-      n = self.createModelNode('DeformedModel', [0.5,0.5,1.0])
-      n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('DeformingTransform').GetID())
-      self.parameterNode.SetNodeReferenceID('DeformedModel', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), parameterNodeShItem)
+    deformedModel = self.parameterNode.GetNodeReference('DeformedModel')
+    if not deformedModel:
+      deformedModel = self.createModelNode('DeformedModel', [0.5,0.5,1.0])
+      deformedModel.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('DeformingTransform').GetID())
+      self.parameterNode.SetNodeReferenceID('DeformedModel', deformedModel.GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(deformedModel), parameterNodeShItem)
 
     if not self.parameterNode.GetNodeReference('DisplacementToColorNode'):
       n = slicer.mrmlScene.CreateNodeByClass("vtkMRMLProceduralColorNode")
@@ -369,33 +372,35 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
       self.parameterNode.SetNodeReferenceID('DisplacementToColorNode', n.GetID())
       # color node does not show up in subject hierarchy, so there is no need to set its parent
 
-    if not self.parameterNode.GetNodeReference('OriginalHandles'):
-      n = self.createMarkupsNode('OriginalHandles', [1, 0, 0])
-      n.GetDisplayNode().SetVisibility(0)
+    originalHandles = self.parameterNode.GetNodeReference('OriginalHandles')
+    if not originalHandles:
+      originalHandles = self.createMarkupsNode('OriginalHandles', [1, 0, 0])
+      originalHandles.GetDisplayNode().SetVisibility(0)
       try:
         # Slicer-4.11
-        n.GetDisplayNode().SetPointLabelsVisibility(False)
+        originalHandles.GetDisplayNode().SetPointLabelsVisibility(False)
       except:
         # Slicer-4.10
-        n.GetDisplayNode().SetTextScale(0)
-      n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
-      self.parameterNode.SetNodeReferenceID('OriginalHandles', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+        originalHandles.GetDisplayNode().SetTextScale(0)
+      originalHandles.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
+      self.parameterNode.SetNodeReferenceID('OriginalHandles', originalHandles.GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(originalHandles), transformationFolderShItem)
 
     # Workaround for Slicer Preview Releases before 2019-10-30 (where invisible markups could be picked)
     self.parameterNode.GetNodeReference('OriginalHandles').SetLocked(True)
 
-    if not self.parameterNode.GetNodeReference('DeformedHandles'):
-      n = self.createMarkupsNode('DeformedHandles', [0.5,0.5,1.0])
+    deformedHandles = self.parameterNode.GetNodeReference('DeformedHandles')
+    if not deformedHandles:
+      deformedHandles = self.createMarkupsNode('DeformedHandles', [0.5,0.5,1.0])
       try:
         # Slicer-4.11
-        n.GetDisplayNode().SetPointLabelsVisibility(False)
+        deformedHandles.GetDisplayNode().SetPointLabelsVisibility(False)
       except:
         # Slicer-4.10
-        n.GetDisplayNode().SetTextScale(0)
-      n.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
-      self.parameterNode.SetNodeReferenceID('DeformedHandles', n.GetID())
-      shNode.SetItemParent(shNode.GetItemByDataNode(n), transformationFolderShItem)
+        deformedHandles.GetDisplayNode().SetTextScale(0)
+      deformedHandles.SetAndObserveTransformNodeID(self.parameterNode.GetNodeReference('PositioningTransform').GetID())
+      self.parameterNode.SetNodeReferenceID('DeformedHandles', deformedHandles.GetID())
+    shNode.SetItemParent(shNode.GetItemByDataNode(deformedHandles), transformationFolderShItem)
 
     # Workaround for Slicer Preview Releases before 2019-10-31 (where point labels could be still shown,
     # even if text scale was set to 0)
@@ -1417,19 +1422,18 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
         vesselLumenModelNode.GetDisplayNode().SliceIntersectionVisibilityOn()
       else:
         vesselLumenModelNode.GetDisplayNode().SetVisibility2D(True)
-      shNode.SetItemParent(shNode.GetItemByDataNode(vesselLumenModelNode), centerlineFolderShItem)
       self.setVesselModelNode(vesselLumenModelNode)
     slicer.modules.segmentations.logic().ExportSegmentToRepresentationNode(
       vesselLumenSegmentationNode.GetSegmentation().GetSegment(vesselLumenSegmentId), vesselLumenModelNode)
+    shNode.SetItemParent(shNode.GetItemByDataNode(vesselLumenModelNode), centerlineFolderShItem)
 
     # Create centerline curve
     centerlineCurveNode = self.getCenterlineNode()
     if not centerlineCurveNode:
       centerlineCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode', 'VesselCenterlineCurve')
       centerlineCurveNode.CreateDefaultDisplayNodes()
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      shNode.SetItemParent(shNode.GetItemByDataNode(centerlineCurveNode), centerlineFolderShItem)
       self.setCenterlineNode(centerlineCurveNode)
+    shNode.SetItemParent(shNode.GetItemByDataNode(centerlineCurveNode), centerlineFolderShItem)
 
     # Extract skeleton
     slicer.util.showStatusMessage("Extracting centerline, this may take a few minutes...", 3000)

@@ -5,6 +5,7 @@ set(MODULE_NAME CardiacDeviceSimulator)
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
   CardiacDeviceSimulatorUtils/__init__.py
+  CardiacDeviceSimulatorUtils/CardiacDeviceSubjectHierarchyPlugin.py
   CardiacDeviceSimulatorUtils/DeviceCompressionQuantificationWidget.py
   CardiacDeviceSimulatorUtils/DeviceCompressionQuantificationWidget.py
   CardiacDeviceSimulatorUtils/DeviceDataTreeWidget.py
