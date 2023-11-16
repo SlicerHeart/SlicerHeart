@@ -320,9 +320,9 @@ class ValveBrowser:
 
     @property
     def probePosition(self):
-      if not self.valveBrowserNode:
+      if not self.volumeSequenceBrowserNode:
         return PROBE_POSITION_UNKNOWN
-      probePosition = self.valveBrowserNode.GetAttribute("ProbePosition")
+      probePosition = self.volumeSequenceBrowserNode.GetAttribute("ProbePosition")
       if not probePosition:
         probePosition = PROBE_POSITION_UNKNOWN
         self.probePosition = probePosition
@@ -330,9 +330,9 @@ class ValveBrowser:
 
     @probePosition.setter
     def probePosition(self, probePosition):
-      if not self.valveBrowserNode:
-        raise RuntimeError("Setting probePosition failed: invalid valve browser node")
-      self.valveBrowserNode.SetAttribute("ProbePosition", probePosition)
+      if not self.volumeSequenceBrowserNode:
+        raise RuntimeError("Setting probePosition failed: invalid volume sequence browser node")
+      self.volumeSequenceBrowserNode.SetAttribute("ProbePosition", probePosition)
       self.updateProbeToRasTransform()
 
     @property
