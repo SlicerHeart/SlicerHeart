@@ -1,0 +1,574 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>OsteotomyPlanner</class>
+ <widget class="qMRMLWidget" name="OsteotomyPlanner">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>474</width>
+    <height>1474</height>
+   </rect>
+  </property>
+  <property name="styleSheet">
+   <string notr="true"/>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_4">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="QLabel" name="label_populationFile">
+       <property name="text">
+        <string>Population File (.csv)</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="ctkPathLineEdit" name="pathLineEdit_loadPopulationFile">
+       <property name="filters">
+        <set>ctkPathLineEdit::Files|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
+       </property>
+       <property name="nameFilters">
+        <stringlist>
+         <string>*.csv</string>
+        </stringlist>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="pushButton_loadPopulationFile">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="text">
+        <string>Load </string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="tableWidget_population">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>100</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_5">
+     <item>
+      <widget class="QLabel" name="label_processPopulationFile">
+       <property name="text">
+        <string>TextLabel</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QProgressBar" name="progressBar_processPopulationFile">
+       <property name="value">
+        <number>24</number>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QGridLayout" name="gridLayout_4">
+     <item row="0" column="0">
+      <widget class="QCheckBox" name="checkBox_normalizeContours">
+       <property name="text">
+        <string>Normalize Contours</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QPushButton" name="pushButton_processPopulationFile">
+       <property name="text">
+        <string>Process Population File</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QCheckBox" name="checkBox_alignContours">
+       <property name="text">
+        <string>Align to Ref. Contour Phase 1</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QPushButton" name="pushButton_showMeanShape">
+       <property name="text">
+        <string>Show Mean Shape</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0">
+      <layout class="QHBoxLayout" name="horizontalLayout_2">
+       <item>
+        <widget class="QLabel" name="label_procrutes">
+         <property name="text">
+          <string>Procrustes Phase</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QComboBox" name="comboBox_procrustes"/>
+       </item>
+      </layout>
+     </item>
+     <item row="2" column="1">
+      <widget class="QPushButton" name="pushButton_visualizeProcrustes">
+       <property name="text">
+        <string>Visualize Procrustes</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleGroupBox" name="collapsibleGroupBox_calculatePCA">
+     <property name="title">
+      <string>Calculate PCA</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_3">
+      <item>
+       <layout class="QGridLayout" name="gridLayout_3">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_minimumExplainedVariance">
+          <property name="text">
+           <string>Minimum Explained Variance (%)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QSpinBox" name="spinBox_minimumExplainedVariance"/>
+        </item>
+        <item row="0" column="2">
+         <widget class="QLabel" name="label_valveType">
+          <property name="text">
+           <string>Valve Type</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="3">
+         <widget class="QComboBox" name="comboBox_valveType"/>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_maximumNumberOfEigenvalues">
+          <property name="text">
+           <string>Maximum Number of Eigenvalues</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QSpinBox" name="spinBox_maximumNumberOfEigenvalues"/>
+        </item>
+        <item row="1" column="2">
+         <widget class="QLabel" name="label_annulusPhase">
+          <property name="text">
+           <string>Annular Phase</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QComboBox" name="comboBox_annulusPhase"/>
+        </item>
+        <item row="2" column="0" colspan="2">
+         <widget class="QPushButton" name="pushButton_evaluateModels">
+          <property name="text">
+           <string>Evaluate Models</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="2" colspan="2">
+         <widget class="QPushButton" name="pushButton_PCAResetSliders">
+          <property name="text">
+           <string>Reset Sliders</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QGridLayout" name="gridLayout_PCASliders">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_explainedVariance">
+          <property name="text">
+           <string>Explained Variance</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1" alignment="Qt::AlignHCenter">
+         <widget class="QLabel" name="label_deviation">
+          <property name="text">
+           <string>Standard Deviation (σ)</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_shapeRegression">
+     <property name="title">
+      <string>Shape Regression</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <layout class="QGridLayout" name="gridLayout">
+        <item row="0" column="0">
+         <layout class="QHBoxLayout" name="horizontalLayout_4">
+          <item>
+           <widget class="QLabel" name="label_demographicsFilePath">
+            <property name="text">
+             <string>Demographics File Path</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="ctkPathLineEdit" name="pathLineEdit_demographicsFilePath">
+            <property name="filters">
+             <set>ctkPathLineEdit::Files|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
+            </property>
+            <property name="nameFilters">
+             <stringlist>
+              <string>*.csv</string>
+             </stringlist>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLabel" name="label_regressionValveType">
+          <property name="text">
+           <string>Valve Type</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="2">
+         <widget class="QComboBox" name="comboBox_regressionValveType"/>
+        </item>
+        <item row="1" column="0">
+         <widget class="QPushButton" name="pushButton_loadAssociatedDemographics">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Load Associated Demographics</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLabel" name="label_regressionAnnulusPhase">
+          <property name="text">
+           <string>Annular Phase</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="2">
+         <widget class="QComboBox" name="comboBox_regressionAnnulusPhase"/>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="tableWidget_demographics">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>100</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
+        <item>
+         <widget class="QPushButton" name="pushButton_performRegression">
+          <property name="text">
+           <string>Perform Regression on Selected Variables</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton_regressionResetSliders">
+          <property name="text">
+           <string>Reset Sliders</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QGridLayout" name="gridLayout_regressionSliders">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_explainedVariance_2">
+          <property name="text">
+           <string>Regression Variables</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1" alignment="Qt::AlignHCenter">
+         <widget class="QLabel" name="label_deviation_2">
+          <property name="text">
+           <string>Values</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_compareCurve">
+     <property name="title">
+      <string>Compare Curve</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout">
+      <item>
+       <layout class="QGridLayout" name="gridLayout_2">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_compareCurve1">
+          <property name="text">
+           <string>Curve1</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QComboBox" name="comboBox_compareCurve1">
+          <property name="minimumSize">
+           <size>
+            <width>150</width>
+            <height>0</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="2">
+         <widget class="QLabel" name="label_compareVaveType">
+          <property name="text">
+           <string>Valve Type</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="3">
+         <widget class="QComboBox" name="comboBox_compareValveType"/>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_compareCurve2">
+          <property name="text">
+           <string>Curve2</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="comboBox_compareCurve2">
+          <property name="minimumSize">
+           <size>
+            <width>150</width>
+            <height>0</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="2">
+         <widget class="QLabel" name="label_compareAnnularPhase">
+          <property name="text">
+           <string>Annular Phase</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QComboBox" name="comboBox_compareAnnularPhase"/>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_compareCurves">
+        <property name="text">
+         <string>Compare Curves</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="tableWidget_compareResults">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>200</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_strainCurvature">
+     <property name="title">
+      <string>Strain and Curvature</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_5">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_strainCurvatureCurve">
+        <property name="text">
+         <string>Curve</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1" colspan="3">
+       <widget class="QComboBox" name="comboBox_strainCurvatureCurve">
+        <property name="minimumSize">
+         <size>
+          <width>150</width>
+          <height>0</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_strainCurvatureVaveType">
+        <property name="text">
+         <string>Valve Type</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="comboBox_strainCurvatureValveType"/>
+      </item>
+      <item row="1" column="2">
+       <widget class="QLabel" name="label_strainCurvatureReferencePhase">
+        <property name="text">
+         <string>Reference Phase</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="3">
+       <widget class="QComboBox" name="comboBox_strainCurvatureReferencePhase"/>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_strainCurvatureVisualize">
+        <property name="text">
+         <string>Visualize</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="comboBox_strainCurvatureVisualize"/>
+      </item>
+      <item row="2" column="2">
+       <widget class="QLabel" name="label_strainCurvatureDeformedPhase">
+        <property name="text">
+         <string>Deformed Phase</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="3">
+       <widget class="QComboBox" name="comboBox_strainCurvatureDeformedPhase"/>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_strainCurvatureResampling">
+        <property name="text">
+         <string>Resampling</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="comboBox_strainCurvatureResampling"/>
+      </item>
+      <item row="3" column="2">
+       <widget class="QLabel" name="label_strainCurvatureTheta0">
+        <property name="text">
+         <string>Theta0 Label</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="3">
+       <widget class="QComboBox" name="comboBox_strainCurvatureTheta0"/>
+      </item>
+      <item row="4" column="0" colspan="4">
+       <widget class="QPushButton" name="pushButton_computeStrainCurvature">
+        <property name="text">
+         <string>Compute </string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>pathLineEdit_loadPopulationFile</sender>
+   <signal>validInputChanged(bool)</signal>
+   <receiver>pushButton_loadPopulationFile</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>260</x>
+     <y>18</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>426</x>
+     <y>18</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>pathLineEdit_demographicsFilePath</sender>
+   <signal>validInputChanged(bool)</signal>
+   <receiver>pushButton_loadAssociatedDemographics</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>224</x>
+     <y>528</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>150</x>
+     <y>556</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

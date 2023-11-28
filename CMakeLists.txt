@@ -82,6 +82,7 @@ add_subdirectory(ValveBatchExport)
 add_subdirectory(LeafletMoldGenerator)
 add_subdirectory(ValveSegmentation)
 add_subdirectory(LeafletAnalysis)
+add_subdirectory(AnnularShapeAnalyzer)
 add_subdirectory(FluoroFlowCalculator)
 ## NEXT_MODULE
 
