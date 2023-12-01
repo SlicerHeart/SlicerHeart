@@ -29,6 +29,21 @@ class AnnularShapeAnalyzer(ScriptedLoadableModule):
             This work was supported by NIH R01HL153166 (PI. Matthew Jolley, 
             Computer Modeling of the Tricuspid Valve in Hypoplastic Left Heart Syndrome)
             """
+        slicer.app.connect("startupCompleted()", self.registerSampleData)
+
+    @staticmethod
+    def registerSampleData():
+        import SampleData
+        iconsPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons')
+
+        SampleData.SampleDataLogic.registerCustomSampleDataSource(
+            category='SlicerHeart',
+            sampleName='AnnularShapeAnalyzer',
+            thumbnailFileName=os.path.join(iconsPath, 'AnnularShapeAnalyzer.png'),
+            uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/AnnularShapeAnalyzer.zip'],
+            checksums=['SHA256:698b493099721a9639f48044780ab271bd1dfd51ca1f4fefccc3755ef23d28a1'],
+            fileNames=['AnnularShapeAnalyzer.zip'],
+        )
 
 
 class AnnularShapeAnalyzerWidget(ScriptedLoadableModuleWidget):
@@ -1815,8 +1830,18 @@ class AnnularShapeAnalyzerTest(ScriptedLoadableModuleTest):
         your test should break so they know that the feature is needed.
         """
 
-        self.delayDisplay("Starting the test")
+        self.delayDisplay("Starting the Annular Shape Analyzer Test")
 
-        # Get/create input data
+        import SampleData
+        downloadedFilePath = SampleData.SampleDataLogic().downloadSample("AnnularShapeAnalyzer")
+
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory(dir=slicer.app.temporaryPath) as temp_dir:
+            from zipfile import ZipFile
+            with ZipFile(downloadedFilePath, 'r') as zipObject:
+                zipObject.extractall(path=temp_dir)
+
+            print(os.listdir(temp_dir))
+            # TODO: run tests with the folder
 
         self.delayDisplay('Test passed')
