@@ -1,3 +1,4 @@
+import os
 import logging
 
 import ctk
@@ -6,6 +7,21 @@ import vtk
 
 import slicer
 from slicer.ScriptedLoadableModule import *
+
+
+
+LEFT_SEGMENT_NAME = 'left'
+RIGHT_SEGMENT_NAME = 'right'
+
+
+class ZeroSegmentsFoundError(Exception):
+  pass
+
+class TooManySegmentsFoundError(Exception):
+  pass
+
+class MissingBaselineError(Exception):
+  pass
 
 
 #
@@ -22,11 +38,29 @@ class FluoroFlowCalculator(ScriptedLoadableModule):
     self.parent.title = "Fluoro Flow Calculator"
     self.parent.categories = ["Sequences"]
     self.parent.dependencies = []
-    self.parent.contributors = ["Yuval Barak-Corren (CHOP), Andras Lasso (PerkLab, Queen's University)"]
+    self.parent.contributors = ["Yuval Barak-Corren (CHOP), Christian Herz (CHOP), Andras Lasso (PerkLab, Queen's University)"]
     self.parent.helpText = """This module can extract frame-by-frame statistics for a sequence"""
     self.parent.acknowledgementText = """
 This file was originally developed by Andras Lasso and modified by Yuval Barak-Corren
 """
+    slicer.app.connect("startupCompleted()", self.registerSampleData)
+
+  @staticmethod
+  def registerSampleData():
+      import SampleData
+      iconsPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons')
+
+      SampleData.SampleDataLogic.registerCustomSampleDataSource(
+          category='SlicerHeart',
+          sampleName='FluoroFlowCalculator',
+          thumbnailFileName=os.path.join(iconsPath, 'FluoroFlowCalculator.png'),
+          loadFileType=["SequenceFile"],
+          loadFiles=[True],
+          nodeNames=["Fluoro Seq"],
+          uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/FluoroFlowCalculator.seq.nrrd'],
+          checksums=['SHA256:4809681a6acf526d75e41e20670043eb6762960ff8124914f01008e4e3a8d7ba'],
+          fileNames=['FluoroFlowCalculator.seq.nrrd'],
+      )
 
 
 #
@@ -41,7 +75,7 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
-    # Instantiate and connect widgets ...
+    self.logic = FluoroFlowCalculatorLogic()
 
     #
     # Parameters Area
@@ -60,7 +94,7 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
     self.inputSelector.nodeTypes = ["vtkMRMLSequenceNode"]
     self.inputSelector.addEnabled = False
     self.inputSelector.removeEnabled = False
-    self.inputSelector.noneEnabled = False
+    self.inputSelector.noneEnabled = True
     self.inputSelector.showHidden = False
     self.inputSelector.showChildNodeTypes = False
     self.inputSelector.setMRMLScene(slicer.mrmlScene)
@@ -85,7 +119,7 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
     # Segmentation selector
     self.segmentationSelector = slicer.qMRMLNodeComboBox()
     self.segmentationSelector.nodeTypes = ["vtkMRMLSegmentationNode"]
-    self.segmentationSelector.addEnabled = False
+    self.segmentationSelector.addEnabled = True
     self.segmentationSelector.removeEnabled = True
     self.segmentationSelector.renameEnabled = True
     self.segmentationSelector.setMRMLScene(slicer.mrmlScene)
@@ -99,17 +133,12 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
     self.outputDirSelector.setToolTip("Directory that will contain summary csv table")
     parametersFormLayout.addRow("Output directory:", self.outputDirSelector)
 
-    # Selectors removed from the original module (crop-volume-sequence)
-    # self.outputSelector
-    # self.cropParametersSelector
-    # self.editCropParametersButton
-
     #
     # Create Segmentation Button
     #
     self.createSegmentationButton = qt.QPushButton("Create Segmentation")
     self.createSegmentationButton.toolTip = "Split the screen into 2 segmentations - right & left"
-    self.createSegmentationButton.enabled = (self.inputSelector.currentNode() is not None)
+    self.createSegmentationButton.enabled = self.inputSelector.currentNode() is not None
     parametersFormLayout.addRow(self.createSegmentationButton)
 
     #
@@ -127,7 +156,6 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
     self.segmentationSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onNodeSelectionChanged)
     self.sequenceStartItemIndexWidget.connect('valueChanged(double)', self.setSequenceItemIndex)
     self.sequenceEndItemIndexWidget.connect('valueChanged(double)', self.setSequenceItemIndex)
-
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -157,6 +185,7 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
     self.sequenceStartItemIndexWidget.value =  0
     self.sequenceEndItemIndexWidget.value = self.sequenceEndItemIndexWidget.maximum
 
+    self.createSegmentationButton.enabled = self.inputSelector.currentNode() is not None
 
   def onNodeSelectionChanged(self):
     self.applyButton.enabled = (self.segmentationSelector.currentNode() is not None)
@@ -171,70 +200,46 @@ class FluoroFlowCalculatorWidget(ScriptedLoadableModuleWidget):
         return browserNode
     return None
 
-
   def setSequenceItemIndex(self, index):
-    sequenceBrowserNode = self.findBrowserForSequence(self.inputSelector.currentNode())
-    sequenceBrowserNode.SetSelectedItemNumber(int(index))
-
+    if self.inputSelector.currentNode():
+      sequenceBrowserNode = self.findBrowserForSequence(self.inputSelector.currentNode())
+      sequenceBrowserNode.SetSelectedItemNumber(int(index))
 
   def onApplyButton(self):
-    logic = FluoroFlowCalculatorLogic()
     self.outputDirSelector.addCurrentPathToHistory()
 
     startFrameIndex = int(self.sequenceStartItemIndexWidget.value)
     endFrameIndex = int(self.sequenceEndItemIndexWidget.value)
 
-    logic.run(self.inputSelector.currentNode(),
-              self.segmentationSelector.currentNode(),
-              self.outputDirSelector.currentPath,
-              startFrameIndex,
-              endFrameIndex)
+    with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+      prcnt_to_left, prcnt_to_right = self.logic.run(
+        self.inputSelector.currentNode(),
+        self.segmentationSelector.currentNode(),
+        startFrameIndex,
+        endFrameIndex,
+        self.outputDirSelector.currentPath
+      )
+      slicer.util.infoDisplay(f"Calculated flow-split:\n\nLeft =\t{prcnt_to_left}%\nRight =\t{prcnt_to_right}%", "Relative Lung Perfusion")
 
   def onCreateSegmentationButton(self):
+    segmentationNode = self.segmentationSelector.currentNode()
+    proceed = True
+    if segmentationNode and segmentationNode.GetSegmentation().GetNumberOfSegments() > 0:
+      proceed = slicer.util.confirmYesNoDisplay("Segmentation already has segments. All segments will be deleted. Do you want to proceed?")
+    if proceed:
+      segmentationNode = self.logic.initializeSegmentation(
+        sequenceNode=self.inputSelector.currentNode(),
+        segmentationNode=segmentationNode
+      )
+      self.segmentationSelector.setCurrentNode(segmentationNode)
 
-    sequenceNode = self.inputSelector.currentNode()
-    seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
-    seqBrowser.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
-    volumeNode = seqBrowser.GetProxyNode(sequenceNode)
-
-    try:
-      if (self.segmentationSelector.currentNode() is not None):
-        segmentationNode = self.segmentationSelector.currentNode()
-      else:
-        segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode')
-        segmentationNode.CreateDefaultDisplayNodes()
-        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(volumeNode)
-
-      if segmentationNode.GetSegmentation().GetSegmentIdBySegmentName('left') != '':
-        leftSegmentId = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName('left')
-      else:
-        leftSegmentId = segmentationNode.GetSegmentation().AddEmptySegment("left")
-
-      if segmentationNode.GetSegmentation().GetSegmentIdBySegmentName('right') != '':
-        rightSegmentId = segmentationNode.GetSegmentation().GetSegmentIdBySegmentName('right')
-      else:
-        rightSegmentId = segmentationNode.GetSegmentation().AddEmptySegment("right")
-
-      segmentId = leftSegmentId
-      segmentArray = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNode, segmentId, volumeNode)
-      segmentArray[:, :, :] = 0 # clear the existing segment
-      # The segmentArray dimensions are of the form of [depth=1,height=512,width=512]
-      segmentArray[0, :, int(segmentArray.shape[2] / 2):] = 1  # fill region using numpy indexing
-      slicer.util.updateSegmentBinaryLabelmapFromArray(segmentArray, segmentationNode, segmentId, volumeNode)
-
-      segmentId = rightSegmentId
-      segmentArray = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNode, segmentId, volumeNode)
-      segmentArray[:, :, :] = 0 # clear the existing segment
-      # The segmentArray dimensions are of the form of [depth=1,height=512,width=512]
-      segmentArray[0, :, 0:int(segmentArray.shape[2] / 2)] = 1  # fill region using numpy indexing
-      slicer.util.updateSegmentBinaryLabelmapFromArray(segmentArray, segmentationNode, segmentId, volumeNode)
-    finally:
-      slicer.mrmlScene.RemoveNode(seqBrowser)
-      slicer.mrmlScene.RemoveNode(volumeNode)
 
 #
 # FluoroFlowCalculatorLogic
 #
+
+
+
 
 class FluoroFlowCalculatorLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual
@@ -255,30 +260,38 @@ class FluoroFlowCalculatorLogic(ScriptedLoadableModuleLogic):
       return None
     return proxyVolume.GetTransformNodeID()
 
-  #
-  # Create the output table - create table with 0 rows and one column per each available segmentation
-  # within the selected segmentation node.
-  #
-  def initializeTable(self, table, selectedSegmentation):
+  def _validateData(self, segmentationNode):
+    selectedSegmentIds = vtk.vtkStringArray()
+    segmentationNode.GetSegmentation().GetSegmentIDs(selectedSegmentIds)
 
+    numSegments = selectedSegmentIds.GetNumberOfValues()
+    if numSegments == 0:
+      raise ZeroSegmentsFoundError("Expected left and right side segmentation, but got no segments")
+    elif numSegments != 2:
+      raise TooManySegmentsFoundError(f"Expected left and right side segmentation, but got {numSegments} segments")
+
+    return True
+
+  def initializeTable(self, table, segmentationNode):
+    # Create the output table with 0 rows and one column per each available segmentation within the selected segmentation node.
     # Get the list of all segments within the selected segmentation node
     selectedSegmentIds = vtk.vtkStringArray()
-    selectedSegmentation.GetSegmentation().GetSegmentIDs(selectedSegmentIds)
+    segmentationNode.GetSegmentation().GetSegmentIDs(selectedSegmentIds)
 
     # start creating the table
     tableWasModified = table.StartModify()
     table.RemoveAllColumns()
 
-    col = table.AddColumn()  # AddColumn(vtk.vtkDoubleArray())
+    col = table.AddColumn()
     col.SetName("Frame")
 
     # For each segmentation create a table column with the segmentation name as header
     columnIndex = 1
     for segmentIndex in range(selectedSegmentIds.GetNumberOfValues()):
       segmentID = selectedSegmentIds.GetValue(segmentIndex)
-      segment = selectedSegmentation.GetSegmentation().GetSegment(segmentID)
+      segment = segmentationNode.GetSegmentation().GetSegment(segmentID)
 
-      col = table.AddColumn() # AddColumn(vtk.vtkDoubleArray())
+      col = table.AddColumn()
       col.SetName(segment.GetName())
       columnIndex += 1
 
@@ -318,23 +331,32 @@ class FluoroFlowCalculatorLogic(ScriptedLoadableModuleLogic):
     slicer.app.applicationLogic().GetSelectionNode().SetActiveTableID(table.GetID())
     slicer.app.applicationLogic().PropagateTableSelection()
 
-
   def calcStatsForSeqBrowser(self, frame_number, segStatLogic, tbl):
     # Compute statistics
     segStatLogic.computeStatistics()
     statistics = segStatLogic.getStatistics()
 
-    # add stats to table
     self.appendToTable(frame_number, statistics, tbl)
     self.showTable(tbl)
 
-  def run(self, inputVolSeq, selectedSegmentation, outputDir, startFrameIndex, endFrameIndex):
+  def run(self, inputVolSeq, segmentationNode, startFrameIndex, endFrameIndex, outputDir=''):
+    """ calculate relative perfusion based on input volume sequence, baseline and left and right side
 
+    :param inputVolSeq: input volume sequence
+    :param segmentationNode: segmentation node
+    :param startFrameIndex: first frame of contrast injection
+    :param endFrameIndex: last frame of contrast injection
+    :param outputDir: (optional) output directory for writing summary .csv file
+    :return: left, right calculated flow split
+    """
+    self._validateData(segmentationNode)
+    if startFrameIndex == 0:
+      raise MissingBaselineError("Start frame index (contrast injection) cannot be at frame 0. Cannot establish baseline")
     import SegmentStatistics
 
     # initialize the results table - each segmentation gets a unique column
     resultsTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
-    self.initializeTable(resultsTableNode, selectedSegmentation)
+    self.initializeTable(resultsTableNode, segmentationNode)
 
     seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
     seqBrowser.SetAndObserveMasterSequenceNodeID(inputVolSeq.GetID())
@@ -356,15 +378,16 @@ class FluoroFlowCalculatorLogic(ScriptedLoadableModuleLogic):
         slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
         segStatLogic = SegmentStatistics.SegmentStatisticsLogic()
-        segStatLogic.getParameterNode().SetParameter("Segmentation", selectedSegmentation.GetID())
+        segStatLogic.getParameterNode().SetParameter("Segmentation", segmentationNode.GetID())
         segStatLogic.getParameterNode().SetParameter("ScalarVolume", seqBrowser.GetProxyNode(inputVolSeq).GetID() )
 
         self.calcStatsForSeqBrowser(seqItemNumber - startFrameIndex, segStatLogic, resultsTableNode)
         logging.info(f'seqItemNumber={seqItemNumber}')
 
       # save output table as csv file into output folder
-      slicer.util.saveNode(resultsTableNode, f'{outputDir}/{inputVolSeq.GetName()}.csv')
-      # logging.info(f'{outputDir}{inputVolSeq.GetName()}.csv')
+      if os.path.exists(outputDir):
+        logging.info(f'Writing summary .csv table to {outputDir}{inputVolSeq.GetName()}.csv')
+        slicer.util.saveNode(resultsTableNode, f'{outputDir}/{inputVolSeq.GetName()}.csv')
 
       # Calculate relative perfusion
       import numpy as np
@@ -377,19 +400,18 @@ class FluoroFlowCalculatorLogic(ScriptedLoadableModuleLogic):
 
       for i in range(table.GetNumberOfRows()):
         frame_num = (table.GetValueByName(i, 'Frame')).ToInt()
-        left = (table.GetValueByName(i, 'left')).ToDouble()
-        right = (table.GetValueByName(i, 'right')).ToDouble()
-        if(frame_num < 0):
+        left = (table.GetValueByName(i, LEFT_SEGMENT_NAME)).ToDouble()
+        right = (table.GetValueByName(i, RIGHT_SEGMENT_NAME)).ToDouble()
+        if frame_num < 0:
           baseline_left.append(left)
           baseline_right.append(right)
-        if (frame_num >= 0):
+        if frame_num >= 0:
           total_left = (left - np.mean(baseline_left) )
           total_right = (right - np.mean(baseline_right))
 
       prcnt_to_left =  round(100 * (total_left / (total_left + total_right)), 0)
       prcnt_to_right = round(100 * (total_right / (total_left + total_right)), 0)
-      slicer.util.messageBox(f"The calculated flow-split is: Left={prcnt_to_left}%, Right={prcnt_to_right}%")
-
+      return prcnt_to_left, prcnt_to_right
     finally:
       qt.QApplication.restoreOverrideCursor()
       slicer.mrmlScene.RemoveNode(seqBrowser)
@@ -397,7 +419,40 @@ class FluoroFlowCalculatorLogic(ScriptedLoadableModuleLogic):
       seqBrowser = slicer.modules.sequences.logic().GetFirstBrowserNodeForSequenceNode(inputVolSeq)
       slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
+  def initializeSegmentation(self, sequenceNode, segmentationNode=None):
+    seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
+    seqBrowser.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
+    volumeNode = seqBrowser.GetProxyNode(sequenceNode)
+    try:
+      if not segmentationNode:  # create new segmentation node
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode')
+        segmentationNode.CreateDefaultDisplayNodes()
+        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(volumeNode)
 
+      segmentation = segmentationNode.GetSegmentation()
+      segmentation.RemoveAllSegments()
+
+      def getOrCreateSegmentIdByName(segmentName):
+        return segmentation.GetSegmentIdBySegmentName(segmentName) if segmentation.GetSegmentIdBySegmentName(
+          segmentName) != '' else segmentation.AddEmptySegment(segmentName)
+
+      leftSegmentId = getOrCreateSegmentIdByName(LEFT_SEGMENT_NAME)
+      segmentArray = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNode, leftSegmentId, volumeNode)
+      segmentArray[:, :, :] = 0  # clear the existing segment
+      # The segmentArray dimensions are of the form of [depth=1,height=512,width=512]
+      segmentArray[0, :, int(segmentArray.shape[2] / 2):] = 1  # fill region using numpy indexing
+      slicer.util.updateSegmentBinaryLabelmapFromArray(segmentArray, segmentationNode, leftSegmentId, volumeNode)
+
+      rightSegmentId = getOrCreateSegmentIdByName(RIGHT_SEGMENT_NAME)
+      segmentArray = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNode, rightSegmentId, volumeNode)
+      segmentArray[:, :, :] = 0  # clear the existing segment
+      # The segmentArray dimensions are of the form of [depth=1,height=512,width=512]
+      segmentArray[0, :, 0:int(segmentArray.shape[2] / 2)] = 1  # fill region using numpy indexing
+      slicer.util.updateSegmentBinaryLabelmapFromArray(segmentArray, segmentationNode, rightSegmentId, volumeNode)
+    finally:
+      slicer.mrmlScene.RemoveNode(seqBrowser)
+      slicer.mrmlScene.RemoveNode(volumeNode)
+    return segmentationNode
 
 
 class FluoroFlowCalculatorTest(ScriptedLoadableModuleTest):
@@ -412,4 +467,39 @@ class FluoroFlowCalculatorTest(ScriptedLoadableModuleTest):
     """
     slicer.mrmlScene.Clear(0)
 
+    import SampleData
+    self.inputVolSeq = SampleData.SampleDataLogic().downloadSample("FluoroFlowCalculator")
+    self.logic = FluoroFlowCalculatorLogic()
 
+  def runTest(self):
+    self.setUp()
+    self.test_calculate_fluoro_flow()
+
+  def test_calculate_fluoro_flow(self):
+    self.delayDisplay("Starting the Fluoro Flow Calculator Test")
+
+    segmentationNode = self.logic.initializeSegmentation(
+      sequenceNode=self.inputVolSeq
+    )
+
+    self.delayDisplay("Starting the Fluoro Flow Calculator Test (too many segments)")
+    with self.assertRaises(MissingBaselineError):
+      self.logic.run(self.inputVolSeq, segmentationNode, 0, 9)
+
+    left, right = self.logic.run(self.inputVolSeq, segmentationNode, 3, 9)
+    self.assertAlmostEqual(left, 23.0)
+    self.assertAlmostEqual(right, 77.0)
+
+    self.delayDisplay("Starting the Fluoro Flow Calculator Test (too many segments)")
+    segmentationNode.GetSegmentation().AddEmptySegment("test123")
+    with self.assertRaises(TooManySegmentsFoundError):
+      self.logic.run(self.inputVolSeq, segmentationNode, 3, 9)
+
+    self.delayDisplay("Starting the Fluoro Flow Calculator Test (no segments)")
+    segmentationNode.GetSegmentation().RemoveAllSegments()
+    with self.assertRaises(ZeroSegmentsFoundError):
+      self.logic.run(self.inputVolSeq, segmentationNode, 3, 9)
+
+    # test raise error if first frame is 0
+
+    self.delayDisplay('Test passed')
