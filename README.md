@@ -20,7 +20,7 @@ The extension currently includes the following features (new features are added 
   - [Valve quantification](Docs/ValveQuantification.md): automatic computation heart valve annulus, leaflet, and papillary metrics
   - Valve batch export: run valve quantification and export results for a large cohort of data.
   - [Orifice area](Docs/OrificeArea.md): measure cross-sectional area of openings in a model, for example to quantify regurgitant orifice area.
-  - [Annular Shape Analyzer](Docs/AnnularShapeAnalyzer.md): make population-wise observations on dynamic annular shape.
+  - [Annulus Shape Analyzer](Docs/AnnulusShapeAnalyzer.md): make population-wise observations on dynamic annular shape.
   - [Fluoro Flow Calculator](Docs/FluoroFlowCalculator.md): measuring Qp-split using readily available fluoroscopy sequences.
 - Implant placement planning and assessment:
   - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.

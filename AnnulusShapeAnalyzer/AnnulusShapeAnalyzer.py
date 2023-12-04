@@ -11,19 +11,19 @@ import numpy as np
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 
-class AnnularShapeAnalyzer(ScriptedLoadableModule):
+class AnnulusShapeAnalyzer(ScriptedLoadableModule):
     """Uses ScriptedLoadableModule base class, available at:
     https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        parent.title = "Annular Shape Analyzer"
+        parent.title = "Annulus Shape Analyzer"
         parent.categories = ["Cardiac"]
         parent.dependencies = []
         parent.contributors = ["Ye Han (Kitware, Inc.), Andras Lasso (PerkLab)"]
         parent.helpText = """
-            Annular Shape Analyzer
+            Annulus Shape Analyzer
             """
         parent.acknowledgementText = """
             This work was supported by NIH R01HL153166 (PI. Matthew Jolley, 
@@ -38,15 +38,15 @@ class AnnularShapeAnalyzer(ScriptedLoadableModule):
 
         SampleData.SampleDataLogic.registerCustomSampleDataSource(
             category='SlicerHeart',
-            sampleName='AnnularShapeAnalyzer',
-            thumbnailFileName=os.path.join(iconsPath, 'AnnularShapeAnalyzer.png'),
-            uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/AnnularShapeAnalyzer.zip'],
+            sampleName='AnnulusShapeAnalyzer',
+            thumbnailFileName=os.path.join(iconsPath, 'AnnulusShapeAnalyzer.png'),
+            uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/AnnulusShapeAnalyzer.zip'],
             checksums=['SHA256:698b493099721a9639f48044780ab271bd1dfd51ca1f4fefccc3755ef23d28a1'],
-            fileNames=['AnnularShapeAnalyzer.zip'],
+            fileNames=['AnnulusShapeAnalyzer.zip'],
         )
 
 
-class AnnularShapeAnalyzerWidget(ScriptedLoadableModuleWidget):
+class AnnulusShapeAnalyzerWidget(ScriptedLoadableModuleWidget):
     """Uses ScriptedLoadableModuleWidget base class, available at:
     https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
@@ -62,11 +62,11 @@ class AnnularShapeAnalyzerWidget(ScriptedLoadableModuleWidget):
         Called when the user opens the module the first time and the widget is initialized.
         """
         ScriptedLoadableModuleWidget.setup(self)
-        self.logic = AnnularShapeAnalyzerLogic()
+        self.logic = AnnulusShapeAnalyzerLogic()
 
         # ---- Widget Setup ----
         # Load file
-        uiWidget = slicer.util.loadUI(self.resourcePath('UI/AnnularShapeAnalyzer.ui'))
+        uiWidget = slicer.util.loadUI(self.resourcePath('UI/AnnulusShapeAnalyzer.ui'))
         self.layout.addWidget(uiWidget)
         self.ui = slicer.util.childWidgetVariables(uiWidget)
         self.pathLineEdit_loadPopulationFile = self.ui.pathLineEdit_loadPopulationFile
@@ -331,7 +331,7 @@ class AnnularShapeAnalyzerWidget(ScriptedLoadableModuleWidget):
         pass
 
 
-class AnnularShapeAnalyzerLogic(ScriptedLoadableModuleLogic):
+class AnnulusShapeAnalyzerLogic(ScriptedLoadableModuleLogic):
 
     def __init__(self):
         super().__init__()
@@ -1800,7 +1800,7 @@ class AnnularShapeAnalyzerLogic(ScriptedLoadableModuleLogic):
         return k
 
 
-class AnnularShapeAnalyzerTest(ScriptedLoadableModuleTest):
+class AnnulusShapeAnalyzerTest(ScriptedLoadableModuleTest):
     """
     This is the test case for your scripted module.
     Uses ScriptedLoadableModuleTest base class, available at:
@@ -1816,9 +1816,9 @@ class AnnularShapeAnalyzerTest(ScriptedLoadableModuleTest):
         """Run as few or as many tests as needed here.
         """
         self.setUp()
-        self.test_AnnularShapeAnalyzer()
+        self.test_AnnulusShapeAnalyzer()
 
-    def test_AnnularShapeAnalyzer(self):
+    def test_AnnulusShapeAnalyzer(self):
         """ Ideally you should have several levels of tests.  At the lowest level
         tests should exercise the functionality of the logic with different inputs
         (both valid and invalid).  At higher levels your tests should emulate the
@@ -1830,10 +1830,10 @@ class AnnularShapeAnalyzerTest(ScriptedLoadableModuleTest):
         your test should break so they know that the feature is needed.
         """
 
-        self.delayDisplay("Starting the Annular Shape Analyzer Test")
+        self.delayDisplay("Starting the Annulus Shape Analyzer Test")
 
         import SampleData
-        downloadedFilePath = SampleData.SampleDataLogic().downloadSample("AnnularShapeAnalyzer")
+        downloadedFilePath = SampleData.SampleDataLogic().downloadSample("AnnulusShapeAnalyzer")
 
         from tempfile import TemporaryDirectory
         with TemporaryDirectory(dir=slicer.app.temporaryPath) as temp_dir:

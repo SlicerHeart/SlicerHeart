@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-set(MODULE_NAME AnnularShapeAnalyzer)
+set(MODULE_NAME AnnulusShapeAnalyzer)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
