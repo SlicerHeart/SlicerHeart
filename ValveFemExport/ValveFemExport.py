@@ -811,7 +811,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       return v * gridResolution[0] + u
 
     # Create temporary grid surface markup containing only the defined region
-    regionGridResolution = (subtractWrappingGridIndices(leftUGridIndex, rightUGridIndex) + 1, maxVGridIndex - minVGridIndex + 1)
+    regionGridResolution = (subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex) + 1, maxVGridIndex - minVGridIndex + 1)
     regionGridPoints = vtk.vtkPoints()
     regionGridPoints.SetNumberOfPoints(regionGridResolution[0] * regionGridResolution[1])
     currentPos = np.zeros(3)
@@ -837,7 +837,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     numberOfChords = int(regionAreaMm2 * chordsPerMm2 + 0.5)
 
     # Distribute points
-    chordGridResolutionV = int((numberOfChords * regionGridResolution[1]) / regionGridResolution[0])
+    chordGridResolutionV = int((numberOfChords * regionGridResolution[1]) / regionGridResolution[0] + 0.5)
     chordGridResolutionU = math.ceil(numberOfChords / chordGridResolutionV)
 
     regionGridStep = np.array([regionGridResolution[0] / chordGridResolutionU, regionGridResolution[1] / chordGridResolutionV])
