@@ -1,5 +1,8 @@
 from collections import OrderedDict
 
+# Show green slice in 3D view, as it is an orthogonal view that makes the leaflets nicely visible
+DEFAULT_SLICE_VIEW_SHOWN_IN_3D = 'Green'
+
 PROBE_POSITION_UNKNOWN = 'UNKNOWN'
 PROBE_POSITION_TTE_APICAL = 'TTE_APICAL'
 PROBE_POSITION_TTE_APICAL_NONSTANDARD_DOT_AT_9OCLOCK = 'TTE_APICAL_NONSTANDARD_DOT_AT_9OCLOCK'
