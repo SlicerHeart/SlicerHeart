@@ -1,6 +1,6 @@
-<mxfile host="Electron" modified="2023-09-14T16:00:16.925Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.6.5 Chrome/114.0.5735.243 Electron/25.3.1 Safari/537.36" etag="rbV6BosqY1-RXAho5w_d" version="21.6.5" type="device">
+<mxfile host="Electron" modified="2023-11-08T16:04:20.514Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.0.2 Chrome/114.0.5735.289 Electron/25.8.4 Safari/537.36" etag="IZ0y7HY4oBCw7-4S_T0r" version="22.0.2" type="device">
   <diagram id="C5RBs43oDa-KdzZeNtuy" name="Page-1">
-    <mxGraphModel dx="2074" dy="2405" grid="1" gridSize="10" guides="1" tooltips="1" connect="0" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
+    <mxGraphModel dx="2060" dy="2390" grid="1" gridSize="10" guides="1" tooltips="1" connect="0" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="WIyWlLk6GJQsqaUBKTNV-0" />
         <mxCell id="WIyWlLk6GJQsqaUBKTNV-1" parent="WIyWlLk6GJQsqaUBKTNV-0" />
@@ -185,15 +185,10 @@
             <mxPoint x="680" y="5" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="201H1WidRGv-Px01H2L--13" value="" style="curved=1;endArrow=classic;html=1;rounded=0;entryX=1;entryY=0;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;" parent="WIyWlLk6GJQsqaUBKTNV-1" target="vHw_XgUT5hpDHiSDQdwm-0" edge="1">
+        <mxCell id="201H1WidRGv-Px01H2L--13" value="" style="curved=1;endArrow=classic;html=1;rounded=0;entryX=1;entryY=0.611;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;entryPerimeter=0;" parent="WIyWlLk6GJQsqaUBKTNV-1" target="vHw_XgUT5hpDHiSDQdwm-0" edge="1">
           <mxGeometry width="50" height="50" relative="1" as="geometry">
             <mxPoint x="1060" y="60" as="sourcePoint" />
             <mxPoint x="1090" y="20" as="targetPoint" />
-            <Array as="points">
-              <mxPoint x="1060" y="61" />
-              <mxPoint x="930" y="61" />
-              <mxPoint x="930" y="110" />
-            </Array>
           </mxGeometry>
         </mxCell>
         <mxCell id="201H1WidRGv-Px01H2L--14" value="Valve volume, but with region outside the ROI blanked out. and reduced to minimum necessary size.&lt;br&gt;The region is computed from the annulus contour sequence.&lt;br&gt;There can be multiple clipped volumes, one for each valve.&lt;br&gt;We know which valve each clipped volume belongs to because the ValveBrowser has a reference to it." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
@@ -216,6 +211,12 @@
         </mxCell>
         <mxCell id="FMtwze112QoW8ohogXbG-8" value="Valve ROI Model (proxy)" style="whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#080808;" parent="WIyWlLk6GJQsqaUBKTNV-1" vertex="1">
           <mxGeometry x="828" y="710" width="172" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="glV9J2HKgnPFTotQAbif-5" value="master node" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
+          <mxGeometry x="833" y="488" width="57" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="glV9J2HKgnPFTotQAbif-6" value="master node" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
+          <mxGeometry x="853" y="-21" width="57" height="32" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

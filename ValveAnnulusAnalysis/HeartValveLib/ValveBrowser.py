@@ -378,7 +378,7 @@ class ValveBrowser:
       self.valveBrowserNode.AddProxyNode(proxyNode, sequenceNode, False)
       self.valveBrowserNode.SetSaveChanges(sequenceNode, True)
       # Prevent automatic creation of missing items (it would clutter the scene and would be difficult to tell what information is actually specified)
-      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemDisableSaveChanges)
+      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
 
     def addCurrentTimePointToSequence(self, sequenceNode):
       """Make a time sequence from a single node and add it to this browser node"""
@@ -387,8 +387,7 @@ class ValveBrowser:
       oldMissingItemMode = self.valveBrowserNode.GetMissingItemMode(sequenceNode)
       oldSaveChanges = self.valveBrowserNode.GetSaveChanges(sequenceNode)
 
-      #self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCopyPrevious)
-      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCreateEmpty)
+      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCreateFromDefault)
       self.valveBrowserNode.SetSaveChanges(sequenceNode, True)
       slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
 
