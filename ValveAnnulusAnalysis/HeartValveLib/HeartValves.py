@@ -2,7 +2,7 @@ import os
 import vtk
 import slicer
 import HeartValveLib
-from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
+from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID, DEFAULT_SLICE_VIEW_SHOWN_IN_3D
 from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
 from HeartValveLib.util import getAllSegmentIDs
 
@@ -256,15 +256,9 @@ def setupDefaultLayout(layoutId=CardiacFourUpViewLayoutId):
     sliceViewNode = sliceLogic.GetSliceNode()
 
     # Show slice intersections
-    try:
-      # Slicer-4.13 (February 2022) and later
-      sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
-    except:
-      # fall back to older API
-      sliceCompositeNode.SetSliceIntersectionVisibility(True)
+    sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
 
-    # Show only red slice in 3D view
-    sliceViewNode.SetSliceVisible(sliceViewName == 'Red')
+    sliceViewNode.SetSliceVisible(sliceViewName == DEFAULT_SLICE_VIEW_SHOWN_IN_3D)
 
   setSliceViewsLink(sliceViewNames, oldLink, oldHotLink)
 
@@ -304,10 +298,13 @@ def setSliceViewsLink(viewNames, link, hotlink):
 
 def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, orthoRotationDeg=0,
                                  axialSliceName='Red', ortho1SliceName='Yellow', ortho2SliceName='Green',
-                                 show3DSliceName='Red'):
+                                 show3DSliceName=None):
   """Sets up views for a specific valve.
   show3DSliceName is the name of the slice that should be shown in 3D views
   valveModel: can be valve model or browser"""
+
+  if show3DSliceName is None:
+    show3DSliceName = DEFAULT_SLICE_VIEW_SHOWN_IN_3D
 
   layoutManager = slicer.app.layoutManager()
   if not layoutManager:
@@ -327,12 +324,7 @@ def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, ortho
     sliceViewNode = sliceLogic.GetSliceNode()
 
     # Show slice intersections
-    try:
-      # Slicer-4.13 (February 2022) and later
-      sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
-    except:
-      # fall back to older API
-      sliceCompositeNode.SetSliceIntersectionVisibility(True)
+    sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
 
     # Show only red slice in 3D view
     sliceViewNode.SetSliceVisible(sliceViewName == show3DSliceName)

@@ -372,8 +372,9 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
                                                          widget == self.ui.contourAdjustmentCollapsibleButton)
         # Hide annulus slice intersection in contouring mode
         # (it is confusing to see something in the slice views while still just adding points)
-        self.annulusContourCurveNode.GetDisplayNode().SetVisibility2D(widget != self.ui.contouringCollapsibleButton)
-        self.annulusContourCurveNode.GetDisplayNode().SetSliceIntersectionThickness(4)
+        if self.annulusContourCurveNode and self.annulusContourCurveNode.GetDisplayNode():
+          self.annulusContourCurveNode.GetDisplayNode().SetVisibility2D(widget != self.ui.contouringCollapsibleButton)
+          self.annulusContourCurveNode.GetDisplayNode().SetSliceIntersectionThickness(4)
 
     # View step
     if widget == self.ui.viewCollapsibleButton:
@@ -493,6 +494,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
       self.updateValveVolumeBrowserObserver()
 
+      # TODO: call this earlier, because the position is already set from the current slice views here
       axialSliceToRasTransformNode = self.valveBrowser.axialSliceToRasTransformNode if self.valveBrowser else None
       self.setAndObserveAxialSliceToRasTransformNode(axialSliceToRasTransformNode)
       self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
@@ -578,7 +580,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.valveVolumeSelector.blockSignals(wasBlocked)
 
     wasBlocked = self.ui.annulusModelRadiusSliderWidget.blockSignals(True)
-    self.ui.annulusModelRadiusSliderWidget.value = self.valveModel.annulusContourRadius if self.valveModel else 5.0
+    self.ui.annulusModelRadiusSliderWidget.value = self.valveModel.annulusContourRadius if (self.valveModel and self.valveModel.annulusContourRadius) else 5.0
     self.ui.annulusModelRadiusSliderWidget.blockSignals(wasBlocked)
 
     wasBlocked = self.ui.probePositionSelector.blockSignals(True)
@@ -623,8 +625,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
         slicer.vtkMRMLTransformableNode.TransformModifiedEvent, self.onAxialSliceToRasTransformNodeModified)
     self.ui.axialSliceToRasTransformOrientationSliderWidget.setMRMLTransformNode(axialSliceToRasTransformNode)
 
-    # Initial update
-    self.onAxialSliceToRasTransformNodeModified()
+    # Make slice views jump to the valve center, aligned with valve axes
+    self.onDisplayFourUpView(resetViewOrientations=True, resetFov=False)
 
   def updateAxialSliceToRasCenterFromSliceViewIntersections(self):
     """Make the axial slice center the intersection of all slices"""
@@ -1203,9 +1205,9 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
 
     # Get this setting the valve orientation sliders and then calling:
     #   arrayFromTransformMatrix(getNode('AxialSliceToRasTransform_1'))
-    axialSliceToRasTransformMatrixArray = np.array([[-0.69571977, -0.3869726 , -0.60516677, 15.09743333],
-       [-0.5315348 ,  0.84402519,  0.07135991, -1.35907367],
-       [ 0.48316164,  0.3713134 , -0.79289388, 26.04229844],
+    axialSliceToRasTransformMatrixArray = np.array([[-0.79650815,  0.12000408, -0.59259969, 13.088414  ],
+       [ 0.05817409,  0.99076903,  0.12244386, -1.09962848],
+       [ 0.60182299,  0.06305333, -0.79613622, 26.9744882 ],
        [ 0.        ,  0.        ,  0.        ,  1.        ]])
 
     # Get this by copying `AnnulusContourMarkup` points to new closed curve node `CC`,
@@ -1309,9 +1311,10 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     valveBrowserModel = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
     self.assertIsNotNone(valveBrowserModel)
 
-    # Jump to the slice positions and orientations prescribed for this test
+    # Jump to the slice positions and orientations prescribed for this test.
+    # Modifying axialSliceToRasTransformNode will also update the slice views position and orientation
     axialSliceToRasMatrix = slicer.util.vtkMatrixFromArray(axialSliceToRasTransformMatrixArray)
-    valveBrowserModel.setSlicePositionAndOrientation(axialSlice, orthogonalSlice1, orthogonalSlice2, sliceIntersectionPosition, 0, axialSliceToRasMatrix)
+    valveAnnulusAnalysisGui.axialSliceToRasTransformNode.SetMatrixTransformToParent(axialSliceToRasMatrix)
 
     # -------------------------------------------
     self.delayDisplay("Specify contour points")
