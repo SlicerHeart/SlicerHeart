@@ -230,7 +230,7 @@ class ValveModel:
       return self._leafletSegmentationNode(forDisplayedHeartValveSequence=True)
 
     @leafletSegmentationNode.setter
-    def leafletSegmentationNode(self, node):
+    def leafletSegmentationNode(self, segmentationNode):
       if not self.heartValveNode:
         logging.error("setLeafletSegmentationNode failed: invalid heartValveNode")
         return

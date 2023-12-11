@@ -129,24 +129,15 @@ class ValveBrowser:
         return 0
       return volumeSequenceBrowserNode.GetSelectedItemNumber()
 
-    @property
-    def valveModel(self):
-      valveModel = HeartValves.getValveModel(self.heartValveNode)
-      return valveModel
-
-    @property
-    def volumeSequenceBrowserNode(self):
-      volumeNode = self.valveVolumeNode
-      if not volumeNode:
-        return None
-      import HeartValveLib
-      volumeSequenceBrowserNode = HeartValveLib.getSequenceBrowserNodeForMasterOutputNode(volumeNode)
-      return volumeSequenceBrowserNode
-
     def getDisplayedValveVolumeSequenceIndexValue(self):
       """Get currently displayed item index value of valve volume sequence"""
       itemIndex, indexValue = self.getDisplayedValveVolumeSequenceIndexAndValue()
       return indexValue
+
+    @property
+    def valveModel(self):
+      valveModel = HeartValves.getValveModel(self.heartValveNode)
+      return valveModel
 
     @property
     def volumeSequenceBrowserNode(self):
@@ -356,7 +347,7 @@ class ValveBrowser:
       valveType = self.valveType
       valveName = valveType[0].upper()+valveType[1:]
 
-      # udpate valve browser node name
+      # update valve browser node name
       valveBrowserNodeName = f"{valveName}Valve"
       currentNodeName = self.valveBrowserNode.GetName()
       if not currentNodeName.startswith(valveBrowserNodeName): # need to update
@@ -394,14 +385,6 @@ class ValveBrowser:
       # Restore original missing item mode
       self.valveBrowserNode.SetSaveChanges(sequenceNode, oldSaveChanges)
       self.valveBrowserNode.SetMissingItemMode(sequenceNode, oldMissingItemMode)
-
-    def removeCurrentTimePointFromSequence(self, sequenceNode):
-      """Remove current tie point of a single node"""
-
-      # Remove contour from sequence
-      valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-      annulusContourCurveSequenceNode.RemoveDataNodeAtValue(indexValue)
-      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
 
     def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
 
