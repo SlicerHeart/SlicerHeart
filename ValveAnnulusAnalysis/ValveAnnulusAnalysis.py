@@ -573,7 +573,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.updateGuiEnabled()
     self.onGoToAnalyzedFrameButtonClicked()
 
-
   def updateGUIFromHeartValveNode(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
     wasBlocked = self.ui.valveVolumeSelector.blockSignals(True)
     self.ui.valveVolumeSelector.setCurrentNode(self.valveVolumeNode)
@@ -822,6 +821,15 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     if timepointAlreadyAdded:
       self.ui.addTimePointButton.text = f"Go to volume (index = {volumeSequenceIndex + 1})"
+
+      heartValveNode = self.valveBrowser.heartValveSequenceNode.GetDataNodeAtValue(volumeSequenceIndexValue)
+      wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
+      self.ui.cardiacCyclePhaseSelector.setCurrentIndex(
+        self.ui.cardiacCyclePhaseSelector.findText(
+          heartValveNode.GetAttribute("CardiacCyclePhase")
+        )
+      )
+      self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
       self.ui.cardiacCyclePhaseSelector.enabled = True
       self.ui.removeTimePointButton.enabled = True
     else:
@@ -835,7 +843,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     # Set the new node in the GUI
     annulusContourCurveNode = self.valveModel.annulusContourCurveNode if self.valveModel else None
     self.setAndObserveAnnulusContourCurveNode(annulusContourCurveNode)
-
 
   def onResampleSamplingDistanceChanged(self):
     self.updateAnnulusContourPreviewModel()
@@ -1253,8 +1260,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
                     valveType, axialSliceToRasTransformMatrixArray, annulusMarkupControlPointsArray):
 
     import time
-    import numpy as np
-    import ValveModel
     import HeartValveLib
 
     ################################
@@ -1272,7 +1277,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
 
     valveAnnulusAnalysisGui.ui.heartValveBrowserSelector.setCurrentNode(heartValveBrowserNode)
     valveAnnulusAnalysisGui.ui.valveTypeSelector.currentText = valveType
-    valveAnnulusAnalysisGui.ui.cardiacCyclePhaseSelector.currentText = cardiacCyclePhase
 
     # -------------------------------------------
     self.delayDisplay("Select analysis frame")
@@ -1286,6 +1290,8 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     # Jump to the analysis frame prescribed for this test
     valveVolumeSequenceBrowser.SetSelectedItemNumber(analyzedFrame)
     valveAnnulusAnalysisGui.ui.addTimePointButton.click()
+
+    valveAnnulusAnalysisGui.ui.cardiacCyclePhaseSelector.currentText = cardiacCyclePhase
 
     # -------------------------------------------
     self.delayDisplay("Set image orientation")
