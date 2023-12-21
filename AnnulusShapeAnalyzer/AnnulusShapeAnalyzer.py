@@ -1842,6 +1842,36 @@ class AnnulusShapeAnalyzerTest(ScriptedLoadableModuleTest):
                 zipObject.extractall(path=temp_dir)
 
             print(os.listdir(temp_dir))
-            # TODO: run tests with the folder
+
+            widget = slicer.modules.AnnulusShapeAnalyzerWidget
+            logic = widget.logic
+
+            # load annulus contour and calculate mean
+            widget.pathLineEdit_loadPopulationFile.currentPath = temp_dir + "/" + "0-1_AnnulusContourPoints.csv"
+            widget.onLoadPopulationFile()
+            widget.onProcessPopulationFile()
+            widget.onCalculateMeanShape()
+
+            # pca
+            widget.onEvaluateModels()
+
+            # load demographics and regress w.r.t. selected variable
+            widget.pathLineEdit_demographicsFilePath.currentPath = temp_dir + "/" + "Demographics.csv"
+            widget.onLoadAssociatedDemographics()
+            widget.tableWidget_demographics.findItems("bsa", qt.Qt.MatchExactly)[0].setCheckState(qt.Qt.Checked)
+            widget.onPerformRegressionOnSelectedVariables()
+
+            # compare curves
+            widget.comboBox_compareCurve2.currentIndex = 3
+            widget.onCompareCurves()
+
+            # strain and curvature
+            widget.comboBox_strainCurvatureDeformedPhase.currentIndex = 1
+            widget.onComputeStrainCurvature()
+
+            # cleanup
+            logic.clear()
+            widget.onReload()
+            slicer.mrmlScene.Clear()
 
         self.delayDisplay('Test passed')
