@@ -34,23 +34,42 @@ class ValveSequenceBrowserWidget:
 
   @heartValveNode.setter
   def heartValveNode(self, heartValveNode):
+    if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
+      return
+
     self._removeHeartValveNodeObserver()
     self._heartValveNode = heartValveNode
     if self._heartValveNode:
       self._heartValveNodeObserver = \
         self._heartValveNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.updateGUIFromMRML)
 
+    self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
+
+    self.updateGUIFromMRML()
+    self.onGoToAnalyzedFrameButtonClicked()
+
   @property
   def valveBrowserNode(self):
-      return self._valveBrowserNode
+    return self._valveBrowserNode
 
   @valveBrowserNode.setter
-  def valveBrowserNode(self, heartValveBrowserNode):
+  def valveBrowserNode(self, valveBrowserNode):
+    self.ui.heartValveBrowserPlayWidget.setMRMLSequenceBrowserNode(valveBrowserNode)
+    self.ui.heartValveBrowserSeekWidget.setMRMLSequenceBrowserNode(valveBrowserNode)
+
     self._removeHeartValveBrowserNodeObserver()
-    self._valveBrowserNode = heartValveBrowserNode
+    self._valveBrowserNode = valveBrowserNode
     if self._valveBrowserNode:
       self._valveBrowserNodeObserver = \
         self._valveBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveBrowserNodeModified)
+
+    self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(valveBrowserNode)
+    self.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
+
+    if self.valveBrowser and not self.valveVolumeNode:
+      self._setValveVolumeToBackgroundVolume()
+
+    self.heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
 
   @property
   def valveVolumeBrowserNode(self):
@@ -127,31 +146,6 @@ class ValveSequenceBrowserWidget:
       self._valveVolumeBrowserNode.RemoveObserver(self._valveVolumeBrowserNodeObserver)
       self._valveVolumeBrowserNodeObserver = None
 
-  def setHeartValveBrowserNode(self, heartValveBrowserNode):
-    self.ui.heartValveBrowserPlayWidget.setMRMLSequenceBrowserNode(heartValveBrowserNode)
-    self.ui.heartValveBrowserSeekWidget.setMRMLSequenceBrowserNode(heartValveBrowserNode)
-
-    self.valveBrowserNode = heartValveBrowserNode
-    self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
-    self.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
-
-    if self.valveBrowser:
-      valveVolumeNode = self.valveVolumeNode
-      if not valveVolumeNode:
-        self._setValveVolumeToBackgroundVolume()
-
-    self.setHeartValveNode(self.valveBrowser.heartValveNode if self.valveBrowser else None)
-
-  def setHeartValveNode(self, heartValveNode):
-    if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
-      return
-
-    self.heartValveNode = heartValveNode
-    self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
-
-    self.updateGUIFromMRML()
-    self.onGoToAnalyzedFrameButtonClicked()
-
   def _setValveVolumeToBackgroundVolume(self):
     # select background volume by default as valve volume (to spare a click for the user)
     appLogic = slicer.app.applicationLogic()
@@ -179,8 +173,7 @@ class ValveSequenceBrowserWidget:
       if not volumeSequenceIndexValue:
         raise RuntimeError("Failed to add time point, could not get volume sequence")
       self.valveBrowser.addTimePoint(volumeSequenceIndexValue)
-      heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
-      self.setHeartValveNode(heartValveNode)
+      self.heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
 
     self.updateGUIFromMRML()
 
