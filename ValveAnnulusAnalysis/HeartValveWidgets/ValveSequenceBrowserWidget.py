@@ -1,22 +1,13 @@
 import logging
 from string import Template
+from pathlib import Path
 
+import qt
 import vtk
 import slicer
-from slicer.util import VTKObservationMixin
 
 import HeartValveLib
 from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
-
-
-MODULE_NAME = "ValveAnnulusAnalysis"
-
-
-def resourcePath(filename):
-  import os
-  import slicer
-  scriptedModulesPath = os.path.dirname(slicer.util.modulePath(MODULE_NAME))
-  return os.path.join(scriptedModulesPath, 'Resources', filename)
 
 
 class ValveSequenceBrowserWidget:
@@ -42,12 +33,14 @@ class ValveSequenceBrowserWidget:
       w = ValveSequenceBrowserWidget(parent=None)
       w.show()
 
-      #w.readOnly = True
+      #set to read only
+      w.readOnly = True
 
       valveSeries = slicer.util.getNode('MitralValve')
       w.valveBrowserNode = valveSeries
 
-      #w.destroy()
+      # destroy widget, remove observers, and disconnect signals
+      w.destroy()
 
   """
 
@@ -134,8 +127,11 @@ class ValveSequenceBrowserWidget:
   def visible(self, visibility):
     self.ui.visible = visibility
 
-  def __init__(self, parent=None): # parent should be a layout
-    self.ui = slicer.util.loadUI(resourcePath("UI/ValveSequenceBrowserWidget.ui"))
+  def __init__(self, parent: qt.QLayout = None):
+    uiFile = str(Path(__file__).parent.parent / "Resources/UI/ValveSequenceBrowserWidget.ui")
+    if not Path(uiFile).exists():
+      raise FileNotFoundError(f"UI file ({uiFile}) could not be found for {self.__class__.__name__}.")
+    self.ui = slicer.util.loadUI(uiFile)
     self.ui.setMRMLScene(slicer.mrmlScene)
 
     # Just used for keeping track of the observers
