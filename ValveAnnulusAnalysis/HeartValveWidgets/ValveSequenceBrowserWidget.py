@@ -1,6 +1,5 @@
 import logging
 from string import Template
-from enum import IntEnum
 
 import vtk
 import slicer
@@ -21,6 +20,36 @@ def resourcePath(filename):
 
 
 class ValveSequenceBrowserWidget:
+  """ Widget for navigating and optional modification of SlicerHeart-based ValveSeries (vtkMRMLSequenceBrowserNode).
+
+    Attributes
+    ----------
+    valveBrowserNode : slicer.vtkMRMLSequenceBrowserNode
+      (required) ValveSeries to be used for navigation and modification (if readOnly set to False)
+    visible: bool
+      controls visibility of underlying widget
+    readOnly: bool
+      flag for setting read-only (no add/remove of timepoints and no cardiac cycle modification) (default is False)
+
+    Methods
+    ----------
+    destroy()
+      deletes widget and all observers and signals
+
+    .. code-block:: python
+
+      from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
+      w = ValveSequenceBrowserWidget(parent=None)
+      w.show()
+
+      #w.readOnly = True
+
+      valveSeries = slicer.util.getNode('MitralValve')
+      w.valveBrowserNode = valveSeries
+
+      #w.destroy()
+
+  """
 
   @property
   def valveVolumeNode(self):
@@ -33,7 +62,7 @@ class ValveSequenceBrowserWidget:
     return self._heartValveNode
 
   @heartValveNode.setter
-  def heartValveNode(self, heartValveNode):
+  def heartValveNode(self, heartValveNode: slicer.vtkMRMLScriptedModuleNode):
     if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
       return
 
@@ -53,7 +82,7 @@ class ValveSequenceBrowserWidget:
     return self._valveBrowserNode
 
   @valveBrowserNode.setter
-  def valveBrowserNode(self, valveBrowserNode):
+  def valveBrowserNode(self, valveBrowserNode: slicer.vtkMRMLSequenceBrowserNode):
     self.ui.heartValveBrowserPlayWidget.setMRMLSequenceBrowserNode(valveBrowserNode)
     self.ui.heartValveBrowserSeekWidget.setMRMLSequenceBrowserNode(valveBrowserNode)
 
@@ -64,6 +93,8 @@ class ValveSequenceBrowserWidget:
         self._valveBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveBrowserNodeModified)
 
     self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(valveBrowserNode)
+    if self._valveBrowserNode and self.valveBrowser and self.valveBrowser.volumeSequenceBrowserNode is None:
+      logging.warning("Could not retrieve a valid VolumeSequenceBrowserNode for the given ValveSeries.")
     self.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
 
     if self.valveBrowser and not self.valveVolumeNode:
@@ -76,7 +107,7 @@ class ValveSequenceBrowserWidget:
     return self._valveVolumeBrowserNode
 
   @valveVolumeBrowserNode.setter
-  def valveVolumeBrowserNode(self, valveVolumeBrowserNode):
+  def valveVolumeBrowserNode(self, valveVolumeBrowserNode: slicer.vtkMRMLSequenceBrowserNode):
     self._removeValveVolumeBrowserObserver()
     self._valveVolumeBrowserNode = valveVolumeBrowserNode
     if self._valveVolumeBrowserNode:
@@ -94,6 +125,14 @@ class ValveSequenceBrowserWidget:
     self.ui.removeTimePointButton.visible = not enabled
     self.ui.cardiacCyclePhaseSelector.enabled = not enabled
     self.updateGUIFromMRML()
+
+  @property
+  def visible(self):
+    return self.ui.visible
+
+  @visible.setter
+  def visible(self, visibility):
+    self.ui.visible = visibility
 
   def __init__(self, parent=None): # parent should be a layout
     self.ui = slicer.util.loadUI(resourcePath("UI/ValveSequenceBrowserWidget.ui"))
@@ -118,6 +157,12 @@ class ValveSequenceBrowserWidget:
 
     self.setup(parent)
 
+  def destroy(self):
+    self.valveBrowserNode = None
+    self._disconnectSignals()
+    self.ui.setParent(None)
+    self.ui.deleteLater()
+
   def setup(self, parent):
     if parent is not None:
       parent.addWidget(self.ui)
@@ -125,11 +170,25 @@ class ValveSequenceBrowserWidget:
     for cardiacCyclePhaseName in CARDIAC_CYCLE_PHASE_PRESETS.keys():
       self.ui.cardiacCyclePhaseSelector.addItem(cardiacCyclePhaseName)
 
-    # connections
+    self._connectSignals()
+
+  def _connectSignals(self):
     self.ui.addTimePointButton.clicked.connect(self.onAddTimePointButtonClicked)
     self.ui.removeTimePointButton.clicked.connect(self.onRemoveTimePointButtonClicked)
     self.ui.cardiacCyclePhaseSelector.connect("currentIndexChanged(int)", self.onCardiacCyclePhaseChanged)
     self.ui.goToAnalyzedFrameButton.clicked.connect(self.onGoToAnalyzedFrameButtonClicked)
+
+  def _disconnectSignals(self):
+    self.ui.addTimePointButton.clicked.disconnect(self.onAddTimePointButtonClicked)
+    self.ui.removeTimePointButton.clicked.disconnect(self.onRemoveTimePointButtonClicked)
+    self.ui.cardiacCyclePhaseSelector.disconnect("currentIndexChanged(int)", self.onCardiacCyclePhaseChanged)
+    self.ui.goToAnalyzedFrameButton.clicked.disconnect(self.onGoToAnalyzedFrameButtonClicked)
+
+  def show(self):
+    self.ui.show()
+
+  def hide(self):
+    self.ui.hide()
 
   def _removeHeartValveBrowserNodeObserver(self):
     if self._valveBrowserNode and self._valveBrowserNodeObserver:
