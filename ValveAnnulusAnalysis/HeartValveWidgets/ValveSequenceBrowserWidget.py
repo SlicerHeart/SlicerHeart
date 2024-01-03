@@ -7,6 +7,7 @@ import vtk
 import slicer
 
 import HeartValveLib
+from HeartValveLib.util import Signal
 from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
 
 
@@ -63,7 +64,7 @@ class ValveSequenceBrowserWidget:
     self._heartValveNode = heartValveNode
     if self._heartValveNode:
       self._heartValveNodeObserver = \
-        self._heartValveNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.updateGUIFromMRML)
+        self._heartValveNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onHeartValveNodeModified)
 
     self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
 
@@ -86,12 +87,13 @@ class ValveSequenceBrowserWidget:
         self._valveBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveBrowserNodeModified)
 
     self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(valveBrowserNode)
-    if self._valveBrowserNode and self.valveBrowser and self.valveBrowser.volumeSequenceBrowserNode is None:
-      logging.warning("Could not retrieve a valid VolumeSequenceBrowserNode for the given ValveSeries.")
-    self.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
 
     if self.valveBrowser and not self.valveVolumeNode:
       self._setValveVolumeToBackgroundVolume()
+
+    if self._valveBrowserNode and self.valveBrowser and self.valveBrowser.volumeSequenceBrowserNode is None:
+      logging.warning("Could not retrieve a valid VolumeSequenceBrowserNode for the given ValveSeries.")
+    self.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
 
     self.heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
 
@@ -105,7 +107,8 @@ class ValveSequenceBrowserWidget:
     self._valveVolumeBrowserNode = valveVolumeBrowserNode
     if self._valveVolumeBrowserNode:
       self._valveVolumeBrowserNodeObserver = \
-        self._valveVolumeBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.updateGUIFromMRML)
+        self._valveVolumeBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveVolumeBrowserNodeModified)
+    self.updateGUIFromMRML()
 
   @property
   def readOnly(self):
@@ -133,6 +136,9 @@ class ValveSequenceBrowserWidget:
       raise FileNotFoundError(f"UI file ({uiFile}) could not be found for {self.__class__.__name__}.")
     self.ui = slicer.util.loadUI(uiFile)
     self.ui.setMRMLScene(slicer.mrmlScene)
+
+    self.valveBrowserNodeModified = Signal()
+    self.heartValveNodeModified = Signal()
 
     # Just used for keeping track of the observers
     self._heartValveNode = None
@@ -268,6 +274,13 @@ class ValveSequenceBrowserWidget:
       self.valveModel.getValveVolumeSequenceIndex()) if self.valveModel else ""
     self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
 
+  def onValveVolumeBrowserNodeModified(self, observer=None, eventid=None):
+    self.updateGUIFromMRML()
+
+  def onHeartValveNodeModified(self, observer=None, eventid=None):
+    self.updateGUIFromMRML()
+    self.heartValveNodeModified.emit()
+
   def onValveBrowserNodeModified(self, observer=None, eventid=None):
     # Show current valve volume if switched valve time point
     lastValveBrowserSelectedItemIndex = -1
@@ -280,3 +293,4 @@ class ValveSequenceBrowserWidget:
 
     self.lastValveBrowserSelectedItemIndex = lastValveBrowserSelectedItemIndex
     self.updateGUIFromMRML()
+    self.valveBrowserNodeModified.emit()

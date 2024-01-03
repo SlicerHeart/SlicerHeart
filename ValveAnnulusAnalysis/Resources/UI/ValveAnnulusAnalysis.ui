@@ -102,77 +102,7 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </property>
     </widget>
    </item>
-   <item row="6" column="0">
-    <widget class="QLabel" name="label_12">
-     <property name="text">
-      <string>Time points:</string>
-     </property>
-    </widget>
-   </item>
-   <item row="6" column="1">
-    <layout class="QHBoxLayout" name="horizontalLayout_7">
-     <item>
-      <widget class="QPushButton" name="addTimePointButton">
-       <property name="text">
-        <string>Add</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QComboBox" name="cardiacCyclePhaseSelector">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="removeTimePointButton">
-       <property name="text">
-        <string>Remove</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item row="7" column="1">
-    <widget class="qMRMLSequenceBrowserPlayWidget" name="heartValveBrowserPlayWidget">
-     <property name="RecordingControlsVisible">
-      <bool>false</bool>
-     </property>
-    </widget>
-   </item>
-   <item row="8" column="1">
-    <layout class="QHBoxLayout" name="horizontalLayout_8">
-     <item>
-      <widget class="qMRMLSequenceBrowserSeekWidget" name="heartValveBrowserSeekWidget"/>
-     </item>
-     <item>
-      <widget class="QLabel" name="label_6">
-       <property name="text">
-        <string>Volume index:</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="valveVolumeSequenceIndexValue">
-       <property name="text">
-        <string>0</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="goToAnalyzedFrameButton">
-       <property name="text">
-        <string>Go to</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item row="11" column="0" colspan="2">
+   <item row="9" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="viewCollapsibleButton">
      <property name="text">
       <string>View</string>
@@ -207,7 +137,7 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
-   <item row="14" column="0" colspan="2">
+   <item row="12" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="contouringCollapsibleButton">
      <property name="text">
       <string>Contouring</string>
@@ -345,7 +275,7 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
-   <item row="17" column="0" colspan="2">
+   <item row="15" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="contourAdjustmentCollapsibleButton">
      <property name="text">
       <string>Contour adjustment</string>
@@ -458,7 +388,7 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
-   <item row="18" column="0" colspan="2">
+   <item row="16" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="displayCollapsibleButton">
      <property name="text">
       <string>Display</string>
@@ -490,9 +420,51 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
+   <item row="4" column="1">
+    <widget class="QFrame" name="valveSequenceBrowserFrame">
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Raised</enum>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+     </layout>
+    </widget>
+   </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="label_12">
+     <property name="text">
+      <string>Time points:</string>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
+  </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
@@ -525,45 +497,7 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
    <extends>qSlicerWidget</extends>
    <header>qSlicerSimpleMarkupsWidget.h</header>
   </customwidget>
-  <customwidget>
-   <class>qMRMLSequenceBrowserPlayWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSequenceBrowserPlayWidget.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSequenceBrowserSeekWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSequenceBrowserSeekWidget.h</header>
-  </customwidget>
-  <customwidget>
-   <class>ctkCollapsibleButton</class>
-   <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
-  </customwidget>
  </customwidgets>
  <resources/>
- <connections>
-  <connection>
-   <sender>heartValveBrowserSelector</sender>
-   <signal>currentNodeChanged(vtkMRMLNode*)</signal>
-   <receiver>heartValveBrowserPlayWidget</receiver>
-   <slot>setMRMLSequenceBrowserNode(vtkMRMLNode*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>182</x>
-     <y>21</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>194</x>
-     <y>156</y>
-    </hint>
-   </hints>
-  </connection>
- </connections>
+ <connections/>
 </ui>
