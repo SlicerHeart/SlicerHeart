@@ -3,6 +3,37 @@
 #
 
 
+class Signal:
+
+  def __init__(self):
+    self._slots = set()
+
+  def connect(self, slot):
+    if callable(slot):
+      self._slots.add(slot)
+    else:
+      raise ValueError("The provided argument is not a callable")
+
+  def disconnect(self, slot):
+    if slot in self._slots:
+      self._slots.remove(slot)
+
+  def emit(self, *args):
+    for slot in self._slots:
+      slot(*args)
+
+
+def reload(packageName, submoduleNames):
+  import imp
+  f, filename, description = imp.find_module(packageName)
+  package = imp.load_module(packageName, f, filename, description)
+  for submoduleName in submoduleNames:
+    f, filename, description = imp.find_module(submoduleName, package.__path__)
+    try:
+      imp.load_module(packageName + '.' + submoduleName, f, filename, description)
+    finally:
+      f.close()
+
 
 def timer(func):
   """ This decorator can be used for profiling a method/function by printing the elapsed time after execution.
