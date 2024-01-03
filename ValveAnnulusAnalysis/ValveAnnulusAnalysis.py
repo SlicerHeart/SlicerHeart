@@ -6,9 +6,9 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
 import HeartValveLib
-from HeartValveLib.util import setAllControlPointsVisibility
-from HeartValveLib.Constants import VALVE_TYPE_PRESETS, CARDIAC_CYCLE_PHASE_PRESETS, PROBE_POSITION_PRESETS
-
+from HeartValveLib.util import setAllControlPointsVisibility, reload
+from HeartValveLib.Constants import VALVE_TYPE_PRESETS, PROBE_POSITION_PRESETS
+from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
 
 #
 # ValveAnnulusAnalysis
@@ -111,21 +111,35 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
+  @property
+  def valveVolumeNode(self):
+    return self.valveSequenceBrowserWidget.valveVolumeNode if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveBrowser(self):
+    return self.valveSequenceBrowserWidget.valveBrowser if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveBrowserNode(self):
+    return self.valveSequenceBrowserWidget.valveBrowserNode if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveModel(self):
+    # Stores the currently selected HeartValveNode (scripted loadable module node)
+    # and also provides methods to operate on it.
+    return self.valveSequenceBrowserWidget.valveModel if self.valveSequenceBrowserWidget is not None else None
+
   def __init__(self, parent):
     ScriptedLoadableModuleWidget.__init__(self, parent)
 
     self.logic = ValveAnnulusAnalysisLogic()
 
+    self.valveSequenceBrowserWidget = None
+
     self.parameterNode = None
     self.parameterNodeObserver = None
 
     # Just used for keeping track of the observers
-    self.heartValveNode = None
-    self.heartValveNodeObserver = None
-
-    self.valveVolumeBrowserNode = None
-    self.valveVolumeBrowserNodeObserver = None
-
     self.annulusContourCurveNode = None
     self.annulusContourCurveNodeObserver = None
 
@@ -139,16 +153,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.autoRotateStartAngle = 0
     self.autoRotateStartNumberOfPoints = 0
     self.autoRotatePointsPerSlice = 1
-
-    # Stores currently selected heart valve browser node
-    self.valveBrowser = None
-    self.valveBrowserNode = None
-    self.valveBrowserNodeObserver = None
-    self.lastValveBrowserSelectedItemIndex = -1
-
-    # Stores the currently selected HeartValveNode (scripted loadable module node)
-    # and also provides methods to operate on it.
-    self.valveModel = None
 
     markupsLogic = slicer.modules.markups.logic()
     self.annulusContourPreviewCurve = markupsLogic.AddNewMarkupsNode('vtkMRMLMarkupsClosedCurveNode')
@@ -169,6 +173,16 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.annulusContourPreviewActive = True
     self.setAnnulusContourPreviewActive(False)
 
+  def onReload(self):
+    self.valveSequenceBrowserWidget.valveBrowserNodeModified.disconnect(self.onValveBrowserNodeModified)
+    self.valveSequenceBrowserWidget.heartValveNodeModified.disconnect(self.onHeartValveNodeModified)
+
+    logging.debug("Reloading ValveAnnulusAnalysis")
+    reload(packageName='HeartValveWidgets', submoduleNames=['ValveSequenceBrowserWidget'])
+    reload(packageName='HeartValveLib',
+           submoduleNames=['util', 'LeafletModel', 'ValveRoi', 'PapillaryModel', 'ValveModel', 'HeartValves'])
+    ScriptedLoadableModuleWidget.onReload(self)
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
@@ -186,21 +200,13 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.heartValveBrowserSelector.setMRMLScene(slicer.mrmlScene)
     self.ui.heartValveBrowserSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveBrowserSelect)
 
-    self.ui.heartValveBrowserPlayWidget.setMRMLScene(slicer.mrmlScene)
-    self.ui.heartValveBrowserSeekWidget.setMRMLScene(slicer.mrmlScene)
-
     for valveTypePresetName in VALVE_TYPE_PRESETS.keys():
       self.ui.valveTypeSelector.addItem(valveTypePresetName)
     self.ui.valveTypeSelector.connect("currentIndexChanged(int)", self.onValveTypeChanged)
 
-    for cardiacCyclePhaseName in CARDIAC_CYCLE_PHASE_PRESETS.keys():
-      self.ui.cardiacCyclePhaseSelector.addItem(cardiacCyclePhaseName)
-    self.ui.cardiacCyclePhaseSelector.connect("currentIndexChanged(int)", self.onCardiacCyclePhaseChanged)
-
-    self.ui.goToAnalyzedFrameButton.clicked.connect(self.onGoToAnalyzedFrameButtonClicked)
-
-    self.ui.addTimePointButton.clicked.connect(self.onAddTimePointButtonClicked)
-    self.ui.removeTimePointButton.clicked.connect(self.onRemoveTimePointButtonClicked)
+    self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(parent=self.ui.valveSequenceBrowserFrame.layout())
+    self.valveSequenceBrowserWidget.valveBrowserNodeModified.connect(self.onValveBrowserNodeModified)
+    self.valveSequenceBrowserWidget.heartValveNodeModified.connect(self.onHeartValveNodeModified)
 
     #
     # View section
@@ -303,7 +309,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     # Add vertical spacer
     self.layout.addStretch(1)
 
-    # Define list of widgets for updateGUIFromParameterNode, updateParameterNodeFromGUI, and addGUIObservers
+    # Define list of widgets for updateGUIFromParameterNode, updateParameterNodeFromGUI
     self.nodeSelectorWidgets = {"HeartValveBrowser": self.ui.heartValveBrowserSelector}
 
     # Use singleton parameter node (it is created if does not exist yet)
@@ -314,12 +320,9 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.onHeartValveBrowserSelect(self.ui.heartValveBrowserSelector.currentNode())
     self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, True)
 
-    self.addGUIObservers()
-
   def cleanup(self):
     # Exit from any special workflow step
     self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, True)
-    self.removeGUIObservers()
     self.removeNodeObservers()
     self.setAndObserveParameterNode(None)
     if self.annulusContourPreviewCurve:
@@ -333,12 +336,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       self.axialSliceToRasTransformNode.RemoveObserver(self.axialSliceToRasTransformNodeObserver)
       self.axialSliceToRasTransformNodeObserver = None
 
-  @property
-  def valveVolumeNode(self):
-    if not self.valveBrowser:
-      return None
-    return self.valveBrowser.valveVolumeNode
-
   def updateGuiEnabled(self):
     valveBrowserSelected = self.valveBrowser is not None
     valveModelSelected = self.valveModel is not None
@@ -346,7 +343,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.valveVolumeSelector.setEnabled(valveBrowserSelected)
     self.ui.probePositionSelector.setEnabled(valveBrowserSelected)
     self.ui.valveTypeSelector.setEnabled(valveBrowserSelected)
-    self.ui.cardiacCyclePhaseSelector.setEnabled(valveModelSelected)
     self.ui.viewCollapsibleButton.setEnabled(valveModelSelected)
     self.ui.contouringCollapsibleButton.setEnabled(volumeSelected)
     self.ui.contourAdjustmentCollapsibleButton.setEnabled(volumeSelected)
@@ -356,7 +352,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.restoreContourButton.setEnabled(valveModelSelected and self.valveModel.hasStoredAnnulusContour())
 
   def onWorkflowStepChanged(self, widget, toggle):
-
     # On activating any step
     if toggle:
       # Deactivate smoothing preview if not in contour adjustment
@@ -450,87 +445,25 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     oldModifiedState = parameterNode.StartModify()
     parameterNode.EndModify(oldModifiedState)
 
-  def addGUIObservers(self):
-    pass
-
-  def removeGUIObservers(self):
-    pass
-
   def onHeartValveBrowserSelect(self, node):
     logging.debug("Selected heart valve browser node: {0}".format(node.GetName() if node else "None"))
 
     self.setHeartValveBrowserNode(node)
 
   def setHeartValveBrowserNode(self, heartValveBrowserNode):
+    self.valveSequenceBrowserWidget.valveBrowserNode = heartValveBrowserNode
 
-    self.ui.heartValveBrowserPlayWidget.setMRMLSequenceBrowserNode(heartValveBrowserNode)
-    self.ui.heartValveBrowserSeekWidget.setMRMLSequenceBrowserNode(heartValveBrowserNode)
-
-    valveBrowserNode = self.valveBrowser.valveBrowserNode if self.valveBrowser else None
-    if valveBrowserNode == heartValveBrowserNode and valveBrowserNode == self.valveBrowserNode and self.valveBrowserNodeObserver:
-      # no change and already observed
-      return
-
-    # Remove observer to old node
-    if self.valveBrowserNode and self.valveBrowserNodeObserver:
-      self.valveBrowserNode.RemoveObserver(self.valveBrowserNodeObserver)
-      self.valveBrowserNodeObserver = None
-    # Set and observe new node
-    self.valveBrowserNode = heartValveBrowserNode
-    if self.valveBrowserNode:
-      self.valveBrowserNodeObserver = self.valveBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveBrowserNodeModified)
-
-    self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
-
-    if self.valveBrowser:
-      valveVolumeNode = self.valveVolumeNode
-      if not valveVolumeNode:
-        # select background volume by default as valve volume (to spare a click for the user)
-        appLogic = slicer.app.applicationLogic()
-        selNode = appLogic.GetSelectionNode()
-        if selNode.GetActiveVolumeID():
-          valveVolumeNode = slicer.mrmlScene.GetNodeByID(selNode.GetActiveVolumeID())
-          self.valveBrowser.valveVolumeNode = valveVolumeNode
-
-      self.updateValveVolumeBrowserObserver()
-
+    valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+    if valveBrowser:
       # TODO: call this earlier, because the position is already set from the current slice views here
-      axialSliceToRasTransformNode = self.valveBrowser.axialSliceToRasTransformNode if self.valveBrowser else None
+      axialSliceToRasTransformNode = valveBrowser.axialSliceToRasTransformNode
       self.setAndObserveAxialSliceToRasTransformNode(axialSliceToRasTransformNode)
       self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
 
-    heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
+    heartValveNode = valveBrowser.heartValveNode if valveBrowser else None
     self.onHeartValveSelect(heartValveNode)
-
-  def onAddTimePointButtonClicked(self):
-    volumeSequenceIndex, volumeSequenceIndexValue = self.valveBrowser.getDisplayedValveVolumeSequenceIndexAndValue()
-    heartValveSequenceIndex = self.valveBrowser.heartValveSequenceNode.GetItemNumberFromIndexValue(volumeSequenceIndexValue)
-    timepointAlreadyAdded = (heartValveSequenceIndex >= 0)
-
-    if timepointAlreadyAdded:
-      self.valveBrowser.valveBrowserNode.SetSelectedItemNumber(heartValveSequenceIndex)
-    else:
-      logging.info(f"Add time point")
-      if not volumeSequenceIndexValue:
-        raise RuntimeError("Failed to add time point, could not get volume sequence")
-      self.valveBrowser.addTimePoint(volumeSequenceIndexValue)
-      heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
-      self.onHeartValveSelect(heartValveNode)
-
-    self.updateGUIFromValveVolumeBrowser()
-
-  def onRemoveTimePointButtonClicked(self):
-    itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    if indexValue is not None:
-      self.valveBrowser.removeTimePoint(indexValue)
-
-    # TODO: this should not be necessary, because we observe the browser node
-    heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
-    self.onHeartValveSelect(heartValveNode)
-    self.updateGUIFromValveVolumeBrowser()
 
   def onHeartValveSelect(self, node):
-
     # Go to display step before switching to another valve (but only if the current node is valid
     # otherwise we could get errors when valve is set to None because the scene is closing)
     #if self.valveModel and self.valveModel.getAxialSliceToRasTransformNode():
@@ -548,21 +481,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
         self.ui.displayCollapsibleButton.checked = True
 
   def setHeartValveNode(self, heartValveNode):
-    if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
-      return
-
-    # Remove observer to old node
-    if self.heartValveNode and self.heartValveNodeObserver:
-      self.heartValveNode.RemoveObserver(self.heartValveNodeObserver)
-      self.heartValveNodeObserver = None
-    # Set and observe new node
-    self.heartValveNode = heartValveNode
-    if self.heartValveNode:
-      self.heartValveNodeObserver = self.heartValveNode.AddObserver(
-        vtk.vtkCommand.ModifiedEvent, self.updateGUIFromHeartValveNode)
-
-    self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
-
     # Observe nodes
     annulusCurveNode = self.valveModel.annulusContourCurveNode if self.valveModel else None
     self.setAndObserveAnnulusContourCurveNode(annulusCurveNode)
@@ -571,9 +489,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     #self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
     self.updateGuiEnabled()
-    self.onGoToAnalyzedFrameButtonClicked()
 
-  def updateGUIFromHeartValveNode(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
+  def updateGUIFromHeartValveNode(self):
     wasBlocked = self.ui.valveVolumeSelector.blockSignals(True)
     self.ui.valveVolumeSelector.setCurrentNode(self.valveVolumeNode)
     self.ui.valveVolumeSelector.blockSignals(wasBlocked)
@@ -591,20 +508,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     valveTypeIndex = self.ui.valveTypeSelector.findText(self.valveBrowser.valveType) if self.valveBrowser else 0
     self.ui.valveTypeSelector.setCurrentIndex(valveTypeIndex)
     self.ui.valveTypeSelector.blockSignals(wasBlocked)
-
-    wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
-    cardiacCyclePhaseIndex = self.ui.cardiacCyclePhaseSelector.findText(self.valveModel.getCardiacCyclePhase()) if self.valveModel else 0
-    self.ui.cardiacCyclePhaseSelector.setCurrentIndex(cardiacCyclePhaseIndex)
-    self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
-
-    wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
-    cardiacCyclePhaseIndex = self.ui.cardiacCyclePhaseSelector.findText(
-      self.valveModel.getCardiacCyclePhase()) if self.valveModel else 0
-    self.ui.cardiacCyclePhaseSelector.setCurrentIndex(cardiacCyclePhaseIndex)
-    self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
-
-    valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(self.valveModel.getValveVolumeSequenceIndex()) if self.valveModel else ""
-    self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
 
   def setAndObserveAxialSliceToRasTransformNode(self, axialSliceToRasTransformNode):
     logging.debug("Observe annulus to probe transform node: {0}".format(axialSliceToRasTransformNode.GetName() if axialSliceToRasTransformNode else "None"))
@@ -757,88 +660,19 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     if self.valveBrowser is None:
       return
     self.valveBrowser.valveVolumeNode = valveVolumeNode
-    self.updateValveVolumeBrowserObserver()
-
+    self.valveSequenceBrowserWidget.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode
+    self.updateGUIFromParameterNode()
     self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
     self.updateGuiEnabled()
 
-  def updateValveVolumeBrowserObserver(self):
-    valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
-    if (valveVolumeBrowserNode == self.valveVolumeBrowserNode) and self.valveVolumeBrowserNodeObserver:
-      # no change and already observed
-      return
-
-    # Remove observer to old parameter node
-    if self.valveVolumeBrowserNode and self.valveVolumeBrowserNodeObserver:
-      self.valveVolumeBrowserNode.RemoveObserver(self.valveVolumeBrowserNodeObserver)
-      self.valveVolumeBrowserNodeObserver = None
-    # Set and observe new parameter node
-    self.valveVolumeBrowserNode = valveVolumeBrowserNode
-    if self.valveVolumeBrowserNode:
-      self.valveVolumeBrowserNodeObserver = self.valveVolumeBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveVolumeBrowserNodeModified)
-    # Update GUI
-    self.updateGUIFromParameterNode()
-
-  def onValveBrowserNodeModified(self, observer=None, eventid=None):
-
-    # Show current valve volume if switched valve time point
-    if self.valveBrowser and self.valveVolumeNode:
-      itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-      if indexValue is not None:
-        if self.lastValveBrowserSelectedItemIndex != itemIndex:
-          self.lastValveBrowserSelectedItemIndex = itemIndex
-          # Switch volume
-          volumeItemIndex = self.valveBrowser.volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
-          self.valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
-      else:
-        # No valve node yet in the sequence
-        self.lastValveBrowserSelectedItemIndex = -1
-    else:
-      self.lastValveBrowserSelectedItemIndex = -1
-
-    self.updateGUIFromValveBrowser()
-
-  def updateGUIFromValveBrowser(self):
-
+  def onValveBrowserNodeModified(self):
     self.updateGUIFromHeartValveNode()
 
-  def onValveVolumeBrowserNodeModified(self, observer=None, eventid=None):
-    self.updateGUIFromValveVolumeBrowser()
+  def onHeartValveNodeModified(self):
+    self.updateGUIFromHeartValveNode()
 
   def updateGUIFromValveVolumeBrowser(self):
-    if (not self.valveVolumeBrowserNode) or (self.valveVolumeBrowserNode.GetPlaybackActive()):
-      self.ui.addTimePointButton.enabled = False
-      self.ui.addTimePointButton.text = "Add volume"
-      self.ui.removeTimePointButton.enabled = False
-      return
-
-    self.ui.addTimePointButton.enabled = True
-    volumeSequenceIndex, volumeSequenceIndexValue = self.valveBrowser.getDisplayedValveVolumeSequenceIndexAndValue()
-    if volumeSequenceIndexValue:
-      timepointAlreadyAdded = (self.valveBrowser.heartValveSequenceNode.GetItemNumberFromIndexValue(volumeSequenceIndexValue) >= 0)
-    else:
-      timepointAlreadyAdded = False
-
-    if timepointAlreadyAdded:
-      self.ui.addTimePointButton.text = f"Go to volume (index = {volumeSequenceIndex + 1})"
-
-      heartValveNode = self.valveBrowser.heartValveSequenceNode.GetDataNodeAtValue(volumeSequenceIndexValue)
-      wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
-      self.ui.cardiacCyclePhaseSelector.setCurrentIndex(
-        self.ui.cardiacCyclePhaseSelector.findText(
-          heartValveNode.GetAttribute("CardiacCyclePhase")
-        )
-      )
-      self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
-      self.ui.cardiacCyclePhaseSelector.enabled = True
-      self.ui.removeTimePointButton.enabled = True
-    else:
-      self.ui.addTimePointButton.text = f"Add volume (index = {volumeSequenceIndex + 1})"
-      self.ui.cardiacCyclePhaseSelector.enabled = False
-      wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
-      self.ui.cardiacCyclePhaseSelector.setCurrentIndex(0)
-      self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
-      self.ui.removeTimePointButton.enabled = False
+    self.valveSequenceBrowserWidget.updateGUIFromMRML()
 
     # Set the new node in the GUI
     annulusContourCurveNode = self.valveModel.annulusContourCurveNode if self.valveModel else None
@@ -950,19 +784,14 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def onAutoRotateClicked(self, pushed):
     if pushed:
       self.autoRotateStartAngle = self.ui.orthogonalSlicerRotationSliderWidget.value
-      self.autoRotateStartNumberOfPoints = self.getNumberOfDefinedControlPoints(self.annulusContourCurveNode) if self.annulusContourCurveNode else 0
+      self.autoRotateStartNumberOfPoints = \
+        self.getNumberOfDefinedControlPoints(self.annulusContourCurveNode) if self.annulusContourCurveNode else 0
 
   def onResetAnnulusView(self):
     if self.valveBrowser is None:
       return
     self.axialSliceToRasTransformNode.SetMatrixTransformToParent(self.valveBrowser.defaultAxialSliceToRasTransformMatrix)
     self.onDisplayFourUpView(resetViewOrientations = True, resetFov = True)
-
-  def onCardiacCyclePhaseChanged(self):
-    if self.valveModel is None:
-      return
-    cardiacCyclePhase = self.ui.cardiacCyclePhaseSelector.currentText
-    self.valveModel.setCardiacCyclePhase(cardiacCyclePhase)
 
   def onValveTypeChanged(self):
     if self.valveBrowser is None:
@@ -977,9 +806,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     else:
       valveVolumeSequenceIndexStr = ""
     self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
-
-  def onGoToAnalyzedFrameButtonClicked(self):
-    HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
   def onProbePositionChanged(self):
     probePosition = self.ui.probePositionSelector.itemData(self.ui.probePositionSelector.currentIndex)
@@ -1073,23 +899,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       if sliceNode.GetID() == excludeSliceView:  # Some Slicer-4.11 versions saved node ID instead of layout name
         continue
       sliceNode.JumpSliceByCentering(jumpLocation[0],jumpLocation[1],jumpLocation[2])
-
-  def onReload(self):
-    logging.debug("Reloading ValveAnnulusAnalysis")
-
-    packageName='HeartValveLib'
-    submoduleNames=['util', 'LeafletModel', 'ValveRoi', 'PapillaryModel', 'ValveModel', 'HeartValves']
-    import imp
-    f, filename, description = imp.find_module(packageName)
-    package = imp.load_module(packageName, f, filename, description)
-    for submoduleName in submoduleNames:
-      f, filename, description = imp.find_module(submoduleName, package.__path__)
-      try:
-          imp.load_module(packageName+'.'+submoduleName, f, filename, description)
-      finally:
-          f.close()
-
-    ScriptedLoadableModuleWidget.onReload(self)
 
   def onResampleContourClicked(self):
     if not self.valveModel.annulusContourCurveNode.GetNumberOfControlPoints():
@@ -1265,6 +1074,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     ################################
 
     valveAnnulusAnalysisGui = slicer.modules.ValveAnnulusAnalysisWidget
+    valveSequenceBrowserGui = valveAnnulusAnalysisGui.valveSequenceBrowserWidget
 
     axialSlice = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeRed')
     orthogonalSlice1 = slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeYellow')
@@ -1289,9 +1099,11 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
 
     # Jump to the analysis frame prescribed for this test
     valveVolumeSequenceBrowser.SetSelectedItemNumber(analyzedFrame)
-    valveAnnulusAnalysisGui.ui.addTimePointButton.click()
+    valveSequenceBrowserGui.ui.addTimePointButton.click()
 
-    valveAnnulusAnalysisGui.ui.cardiacCyclePhaseSelector.currentText = cardiacCyclePhase
+    # TODO: test removing timepoint
+
+    valveSequenceBrowserGui.ui.cardiacCyclePhaseSelector.currentText = cardiacCyclePhase
 
     # -------------------------------------------
     self.delayDisplay("Set image orientation")
@@ -1314,8 +1126,8 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
         slicer.app.processEvents()
         time.sleep(0.1)
 
-    valveBrowserModel = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
-    self.assertIsNotNone(valveBrowserModel)
+    valveBrowser = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
+    self.assertIsNotNone(valveBrowser)
 
     # Jump to the slice positions and orientations prescribed for this test.
     # Modifying axialSliceToRasTransformNode will also update the slice views position and orientation
@@ -1329,7 +1141,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     valveAnnulusAnalysisGui.ui.addAnnulusContourCurveButton.click()
 
     # Place control points
-    valveModel = valveBrowserModel.valveModel
+    valveModel = valveBrowser.valveModel
     self.assertIsNotNone(valveModel)
     annulusCurveNode = valveModel.annulusContourCurveNode
     self.assertIsNotNone(annulusCurveNode)
