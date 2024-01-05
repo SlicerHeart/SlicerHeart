@@ -51,7 +51,7 @@ class ValveModel:
         self.setHeartValveNodeDefaults()
         # Update parameters and references
 
-        self.annulusContourCurveNode = self.annulusContourCurveNode
+        self.annulusContourCurveNode = self._annulusContourCurveNode(False)
         self.annulusContourRadius = self.annulusContourRadius
 
         self.valveLabelsNode = self.valveLabelsNode
@@ -91,15 +91,15 @@ class ValveModel:
          is returned, regardless of contour is specified for the current heart valve phase.
       :returns Markup closed curve storing the annulus contour
       """
-      # Get segmentation proxy node
-      segmentationNode = self.heartValveNode.GetNodeReference("AnnulusContourPoints") if self.heartValveNode else None
-      if (not forDisplayedHeartValveSequence) or (not segmentationNode):
+      # Get annulus contour proxy node
+      annulusContourCurveNode = self.heartValveNode.GetNodeReference("AnnulusContourPoints") if self.heartValveNode else None
+      if (not forDisplayedHeartValveSequence) or (not annulusContourCurveNode):
         # No need to check if it is for the displayed heart valve phase
-        return segmentationNode
-      # Check if segmentation is available for the current heart valve phase
-      if not self.isNodeSpecifiedForCurrentTimePoint(segmentationNode):
+        return annulusContourCurveNode
+      # Check if annulus contour is available for the current heart valve phase
+      if not self.isNodeSpecifiedForCurrentTimePoint(annulusContourCurveNode):
         return None
-      return segmentationNode
+      return annulusContourCurveNode
 
     @property
     def annulusContourCurveNode(self):
