@@ -46,6 +46,14 @@ class ValveSequenceBrowserWidget:
   """
 
   @property
+  def valveModel(self):
+    return self.valveBrowser.valveModel if self.valveBrowser else None
+
+  @property
+  def valveBrowser(self):
+    return HeartValveLib.HeartValves.getValveBrowser(self.valveBrowserNode)
+
+  @property
   def valveVolumeNode(self):
     if not self.valveBrowser:
       return None
@@ -66,8 +74,6 @@ class ValveSequenceBrowserWidget:
       self._heartValveNodeObserver = \
         self._heartValveNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onHeartValveNodeModified)
 
-    self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
-
     self.updateGUIFromMRML()
     self.onGoToAnalyzedFrameButtonClicked()
 
@@ -85,8 +91,6 @@ class ValveSequenceBrowserWidget:
     if self._valveBrowserNode:
       self._valveBrowserNodeObserver = \
         self._valveBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveBrowserNodeModified)
-
-    self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(valveBrowserNode)
 
     if self.valveBrowser and not self.valveVolumeNode:
       self._setValveVolumeToBackgroundVolume()
@@ -149,9 +153,6 @@ class ValveSequenceBrowserWidget:
 
     self._valveBrowserNode = None
     self._valveBrowserNodeObserver = None
-
-    self.valveModel = None
-    self.valveBrowser = None
 
     self._readOnly = False
 
@@ -216,7 +217,7 @@ class ValveSequenceBrowserWidget:
       self.valveBrowser.valveVolumeNode = valveVolumeNode
 
   def onGoToAnalyzedFrameButtonClicked(self):
-    HeartValveLib.goToAnalyzedFrame(self.valveBrowser.valveModel if self.valveBrowser else None)
+    HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
   def onCardiacCyclePhaseChanged(self):
     if self.valveModel is None:
