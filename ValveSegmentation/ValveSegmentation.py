@@ -2,6 +2,9 @@ import vtk, qt, ctk, slicer
 import logging
 from slicer.ScriptedLoadableModule import *
 
+from HeartValveLib.util import reload
+from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
+
 SMALL_SCREEN = 'SMALL_SCREEN'
 LARGE_SCREEN = 'LARGE_SCREEN'
 DUAL_SCREEN = 'DUAL_SCREEN'
@@ -50,23 +53,10 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
     self.logic = ValveSegmentationLogic()
 
+    self.valveSequenceBrowserWidget = None
+
     self.parameterNode = None
     self.parameterNodeObserver = None
-
-    # Stores currently selected heart valve browser node
-    self.valveBrowser = None
-    self.valveBrowserNode = None  # Stores annotates valve phases
-    self.valveBrowserNodeObserver = None
-    self.lastValveBrowserSelectedItemIndex = -1
-
-    # Browser for all the time points in the image series
-    # (allows the user to view previous/next frame when segmenting leaflets)
-    self.valveVolumeBrowserNode = None
-    self.valveVolumeBrowserNodeObserver = None
-
-    # Stores the currently selected HeartValveNode (scripted loadable module node)
-    # and also provides methods to operate on it.
-    self.valveModel = None
 
     # Needed for observing the annulus contour so that the clipping ROI can be updated
     # when the contour changes.
@@ -80,6 +70,31 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.roiGeometryWidgets = {}
 
     self.inverseVolumeRendering = False
+
+  @property
+  def valveVolumeNode(self):
+    return self.valveSequenceBrowserWidget.valveVolumeNode if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveVolumeBrowserNode(self):
+    return self.valveSequenceBrowserWidget.valveVolumeBrowserNode if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveBrowser(self):
+    return self.valveSequenceBrowserWidget.valveBrowser if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveBrowserNode(self):
+    """Browser for all the time points in the image series
+    (allows the user to view previous/next frame when segmenting leaflets)
+    """
+    return self.valveSequenceBrowserWidget.valveBrowserNode if self.valveSequenceBrowserWidget is not None else None
+
+  @property
+  def valveModel(self):
+    # Stores the currently selected HeartValveNode (scripted loadable module node)
+    # and also provides methods to operate on it.
+    return self.valveSequenceBrowserWidget.valveModel if self.valveSequenceBrowserWidget is not None else None
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -97,12 +112,20 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.heartValveBrowserSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveBrowserSelect)
 
     self.ui.valveVolumeSelector.setMRMLScene(slicer.mrmlScene)
+    self.ui.valveVolumeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveVolumeSelect)
     self.ui.valveVolumeSelector.enabled = False
-    self.ui.goToAnalyzedFrameButton.clicked.connect(self.onGoToAnalyzedFrameButtonClicked)
+
+    self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(parent=self.ui.valveSequenceBrowserFrame.layout())
+    # Segmentation requires annulus contour (for resampling in annulus plane)
+    # therefore we do not allow adding new time points in this module, but time points must be added in ValveAnnulusAnalysis module.
+    self.valveSequenceBrowserWidget.readOnly = True
+    self.valveSequenceBrowserWidget.valveBrowserNodeModified.connect(self.onValveBrowserNodeModified)
+    self.valveSequenceBrowserWidget.heartValveNodeModified.connect(self.onHeartValveNodeModified)
+
     self.ui.hideSlicerHeartDataButton.clicked.connect(self.onHideSlicerHeartDataClicked)
 
-    self.ui.addTimePointButton.clicked.connect(self.onAddTimePointButtonClicked)
-    self.ui.removeTimePointButton.clicked.connect(self.onRemoveTimePointButtonClicked)
+    self.ui.addSegmentationButton.clicked.connect(self.onAddSegmentationButtonClicked)
+    self.ui.removeSegmentationButton.clicked.connect(self.onRemoveSegmentationButtonClicked)
 
     # initial state is inconsistent, need to switch to reverse before we can set
     # the desired state reliably
@@ -266,30 +289,11 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.setHeartValveBrowserNode(node)
 
   def setHeartValveBrowserNode(self, heartValveBrowserNode):
+    self.valveSequenceBrowserWidget.valveBrowserNode = heartValveBrowserNode
 
-    self.ui.heartValveBrowserPlayWidget.setMRMLSequenceBrowserNode(heartValveBrowserNode)
-    self.ui.heartValveBrowserSeekWidget.setMRMLSequenceBrowserNode(heartValveBrowserNode)
+    valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
 
-    valveBrowserNode = self.valveBrowser.valveBrowserNode if self.valveBrowser else None
-    if valveBrowserNode == heartValveBrowserNode and valveBrowserNode == self.valveBrowserNode and self.valveBrowserNodeObserver:
-      # no change and already observed
-      return
-
-    # Remove observer to old node
-    if self.valveBrowserNode and self.valveBrowserNodeObserver:
-      self.valveBrowserNode.RemoveObserver(self.valveBrowserNodeObserver)
-      self.valveBrowserNodeObserver = None
-    # Set and observe new node
-    self.valveBrowserNode = heartValveBrowserNode
-    if self.valveBrowserNode:
-      self.valveBrowserNodeObserver = self.valveBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveBrowserNodeModified)
-
-    self.valveBrowser = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
-
-    if self.valveBrowser:
-      self.updateValveVolumeBrowserObserver()
-
-    heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
+    heartValveNode = valveBrowser.heartValveNode if valveBrowser else None
     self.onHeartValveSelect(heartValveNode)
 
   def onHeartValveSelect(self, node):
@@ -297,11 +301,6 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.setHeartValveNode(node)
 
   def setHeartValveNode(self, heartValveNode):
-    if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
-      return
-
-    self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
-
     if self.valveModel:
       self._setupValveVolume()
       self._updateRoiGeometryGui()
@@ -316,18 +315,20 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
     self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None)
 
-    HeartValveLib.goToAnalyzedFrame(self.valveModel)
-
     if not self.ui.segmentationEditingCollapsibleButton.collapsed:
       self.ui.clippingCollapsibleButton.collapsed = False
     if self.ui.hideSlicerHeartDataButton.checked:
       self.onHideSlicerHeartDataClicked()
 
+  def onHeartValveVolumeSelect(self, valveVolumeNode):
+    if self.valveBrowser is None:
+      return
+    self.valveBrowser.valveVolumeNode = valveVolumeNode
+    self.valveSequenceBrowserWidget.valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode
+    self.updateGUIFromParameterNode()
+
   def _setupValveVolume(self):
     self.ui.valveVolumeSelector.setCurrentNode(self.valveModel.getValveVolumeNode())
-    valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(
-      self.valveModel.getValveVolumeSequenceIndex())
-    self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
 
   def _updateRoiGeometryGui(self):
     if self.valveModel.valveRoi.roiModelNode:
@@ -369,42 +370,14 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.showVolumeRenderingCheckbox.checked = volumeRenderingVisible
     self.ui.showVolumeRenderingCheckbox.blockSignals(wasBlocked)
 
-
   def onValveBrowserNodeModified(self, observer=None, eventid=None):
-
-    # # TODO: Show current segmentation volume instead
-    # # Show current valve volume if switched valve time point
-    # if self.valveBrowser and self.valveVolumeNode:
-    #   itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    #   if indexValue is not None:
-    #     if self.lastValveBrowserSelectedItemIndex != itemIndex:
-    #       self.lastValveBrowserSelectedItemIndex = itemIndex
-    #       # Switch volume
-    #       volumeItemIndex = self.valveBrowser.volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
-    #       self.valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
-    #   else:
-    #     # No valve node yet in the sequence
-    #     self.lastValveBrowserSelectedItemIndex = -1
-    # else:
-    #   self.lastValveBrowserSelectedItemIndex = -1
-
     self.updateGUIFromValveBrowser()
 
   def updateGUIFromValveBrowser(self):
     self.updateGUIFromHeartValveNode()
 
-  def _getLeafletSegmentationState(self):
-    """returns two flags: if timepoint is already added and if currently editing"""
-
-
-    leafletSegmentationSequenceNode = self.valveBrowser.leafletSegmentationSequenceNode
-    valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    if leafletSegmentationSequenceNode and indexValue:
-      timepointAlreadyAdded = (self.valveBrowser.leafletSegmentationSequenceNode.GetItemNumberFromIndexValue(indexValue) >= 0)
-    else:
-      timepointAlreadyAdded = False
-    editing = self.valveBrowser.GetSaveChanges(leafletSegmentationSequenceNode) if timepointAlreadyAdded else False
-    return timepointAlreadyAdded, editing
+  def onHeartValveNodeModified(self):
+    self.updateGUIFromHeartValveNode()
 
   def updateGUIFromHeartValveNode(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
     # wasBlocked = self.ui.valveVolumeSelector.blockSignals(True)
@@ -416,172 +389,83 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     # self.ui.valveTypeSelector.setCurrentIndex(valveTypeIndex)
     # self.ui.valveTypeSelector.blockSignals(wasBlocked)
 
-    valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(self.valveModel.getValveVolumeSequenceIndex()) if self.valveModel else ""
-    if self.valveModel:
-        cardiacCyclePhase = self.valveModel.getCardiacCyclePhase()
-        valveVolumeSequenceIndexStr += f" ({cardiacCyclePhase})"
-    self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
-
-    if (not self.valveVolumeBrowserNode) or (self.valveVolumeBrowserNode.GetPlaybackActive()):
-      self.ui.addTimePointButton.enabled = False
-      self.ui.addTimePointButton.text = "Add"
+    if (not self.valveModel) or (not self.valveVolumeBrowserNode) or (self.valveVolumeBrowserNode.GetPlaybackActive()):
+      self.ui.addSegmentationButton.enabled = False
+      self.ui.removeSegmentationButton.enabled = False
     else:
-      leafletSegmentationNode = self.valveModel.leafletSegmentationNode if self.valveModel else None
-      if leafletSegmentationNode:
-        alreadyEditing = self.valveBrowser.GetSaveChanges(self.valveModel.leafletSegmentationSequenceNode)
-        self.ui.addTimePointButton.text = "End editing" if alreadyEditing else "Start editing"
-      else:
-        self.ui.addTimePointButton.text = "Add"
-
-
-
-
-
-
-
-
-  def updateValveVolumeBrowserObserver(self):
-    # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
-    valveVolumeBrowserNode = self.valveBrowser.volumeSequenceBrowserNode if self.valveBrowser else None
-    if (valveVolumeBrowserNode == self.valveVolumeBrowserNode) and self.valveVolumeBrowserNodeObserver:
-      # no change and already observed
-      return
-
-    # Remove observer to old parameter node
-    if self.valveVolumeBrowserNode and self.valveVolumeBrowserNodeObserver:
-      self.valveVolumeBrowserNode.RemoveObserver(self.valveVolumeBrowserNodeObserver)
-      self.valveVolumeBrowserNodeObserver = None
-    # Set and observe new parameter node
-    self.valveVolumeBrowserNode = valveVolumeBrowserNode
-    if self.valveVolumeBrowserNode:
-      self.valveVolumeBrowserNodeObserver = self.valveVolumeBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onValveVolumeBrowserNodeModified)
-    # Update GUI
-    self.updateGUIFromParameterNode()
-
-  def onValveBrowserNodeModified(self, observer=None, eventid=None):
-    # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
-
-    # Show current valve volume if switched valve time point
-    if self.valveBrowser:
-      itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-      if indexValue is not None:
-        if self.lastValveBrowserSelectedItemIndex != itemIndex:
-          self.lastValveBrowserSelectedItemIndex = itemIndex
-          # Switch volume
-          volumeItemIndex = self.valveBrowser.volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
-          self.valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
-      else:
-        # No valve node yet in the sequence
-        self.lastValveBrowserSelectedItemIndex = -1
-    else:
-      self.lastValveBrowserSelectedItemIndex = -1
-
-    self.updateGUIFromValveBrowser()
+      leafletSegmentationNode = self.valveModel.leafletSegmentationNode
+      self.ui.addSegmentationButton.enabled = not leafletSegmentationNode
+      self.ui.removeSegmentationButton.enabled = leafletSegmentationNode
 
   def updateGUIFromValveBrowser(self):
     # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
-
     self.updateGUIFromHeartValveNode()
 
-  def onValveVolumeBrowserNodeModified(self, observer=None, eventid=None):
-    # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
-    self.updateGUIFromValveVolumeBrowser()
-
   def updateGUIFromValveVolumeBrowser(self):
-    # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
-    if (not self.valveVolumeBrowserNode) or (self.valveVolumeBrowserNode.GetPlaybackActive()):
-      self.ui.addTimePointButton.enabled = False
-      self.ui.addTimePointButton.text = "Add volume"
-      return
+    pass
 
-    self.ui.addTimePointButton.enabled = True
-
-    # TODO: refine this logic. We don't just want to check if a time point is available but if a segmentation
-    # is available at that time point
-    volumeSequenceIndex, volumeSequenceIndexValue = self.valveBrowser.getDisplayedValveVolumeSequenceIndexAndValue()
-    if volumeSequenceIndexValue:
-      timepointAlreadyAdded = (self.valveBrowser.heartValveSequenceNode.GetItemNumberFromIndexValue(volumeSequenceIndexValue) >= 0)
-    else:
-      timepointAlreadyAdded = False
-
-    # TODO: update this
-    # if timepointAlreadyAdded:
-    #   self.ui.addTimePointButton.text = f"Go to volume (index = {volumeSequenceIndex + 1})"
-    #   self.ui.cardiacCyclePhaseSelector.enabled = True
-    # else:
-    #   self.ui.addTimePointButton.text = f"Add segmentation (index = {volumeSequenceIndex + 1})"
-
-    #   self.ui.cardiacCyclePhaseSelector.enabled = False
-    #   wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
-    #   self.ui.cardiacCyclePhaseSelector.setCurrentIndex(0)
-    #   self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
-
-
-
-
-  def onAddTimePointButtonClicked(self):
+  def onAddSegmentationButtonClicked(self):
 
     # TODO: create ROI ttt
 
+    # Make sure there is a leaflet volume is available
+    # (it will be used as source volume for the segmentation)
+    leafletVolumeNode = self.valveModel.leafletVolumeNode
+    if not leafletVolumeNode:
+      # Create leaflet volume by copying the current analyzed frame
+      HeartValveLib.goToAnalyzedFrame(self.valveModel)
+      volumeNode = self.valveBrowser.valveVolumeNode
+      name = f"{self.valveModel.heartValveNode.GetName()}-segmented"
+      newLeafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
+      leafletVolumeSequenceNode = self.valveModel.leafletVolumeSequenceNode
+      if leafletVolumeSequenceNode:
+        # Sequence already exists, just add a new time point
+        self.valveBrowser.addCurrentTimePointToSequence(leafletVolumeSequenceNode)
+        leafletVolumeNode = self.valveModel.leafletVolumeNode
+        newLeafletVolumeNode.CopyContents(newLeafletVolumeNode)
+        slicer.mrmlScene.RemoveNode(newLeafletVolumeNode)
+      else:
+        # Set a new leaflet volume node
+        self.valveModel.leafletVolumeNode = newLeafletVolumeNode
+    leafletVolumeNode = self.valveModel.leafletVolumeNode
+
+    # Add leaflet segmentation
     leafletSegmentationNode = self.valveModel.leafletSegmentationNode
-    if leafletSegmentationNode:
-      leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
-      alreadyEditing = self.valveBrowser.GetSaveChanges(leafletSegmentationSequenceNode)
-      startEditNow = not alreadyEditing  # toggle edit state
-      self.valveBrowser.SetSaveChanges(leafletSegmentationSequenceNode, startEditNow)
-      if startEditNow:
-        HeartValveLib.goToAnalyzedFrame(self.valveModel)
-    else:
-      # Need to add a new time point
+    if not leafletSegmentationNode:
+      # Create new leaflet segmentation node
       leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
       if leafletSegmentationSequenceNode:
-        # Need to add a new timepoint. For that we just need to enable saving changes.
-        self.valveBrowser.SetSaveChanges(leafletSegmentationSequenceNode, True)
-        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowser)
+        # Sequence already exists, just add a new time point
+        self.valveBrowser.addCurrentTimePointToSequence(leafletSegmentationSequenceNode)
+        self.valveBrowserNode.SetSaveChanges(leafletSegmentationSequenceNode, True)
       else:
-        # Need to create new leaflet segmentation sequence
+        # Add new segmentation
+        name = f"{self.valveModel.heartValveNode.GetName()}-LeafletSegmentation"
+        newLeafletSegmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", name)
+        newLeafletSegmentationNode.SetNodeReferenceID(newLeafletSegmentationNode.GetReferenceImageGeometryReferenceRole(), leafletVolumeNode.GetID())
+        self.valveModel.leafletSegmentationNode = newLeafletSegmentationNode
+      leafletSegmentationNode = self.valveModel.leafletSegmentationNode
 
-        leafletVolumeNode = self.valveModel.leafletVolumeNode
-        if not leafletVolumeNode:
-          # Create leaflet volume by copying the current analyzed frame
-          HeartValveLib.goToAnalyzedFrame(self.valveModel)
-          volumeNode = self.valveBrowser.valveVolumeNode
-          name = f"{self.valveModel.heartValveNode.GetName()}-segmented"
-          leafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
-          self.valveModel.leafletVolumeNode = leafletVolumeNode
-        else:
-          # TODO: add a new time point to the sequence leafletVolumeNode sequence
-          pass
+      # NB: sometimes segmentation node is already set within mrmlSegmentEditorNode which is why the segment list doesn't
+      # get updated. Setting it to None or firing Modified flag works.
+      self.ui.segmentEditorWidget.setSegmentationNode(None)
+      self.ui.segmentEditorWidget.setSegmentationNode(leafletSegmentationNode)
 
-        segmentationNode = self.valveModel.leafletSegmentationNode  # this can be any segmentation node, not necessarily for the current time point
-        if not segmentationNode:
-          # Create new leaflet segmentation node
-          segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "LeafletSegmentation")
-          segmentationNode.SetNodeReferenceID(segmentationNode.GetReferenceImageGeometryReferenceRole(), leafletVolumeNode.GetID())
-          self.valveModel.leafletSegmentationNode = segmentationNode
+    # TODO: add default segments?
 
-        # NB: sometimes segmentation node is already set within mrmlSegmentEditorNode which is why the segment list doesn't
-        # get updated. Setting it to None or firing Modified flag works.
-        self.ui.segmentEditorWidget.setSegmentationNode(None)
+    self.updateGUIFromHeartValveNode()
 
-        self.ui.segmentEditorWidget.setSegmentationNode(segmentationNode)
-
-      # TODO: clear segmentation? add default segments
-
-    self.updateGUIFromValveVolumeBrowser()
-
-  def onRemoveTimePointButtonClicked(self):
-    itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    if indexValue is not None:
-      self.valveBrowser.removeTimePoint(indexValue)
-
-    # TODO: this should not be necessary, because we observe the browser node
-    heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
-    self.onHeartValveSelect(heartValveNode)
-    self.updateGUIFromValveVolumeBrowser()
-
-  def onGoToAnalyzedFrameButtonClicked(self):
-    HeartValveLib.goToAnalyzedFrame(self.valveModel)
+  def onRemoveSegmentationButtonClicked(self):
+    leafletSegmentationNode = self.valveModel.leafletSegmentationNode
+    if not leafletSegmentationNode:
+      return
+    if not self.valveModel.isNodeSpecifiedForCurrentTimePoint(leafletSegmentationNode):
+      return
+    # Remove segmentation from sequence
+    leafletSegmentationSequenceNode = self.valveBrowserNode.GetSequenceNode(leafletSegmentationNode)
+    valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    leafletSegmentationSequenceNode.RemoveDataNodeAtValue(indexValue)
+    self.updateGUIFromHeartValveNode()
 
   def onHideSlicerHeartDataClicked(self):
     from HeartValveLib.helpers import hideAllSlicerHeartData, setValveModelDataVisibility
@@ -873,7 +757,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveBrowser = self.valveModel.valveBrowser
 
     fixedVolumeNode = self.valveModel.leafletVolumeNode
-    movingVolumeNode = valveBrowserNode.valveVolumeNode()
+    movingVolumeNode = valveBrowser.valveVolumeNode
 
     sequencesModule = slicer.modules.sequences
     sequencesModule.widgetRepresentation().setActiveBrowserNode(valveBrowser.valveBrowserNode)
@@ -951,7 +835,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     if viewNames is None:
       return
     resetFov = True
-    HeartValveLib.setupDefaultSliceOrientation(resetFov=resetFov, valveModel=self.valveModel,
+    HeartValveLib.setupDefaultSliceOrientation(resetFov, self.valveModel,
                                                axialSliceName=viewNames[0],
                                                ortho1SliceName=viewNames[1],
                                                ortho2SliceName=viewNames[2],
@@ -1047,17 +931,13 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def onReload(self):
     logging.debug("Reloading ValveSegmentation")
 
-    packageName = 'HeartValveLib'
-    submoduleNames = ['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves']
-    import imp
-    f, filename, description = imp.find_module(packageName)
-    package = imp.load_module(packageName, f, filename, description)
-    for submoduleName in submoduleNames:
-      f, filename, description = imp.find_module(submoduleName, package.__path__)
-      try:
-        imp.load_module(packageName + '.' + submoduleName, f, filename, description)
-      finally:
-        f.close()
+    self.valveSequenceBrowserWidget.valveBrowserNodeModified.disconnect(self.onValveBrowserNodeModified)
+    self.valveSequenceBrowserWidget.heartValveNodeModified.disconnect(self.onHeartValveNodeModified)
+
+    logging.debug("Reloading ValveAnnulusAnalysis")
+    reload(packageName='HeartValveWidgets', submoduleNames=['ValveSequenceBrowserWidget'])
+    reload(packageName='HeartValveLib',
+           submoduleNames=['util', 'LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves'])
 
     ScriptedLoadableModuleWidget.onReload(self)
 

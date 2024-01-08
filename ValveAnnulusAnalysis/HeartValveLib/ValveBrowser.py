@@ -159,8 +159,11 @@ class ValveBrowser:
     def getDisplayedValveVolumeSequenceIndexAndValue(self):
       """Get currently displayed item index value of valve volume sequence"""
       volumeSequenceBrowserNode = self.volumeSequenceBrowserNode
+      if volumeSequenceBrowserNode:
+        itemIndex = volumeSequenceBrowserNode.GetSelectedItemNumber()
+      else:
+        itemIndex = -1
       volumeSequenceNode = self.volumeSequenceNode
-      itemIndex = volumeSequenceBrowserNode.GetSelectedItemNumber()
       if itemIndex < 0 or itemIndex >= volumeSequenceNode.GetNumberOfDataNodes():
         indexValue = None
       else:
@@ -368,6 +371,8 @@ class ValveBrowser:
                                                         slicer.mrmlScene.GetUniqueNameByString(proxyNode.GetName()+"Sequence"))
       self.valveBrowserNode.AddProxyNode(proxyNode, sequenceNode, False)
       self.valveBrowserNode.SetSaveChanges(sequenceNode, True)
+      # Add it to current timepoint
+      slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(self.valveBrowserNode, proxyNode)
       # Prevent automatic creation of missing items (it would clutter the scene and would be difficult to tell what information is actually specified)
       self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
 

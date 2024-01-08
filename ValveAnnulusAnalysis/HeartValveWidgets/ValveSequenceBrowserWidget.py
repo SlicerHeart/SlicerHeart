@@ -123,7 +123,7 @@ class ValveSequenceBrowserWidget:
     self._readOnly = enabled
     self.ui.addTimePointButton.visible = not enabled
     self.ui.removeTimePointButton.visible = not enabled
-    self.ui.cardiacCyclePhaseSelector.enabled = not enabled
+    self.ui.cardiacCyclePhaseSelector.visible = not enabled
     self.updateGUIFromMRML()
 
   @property
@@ -248,6 +248,7 @@ class ValveSequenceBrowserWidget:
     self.updateGUIFromMRML()
 
   def updateGUIFromMRML(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
+    cardiacCyclePhase = self.valveModel.getCardiacCyclePhase() if self.valveModel else ""
     cardiacCycleIndex = 0
     if not self.valveBrowserNode or not self.valveVolumeBrowserNode or self.valveVolumeBrowserNode.GetPlaybackActive():
       self.ui.addTimePointButton.text = "Add volume"
@@ -258,22 +259,28 @@ class ValveSequenceBrowserWidget:
       hasTimepoint = seqIndexValue and self.valveBrowser.heartValveSequenceNode.GetItemNumberFromIndexValue(seqIndexValue) >= 0
 
       self.ui.removeTimePointButton.enabled = hasTimepoint
-      t = Template("$action volume (index = $index)")
       if hasTimepoint:
-        self.ui.addTimePointButton.text = t.substitute(action="Go to", index=seqIndex + 1)
-        cardiacCycleIndex = self.ui.cardiacCyclePhaseSelector.findText(self.valveModel.getCardiacCyclePhase()) if self.valveModel else 0
+        action = "Go to"
+        cardiacCycleIndex = self.ui.cardiacCyclePhaseSelector.findText(cardiacCyclePhase)
         self.ui.cardiacCyclePhaseSelector.setEnabled(not self.readOnly)
       else:
-        self.ui.addTimePointButton.text = t.substitute(action="Add", index=seqIndex + 1)
+        action = "Add"
         self.ui.cardiacCyclePhaseSelector.setEnabled(False)
+
+      self.ui.addTimePointButton.text = "{action} volume (index: {index})".format(action=action, index=seqIndex + 1)
 
     wasBlocked = self.ui.cardiacCyclePhaseSelector.blockSignals(True)
     self.ui.cardiacCyclePhaseSelector.setCurrentIndex(cardiacCycleIndex)
     self.ui.cardiacCyclePhaseSelector.blockSignals(wasBlocked)
 
     valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(
-      self.valveModel.getValveVolumeSequenceIndex()) if self.valveModel else ""
-    self.ui.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
+      self.valveModel.getValveVolumeSequenceIndex()) if self.valveModel else "NA"
+
+    if self.readOnly and cardiacCyclePhase:
+      valveVolumeSequenceIndexStr = "Volume index: {index} ({phase})".format(index=valveVolumeSequenceIndexStr, phase=cardiacCyclePhase)
+    else:
+      valveVolumeSequenceIndexStr = "Volume index: {index}".format(index=valveVolumeSequenceIndexStr)
+    self.ui.valveVolumeSequenceIndexLabel.setText(valveVolumeSequenceIndexStr)
 
   def onValveVolumeBrowserNodeModified(self, observer=None, eventid=None):
     self.updateGUIFromMRML()

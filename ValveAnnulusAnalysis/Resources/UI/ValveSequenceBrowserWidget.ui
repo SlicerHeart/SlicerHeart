@@ -10,7 +10,7 @@
     <x>0</x>
     <y>0</y>
     <width>557</width>
-    <height>311</height>
+    <height>118</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -85,16 +85,12 @@
       <widget class="qMRMLSequenceBrowserSeekWidget" name="heartValveBrowserSeekWidget"/>
      </item>
      <item>
-      <widget class="QLabel" name="label_6">
+      <widget class="QLabel" name="valveVolumeSequenceIndexLabel">
        <property name="text">
-        <string>Volume index:</string>
+        <string>Volume index: NA</string>
        </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="valveVolumeSequenceIndexValue">
-       <property name="text">
-        <string>0</string>
+       <property name="margin">
+        <number>6</number>
        </property>
       </widget>
      </item>
