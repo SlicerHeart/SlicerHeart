@@ -51,7 +51,7 @@ class ValveModel:
         self.setHeartValveNodeDefaults()
         # Update parameters and references
 
-        self.annulusContourCurveNode = self._annulusContourCurveNode(False)
+        self.annulusContourCurveNode = self._heartValveNodeReferencedProxyNode("AnnulusContourPoints", forDisplayedHeartValvePhase=False)
         self.annulusContourRadius = self.annulusContourRadius
 
         self.valveLabelsNode = self.valveLabelsNode
@@ -78,33 +78,12 @@ class ValveModel:
 
     @property
     def annulusContourCurveSequenceNode(self):
-      annulusContourCurveNode = self._annulusContourCurveNode(forDisplayedHeartValveSequence=False)
-      if not annulusContourCurveNode:
-        return None
-      annulusContourCurveSequenceNode = self.valveBrowserNode.GetSequenceNode(annulusContourCurveNode)
-      return annulusContourCurveSequenceNode
-
-    def _annulusContourCurveNode(self, forDisplayedHeartValveSequence):
-      """Get annulus contour curve node
-      :param forDisplayedHeartValveSequence specifies if curve of the currently displayed
-         heart valve index should be returned. If False then the current contour proxy node
-         is returned, regardless of contour is specified for the current heart valve phase.
-      :returns Markup closed curve storing the annulus contour
-      """
-      # Get annulus contour proxy node
-      annulusContourCurveNode = self.heartValveNode.GetNodeReference("AnnulusContourPoints") if self.heartValveNode else None
-      if (not forDisplayedHeartValveSequence) or (not annulusContourCurveNode):
-        # No need to check if it is for the displayed heart valve phase
-        return annulusContourCurveNode
-      # Check if annulus contour is available for the current heart valve phase
-      if not self.isNodeSpecifiedForCurrentTimePoint(annulusContourCurveNode):
-        return None
-      return annulusContourCurveNode
+      return self._heartValveNodeReferencedSequenceNode("AnnulusContourPoints")
 
     @property
     def annulusContourCurveNode(self):
       """:returns Markup closed curve storing the annulus contour"""
-      return self._annulusContourCurveNode(forDisplayedHeartValveSequence=True)
+      return self._heartValveNodeReferencedProxyNode("AnnulusContourPoints", forDisplayedHeartValvePhase=True)
 
     @annulusContourCurveNode.setter
     def annulusContourCurveNode(self, annulusContourMarkupNode):
@@ -167,10 +146,14 @@ class ValveModel:
       self.valveRoi.setRoiModelNode(modelNode)
 
     @property
+    def leafletVolumeSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("LeafletVolume")
+
+    @property
     def leafletVolumeNode(self):
       """:returns Volume that is used for leaflet segmentation (to generate leafletSegmentationNode).
       It is typically isotropic and higher resolution than the original volume."""
-      return self.heartValveNode.GetNodeReference("LeafletVolume") if self.heartValveNode else None
+      return self._heartValveNodeReferencedProxyNode("LeafletVolume", forDisplayedHeartValvePhase=True)
 
     @leafletVolumeNode.setter
     def leafletVolumeNode(self, leafletVolumeNode):
@@ -186,11 +169,7 @@ class ValveModel:
 
     @property
     def leafletSegmentationSequenceNode(self):
-      leafletSegmentationNode = self.leafletSegmentationNode(forDisplayedHeartValveSequence=False)
-      if not leafletSegmentationNode:
-        return None
-      leafletSegmentationSequenceNode = self.valveBrowserNode.GetSequenceNode(leafletSegmentationNode)
-      return leafletSegmentationSequenceNode
+      return self._heartValveNodeReferencedSequenceNode("LeafletSegmentation")
 
     def isNodeSpecifiedForCurrentTimePoint(self, proxyNode):
       sequenceNode = self.valveBrowserNode.GetSequenceNode(proxyNode)
@@ -204,30 +183,35 @@ class ValveModel:
         return False
       return True
 
-    def _leafletSegmentationNode(self, forDisplayedHeartValveSequence):
-      """Get leaflet segmentation node
-      :param forDisplayedHeartValveSequence specifies if segmentation of the currently displayed
-         heart valve index should be returned. If False then the current segmentation proxy node
-         is returned, regardless of segmentation is specified for the current heart valve phase.
-      :returns Segmentation node storing each valve leaflet as a segment
-      """
-      # Get segmentation proxy node
-      segmentationNode = self.heartValveNode.GetNodeReference("LeafletSegmentation") if self.heartValveNode else None
-      if (not forDisplayedHeartValveSequence) or (not segmentationNode):
-        # No need to check if it is for the displayed heart valve phase
-        return segmentationNode
-      # Check if segmentation is available for the current heart valve phase
-      if not self.isNodeSpecifiedForCurrentTimePoint(segmentationNode):
+    def _heartValveNodeReferencedSequenceNode(self, referenceRole):
+      referencedNode = self._heartValveNodeReferencedProxyNode(referenceRole, forDisplayedHeartValvePhase=False)
+      if not referencedNode:
         return None
-      return segmentationNode
+      referencedSequenceNode = self.valveBrowserNode.GetSequenceNode(referencedNode)
+      return referencedSequenceNode
 
+    def _heartValveNodeReferencedProxyNode(self, referenceRole, forDisplayedHeartValvePhase):
+      """Get node referenced from the heartValveNode
+      :param forDisplayedHeartValvePhase specifies if the referenced proxy node of the currently displayed
+         heart valve index should be returned. If False then the current referenced node
+         is returned, regardless of the proxy node is specified for the current heart valve phase.
+      :returns Referenced node
+      """
+      referencedProxyNode = self.heartValveNode.GetNodeReference(referenceRole) if self.heartValveNode else None
+      if (not forDisplayedHeartValvePhase) or (not referencedProxyNode):
+        # No need to check if it is for the displayed heart valve phase
+        return referencedProxyNode
+      # Check if segmentation is available for the current heart valve phase
+      if not self.isNodeSpecifiedForCurrentTimePoint(referencedProxyNode):
+        return None
+      return referencedProxyNode
 
     @property
     def leafletSegmentationNode(self):
       """Get leaflet segmentation node
       :returns Segmentation node storing each valve leaflet as a segment
       """
-      return self._leafletSegmentationNode(forDisplayedHeartValveSequence=True)
+      return self._heartValveNodeReferencedProxyNode("LeafletSegmentation", forDisplayedHeartValvePhase=True)
 
     @leafletSegmentationNode.setter
     def leafletSegmentationNode(self, segmentationNode):
