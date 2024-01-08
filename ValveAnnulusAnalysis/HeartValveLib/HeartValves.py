@@ -298,7 +298,7 @@ def setSliceViewsLink(viewNames, link, hotlink):
 
 def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, orthoRotationDeg=0,
                                  axialSliceName='Red', ortho1SliceName='Yellow', ortho2SliceName='Green',
-                                 show3DSliceName=None):
+                                 show3DSliceName=None, valveModel = None, valveBrowser = None):
   """Sets up views for a specific valve.
   show3DSliceName is the name of the slice that should be shown in 3D views
   valveModel: can be valve model or browser"""

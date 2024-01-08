@@ -140,8 +140,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.parameterNodeObserver = None
 
     # Just used for keeping track of the observers
-    self.annulusContourCurveNode = None
-    self.annulusContourCurveNodeObserver = None
+    self._annulusContourCurveNode = None
+    self._annulusContourCurveNodeObserver = None
 
     self.axialSliceToRasTransformNode = None
     self.axialSliceToRasTransformNodeObserver = None
@@ -329,9 +329,9 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       slicer.mrmlScene.RemoveNode(self.annulusContourPreviewCurve)
 
   def removeNodeObservers(self):
-    if self.annulusContourCurveNode and self.annulusContourCurveNodeObserver:
-      self.annulusContourCurveNode.RemoveObserver(self.annulusContourCurveNodeObserver)
-      self.annulusContourCurveNodeObserver = None
+    if self._annulusContourCurveNode and self._annulusContourCurveNodeObserver:
+      self._annulusContourCurveNode.RemoveObserver(self._annulusContourCurveNodeObserver)
+      self._annulusContourCurveNodeObserver = None
     if self.axialSliceToRasTransformNode and self.axialSliceToRasTransformNodeObserver:
       self.axialSliceToRasTransformNode.RemoveObserver(self.axialSliceToRasTransformNodeObserver)
       self.axialSliceToRasTransformNodeObserver = None
@@ -358,18 +358,20 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       if widget != self.ui.contourAdjustmentCollapsibleButton:
         self.ui.smoothContourPreviewCheckbox.setChecked(False)
 
-      if self.annulusContourCurveNode:
+      annulusContourCurveNode = self.valveModel.annulusContourCurveNode if self.valveModel else None
+
+      if annulusContourCurveNode:
         # Only allow fiducial moving in contouring or adjustment mode
-        self.annulusContourCurveNode.SetLocked(not (widget == self.ui.contouringCollapsibleButton or
+        annulusContourCurveNode.SetLocked(not (widget == self.ui.contouringCollapsibleButton or
                                               widget == self.ui.contourAdjustmentCollapsibleButton))
         if self.valveModel:
           self.valveModel.setNonLabeledMarkupsVisibility(widget == self.ui.contouringCollapsibleButton or
                                                          widget == self.ui.contourAdjustmentCollapsibleButton)
         # Hide annulus slice intersection in contouring mode
         # (it is confusing to see something in the slice views while still just adding points)
-        if self.annulusContourCurveNode and self.annulusContourCurveNode.GetDisplayNode():
-          self.annulusContourCurveNode.GetDisplayNode().SetVisibility2D(widget != self.ui.contouringCollapsibleButton)
-          self.annulusContourCurveNode.GetDisplayNode().SetSliceIntersectionThickness(4)
+        if annulusContourCurveNode and annulusContourCurveNode.GetDisplayNode():
+          annulusContourCurveNode.GetDisplayNode().SetVisibility2D(widget != self.ui.contouringCollapsibleButton)
+          annulusContourCurveNode.GetDisplayNode().SetSliceIntersectionThickness(4)
 
     # View step
     if widget == self.ui.viewCollapsibleButton:
@@ -569,7 +571,6 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
       return
 
     # Contour sequence is there, but no contour for displayed heart valve phase.
-    # Enable saving of contour and generate missing proxy node
     self.valveBrowser.addCurrentTimePointToSequence(annulusContourCurveSequenceNode)
 
     # Set the new node in the GUI
@@ -601,23 +602,23 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def setAndObserveAnnulusContourCurveNode(self, annulusCurveNode):
     logging.debug("Observe annulus curve node: {0}".format(annulusCurveNode.GetName() if annulusCurveNode else "None"))
-    if annulusCurveNode == self.annulusContourCurveNode and self.annulusContourCurveNodeObserver:
+    if annulusCurveNode == self._annulusContourCurveNode and self._annulusContourCurveNodeObserver:
       # no change and node is already observed
       logging.debug("Already observed")
       return
     # Remove observer to old node
-    if self.annulusContourCurveNode and self.annulusContourCurveNodeObserver:
-      self.annulusContourCurveNode.RemoveObserver(self.annulusContourCurveNodeObserver)
-      self.annulusContourCurveNodeObserver = None
+    if self._annulusContourCurveNode and self._annulusContourCurveNodeObserver:
+      self._annulusContourCurveNode.RemoveObserver(self._annulusContourCurveNodeObserver)
+      self._annulusContourCurveNodeObserver = None
     # Set and observe new node
-    self.annulusContourCurveNode = annulusCurveNode
-    if self.annulusContourCurveNode:
-      self.annulusContourCurveNodeObserver = \
-        self.annulusContourCurveNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+    self._annulusContourCurveNode = annulusCurveNode
+    if self._annulusContourCurveNode:
+      self._annulusContourCurveNodeObserver = \
+        self._annulusContourCurveNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                                            self.onAnnulusMarkupNodeModified)
 
-    self.ui.annulusMarkupAdjustmentList.setCurrentNode(self.annulusContourCurveNode)
-    self.ui.placeButton2.setCurrentNode(self.annulusContourCurveNode)
+    self.ui.annulusMarkupAdjustmentList.setCurrentNode(self._annulusContourCurveNode)
+    self.ui.placeButton2.setCurrentNode(self._annulusContourCurveNode)
     # Hide label column, annulus labels are specified in a different markup list
     # It can only be done here, after a node is set because columns may be re-created when a new node is set.
     self.ui.annulusMarkupAdjustmentList.tableWidget().setColumnHidden(0, True)
@@ -625,13 +626,19 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.onAnnulusMarkupNodeModified()
 
   def onAnnulusMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
-    self.ui.addAnnulusContourCurveButton.enabled = not self.annulusContourCurveNode
-    self.ui.removeAnnulusContourCurveButton.enabled = self.annulusContourCurveNode
+    annulusContourCurveNode = self.valveModel.annulusContourCurveNode if self.valveModel else None
+    if annulusContourCurveNode:
+      if not self.valveModel.isNodeSpecifiedForCurrentTimePoint(annulusContourCurveNode):
+        # Curve is not present for current time point
+        annulusContourCurveNode = None
 
-    if not self.annulusContourCurveNode:
+    self.ui.addAnnulusContourCurveButton.enabled = not annulusContourCurveNode
+    self.ui.removeAnnulusContourCurveButton.enabled = annulusContourCurveNode
+
+    if not annulusContourCurveNode:
       return
 
-    numberOfPoints = self.getNumberOfDefinedControlPoints(self.annulusContourCurveNode)
+    numberOfPoints = self.getNumberOfDefinedControlPoints(annulusContourCurveNode)
 
     if self.ui.autoRotateButton.checked:
       if numberOfPoints-self.autoRotateStartNumberOfPoints >= 360/self.ui.orthogonalSlicerRotationStepSizeSpinBox.value:
@@ -738,14 +745,10 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
                                      if self.annulusContourPreviewActive else annulusContourPreviewDisplayNode.Sphere3D)
 
   def currentAnnulusMarkupPointSelectionChanged(self, markupIndex):
-    nOfControlPoints = self.getNumberOfDefinedControlPoints(self.annulusContourCurveNode) if self.annulusContourCurveNode else 0
+    annulusContourCurveNode = self.valveModel.annulusContourCurveNode
+    nOfControlPoints = self.getNumberOfDefinedControlPoints(annulusContourCurveNode) if annulusContourCurveNode else 0
     for i in range(nOfControlPoints):
-      try:
-        # Current API (Slicer-4.13 February 2022)
-        self.annulusContourCurveNode.SetNthControlPointSelected(i, i==markupIndex)
-      except:
-        # Legacy API
-        self.annulusContourCurveNode.SetNthFiducialSelected(i, i==markupIndex)
+      annulusContourCurveNode.SetNthControlPointSelected(i, i==markupIndex)
 
   def onAnnulusModelRadiusChanged(self, radius):
     if not self.valveModel:
@@ -784,8 +787,9 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
   def onAutoRotateClicked(self, pushed):
     if pushed:
       self.autoRotateStartAngle = self.ui.orthogonalSlicerRotationSliderWidget.value
+      annulusContourCurveNode = self.valveModel.annulusContourCurveNode
       self.autoRotateStartNumberOfPoints = \
-        self.getNumberOfDefinedControlPoints(self.annulusContourCurveNode) if self.annulusContourCurveNode else 0
+        self.getNumberOfDefinedControlPoints(annulusContourCurveNode) if annulusContourCurveNode else 0
 
   def onResetAnnulusView(self):
     if self.valveBrowser is None:
@@ -862,7 +866,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
           return
 
     slicer.app.applicationLogic().GetInteractionNode().SetPlaceModePersistence(1)
-    if self.getNumberOfDefinedControlPoints(self.annulusContourCurveNode) == 0:
+    if self.getNumberOfDefinedControlPoints(self.valveModel.annulusContourCurveNode) == 0:
       self.ui.autoRotateButton.setChecked(True)
     if self.ui.autoRotateButton.isChecked():
       # forces the slice to the first rotation position
@@ -872,19 +876,19 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     # Get the view where the user is dragging the markup and don't change that view
     # (it would move the image while the user is marking a point on it and so the screw would drift)
-    excludeSliceView = self.annulusContourCurveNode.GetAttribute('Markups.MovingInSliceView')
-    movingMarkupIndex = self.annulusContourCurveNode.GetAttribute('Markups.MovingMarkupIndex')
+    excludeSliceView = self._annulusContourCurveNode.GetAttribute('Markups.MovingInSliceView')
+    movingMarkupIndex = self._annulusContourCurveNode.GetAttribute('Markups.MovingMarkupIndex')
 
     if not excludeSliceView or movingMarkupIndex is None or movingMarkupIndex == '':
       return
 
     try:
       jumpLocation = [0,0,0,1]
-      self.annulusContourCurveNode.GetMarkupPointWorld(int(movingMarkupIndex), 0, jumpLocation)
+      self._annulusContourCurveNode.GetMarkupPointWorld(int(movingMarkupIndex), 0, jumpLocation)
     except:
       # Slicer-4.11
       jumpLocation = [0,0,0]
-      self.annulusContourCurveNode.GetNthControlPointPositionWorld(int(movingMarkupIndex), jumpLocation)
+      self._annulusContourCurveNode.GetNthControlPointPositionWorld(int(movingMarkupIndex), jumpLocation)
 
     sliceNodes = slicer.mrmlScene.GetNodesByClass("vtkMRMLSliceNode")
     sliceNodes.UnRegister(None)  # GetNodesByClass returns a new collection
