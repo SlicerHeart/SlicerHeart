@@ -743,7 +743,12 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
     numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
     numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
     if numLegacySurfaceBoundaries:
-      assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+      surfaceDataMatches = numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+      if not surfaceDataMatches:
+        logging.warning(f"Number of numLegacySurfaceBoundaries({numLegacySurfaceBoundaries}), "
+                        f"numSurfaceBoundaryMarkups({numSurfaceBoundaryMarkups}), "
+                        f"and numLeafletSurfaceModels({numLeafletSurfaceModels}) doesn't match")
+        return
 
       for boundaryModelIndex in range(numLegacySurfaceBoundaries):
         boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)
