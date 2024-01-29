@@ -31,6 +31,13 @@ def setup(usPresetsScenePath):
     scriptedPlugin.setPythonSource(hvp.HeartValvesSubjectHierarchyPlugin.filePath)
 
 
+def setupTerminology():
+  tlogic = slicer.modules.terminologies.logic()
+  terminologyName = tlogic.LoadTerminologyFromFile(getTerminologyFile())
+  terminologyEntry = slicer.vtkSlicerTerminologyEntry()
+  terminologyEntry.SetTerminologyContextName(terminologyName)
+
+
 def getTerminologyFile():
   import os
   moduleDir = os.path.dirname(slicer.modules.valveannulusanalysis.path)

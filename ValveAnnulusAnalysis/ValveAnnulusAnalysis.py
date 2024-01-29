@@ -100,7 +100,7 @@ class ValveAnnulusAnalysis(ScriptedLoadableModule):
     moduleDir = os.path.dirname(self.parent.path)
     usPresetsScenePath = os.path.join(moduleDir, 'Resources/VrPresets', 'US-VrPresets.mrml')
     HeartValveLib.setup(usPresetsScenePath)
-
+    HeartValveLib.setupTerminology()
 
 #
 # ValveAnnulusAnalysisWidget
