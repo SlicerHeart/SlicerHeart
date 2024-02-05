@@ -4,9 +4,9 @@
   "SegmentationCodes": {
     "Category": [
       {
-        "CodeMeaning": "Leaflets",
+        "CodeMeaning": "Mitral Valve",
         "CodingSchemeDesignator": "SCT",
-        "CodeValue": "85756007",
+        "CodeValue": "91134007",
         "Type": [
           {
             "CodeMeaning": "mitral anterior leaflet",
@@ -21,46 +21,106 @@
             "recommendedDisplayRGBValue": [42, 61, 244]
           },
           {
+            "CodeMeaning": "entire mitral valve",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-tissue-mv-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          }
+        ],
+        "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Tricuspid Valve",
+        "CodingSchemeDesignator": "SCT",
+        "CodeValue": "46030003",
+        "Type": [
+          {
             "CodeMeaning": "tricuspid anterior leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-tcv-a",
+            "CodeValue": "sh-leaflet-tv-a",
             "recommendedDisplayRGBValue": [255, 18, 8]
-          },
-          {
-            "CodeMeaning": "tricuspid septal leaflet",
-            "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-tcv-s",
-            "recommendedDisplayRGBValue": [42, 61, 244]
           },
           {
             "CodeMeaning": "tricuspid posterior leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-tcv-p",
+            "CodeValue": "sh-leaflet-tv-p",
             "recommendedDisplayRGBValue": [42, 237, 33]
           },
           {
-            "CodeMeaning": "superior bridging leaflet",
+            "CodeMeaning": "tricuspid septal leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-tv-s",
+            "recommendedDisplayRGBValue": [42, 61, 244]
+          },
+          {
+            "CodeMeaning": "entire tricuspid valve",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-tissue-tv-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          }
+        ],
+        "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Complete Atrioventricular Canal Valve",
+        "CodingSchemeDesignator": "SCT",
+          "CodeValue": "279316009",
+        "Type": [
+          {
+            "CodeMeaning": "cavc superior bridging leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-cavc-sb",
             "recommendedDisplayRGBValue": [255, 18, 8]
           },
           {
-            "CodeMeaning": "right mural leaflet",
+            "CodeMeaning": "cavc right mural leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-cavc-rm",
             "recommendedDisplayRGBValue": [42, 61, 244]
           },
           {
-            "CodeMeaning": "inferior bridging leaflet",
+            "CodeMeaning": "cavc inferior bridging leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-cavc-ib",
             "recommendedDisplayRGBValue": [42, 237, 33]
           },
           {
-            "CodeMeaning": "left mural leaflet",
+            "CodeMeaning": "cavc left mural leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-cavc-lm",
             "recommendedDisplayRGBValue": [243, 153, 36]
+          },
+          {
+            "CodeMeaning": "entire cavc valve",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-tissue-cavc-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          }
+        ],
+        "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Left Atrioventricular Valve",
+        "CodingSchemeDesignator": "SCT",
+        "CodeValue": "312523009",
+        "Type": [
+          {
+            "CodeMeaning": "lavv left mural leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-lavv-lm",
+            "recommendedDisplayRGBValue": [243, 153, 36]
+          },
+          {
+            "CodeMeaning": "lavv superior bridging leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-lavv-sb",
+            "recommendedDisplayRGBValue": [255, 18, 8]
+          },
+          {
+            "CodeMeaning": "lavv inferior bridging leaflet",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-lavv-ib",
+            "recommendedDisplayRGBValue": [42, 237, 33]
           },
           {
             "CodeMeaning": "lavv neo-anterior leaflet",
@@ -69,53 +129,95 @@
             "recommendedDisplayRGBValue": [255, 18, 8]
           },
           {
-            "CodeMeaning": "tri-leaflet aortic left leaflet",
+            "CodeMeaning": "entire lavv valve",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-triav-l",
+            "CodeValue": "sh-tissue-lavv-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          }
+        ],
+        "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Tricuspid Aortic Valve",
+        "CodingSchemeDesignator": "SCT",
+        "CodeValue": "34202007",
+        "Type": [
+           {
+            "CodeMeaning": "tricuspid aortic left coronary cusp",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-tav-l",
             "recommendedDisplayRGBValue": [255, 18, 8]
           },
           {
-            "CodeMeaning": "tri-leaflet aortic right leaflet",
+            "CodeMeaning": "tricuspid aortic right coronary cusp",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-triav-r",
+            "CodeValue": "sh-leaflet-tav-r",
             "recommendedDisplayRGBValue": [42, 237, 33]
           },
           {
-            "CodeMeaning": "tri-leaflet aortic non-coronary leaflet",
+            "CodeMeaning": "tricuspid aortic non-coronary cusp",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-triav-nc",
+            "CodeValue": "sh-leaflet-tav-nc",
             "recommendedDisplayRGBValue": [243, 153, 36]
           },
           {
-            "CodeMeaning": "tri-leaflet aortic root tissue",
+            "CodeMeaning": "tricuspid aortic root tissue",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-tissue-triav-root",
+            "CodeValue": "sh-tissue-tav-rt",
             "recommendedDisplayRGBValue": [42, 61, 244]
           },
           {
-            "CodeMeaning": "bi-commissural aortic left leaflet",
+            "CodeMeaning": "entire tricuspid aortic valve",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-bicomav-l",
+            "CodeValue": "sh-tissue-tav-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          }
+        ],
+        "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Bicuspid Aortic Valve",
+        "CodingSchemeDesignator": "SCT",
+        "CodeValue": "72352009",
+        "Type": [
+          {
+            "CodeMeaning": "bi-commissural aortic left cusp",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-bav-l",
             "recommendedDisplayRGBValue": [255, 18, 8]
           },
           {
-            "CodeMeaning": "bi-commissural aortic right leaflet",
+            "CodeMeaning": "bi-commissural aortic right cusp",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-bicomav-r",
+            "CodeValue": "sh-leaflet-bav-r",
             "recommendedDisplayRGBValue": [42, 237, 33]
           },
           {
-            "CodeMeaning": "bi-commissural aortic non-coronary leaflet",
+            "CodeMeaning": "bi-commissural aortic non-coronary cusp",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-leaflet-bicomav-nc",
+            "CodeValue": "sh-leaflet-bav-nc",
             "recommendedDisplayRGBValue": [243, 153, 36]
           },
           {
             "CodeMeaning": "bi-commissural aortic root tissue",
             "CodingSchemeDesignator": "SlicerHeart",
-            "CodeValue": "sh-tissue-bicomav-root",
+            "CodeValue": "sh-tissue-bav-rt",
             "recommendedDisplayRGBValue": [42, 61, 244]
           },
+          {
+            "CodeMeaning": "entire bi-commissural aortic valve",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-tissue-bav-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
+          }
+        ],
+        "showAnatomy": false
+      },
+      {
+        "CodeMeaning": "Truncal Valve",
+        "CodingSchemeDesignator": "SCT",
+        "CodeValue": "279317000",
+        "Type": [
           {
             "CodeMeaning": "truncal leaflet 1",
             "CodingSchemeDesignator": "SlicerHeart",
@@ -139,6 +241,12 @@
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-trunc-4",
             "recommendedDisplayRGBValue": [243, 153, 36]
+          },
+          {
+            "CodeMeaning": "entire truncal valve",
+            "CodingSchemeDesignator": "SlicerHeart",
+            "CodeValue": "sh-leaflet-trunc-b",
+            "recommendedDisplayRGBValue": [128, 174, 128]
           }
         ],
         "showAnatomy": false
