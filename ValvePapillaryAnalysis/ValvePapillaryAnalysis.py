@@ -205,7 +205,26 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.heartValveSelector.setMRMLScene(slicer.mrmlScene)
     self.heartValveSelector.setToolTip("Select heart valve node where annulus will be added")
     self.heartValveSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveSelect)
-    valveFormLayout.addRow("Heart valve: ", self.heartValveSelector)
+
+    self.goToAnalyzedFrameButton = qt.QPushButton("Show")
+    self.valveVolumeSequenceIndexValue = qt.QLabel("0")
+
+    valveFormLayout.addWidget(
+      self._createHLayout([qt.QLabel("Heart valve: "), self.heartValveSelector, qt.QLabel("Valve volume index:"),
+                           self.valveVolumeSequenceIndexValue, self.goToAnalyzedFrameButton])
+    )
+    self.goToAnalyzedFrameButton.connect("clicked()", self.onGoToAnalyzedFrameButtonClicked)
+
+  def _createHLayout(self, elements, **kwargs):
+    widget = qt.QWidget()
+    rowLayout = qt.QHBoxLayout()
+    widget.setLayout(rowLayout)
+    for element in elements:
+      rowLayout.addWidget(element)
+    for key, value in iter(kwargs.items()):
+      if hasattr(rowLayout, key):
+        setattr(rowLayout, key, value)
+    return widget
 
   def cleanup(self):
     self.removeGUIObservers()
@@ -275,8 +294,15 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
       self.valveModel.updatePapillaryModels()
       self.showAllPapillaryMuscles()
 
+    valveVolumeSequenceIndexStr = self.valveModel.getVolumeSequenceIndexAsDisplayedString(
+      self.valveModel.getValveVolumeSequenceIndex()) if self.valveModel else ""
+    self.valveVolumeSequenceIndexValue.setText(valveVolumeSequenceIndexStr)
+
     self.onDisplayFourUpView(resetViewOrientations=True, resetFov=True)
     self.updateGuiEnabled()
+    self.onGoToAnalyzedFrameButtonClicked()
+
+  def onGoToAnalyzedFrameButtonClicked(self):
     HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
   def updateGuiEnabled(self):
