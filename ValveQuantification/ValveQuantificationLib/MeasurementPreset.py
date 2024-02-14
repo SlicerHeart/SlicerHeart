@@ -1368,9 +1368,7 @@ class MeasurementPreset(object):
     """
 
     oversamplingFactor = 3
-    segmentationNode = slicer.vtkMRMLSegmentationNode()
-    segmentationNode.SetName("VolumeBetweenSurfaces-"+measurementName)
-    slicer.mrmlScene.AddNode(segmentationNode)
+    segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', f"VolumeBetweenSurfaces-{measurementName}")
     segmentationNode.CreateDefaultDisplayNodes()
     segmentation = segmentationNode.GetSegmentation()
     # Set parent transform
@@ -1416,9 +1414,6 @@ class MeasurementPreset(object):
       leafletRoiSegmentIds.append(leafletRoiSegmentId)
 
     # Subtract extruded soap bubble from extruded leaflet surface
-
-    segmentationNode.SetMasterRepresentationToBinaryLabelmap()
-    segmentationNode.RemoveClosedSurfaceRepresentation()
 
     modifierSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, soapBubbleClosedSurfaceSegmentId)
 
