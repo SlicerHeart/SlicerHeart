@@ -35,37 +35,42 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
     valveModel.removeAnnulusMarkupLabel(pointName)
 
     coaptationCenterPoints = None
-
-    for coaptationModel in coaptationModels:
-      
+    if len(coaptationModels) == 1: # tricuspid has only two leaflets
+      coaptationModel = coaptationModels[0]
       basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
       numberOfBasePoints = basePoints.GetNumberOfPoints()
-      if not numberOfBasePoints:
-        continue
+      if numberOfBasePoints:
+        coaptationCenterPoints = np.array(basePoints.GetPoint(numberOfBasePoints//2 - 1))
+    elif len(coaptationModels) == 3: # not always the case (for example if tricuspid has only two leaflets)
+      for coaptationModel in coaptationModels:
+        basePoints = coaptationModel.baseLine.curvePoly.GetPoints()
+        numberOfBasePoints = basePoints.GetNumberOfPoints()
+        if not numberOfBasePoints:
+          continue
 
-      # Find which end of the coaptation base line is farther from the annulus contour
-      # (that will be the center point)
-      firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
-      [closestAnnulusPointToFirstPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(firstCoaptationLinePoint)
-      firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint-firstCoaptationLinePoint) 
-      lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
-      [closestAnnulusPointToLastPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(lastCoaptationLinePoint)
-      lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint-lastCoaptationLinePoint) 
+        # Find which end of the coaptation base line is farther from the annulus contour
+        # (that will be the center point)
+        firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
+        [closestAnnulusPointToFirstPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(firstCoaptationLinePoint)
+        firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint-firstCoaptationLinePoint)
+        lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
+        [closestAnnulusPointToLastPoint, dummy] = valveModel.annulusContourCurve.getClosestPoint(lastCoaptationLinePoint)
+        lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint-lastCoaptationLinePoint)
 
-      if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
-        coaptationCenterPoint = firstCoaptationLinePoint
-      else:
-        coaptationCenterPoint = lastCoaptationLinePoint
+        if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
+          coaptationCenterPoint = firstCoaptationLinePoint
+        else:
+          coaptationCenterPoint = lastCoaptationLinePoint
 
-      # Add to point list
-      if coaptationCenterPoints is None:
-        coaptationCenterPoints = coaptationCenterPoint
-      else:
-        coaptationCenterPoints = np.column_stack((coaptationCenterPoints, coaptationCenterPoint))
+        # Add to point list
+        if coaptationCenterPoints is None:
+          coaptationCenterPoints = coaptationCenterPoint
+        else:
+          coaptationCenterPoints = np.column_stack((coaptationCenterPoints, coaptationCenterPoint))
 
     # Add markup and mean position
     if coaptationCenterPoints is not None:
-      meanCoaptationCenterPoint = coaptationCenterPoints.mean(axis=1)
+      meanCoaptationCenterPoint = coaptationCenterPoints.mean(axis=1) if coaptationCenterPoints.ndim > 1 else coaptationCenterPoints
       valveModel.setAnnulusMarkupLabel(pointName, meanCoaptationCenterPoint)
 
   def computeMetrics(self, inputValveModels, outputTableNode):
