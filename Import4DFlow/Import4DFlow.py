@@ -115,6 +115,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Create logic class. Logic implements all computations that should be possible to run
         # in batch mode, without a graphical user interface.
         self.logic = Import4DFlowLogic()
+        self.logic.logCallback = self.addLog
 
         # Connections
 
@@ -163,6 +164,12 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
             self._parameterNodeGuiTag = None
             self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+
+    def addLog(self, text):
+        """Display log message
+        """
+        slicer.util.showStatusMessage(text, 3000)
+        slicer.app.processEvents()  # force update
 
     def onSceneStartClose(self, caller, event) -> None:
         """
@@ -292,7 +299,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def onExportButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to export the flow field to files.", waitCursor=True):
-
             self.logic.exportDisplacementFieldToFiles(self._parameterNode.outputTransform, self._parameterNode.exportDirectory)
 
 
@@ -302,6 +308,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
+            self.addLog("Sample flow field...")
             self._parameterNode.outputSpeedProfileModel = self.logic.sampleFlowFieldWithPlane(
                 self._parameterNode.inputPlane,
                 self._parameterNode.outputTransform,
@@ -309,6 +316,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.samplingDistance,
                 self._parameterNode.outputSpeedProfileModel)
 
+            self.addLog("Compute speed profile table...")
             self._parameterNode.outputSpeedProfileTable = self.logic.computeSpeedProfileTable(
                 self._parameterNode.outputSpeedProfileModel,
                 self._parameterNode.speedThreshold,
@@ -338,6 +346,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         """
         ScriptedLoadableModuleLogic.__init__(self)
 
+        self.logCallback = None
+
         # Converts direction code (in the DICOM header) to axis index (x, y, z, magnitude)
         self.axisForDirectionCode = {
             'through': 0,
@@ -346,6 +356,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             'magnitude': 3,
         }
 
+    def log(self, text):
+        logging.info(text)
+        if self.logCallback:
+            self.logCallback(text)
 
     def getParameterNode(self):
         return Import4DFlowParameterNode(super().getParameterNode())
@@ -381,6 +395,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     continue
                 instUids = instUidsStr.split()
                 filename = slicer.dicomDatabase.fileForInstance(instUids[0])
+                if not filename:
+                    # DICOM files are not in the Slicer DICOM database
+                    logging.debug(f"{volumeNode.GetName()} is not found in the DICOM database - skip")
+                    continue
                 ds = pydicom.read_file(filename)
                 if (0x0051,0x1014) in ds:
                     # flow vector component image
@@ -647,8 +665,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
 
-    @staticmethod
     def sampleFlowFieldWithPlane(
+            self,
             crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
             gridTransformNode: vtkMRMLTransformNode,
             magnitudeVolumeNode: vtkMRMLScalarVolumeNode,
@@ -656,6 +674,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             samplingGridModelNode: vtkMRMLModelNode = None) -> vtkMRMLModelNode:
 
         transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
+        if not transformSequenceBrowserNode:
+            raise RuntimeError("Input transform is not in a sequence")
 
         # Temporary nodes
         displacementImageNode = None
@@ -663,8 +683,17 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         try:
 
+            # Turn off transform visibility to speed up browsing
+            if gridTransformNode.GetDisplayNode():
+                originalTransformVisibility = gridTransformNode.GetDisplayNode().GetVisibility()
+                gridTransformNode.GetDisplayNode().SetVisibility(False)
+            else:
+                originalTransformVisibility = False
+
             originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
             for itemNumber in range(transformSequenceBrowserNode.GetNumberOfItems()):
+                self.log("Sampling flow field with plane... ({item}/{count})".format(item=itemNumber+1, count=transformSequenceBrowserNode.GetNumberOfItems()))
+
                 transformSequenceBrowserNode.SetSelectedItemNumber(itemNumber)
 
                 # Create sampling plane
@@ -701,13 +730,29 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
                 # Add the model to the same sequence browser as the input 4D flow field
-                modelSequenceNode = transformSequenceBrowserNode.GetSequenceNode(samplingGridModelNode)
+
+                # Make sure the model is in the same sequence browser as the transform sequence and
+                # model is in not a proxy node of any other sequence browsers
+                foundBrowserNodes = vtk.vtkCollection()
+                sequencesLogic = slicer.modules.sequences.logic()
+                sequencesLogic.GetBrowserNodesForProxyNode(samplingGridModelNode, foundBrowserNodes)
+                modelSequenceNode = None
+                for i in range(foundBrowserNodes.GetNumberOfItems()):
+                    foundBrowserNode = foundBrowserNodes.GetItemAsObject(i)
+                    foundSequenceNode = transformSequenceBrowserNode.GetSequenceNode(samplingGridModelNode)
+                    if foundBrowserNode == transformSequenceBrowserNode:
+                        # Store the sequence node corresponding to the transform sequence browser node
+                        modelSequenceNode = foundSequenceNode
+                    else:
+                        # Remove model from other sequence browser nodes
+                        foundBrowserNode.RemoveSynchronizedSequenceNode(foundSequenceNode.GetID())
+
                 if not modelSequenceNode:
-                    transformSequenceNode = transformSequenceBrowserNode.GetSequenceNode(gridTransformNode)
+                    masterSequenceNode = transformSequenceBrowserNode.GetMasterSequenceNode()
                     modelSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "Cross-section model sequence")
-                    modelSequenceNode.SetIndexType(transformSequenceNode.GetIndexType())
-                    modelSequenceNode.SetIndexName(transformSequenceNode.GetIndexName())
-                    modelSequenceNode.SetIndexUnit(transformSequenceNode.GetIndexUnit())
+                    modelSequenceNode.SetIndexType(masterSequenceNode.GetIndexType())
+                    modelSequenceNode.SetIndexName(masterSequenceNode.GetIndexName())
+                    modelSequenceNode.SetIndexUnit(masterSequenceNode.GetIndexUnit())
                     slicer.modules.sequences.logic().AddSynchronizedNode(modelSequenceNode, samplingGridModelNode, transformSequenceBrowserNode)
                     transformSequenceBrowserNode.SetSaveChanges(modelSequenceNode, True)
 
@@ -739,11 +784,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             if displacementImageNode:
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
             transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
+            if originalTransformVisibility and gridTransformNode.GetDisplayNode():
+                gridTransformNode.GetDisplayNode().SetVisibility(True)
 
         return samplingGridModelNode
 
-    @staticmethod
     def computeSpeedProfileTable(
+            self,
             crossSectionModelNode: vtkMRMLMarkupsPlaneNode,
             speedThreshold: float = 0.1,
             outputSpeedProfileTableNode: vtkMRMLTableNode = None) -> vtkMRMLTableNode:
@@ -758,8 +805,25 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         speedArray = vtk.vtkDoubleArray()
         speedArray.SetName("speed")
 
+        # Turn off transform visibility to speed up browsing
+        gridTransformNode = None
+        proxyNodes = vtk.vtkCollection()
+        sequenceBrowserNode.GetAllProxyNodes(proxyNodes)
+        for i in range(proxyNodes.GetNumberOfItems()):
+            proxyNode = proxyNodes.GetItemAsObject(i)
+            if proxyNode.IsA("vtkMRMLTransformNode"):
+                gridTransformNode = proxyNode
+                break
+        if gridTransformNode and gridTransformNode.GetDisplayNode():
+            originalTransformVisibility = gridTransformNode.GetDisplayNode().GetVisibility()
+            gridTransformNode.GetDisplayNode().SetVisibility(False)
+        else:
+            originalTransformVisibility = False
+
         originalItemNumber = sequenceBrowserNode.GetSelectedItemNumber()
         for itemNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+            self.log("Computing speed profile... ({item}/{count})".format(item=itemNumber+1, count=sequenceBrowserNode.GetNumberOfItems()))
+
             sequenceBrowserNode.SetSelectedItemNumber(itemNumber)
             speed = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'displacement')
             valuesAboveThreshold = speed[speed>speedThreshold]
@@ -772,6 +836,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             speedArray.InsertNextValue(averageSpeed)
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
+        if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
+            gridTransformNode.GetDisplayNode().SetVisibility(True)
+
 
         if not outputSpeedProfileTableNode:
             outputSpeedProfileTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
