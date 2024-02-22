@@ -4,12 +4,12 @@ tagline: SlicerHeart
 author: 
 first_button_text: 'Find out more'
 first_button_url: '#install'
-header_img: # /img/annie-spratt-BcGoZXjyPzA-unsplash.jpg # https://unsplash.com/photos/a-model-of-a-human-heart-on-a-white-surface-MhFJNz_D8t4
+header_img: #
 home_menu_text: Home
-home_menu_img: /img/slicerheart_1.png
+home_menu_img: /img/logo.png
 description: Tools for cardiac image import (3D/4D ultrasound, CT, MRI), quantification, surgical planning, and implant placement planning and assessment.
 baseurl: "" # the subpath of your site, e.g. /blog/
-url: "" # the base hostname & protocol for your site
+url: "https://slicerheart.github.io/" # the base hostname & protocol for your site
 
 # Theme customization
 primary: '#981616'
