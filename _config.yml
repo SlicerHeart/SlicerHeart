@@ -8,8 +8,8 @@ header_img: #
 home_menu_text: Home
 home_menu_img: /img/logo.png
 description: Tools for cardiac image import (3D/4D ultrasound, CT, MRI), quantification, surgical planning, and implant placement planning and assessment.
-baseurl: "" # the subpath of your site, e.g. /blog/
-url: "https://slicerheart.github.io/" # the base hostname & protocol for your site
+baseurl: SlicerHeart # the subpath of your site, e.g. /blog/
+url: https://slicerheart.github.io # the base hostname & protocol for your site
 
 # Theme customization
 primary: '#981616'
