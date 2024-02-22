@@ -13,7 +13,8 @@ In case the standard templates don't suffice, you can still use raw HTML (with l
 {% endcomment %}
 
 <p class="col-lg-8 col-lg-offset-2">
-	Ready to start your next project with us? That's great! Give us a call or send us an email and we will get back to you as soon as possible!
+	Connect with us on our public profiles.
+	You can also send us an email and we will get back to you as soon as possible!
 <p>
 
 {% assign colcount = 0 %}
@@ -25,6 +26,7 @@ In case the standard templates don't suffice, you can still use raw HTML (with l
 {% if site.instagram_username %} {% assign colcount = colcount | plus: 1 %} {% endif %}
 {% if site.facebook_username %} {% assign colcount = colcount | plus: 1 %} {% endif %}
 {% if site.linkedin_username %} {% assign colcount = colcount | plus: 1 %} {% endif %}
+{% if site.youtube_username %} {% assign colcount = colcount | plus: 1 %} {% endif %}
 
 {% if colcount == 1 %}
     {% assign size = 6 %}
@@ -84,7 +86,7 @@ In case the standard templates don't suffice, you can still use raw HTML (with l
 	                <a href="mailto:{{ site.email }}">
 	                    <div class="service-box">
 	                        <i class="fa fa-4x fa-at wow bounceIn text-primary"></i>
-	                        <p class="text-muted">{{ site.email }}</p>
+<!--	                        <p class="text-muted">{{ site.email }}</p>-->
 	                    </div>
 	                </a>
 	            </div>
@@ -207,10 +209,10 @@ In case the standard templates don't suffice, you can still use raw HTML (with l
                     text-center
                     bg-light
                 ">
-	                <a href="https://linkedin.com/in/{{ site.linkedin_username }}">
+	                <a href="https://linkedin.com/company/{{ site.linkedin_username }}">
 	                    <div class="service-box">
 	                        <i class="fa fa-4x fa-linkedin wow bounceIn text-primary"></i>
-	                        <p class="text-muted">{{ site.linkedin_username }}</p>
+<!--	                        <p class="text-muted">{{ site.linkedin_username }}</p>-->
 	                    </div>
 	                </a>
 	            </div>
@@ -231,12 +233,32 @@ In case the standard templates don't suffice, you can still use raw HTML (with l
 	                <a href="https://github.com/{{ site.github_username }}">
 	                    <div class="service-box">
 	                        <i class="fa fa-4x fa-github wow bounceIn text-primary"></i>
-	                        <p class="text-muted">{{ site.github_username }}</p>
+<!--	                        <p class="text-muted">{{ site.github_username }}</p>-->
 	                    </div>
 	                </a>
 	            </div>
 	        {% endif %}
-	 
+
+			{% if site.youtube_username %}
+                <div class="
+                    col-lg-{{ size }}
+                    {% if first %}
+                        {% assign first = false %}
+                        col-lg-offset-{{ first_offset }}
+                    {% else %}
+                        col-lg-offset-{{ offset }}
+                    {% endif %}
+                    text-center
+                    bg-light
+                ">
+	                <a href="https://www.youtube.com/@{{ site.linkedin_username }}">
+	                    <div class="service-box">
+	                        <i class="fa fa-4x fa-youtube wow bounceIn text-primary"></i>
+<!--	                        <p class="text-muted">{{ site.linkedin_username }}</p>-->
+	                    </div>
+	                </a>
+	            </div>
+	        {% endif %}
 	    </div>
 	</div>
 {% else %}

@@ -1,28 +1,25 @@
 # Site settings
-title: Creative - Start Bootstrap theme
-tagline: Your Favorite Source of Free Bootstrap Themes
+title: SlicerHeart
+tagline: SlicerHeart
 author: 
 first_button_text: 'Find out more'
-first_button_url: '#about'
-header_img: /img/header.jpg
-home_menu_text: Start Bootstrap
-description: Start Bootstrap can help you build better websites using the Bootstrap CSS framework! Just download your template and start going, no strings attached!
+first_button_url: '#install'
+header_img: # /img/annie-spratt-BcGoZXjyPzA-unsplash.jpg # https://unsplash.com/photos/a-model-of-a-human-heart-on-a-white-surface-MhFJNz_D8t4
+home_menu_text: Home
+home_menu_img: /img/slicerheart_1.png
+description: Tools for cardiac image import (3D/4D ultrasound, CT, MRI), quantification, surgical planning, and implant placement planning and assessment.
 baseurl: "" # the subpath of your site, e.g. /blog/
 url: "" # the base hostname & protocol for your site
 
 # Theme customization
-primary: '#F05F40'
-dark: '#222'
+primary: '#981616'
+dark: '#555'
 
 # Contact details
-email: 
-telephone_number: 
-whatsapp_number: 
-twitter_username: 
-github_username: volny
-instagram_username: 
-facebook_username: 
-linkedin_username: 
+email: JOLLEYM@chop.edu
+github_username: slicerheart/slicerheart
+linkedin_username: jolleylab
+youtube_username: jolleylab
 
 # Data collections
 collections:

@@ -85,6 +85,10 @@ aside {
 
 // Navigation
 
+.navbar-brand {
+    float: right;
+}
+
 .navbar-default {
     background-color: white;
     border-color: rgba($theme-dark, .5);
@@ -171,7 +175,8 @@ header {
     min-height: auto;
     @include background-cover;
     background-position: center;
-    background-image: url($header-img);
+    //background-image: linear-gradient(rgba(255,255,255,.5), rgba(255,255,255,.5)), url($header-img);
+    background-image: linear-gradient(to bottom, rgb(150,150,150) , rgb(255,255,255));
     text-align: center;
     color: white;
     .header-content {
@@ -180,19 +185,24 @@ header {
         padding: 100px 15px 100px;
         width: 100%;
         .header-content-inner {
+            img {
+                max-width: 50%;
+                height: auto;
+                margin: 30px auto;
+            }
             h1 {
-                font-weight: 700;
-                text-transform: uppercase;
+                font-weight: 1000;
                 margin-top: 0;
                 margin-bottom: 0;
+                color: rgba(black, .7);
             }
             hr {
                 margin: 30px auto;
             }
             p {
-                font-weight: 300;
-                color: rgba(white, .7);
-                font-size: 16px;
+                font-weight: 500;
+                color: rgba(black, .9);
+                font-size: 18px;
                 margin-bottom: 50px;
             }
         }

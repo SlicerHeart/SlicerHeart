@@ -9,4 +9,4 @@ menu_exclude: true
 width: 8 # With of the main block
 header_img: # You can specify a different header image if required e.g. /img/portfolio/1.jpg
 ---
-Start Bootstrap can help you build better websites using the Bootstrap CSS framework! Just download your template and start going, no strings attached!
+Tools for cardiac image import (3D/4D ultrasound, CT, MRI), quantification, surgical planning, and implant placement planning and assessment.
