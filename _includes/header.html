@@ -1,7 +1,7 @@
 <header>
     <div class="header-content" >
         <div class="header-content-inner">
-            <img src="{{ site.home_menu_img }}" alt="{{ item.alt }}">
+            <img src="{{ site.home_menu_img | absolute_url }}" alt="{{ item.alt }}">
             <h1>{{ site.tagline }}</h1>
             <hr>
             {{ include.body }}
