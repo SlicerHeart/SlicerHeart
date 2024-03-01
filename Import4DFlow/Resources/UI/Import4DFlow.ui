@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>344</width>
-    <height>505</height>
+    <height>734</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -202,13 +202,20 @@
        </widget>
       </item>
       <item row="1" column="0">
+       <widget class="QLabel" name="label_11">
+        <property name="text">
+         <string>Input mask:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
        <widget class="QLabel" name="label_3">
         <property name="text">
          <string>Sampling distance:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <widget class="ctkSliderWidget" name="samplingDistanceSliderWidget">
         <property name="toolTip">
          <string>Distance between sampling points in the plane.</string>
@@ -233,14 +240,14 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_4">
         <property name="text">
          <string>Speed threshold:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="ctkSliderWidget" name="speedThresholdSliderWidget">
         <property name="toolTip">
          <string>Samples below this threshold will be excluded from the time plot computation.</string>
@@ -253,14 +260,14 @@
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
          <string>Output model:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="4" column="1">
        <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
         <property name="toolTip">
          <string>Model node that contains speed vectors as point data</string>
@@ -296,14 +303,14 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="5" column="0">
        <widget class="QLabel" name="label_9">
         <property name="text">
          <string>Output speed profile table:</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="5" column="1">
        <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
         <property name="toolTip">
          <string>Plot series that contain average speed value vs time.</string>
@@ -342,8 +349,8 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0" colspan="2">
-       <widget class="QPushButton" name="applyButton">
+      <item row="6" column="0" colspan="2">
+       <widget class="QPushButton" name="sampleFlowFieldButton">
         <property name="enabled">
          <bool>true</bool>
         </property>
@@ -351,14 +358,24 @@
          <string>Export flow field profile</string>
         </property>
         <property name="text">
-         <string>Apply</string>
+         <string>Sample flow field</string>
         </property>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="QPushButton" name="showPlotButton">
         <property name="text">
          <string>Show plot</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLSegmentSelectorWidget" name="inputMaskSegmentSelectorWidget">
+        <property name="toolTip">
+         <string>If a segment is selected then flow field outside that segment will be set to zero.</string>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
@@ -413,6 +430,11 @@
    <header>qMRMLWidget.h</header>
    <container>1</container>
   </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentSelectorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentSelectorWidget.h</header>
+  </customwidget>
  </customwidgets>
  <resources/>
  <connections>
@@ -443,8 +465,8 @@
      <y>452</y>
     </hint>
     <hint type="destinationlabel">
-     <x>177</x>
-     <y>283</y>
+     <x>325</x>
+     <y>313</y>
     </hint>
    </hints>
   </connection>
@@ -459,8 +481,8 @@
      <y>450</y>
     </hint>
     <hint type="destinationlabel">
-     <x>306</x>
-     <y>365</y>
+     <x>325</x>
+     <y>433</y>
     </hint>
    </hints>
   </connection>
@@ -475,8 +497,8 @@
      <y>454</y>
     </hint>
     <hint type="destinationlabel">
-     <x>180</x>
-     <y>382</y>
+     <x>325</x>
+     <y>459</y>
     </hint>
    </hints>
   </connection>
@@ -487,12 +509,28 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>267</x>
-     <y>381</y>
+     <x>325</x>
+     <y>459</y>
     </hint>
     <hint type="destinationlabel">
-     <x>271</x>
-     <y>433</y>
+     <x>289</x>
+     <y>519</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>inputMaskSegmentSelectorWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>19</x>
+     <y>5</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>186</x>
+     <y>330</y>
     </hint>
    </hints>
   </connection>
