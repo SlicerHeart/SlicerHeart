@@ -18,6 +18,7 @@ from slicer import vtkMRMLScalarVolumeNode
 from slicer import vtkMRMLTransformNode
 from slicer import vtkMRMLMarkupsPlaneNode
 from slicer import vtkMRMLModelNode
+from slicer import vtkMRMLSegmentationNode
 from slicer import vtkMRMLTableNode
 
 #
@@ -59,6 +60,8 @@ class Import4DFlowParameterNode:
     exportDirectory: str
     exportFormat: str
     inputPlane: vtkMRMLMarkupsPlaneNode
+    inputMaskSegmentation: vtkMRMLSegmentationNode
+    inputMaskSegmentID: str
     outputSpeedProfileModel: vtkMRMLModelNode
     outputSpeedProfileTable: vtkMRMLTableNode
     samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2  # distance unit
@@ -122,10 +125,12 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputVolumeNodeSetSelector.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
         self.ui.exportPathLineEdit.connect('currentPathChanged(QString)', self.updateParameterNodeFromGUI)
         self.ui.exportFormatComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
+        self.ui.inputMaskSegmentSelectorWidget.connect('currentNodeChanged(bool)', self.updateParameterNodeFromGUI)
+        self.ui.inputMaskSegmentSelectorWidget.connect('currentSegmentChanged(QString)', self.updateParameterNodeFromGUI)
         self.ui.inspectButton.connect('clicked(bool)', self.onInspectButton)
         self.ui.convertButton.connect('clicked(bool)', self.onConvertButton)
         self.ui.exportButton.connect('clicked(bool)', self.onExportButton)
-        self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
+        self.ui.sampleFlowFieldButton.connect('clicked(bool)', self.onSampleFlowFieldButton)
         self.ui.showPlotButton.connect('clicked(bool)', self.onShowPlotButton)
 
         # Make sure parameter node is initialized (needed for module reload)
@@ -224,7 +229,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputVolumeNodeSetSelector.setCurrentIndex(
             self.ui.inputVolumeNodeSetSelector.findData(self._parameterNode.inputVolumeNodeSet))
 
-        # Update apply button state and tooltip
+        # Update buttons state and tooltip
         if self._parameterNode and self._parameterNode.inputVolumeNodeSet:
             self.ui.convertButton.toolTip = "Convert input flow image to flow field"
             self.ui.convertButton.enabled = True
@@ -234,6 +239,9 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.ui.exportPathLineEdit.setCurrentPath(self._parameterNode.exportDirectory)
         self.ui.exportFormatComboBox.setCurrentIndex(1 if self._parameterNode.exportFormat == self.logic.EXPORT_FORMAT_NRRD_STACK else 0)
+
+        self.ui.inputMaskSegmentSelectorWidget.setCurrentNode(self._parameterNode.inputMaskSegmentation)
+        self.ui.inputMaskSegmentSelectorWidget.setCurrentSegmentID(self._parameterNode.inputMaskSegmentID)
 
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
@@ -255,6 +263,9 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNode.exportDirectory = self.ui.exportPathLineEdit.currentPath
             self._parameterNode.exportFormat = self.logic.EXPORT_FORMAT_ANONYMIZED_SCENE if self.ui.exportFormatComboBox.currentIndex == 0 else self.logic.EXPORT_FORMAT_NRRD_STACK
             #self._parameterNode.ComponentToExtract = self.ui.componentsSpinBox.value
+            self._parameterNode.inputMaskSegmentation = self.ui.inputMaskSegmentSelectorWidget.currentNode()
+            self._parameterNode.inputMaskSegmentID = self.ui.inputMaskSegmentSelectorWidget.currentSegmentID()
+
 
 
     def onInspectButton(self) -> None:
@@ -299,9 +310,9 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             slicer.util.infoDisplay("Export successfully completed.")
 
 
-    def onApplyButton(self) -> None:
+    def onSampleFlowFieldButton(self) -> None:
         """
-        Run processing when user clicks "Apply" button.
+        Run processing when user clicks "Sample flow field" button.
         """
         with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
@@ -311,7 +322,9 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.outputTransform,
                 self._parameterNode.outputTransform.GetNodeReference("magnitudeVolume"),
                 self._parameterNode.samplingDistance,
-                self._parameterNode.outputSpeedProfileModel)
+                self._parameterNode.outputSpeedProfileModel,
+                self._parameterNode.inputMaskSegmentation,
+                self._parameterNode.inputMaskSegmentID)
 
             self.addLog("Compute speed profile table...")
             self._parameterNode.outputSpeedProfileTable = self.logic.computeSpeedProfileTable(
@@ -784,7 +797,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             gridTransformNode: vtkMRMLTransformNode,
             magnitudeVolumeNode: vtkMRMLScalarVolumeNode,
             samplingDistanceMm: float = 2.0,
-            samplingGridModelNode: vtkMRMLModelNode = None) -> vtkMRMLModelNode:
+            samplingGridModelNode: vtkMRMLModelNode = None,
+            maskSegmentationNode: vtkMRMLSegmentationNode = None,
+            maskSegmentID: str = None) -> vtkMRMLModelNode:
+
+        if not crossSectionPlaneNode:
+            raise ValueError("Cross-section plane node is invalid")
 
         transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
         if not transformSequenceBrowserNode:
@@ -792,6 +810,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # Temporary nodes
         displacementImageNode = None
+        maskLabelmapNode = None
         probeVolumeCliNode = None
 
         try:
@@ -838,7 +857,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     samplingGridModelNode.CreateDefaultDisplayNodes()
                     displayNode = samplingGridModelNode.GetDisplayNode()
                     displayNode.SetColor(1, 1, 0)
-                    displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
+                    displayNode.SetEdgeVisibility(True)
                     displayNode.BackfaceCullingOff()
                     displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
@@ -874,14 +893,42 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 # Sample displacement field with the model
                 displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(gridTransformNode, magnitudeVolumeNode, False)
+
                 parameters = {}
+
+                if maskSegmentationNode and maskSegmentID:
+                    # Export mask segment to labelmap node
+                    maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
+                    slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetColorNode())
+
+                    # Probe mask image with model
+                    parameters["InputVolume"] = maskLabelmapNode
+                    parameters["InputModel"] = samplingGridModelNode
+                    parameters["OutputModel"] = samplingGridModelNode
+                    parameters["OutputArrayName"] = "insideMask"
+                    probeVolumeWithModel = slicer.modules.probevolumewithmodel
+                    probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
+                    if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
+                        # error
+                        errorText = probeVolumeCliNode.GetErrorText()
+                        raise ValueError("Probe 4D field execution failed: " + errorText)
+                    # Clean up
+                    if maskLabelmapNode:
+                        slicer.mrmlScene.RemoveNode(maskLabelmapNode)
+                        maskLabelmapNode = None
+
+                    # Save mask array
+                    insideMaskArray = slicer.util.arrayFromModelPointData(samplingGridModelNode, 'insideMask').copy()
+                else:
+                    insideMaskArray = None
+
                 parameters["InputVolume"] = displacementImageNode
                 parameters["InputModel"] = samplingGridModelNode
                 parameters["OutputModel"] = samplingGridModelNode
                 parameters["OutputArrayName"] = "displacement"
                 probeVolumeWithModel = slicer.modules.probevolumewithmodel
                 probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
-                # Process results
                 if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
                     # error
                     errorText = probeVolumeCliNode.GetErrorText()
@@ -890,12 +937,19 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
                 displacementImageNode = None
 
+                if insideMaskArray is not None:
+                    # Set all displacements outside the mask to zero
+                    displacementArray = slicer.util.arrayFromModelPointData(samplingGridModelNode, 'displacement')
+                    displacementArray[insideMaskArray==0] = (0,0,0)
+
         finally:
             # Clean up
             if probeVolumeCliNode:
                 slicer.mrmlScene.RemoveNode(probeVolumeCliNode)
             if displacementImageNode:
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
+            if maskLabelmapNode:
+                slicer.mrmlScene.RemoveNode(maskLabelmapNode)
             transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
             if originalTransformVisibility and gridTransformNode.GetDisplayNode():
                 gridTransformNode.GetDisplayNode().SetVisibility(True)
