@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>334</width>
-    <height>472</height>
+    <width>344</width>
+    <height>505</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -91,7 +91,7 @@
          <bool>false</bool>
         </property>
         <property name="toolTip">
-         <string>Run the algorithm.</string>
+         <string>Convert component images to 4D flow field</string>
         </property>
         <property name="text">
          <string>Convert</string>
@@ -107,31 +107,49 @@
       <string>Export flow field to file</string>
      </property>
      <layout class="QFormLayout" name="formLayout_4">
-      <item row="0" column="0">
+      <item row="1" column="0">
        <widget class="QLabel" name="label_8">
         <property name="text">
          <string>Output directory:</string>
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
+      <item row="1" column="1">
        <widget class="ctkPathLineEdit" name="exportPathLineEdit">
         <property name="filters">
          <set>ctkPathLineEdit::Dirs</set>
         </property>
        </widget>
       </item>
-      <item row="1" column="0" colspan="2">
+      <item row="2" column="0" colspan="2">
        <widget class="QPushButton" name="exportButton">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
         <property name="toolTip">
-         <string>Run the algorithm.</string>
+         <string>Export flow field to files</string>
         </property>
         <property name="text">
          <string>Export</string>
         </property>
+       </widget>
+      </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>Format:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkComboBox" name="exportFormatComboBox">
+        <item>
+         <property name="text">
+          <string>Anonymized Slicer scene</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Stack of NRRD files</string>
+         </property>
+        </item>
        </widget>
       </item>
      </layout>
@@ -330,7 +348,7 @@
          <bool>true</bool>
         </property>
         <property name="toolTip">
-         <string>Run the algorithm.</string>
+         <string>Export flow field profile</string>
         </property>
         <property name="text">
          <string>Apply</string>

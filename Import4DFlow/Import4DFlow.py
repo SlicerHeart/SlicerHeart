@@ -53,16 +53,11 @@ This file was originally developed by Andras Lasso, PerkLab.
 class Import4DFlowParameterNode:
     """
     The parameters needed by module.
-
-    inputVolume - The volume to threshold.
-    imageThreshold - The value at which to threshold the input volume.
-    invertThreshold - If true, will invert the threshold.
-    thresholdedVolume - The output volume that will contain the thresholded volume.
-    invertedVolume - The output volume that will contain the inverted thresholded volume.
     """
     outputTransform: vtkMRMLTransformNode
     inputVolumeNodeSet: str
     exportDirectory: str
+    exportFormat: str
     inputPlane: vtkMRMLMarkupsPlaneNode
     outputSpeedProfileModel: vtkMRMLModelNode
     outputSpeedProfileTable: vtkMRMLTableNode
@@ -126,6 +121,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Buttons
         self.ui.inputVolumeNodeSetSelector.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
         self.ui.exportPathLineEdit.connect('currentPathChanged(QString)', self.updateParameterNodeFromGUI)
+        self.ui.exportFormatComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
         self.ui.inspectButton.connect('clicked(bool)', self.onInspectButton)
         self.ui.convertButton.connect('clicked(bool)', self.onConvertButton)
         self.ui.exportButton.connect('clicked(bool)', self.onExportButton)
@@ -237,15 +233,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.convertButton.enabled = False
 
         self.ui.exportPathLineEdit.setCurrentPath(self._parameterNode.exportDirectory)
-
-        # Update apply button state and tooltip
-        if self._parameterNode and self._parameterNode.exportDirectory and self._parameterNode.outputTransform:
-            self.ui.exportButton.toolTip = "Export flow field to NRRD files"
-            self.ui.exportButton.enabled = True
-        else:
-            self.ui.exportButton.toolTip = "Select a valid input flow field and output directory"
-            self.ui.exportButton.enabled = False
-
+        self.ui.exportFormatComboBox.setCurrentIndex(1 if self._parameterNode.exportFormat == self.logic.EXPORT_FORMAT_NRRD_STACK else 0)
 
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
@@ -265,6 +253,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             volumeNodeSet = self.ui.inputVolumeNodeSetSelector.currentData
             self._parameterNode.inputVolumeNodeSet = volumeNodeSet if volumeNodeSet else ""
             self._parameterNode.exportDirectory = self.ui.exportPathLineEdit.currentPath
+            self._parameterNode.exportFormat = self.logic.EXPORT_FORMAT_ANONYMIZED_SCENE if self.ui.exportFormatComboBox.currentIndex == 0 else self.logic.EXPORT_FORMAT_NRRD_STACK
             #self._parameterNode.ComponentToExtract = self.ui.componentsSpinBox.value
 
 
@@ -298,8 +287,16 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
     def onExportButton(self) -> None:
+        if not self._parameterNode.exportDirectory:
+            self.ui.exportPathLineEdit.setCurrentPath(slicer.mrmlScene.GetRootDirectory())
+            slicer.app.processEvents()
+
+        success = False
         with slicer.util.tryWithErrorDisplay("Failed to export the flow field to files.", waitCursor=True):
-            self.logic.exportDisplacementFieldToFiles(self._parameterNode.outputTransform, self._parameterNode.exportDirectory)
+            self.logic.exportDisplacementFieldToFiles(self._parameterNode.outputTransform, self._parameterNode.exportDirectory, self._parameterNode.exportFormat)
+            success = True
+        if success:
+            slicer.util.infoDisplay("Export successfully completed.")
 
 
     def onApplyButton(self) -> None:
@@ -339,6 +336,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     Uses ScriptedLoadableModuleLogic base class, available at:
     https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
     """
+
+    EXPORT_FORMAT_ANONYMIZED_SCENE = "ANONYMIZED_SCENE"
+    EXPORT_FORMAT_NRRD_STACK = "NRRD_STACK"
 
     def __init__(self) -> None:
         """
@@ -622,6 +622,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # Delete imported component image series from the scene
         for axisIndex in range(3):
+            slicer.mrmlScene.RemoveNode(volumeSequenceNodes[axisIndex].GetStorageNode())
             slicer.mrmlScene.RemoveNode(volumeSequenceNodes[axisIndex])
             slicer.mrmlScene.RemoveNode(volumeNodes[axisIndex].GetDisplayNode())
             slicer.mrmlScene.RemoveNode(volumeNodes[axisIndex].GetStorageNode())
@@ -632,7 +633,119 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
     def exportDisplacementFieldToFiles(self,
                                        gridTransformNode: vtkMRMLTransformNode,
-                                       exportDirectory: str) -> None:
+                                       exportDirectory: str,
+                                       exportFormat: str) -> None:
+        if exportFormat == Import4DFlowLogic.EXPORT_FORMAT_NRRD_STACK:
+            self.exportDisplacementFieldToNrrdStack(gridTransformNode, exportDirectory)
+        elif exportFormat == Import4DFlowLogic.EXPORT_FORMAT_ANONYMIZED_SCENE:
+            self.exportDisplacementFieldToAnonymizedScene(exportDirectory)
+        else:
+            raise ValueError(f"Unsupported export format: {exportFormat}")
+
+    def exportDisplacementFieldToAnonymizedScene(self, exportDirectory: str) -> None:
+
+        oldRootDirectory = slicer.mrmlScene.GetRootDirectory()
+        try:
+            if slicer.mrmlScene.GetURL():
+                filename = os.path.basename(slicer.mrmlScene.GetURL())
+                baseFileName = os.path.splitext(filename)[0]
+            else:
+                baseFileName = "4DFlow"
+
+            # Make a copy of the scene by writing to MRB and reading it back
+            temporaryAnonymizedSceneFilePath = f"{exportDirectory}/temp-{baseFileName}.mrb"
+            logging.info(f"Saving scene to {temporaryAnonymizedSceneFilePath}")
+
+            userMessages = slicer.vtkMRMLMessageCollection()
+            if not slicer.mrmlScene.WriteToMRB(temporaryAnonymizedSceneFilePath, None, userMessages):
+                errorMessage = f"Initial saving of anonymized scene failed: {temporaryAnonymizedSceneFilePath}"
+                if userMessages.GetNumberOfMessages() > 0:
+                    errorMessage += "\n" + userMessages.GetAllMessagesAsString()
+                raise RuntimeError(errorMessage)
+
+            # Set up new scene that will contain the anonymized content
+            anonymizedScene = slicer.vtkMRMLScene()
+            slicer.mrmlScene.CopyRegisteredNodesToScene(anonymizedScene)
+            anonymizedScene.SetDataIOManager(slicer.mrmlScene.GetDataIOManager())
+            layoutNode = slicer.mrmlScene.GetSingletonNode('vtkMRMLLayoutNode', 'vtkMRMLLayoutNode')
+            anonymizedLayoutNode = slicer.vtkMRMLLayoutNode()
+            anonymizedLayoutNode.Copy(layoutNode)
+            anonymizedScene.AddNode(anonymizedLayoutNode)
+
+            logging.info(f"Loading scene from {temporaryAnonymizedSceneFilePath}")
+            userMessages = slicer.vtkMRMLMessageCollection()
+            if not anonymizedScene.ReadFromMRB(temporaryAnonymizedSceneFilePath, True, userMessages):
+                errorMessage = f"Reloading of anonymized scene failed: {temporaryAnonymizedSceneFilePath}"
+                if userMessages.GetNumberOfMessages() > 0:
+                    errorMessage += "\n" + userMessages.GetAllMessagesAsString()
+                raise RuntimeError(errorMessage)
+
+            # Remove the temporary scene file to free up disk space before writing the final anonymized scene file
+            if os.path.exists(temporaryAnonymizedSceneFilePath):
+                os.remove(temporaryAnonymizedSceneFilePath)
+
+            self.anonymizeScene(anonymizedScene)
+            slicer.anonymizedScene = anonymizedScene
+
+            anonymizedSceneFilePath = f"{exportDirectory}/{baseFileName}-anon.mrb"
+            logging.info(f"Saving anonymized scene from {anonymizedSceneFilePath}")
+            userMessages = slicer.vtkMRMLMessageCollection()
+            if not anonymizedScene.WriteToMRB(anonymizedSceneFilePath, None, userMessages):
+                errorMessage = f"Saving after anonymization failed: {anonymizedSceneFilePath}"
+                if userMessages.GetNumberOfMessages() > 0:
+                    errorMessage += "\n" + userMessages.GetAllMessagesAsString()
+                raise RuntimeError(errorMessage)
+
+        finally:
+            if os.path.exists(temporaryAnonymizedSceneFilePath):
+                os.remove(temporaryAnonymizedSceneFilePath)
+            oldRootDirectory = slicer.mrmlScene.GetRootDirectory()
+
+    def anonymizeScene(self, scene: slicer.vtkMRMLScene) -> None:
+        """Remove all known patient identifying information from the scene.
+        """
+
+        if not hasattr(slicer.vtkMRMLSubjectHierarchyNode, "GetItemUIDNames"):
+            raise RuntimeError("Anonymization feature requires a recent Slicer-5.7 version or later.")
+
+        # Anonymize nodes
+        nodes = scene.GetNodes()
+        for i in range(nodes.GetNumberOfItems()):
+            node = nodes.GetItemAsObject(i)
+            # Remove MultiVolume.FrameFileList attribute from sequence nodes because they contain absolute file paths
+            # that could potentially reveal patient name or IDs
+            node.RemoveAttribute("MultiVolume.FrameFileList")
+            # Remove all attributes that start with DICOM (DICOM.ContentDate, DICOM.ContentTime, DICOM.FrameOfReferenceUID, etc.).
+            attributeNames = node.GetAttributeNames()
+            for attributeName in attributeNames:
+                if attributeName.startswith("DICOM"):
+                    node.RemoveAttribute(attributeName)
+
+        # Anonymize subject hierarchy items
+        shNode = scene.GetSubjectHierarchyNode()
+        childrenIds = vtk.vtkIdList()
+        shNode.GetItemChildren(shNode.GetSceneItemID(), childrenIds, True)
+        for i in range(childrenIds.GetNumberOfIds()):
+            childId = childrenIds.GetId(i)
+            # Replace patient name with "Anonymous"
+            if shNode.GetItemLevel(childId) == "Patient":
+                shNode.SetItemName(childId, "Anonymous")
+            # Remove all UIDs that start with DICOM (e.g., DICOM, DICOMInstanceUID)
+            uidNames = shNode.GetItemUIDNames(childId)
+            for uidName in uidNames:
+                if uidName.startswith("DICOM"):
+                    shNode.RemoveItemUID(childId, uidName)
+            # Remove all attributes that start with DICOM (DICOM.ContentDate, DICOM.ContentTime, DICOM.FrameOfReferenceUID, etc.).
+            attributeNames = shNode.GetItemAttributeNames(childId)
+            for attributeName in attributeNames:
+                if attributeName.startswith("DICOM"):
+                    shNode.RemoveItemAttribute(childId, attributeName)
+
+
+    def exportDisplacementFieldToNrrdStack(self,
+                                           gridTransformNode: vtkMRMLTransformNode,
+                                           exportDirectory: str) -> None:
+
         transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
 
         try:
