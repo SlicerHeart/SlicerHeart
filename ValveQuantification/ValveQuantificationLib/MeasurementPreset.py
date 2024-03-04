@@ -1643,7 +1643,7 @@ class MeasurementPreset(object):
                            KEY_UNIT: 'mm'})
 
     kernelSizeMm = 2.0
-    maxKernelSizeMm = 5.0
+    maxKernelSizeMm = 20.0
     name = valveModel.heartValveNode.GetName()
 
     allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal, kernelSizeMm)
