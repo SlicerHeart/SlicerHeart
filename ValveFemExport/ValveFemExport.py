@@ -790,13 +790,35 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         rightUGridIndex = list(linesOrderedByGridU.keys())[nextIndex(regionIndex)]
         if logCallback:
           logCallback(f"Creating chord bundles for region {regionIndex + 1} / {leafletRegionNodes.GetNumberOfItems()}...")
+        regionFolderItem = None
         if enableEdgeBranchCalculation:
-          self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+          regionFolderItem = self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
         if enableBodyBranchCalculation:
-          self.createBodyChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+          regionFolderItem = self.createBodyChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+        # Create mesh to export
+        if regionFolderItem:
+          self.createChordsMesh(regionFolderItem)
 
     finally:
       slicer.app.resumeRender()
+
+  def subtractWrappingGridIndices(self, leftIndex, rightIndex, gridResolution):
+    """Utility function to manage wrapped around grid surface. Subtract two indices along wrapped U side."""
+    if leftIndex >= rightIndex:
+      return leftIndex - rightIndex
+    else:
+      return gridResolution[0] - rightIndex + leftIndex
+
+  def incrementWrappingGridIndex(self, index, increment, gridResolution):
+    """Utility function to manage wrapped around grid surface. Increment index along wrapped U side."""
+    if index < gridResolution[0] - increment:
+      return index + increment
+    else:
+      return index - gridResolution[0] + increment
+
+  def controlPointIndex(self, u, v, gridResolution):
+    """Utility function to manage wrapped around grid surface. Get control point index by grid point coordinate."""
+    return v * gridResolution[0] + u
 
   def createEdgeChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
@@ -806,7 +828,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     :param minVGridIndex: Minimum V grid index (defined on NURBS grid) for the region parametric rectangle
     :param maxVGridIndex: Maximum V grid index (defined on NURBS grid) for the region parametric rectangle
     :param chordsFolderItemId:
-    :return:
+    :return int: SH folder item that contains the chords for the region
     """
     leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
@@ -815,37 +837,19 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Get variables used for calculation
     chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "8") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
     baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
-    leafletGridResolution = leafletNurbsSurfaceNode.GetGridResolution()
-
-    # Utility functions to manage wrapped around grid surface
-    def subtractWrappingGridIndices(leftIndex, rightIndex):
-      if leftIndex >= rightIndex:
-        return leftIndex - rightIndex
-      else:
-        return leafletGridResolution[0] - rightIndex + leftIndex
-
-    def incrementWrappingGridIndex(index, increment=1):
-      if index < leafletGridResolution[0] - increment:
-        return index + increment
-      else:
-        return index - leafletGridResolution[0] + increment
-
-    def controlPointIndex(u, v):
-      return v * leafletGridResolution[0] + u
+    res = leafletNurbsSurfaceNode.GetGridResolution()  # Increase readability by shortening lines in later function calls
 
     # Get V grid index for edge (closest edge to region)
-    if minVGridIndex < leafletGridResolution[1] - maxVGridIndex:
+    if minVGridIndex < res[1] - maxVGridIndex:
       vGridIndex = 0
     else:
-      vGridIndex = leafletGridResolution[1] - 1
-
-    # logging.error(f'ZZZ createEdgeChordBundleFromRegion\n  UGridIndex: {leftUGridIndex}-{rightUGridIndex}, VGridIndex: {minVGridIndex}-{maxVGridIndex}->{vGridIndex}')
+      vGridIndex = res[1] - 1
 
     # Calculate edge length in the region
     edgePoints = vtk.vtkPoints()
     currentPos = np.zeros(3)
-    for u in range(subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex) + 1):
-      edgeControlPointIndex = controlPointIndex(incrementWrappingGridIndex(leftUGridIndex, u), vGridIndex)
+    for u in range(self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1):
+      edgeControlPointIndex = self.controlPointIndex(self.incrementWrappingGridIndex(leftUGridIndex, u, res), vGridIndex, res)
       leafletNurbsSurfaceNode.GetNthControlPointPosition(edgeControlPointIndex, currentPos)
       edgePoints.InsertNextPoint(currentPos[0], currentPos[1], currentPos[2])
     tempEdgeCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode', f'{baseName} EdgeCurve Temp')
@@ -857,24 +861,24 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     numberOfChords = int(edgeLengthMm * math.sqrt(chordsPerMm2) + 0.5)
 
     # Distribute points
-    regionEdgeStep = (subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex) + 1) / numberOfChords
-    regionEdgeStart = incrementWrappingGridIndex(leftUGridIndex, regionEdgeStep / 2)
+    regionEdgeStep = (self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1) / numberOfChords
+    regionEdgeStart = self.incrementWrappingGridIndex(leftUGridIndex, regionEdgeStep / 2, res)
     pointPositions = []
     meanEdgePoint = np.zeros(3)
     for u in range(numberOfChords):
-      regionEdgePosU = incrementWrappingGridIndex(regionEdgeStart, + u * regionEdgeStep)
+      regionEdgePosU = self.incrementWrappingGridIndex(regionEdgeStart, u * regionEdgeStep, res)
       pos = np.zeros(3)
-      leafletNurbsSurfaceNode.GetNthControlPointPosition(controlPointIndex(int(regionEdgePosU + 0.5), vGridIndex), pos)
+      leafletNurbsSurfaceNode.GetNthControlPointPosition(self.controlPointIndex(int(regionEdgePosU + 0.5), vGridIndex, res), pos)
       pointPositions.append(pos)
       meanEdgePoint += pos
     meanEdgePoint /= numberOfChords
 
     # Create folder for the chords for the current region
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    regionEdgeFolderItem = shNode.GetItemByName(baseName)  # The body chord creation function may have already created the folder
-    if not regionEdgeFolderItem:
-      regionEdgeFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
-      shNode.SetItemParent(regionEdgeFolderItem, chordsFolderItemId)
+    regionFolderItem = shNode.GetItemByName(baseName)  # The body chord creation function may have already created the folder
+    if not regionFolderItem:
+      regionFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), baseName)
+      shNode.SetItemParent(regionFolderItem, chordsFolderItemId)
 
     # Automatically find closest papillary muscle tip point for region
     papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
@@ -905,18 +909,109 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       line.AddControlPointWorld(vtk.vtkVector3d(closestPapillatyMuscleTipPos), papillaryMuscleTipsNode.GetNthControlPointLabel(minDistanceToMeanPoint[1]))
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
       # Put under subject hierarchy folder
-      shNode.SetItemParent(shNode.GetItemByDataNode(line), regionEdgeFolderItem)
+      shNode.SetItemParent(shNode.GetItemByDataNode(line), regionFolderItem)
 
       # Create chord branching
-      # self.createRadialChordBranching(parameterNode, line, regionGridSurfaceNode, regionEdgeFolderItem, normalsArray, chordEndPointLocator)
-
-    # Create mesh to export
-    #TODO:
-
-
+      # self.createFanChordBranching(parameterNode, line, regionFolderItem, chordEndPointLocator)
 
     # Remove temporary nodes
     slicer.mrmlScene.RemoveNode(tempEdgeCurveNode)
+
+  def createFanChordBranching(self, parameterNode, chordLineNode, regionFolderItem, chordEndPointLocator):
+    """
+    Create fan branching at the valve end of a primary (edge) chord represented by given markups line node.
+
+      P : papillary muscle endpoint
+      |
+     ...
+      |
+      │ chord line coming from papillary muscle tip
+      │
+      C : branching point
+      │\
+      │ \
+      │  \
+      │   \
+      │    \
+      │     \
+      │  r   \
+      A───────B : fan branch endpoint
+       : central branch endpoint
+
+    """
+    if not chordLineNode or chordLineNode.GetNumberOfControlPoints() != 2:
+      raise ValueError("Invalid chord line node")
+    leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid papillary muscle tips node")
+    if not regionFolderItem:
+      raise ValueError("Invalid region folder item ID")
+
+    edgeBranchLengthMm = float(parameterNode.GetParameter("EdgeBranchLengthMm"))
+    numberOfEdgeFanBranches = round(float(parameterNode.GetParameter("NumberOfEdgeFanBranches")))
+    edgeBranchRadiusMm = float(parameterNode.GetParameter("EdgeBranchRadiusMm"))
+
+    # Get branching point on chord line
+    pointP = np.zeros(3)
+    chordLineNode.GetNthControlPointPositionWorld(0, pointP)
+    pointA = np.zeros(3)
+    chordLineNode.GetNthControlPointPositionWorld(1, pointA)
+    vectorPA = pointA - pointP
+    pointC = pointA - vectorPA / np.linalg.norm(vectorPA) * edgeBranchLengthMm
+    # Change endpoint of the main chord line to only reach the branching point
+    chordLineNode.SetNthControlPointPositionWorld(1, pointC)
+
+    # Create folder for chord branch
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    branchesFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), f'{chordLineNode.GetName()} - branches')
+    shNode.SetItemParent(branchesFolderItem, regionFolderItem)
+
+    # Add central branch
+    branchName = f'{chordLineNode.GetName()}-central'
+    branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
+    self.setupChordLine(branchLine)
+    branchLine.AddControlPointWorld(pointC)
+    branchLine.AddControlPointWorld(pointA)
+    # Put under subject hierarchy folder
+    shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
+
+    # # Get leaflet surface normal at the chord endpoint
+    # closestVertexIndex = chordEndPointLocator.FindClosestPoint(pointA)
+    # leafletSurfaceNormal = leafletSurfaceNormalsArray[closestVertexIndex]
+
+    # # Get perpendicular radius direction
+    # vectorRadiusX = np.cross(vectorPA / np.linalg.norm(vectorPA), leafletSurfaceNormal)
+    # vectorRadiusX = vectorRadiusX * edgeBranchRadiusMm / np.linalg.norm(vectorRadiusX)
+
+    # vectorRadiusY = np.cross(vectorRadiusX, leafletSurfaceNormal)
+    # vectorRadiusY = vectorRadiusY * edgeBranchRadiusMm / np.linalg.norm(vectorRadiusY)
+
+    # Add chord branch lines
+    angleIncrementRad = np.pi * 2 / numberOfEdgeFanBranches
+    for branchIdx in range(numberOfEdgeFanBranches):
+      # Get chord branch ideal endpoint
+      angleRad = angleIncrementRad * branchIdx
+      branchEndpointPos = pointA + np.sin(angleRad) * vectorRadiusX + np.cos(angleRad) * vectorRadiusY
+
+      branchName = f'{chordLineNode.GetName()}-{branchIdx + 1}'
+      branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
+      self.setupChordLine(branchLine)
+      branchLine.AddControlPointWorld(pointC)
+      branchLine.AddControlPointWorld(branchEndpointPos)
+      # Put under subject hierarchy folder
+      shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
+
+      # Snap ideal branch endpoint position to leaflet NURBS grid
+      closestDistance2 = np.inf
+      closestRegionGridPoint = np.zeros(3)
+      leafletGridPoint = np.zeros(3)
+      for gridPointIdx in range(leafletNurbsNode.GetNumberOfControlPoints()):
+        leafletNurbsNode.GetNthControlPointPositionWorld(gridPointIdx, leafletGridPoint)
+        currentDistance2 = vtk.vtkMath.Distance2BetweenPoints(leafletGridPoint, branchEndpointPos)
+        if currentDistance2 < closestDistance2 and vtk.vtkMath.Distance2BetweenPoints(leafletGridPoint, pointC) > 1e-6:
+          closestDistance2 = currentDistance2
+          closestRegionGridPoint = leafletGridPoint.copy()
+      branchLine.SetNthControlPointPositionWorld(1, closestRegionGridPoint)
 
   def createBodyChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
@@ -926,7 +1021,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     :param minVGridIndex: Minimum V grid index (defined on NURBS grid) for the region parametric rectangle
     :param maxVGridIndex: Maximum V grid index (defined on NURBS grid) for the region parametric rectangle
     :param chordsFolderItemId:
-    :return:
+    :return int: SH folder item that contains the chords for the region
     """
     leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
@@ -935,33 +1030,16 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Get variables used for calculation
     chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "8") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
     baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
-    leafletGridResolution = leafletNurbsSurfaceNode.GetGridResolution()
-
-    # Utility functions to manage wrapped around grid surface
-    def subtractWrappingGridIndices(leftIndex, rightIndex):
-      if leftIndex >= rightIndex:
-        return leftIndex - rightIndex
-      else:
-        return leafletGridResolution[0] - rightIndex + leftIndex
-
-    def incrementWrappingGridIndex(index, increment=1):
-      if index < leafletGridResolution[0] - increment:
-        return index + increment
-      else:
-        return index - leafletGridResolution[0] + increment
-
-    def controlPointIndex(u, v, gridResolution=None):
-      gridResolution = gridResolution if gridResolution else leafletGridResolution
-      return v * gridResolution[0] + u
+    res = leafletNurbsSurfaceNode.GetGridResolution()  # Increase readability by shortening lines in later function calls
 
     # Create temporary grid surface markup containing only the defined region
-    regionGridResolution = (subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex) + 1, maxVGridIndex - minVGridIndex + 1)
+    regionGridResolution = (self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1, maxVGridIndex - minVGridIndex + 1)
     regionGridPoints = vtk.vtkPoints()
     regionGridPoints.SetNumberOfPoints(regionGridResolution[0] * regionGridResolution[1])
     currentPos = np.zeros(3)
     for v in range(regionGridResolution[1]):
       for u in range(regionGridResolution[0]):
-        leafletControlPointIndex = controlPointIndex(incrementWrappingGridIndex(leftUGridIndex, u), minVGridIndex + v)
+        leafletControlPointIndex = self.controlPointIndex(self.incrementWrappingGridIndex(leftUGridIndex, u, res), minVGridIndex + v, res)
         leafletNurbsSurfaceNode.GetNthControlPointPosition(leafletControlPointIndex, currentPos)
         regionGridPoints.SetPoint(v * regionGridResolution[0] + u, currentPos[0], currentPos[1], currentPos[2])
 
@@ -995,7 +1073,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       for u in range(chordGridResolutionU):
         regionGridPos = np.round(regionGridStart + rowUOffset + np.array([u * regionGridStep[0], v * regionGridStep[1]]))
         pos = np.zeros(3)
-        regionGridSurfaceNode.GetNthControlPointPosition(controlPointIndex(int(regionGridPos[0] + 0.5), int(regionGridPos[1] + 0.5), regionGridResolution), pos)
+        regionGridSurfaceNode.GetNthControlPointPosition(self.controlPointIndex(int(regionGridPos[0] + 0.5), int(regionGridPos[1] + 0.5), regionGridResolution), pos)
         pointPositions.append(pos)
         meanRegionPoint += pos
     meanRegionPoint /= chordGridResolutionU * chordGridResolutionV
@@ -1047,26 +1125,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       # Create chord branching
       self.createRadialChordBranching(parameterNode, line, regionGridSurfaceNode, regionFolderItem, normalsArray, chordEndPointLocator)
 
-    # Create mesh to export
-    self.createChordsMesh(regionFolderItem)
-
     # Remove temporary nodes
     slicer.mrmlScene.RemoveNode(regionGridSurfaceNode)
     slicer.mrmlScene.RemoveNode(regionModelNode)
 
-  def setupChordLine(self, chordLineNode):
-    chordLineNode.SetLocked(True)  # it was left unlocked to allow the user to rearrange the points to achieve more uniform sampling, but with branching it is too complicated for manual modifications
-    chordLineNode.CreateDefaultDisplayNodes()
-    # chordLineNode.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
-    chordLineNode.GetDisplayNode().SetPropertiesLabelVisibility(False)
-    chordLineNode.GetDisplayNode().SetPointLabelsVisibility(False)
-    chordLineNode.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
-    chordLineNode.GetDisplayNode().UseGlyphScaleOff()
-    chordLineNode.GetDisplayNode().SetGlyphSize(0.5)
+    return regionFolderItem
 
   def createRadialChordBranching(self, parameterNode, chordLineNode, regionGridSurfaceNode, regionFolderItem, leafletSurfaceNormalsArray, chordEndPointLocator):
     """
-    Create branching at the valve end of a chord represented by given markups line node.
+    Create radial branching at the valve end of a secondary (body) chord represented by given markups line node.
 
       P : papillary muscle endpoint
       |
@@ -1195,6 +1262,16 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordsPolyData.SetPoints(chordEndpoints)
     chordsPolyData.SetLines(chordLines)
     chordsMesh.SetAndObservePolyData(chordsPolyData)
+
+  def setupChordLine(self, chordLineNode):
+    chordLineNode.SetLocked(True)  # it was left unlocked to allow the user to rearrange the points to achieve more uniform sampling, but with branching it is too complicated for manual modifications
+    chordLineNode.CreateDefaultDisplayNodes()
+    # chordLineNode.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
+    chordLineNode.GetDisplayNode().SetPropertiesLabelVisibility(False)
+    chordLineNode.GetDisplayNode().SetPointLabelsVisibility(False)
+    chordLineNode.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
+    chordLineNode.GetDisplayNode().UseGlyphScaleOff()
+    chordLineNode.GetDisplayNode().SetGlyphSize(0.5)
 
   @staticmethod
   def fitTpsRectangleToClosedCurve(boundaryCurveNode, rectangleResolution=30, margin=1.2):
