@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>396</width>
-    <height>720</height>
+    <width>386</width>
+    <height>719</height>
    </rect>
   </property>
   <layout class="QGridLayout" name="gridLayout_5">
@@ -847,7 +847,7 @@
         <property name="frameShadow">
          <enum>QFrame::Raised</enum>
         </property>
-        <layout class="QHBoxLayout" name="horizontalLayout_4">
+        <layout class="QGridLayout" name="gridLayout_6">
          <property name="leftMargin">
           <number>0</number>
          </property>
@@ -860,37 +860,7 @@
          <property name="bottomMargin">
           <number>0</number>
          </property>
-         <item>
-          <widget class="QLabel" name="label_29">
-           <property name="text">
-            <string>Branches: </string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLabel" name="label_32">
-           <property name="text">
-            <string>Length:</string>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="ctkDoubleSpinBox" name="branchingLengthSpinBox">
-           <property name="suffix">
-            <string>mm</string>
-           </property>
-           <property name="minimum">
-            <double>0.100000000000000</double>
-           </property>
-           <property name="value">
-            <double>3.500000000000000</double>
-           </property>
-          </widget>
-         </item>
-         <item>
+         <item row="1" column="3">
           <widget class="QLabel" name="label_31">
            <property name="text">
             <string># radial:</string>
@@ -900,8 +870,8 @@
            </property>
           </widget>
          </item>
-         <item>
-          <widget class="ctkDoubleSpinBox" name="numberOfRadialBranchesSpinBox">
+         <item row="1" column="4">
+          <widget class="ctkDoubleSpinBox" name="numberOfBodyRadialBranchesSpinBox">
            <property name="decimals">
             <number>0</number>
            </property>
@@ -916,18 +886,28 @@
            </property>
           </widget>
          </item>
-         <item>
-          <widget class="QLabel" name="label_30">
+         <item row="0" column="1">
+          <widget class="QLabel" name="label_34">
            <property name="text">
-            <string>Radius:</string>
+            <string>Len:</string>
            </property>
            <property name="alignment">
             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
            </property>
           </widget>
          </item>
-         <item>
-          <widget class="ctkDoubleSpinBox" name="branchingRadiusSpinBox">
+         <item row="0" column="3">
+          <widget class="QLabel" name="label_35">
+           <property name="text">
+            <string># fan:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="6">
+          <widget class="ctkDoubleSpinBox" name="edgeBranchRadiusSpinBox">
            <property name="minimum">
             <double>0.010000000000000</double>
            </property>
@@ -936,6 +916,125 @@
            </property>
            <property name="value">
             <double>1.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="ctkDoubleSpinBox" name="edgeBranchLengthSpinBox">
+           <property name="suffix">
+            <string>mm</string>
+           </property>
+           <property name="minimum">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>3.500000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_33">
+           <property name="text">
+            <string>Edge branches: </string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QLabel" name="label_32">
+           <property name="text">
+            <string>Len:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="6">
+          <widget class="ctkDoubleSpinBox" name="bodyBranchRadiusSpinBox">
+           <property name="minimum">
+            <double>0.010000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>1.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="5">
+          <widget class="QLabel" name="label_36">
+           <property name="text">
+            <string>Rad:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_29">
+           <property name="text">
+            <string>Body branches: </string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="4">
+          <widget class="ctkDoubleSpinBox" name="numberOfEdgeFanBranchesSpinBox">
+           <property name="decimals">
+            <number>0</number>
+           </property>
+           <property name="minimum">
+            <double>1.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>10.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>4.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="2">
+          <widget class="ctkDoubleSpinBox" name="bodyBranchLengthSpinBox">
+           <property name="suffix">
+            <string>mm</string>
+           </property>
+           <property name="minimum">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>3.500000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="5">
+          <widget class="QLabel" name="label_30">
+           <property name="text">
+            <string>Rad:</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="7">
+          <widget class="QCheckBox" name="enableEdgeBranchCalculationCheckBox">
+           <property name="text">
+            <string/>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="7">
+          <widget class="QCheckBox" name="enableBodyBranchCalculationCheckBox">
+           <property name="text">
+            <string/>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
            </property>
           </widget>
          </item>

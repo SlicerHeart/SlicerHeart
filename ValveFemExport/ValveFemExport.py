@@ -118,9 +118,14 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       (self.ui.chordsPerCm2Slider, "ChordsPerCm2"),
       (self.ui.createShellModelCheckBox, "CreateLeafletSurfaceShellModel"),
       (self.ui.createChordsCheckBox, "CreateChords"),
-      (self.ui.branchingLengthSpinBox, "BranchingLengthMm"),
-      (self.ui.numberOfRadialBranchesSpinBox, "NumberOfRadialBranches"),
-      (self.ui.branchingRadiusSpinBox, "BranchingRadiusMm"),
+      (self.ui.edgeBranchLengthSpinBox, "EdgeBranchLengthMm"),
+      (self.ui.numberOfEdgeFanBranchesSpinBox, "NumberOfEdgeFanBranches"),
+      (self.ui.edgeBranchRadiusSpinBox, "EdgeBranchRadiusMm"),
+      (self.ui.enableEdgeBranchCalculationCheckBox, "EnableEdgeBranchCalculation"),
+      (self.ui.bodyBranchLengthSpinBox, "BodyBranchLengthMm"),
+      (self.ui.numberOfBodyRadialBranchesSpinBox, "NumberOfBodyRadialBranches"),
+      (self.ui.bodyBranchRadiusSpinBox, "BodyBranchRadiusMm"),
+      (self.ui.enableBodyBranchCalculationCheckBox, "EnableBodyBranchCalculation"),
       ]
 
     # Create a new parameterNode
@@ -145,10 +150,16 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.leafletRegionBoundaryTreeView.currentItemChanged.connect(self.onLeafletRegionBoundarySelected)
     self.ui.generateButton.clicked.connect(self.onGenerate)
     self.ui.exportButton.clicked.connect(self.onExport)
+
     slicer.util.addParameterEditWidgetConnections(self.parameterEditWidgets, self.updateParameterNodeFromGUI)
-    self.ui.branchingLengthSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
-    self.ui.numberOfRadialBranchesSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
-    self.ui.branchingRadiusSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.edgeBranchLengthSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.numberOfEdgeFanBranchesSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.edgeBranchRadiusSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.enableEdgeBranchCalculationCheckBox.toggled.connect(self.updateParameterNodeFromGUI)
+    self.ui.bodyBranchLengthSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.numberOfBodyRadialBranchesSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.bodyBranchRadiusSpinBox.valueChanged.connect(self.updateParameterNodeFromGUI)
+    self.ui.enableBodyBranchCalculationCheckBox.toggled.connect(self.updateParameterNodeFromGUI)
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
@@ -328,9 +339,14 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.papillaryMuscleTipPointComboBox.blockSignals(wasBlocked)
 
     slicer.util.updateParameterEditWidgetsFromNode(self.parameterEditWidgets, self._parameterNode)
-    self.ui.branchingLengthSpinBox.value = float(self._parameterNode.GetParameter("BranchingLengthMm"))
-    self.ui.numberOfRadialBranchesSpinBox.value = float(self._parameterNode.GetParameter("NumberOfRadialBranches"))
-    self.ui.branchingRadiusSpinBox.value = float(self._parameterNode.GetParameter("BranchingRadiusMm"))
+    self.ui.edgeBranchLengthSpinBox.value = float(self._parameterNode.GetParameter("EdgeBranchLengthMm"))
+    self.ui.numberOfEdgeFanBranchesSpinBox.value = float(self._parameterNode.GetParameter("NumberOfEdgeFanBranches"))
+    self.ui.edgeBranchRadiusSpinBox.value = float(self._parameterNode.GetParameter("EdgeBranchRadiusMm"))
+    self.ui.enableEdgeBranchCalculationCheckBox.checked = bool(self._parameterNode.GetParameter("EnableEdgeBranchCalculation"))
+    self.ui.bodyBranchLengthSpinBox.value = float(self._parameterNode.GetParameter("BodyBranchLengthMm"))
+    self.ui.numberOfBodyRadialBranchesSpinBox.value = float(self._parameterNode.GetParameter("NumberOfBodyRadialBranches"))
+    self.ui.bodyBranchRadiusSpinBox.value = float(self._parameterNode.GetParameter("BodyBranchRadiusMm"))
+    self.ui.enableBodyBranchCalculationCheckBox.checked = bool(self._parameterNode.GetParameter("EnableBodyBranchCalculation"))
 
     self.updatingGUIFromParameterNode = False
 
@@ -374,9 +390,14 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
 
     slicer.util.updateNodeFromParameterEditWidgets(self.parameterEditWidgets, self._parameterNode)
-    self._parameterNode.SetParameter("BranchingLengthMm", str(self.ui.branchingLengthSpinBox.value))
-    self._parameterNode.SetParameter("NumberOfRadialBranches", str(self.ui.numberOfRadialBranchesSpinBox.value))
-    self._parameterNode.SetParameter("BranchingRadiusMm", str(self.ui.branchingRadiusSpinBox.value))
+    self._parameterNode.SetParameter("EdgeBranchLengthMm", str(self.ui.edgeBranchLengthSpinBox.value))
+    self._parameterNode.SetParameter("NumberOfEdgeFanBranches", str(self.ui.numberOfEdgeFanBranchesSpinBox.value))
+    self._parameterNode.SetParameter("EdgeBranchRadiusMm", str(self.ui.edgeBranchRadiusSpinBox.value))
+    self._parameterNode.SetParameter("EnableEdgeBranchCalculation", str(self.ui.enableEdgeBranchCalculationCheckBox.checked))
+    self._parameterNode.SetParameter("BodyBranchLengthMm", str(self.ui.bodyBranchLengthSpinBox.value))
+    self._parameterNode.SetParameter("NumberOfBodyRadialBranches", str(self.ui.numberOfBodyRadialBranchesSpinBox.value))
+    self._parameterNode.SetParameter("BodyBranchRadiusMm", str(self.ui.bodyBranchRadiusSpinBox.value))
+    self._parameterNode.SetParameter("EnableBodyBranchCalculation", str(self.ui.enableBodyBranchCalculationCheckBox.checked))
 
     self._parameterNode.EndModify(wasModified)
 
@@ -570,12 +591,22 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter("CreateChords", "true")
     if not parameterNode.GetParameter("ChordsPerCm2"):
         parameterNode.SetParameter("ChordsPerCm2", "8")
-    if not parameterNode.GetParameter("BranchingLengthMm"):
-        parameterNode.SetParameter("BranchingLengthMm", "3.5")
-    if not parameterNode.GetParameter("NumberOfRadialBranches"):
-        parameterNode.SetParameter("NumberOfRadialBranches", "4")
-    if not parameterNode.GetParameter("BranchingRadiusMm"):
-        parameterNode.SetParameter("BranchingRadiusMm", "1")
+    if not parameterNode.GetParameter("EdgeBranchLengthMm"):
+        parameterNode.SetParameter("EdgeBranchLengthMm", "3.5")
+    if not parameterNode.GetParameter("NumberOfEdgeFanBranches"):
+        parameterNode.SetParameter("NumberOfEdgeFanBranches", "4")
+    if not parameterNode.GetParameter("EdgeBranchRadiusMm"):
+        parameterNode.SetParameter("EdgeBranchRadiusMm", "1")
+    if not parameterNode.GetParameter("EnableEdgeBranchCalculation"):
+        parameterNode.SetParameter("EnableEdgeBranchCalculation", "true")
+    if not parameterNode.GetParameter("BodyBranchLengthMm"):
+        parameterNode.SetParameter("BodyBranchLengthMm", "3.5")
+    if not parameterNode.GetParameter("NumberOfBodyRadialBranches"):
+        parameterNode.SetParameter("NumberOfBodyRadialBranches", "4")
+    if not parameterNode.GetParameter("BodyBranchRadiusMm"):
+        parameterNode.SetParameter("BodyBranchRadiusMm", "1")
+    if not parameterNode.GetParameter("EnableBodyBranchCalculation"):
+        parameterNode.SetParameter("EnableBodyBranchCalculation", "true")
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     if parameterNode.GetHideFromEditors():
@@ -948,9 +979,9 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if not regionFolderItem:
       raise ValueError("Invalid region folder item ID")
 
-    branchingLengthMm = float(parameterNode.GetParameter("BranchingLengthMm"))
-    numberOfRadialBranches = round(float(parameterNode.GetParameter("NumberOfRadialBranches")))
-    branchingRadiusMm = float(parameterNode.GetParameter("BranchingRadiusMm"))
+    bodyBranchLengthMm = float(parameterNode.GetParameter("BodyBranchLengthMm"))
+    numberOfBodyRadialBranches = round(float(parameterNode.GetParameter("NumberOfBodyRadialBranches")))
+    bodyBranchRadiusMm = float(parameterNode.GetParameter("BodyBranchRadiusMm"))
 
     # Get branching point on chord line
     pointP = np.zeros(3)
@@ -958,7 +989,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     pointA = np.zeros(3)
     chordLineNode.GetNthControlPointPositionWorld(1, pointA)
     vectorPA = pointA - pointP
-    pointC = pointA - vectorPA / np.linalg.norm(vectorPA) * branchingLengthMm
+    pointC = pointA - vectorPA / np.linalg.norm(vectorPA) * bodyBranchLengthMm
     # Change endpoint of the main chord line to only reach the branching point
     chordLineNode.SetNthControlPointPositionWorld(1, pointC)
 
@@ -982,14 +1013,14 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     # Get perpendicular radius direction
     vectorRadiusX = np.cross(vectorPA / np.linalg.norm(vectorPA), leafletSurfaceNormal)
-    vectorRadiusX = vectorRadiusX * branchingRadiusMm / np.linalg.norm(vectorRadiusX)
+    vectorRadiusX = vectorRadiusX * bodyBranchRadiusMm / np.linalg.norm(vectorRadiusX)
 
     vectorRadiusY = np.cross(vectorRadiusX, leafletSurfaceNormal)
-    vectorRadiusY = vectorRadiusY * branchingRadiusMm / np.linalg.norm(vectorRadiusY)
+    vectorRadiusY = vectorRadiusY * bodyBranchRadiusMm / np.linalg.norm(vectorRadiusY)
 
     # Add chord branch lines
-    angleIncrementRad = np.pi * 2 / numberOfRadialBranches
-    for branchIdx in range(numberOfRadialBranches):
+    angleIncrementRad = np.pi * 2 / numberOfBodyRadialBranches
+    for branchIdx in range(numberOfBodyRadialBranches):
       # Get chord branch ideal endpoint
       angleRad = angleIncrementRad * branchIdx
       branchEndpointPos = pointA + np.sin(angleRad) * vectorRadiusX + np.cos(angleRad) * vectorRadiusY
