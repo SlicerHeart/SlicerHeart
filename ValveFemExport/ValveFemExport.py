@@ -11,6 +11,8 @@ import numpy as np
 
 import HeartValveLib
 
+CHORD_COLORS = [[1.0, 0.3, 0.3], [1.0, 0.6, 0.6], [0.3, 1.0, 0.3], [0.8, 1.0, 0.8], [0.3, 0.3, 1.0], [0.8, 0.8, 1.0]]
+
 #
 # ValveFemExport
 #
@@ -699,7 +701,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
     if not papillaryMuscleTips or papillaryMuscleTips.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid papillary muscle tips node")
-    colors = [[1.0, 0.3, 0.3], [1.0, 0.6, 0.6], [0.3, 1.0, 0.3], [0.8, 1.0, 0.8], [0.3, 0.3, 1.0], [0.8, 0.8, 1.0]]
+
     slicer.app.pauseRender()
     try:
       for bundleIndex in range(len(leafletSurfaceModels)):
@@ -711,10 +713,10 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         if logCallback:
           logCallback(f"Creating chord bundles for {leafletSurfaceModel.GetName()}...")
         if leafletMarginCurve:
-          self.createChordBundle(leafletSurfaceModel.GetName()+'-primary', colors[bundleIndex*2],
+          self.createChordBundle(leafletSurfaceModel.GetName()+'-primary', CHORD_COLORS[bundleIndex*2],
             papillaryMuscleTips, leafletMarginCurve, leafletSurfaceModel, chordsFolderItemId)
         if leafletSecondaryCurve:
-          self.createChordBundle(leafletSurfaceModel.GetName()+'-secondary', colors[bundleIndex*2+1],
+          self.createChordBundle(leafletSurfaceModel.GetName()+'-secondary', CHORD_COLORS[bundleIndex*2+1],
             papillaryMuscleTips, leafletSecondaryCurve, leafletSurfaceModel, chordsFolderItemId)
     finally:
       slicer.app.resumeRender()
@@ -740,6 +742,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       minVGridIndex = -1
       for regionIndex in range(leafletRegionNodes.GetNumberOfItems()):
         leafletRegionBoundaryNode = leafletRegionNodes.GetItemAsObject(regionIndex)
+        leafletRegionBoundaryNode.GetDisplayNode().SetPropertiesLabelVisibility(False)  # Hide name and length (they just clutter the view after chord generation)
         linePoint0Pos = np.zeros(3)
         leafletRegionBoundaryNode.GetNthControlPointPosition(0, linePoint0Pos)
         linePoint1Pos = np.zeros(3)
@@ -895,29 +898,24 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     closestPapillatyMuscleTipPos = np.zeros(3)
     papillaryMuscleTipsNode.GetNthControlPointPosition(minDistanceToMeanPoint[1], closestPapillatyMuscleTipPos)
 
-    # Build locator for leaflet
-    leafletModelNode = leafletNurbsSurfaceNode.GetOutputSurfaceModelNode()
-    chordEndPointLocator = vtk.vtkPointLocator()
-    chordEndPointLocator.SetDataSet(leafletModelNode.GetPolyData())
-
     # Create all chords and chord branches
     for endPointIndex, endPoint_World in enumerate(pointPositions):
       # Create line
       chordName = f'{baseName}-edge{endPointIndex:02d}'
       line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
-      self.setupChordLine(line)
+      self.setupChordLine(line, CHORD_COLORS[0])
       line.AddControlPointWorld(vtk.vtkVector3d(closestPapillatyMuscleTipPos), papillaryMuscleTipsNode.GetNthControlPointLabel(minDistanceToMeanPoint[1]))
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
       # Put under subject hierarchy folder
       shNode.SetItemParent(shNode.GetItemByDataNode(line), regionFolderItem)
 
       # Create chord branching
-      # self.createFanChordBranching(parameterNode, line, regionFolderItem, chordEndPointLocator)
+      self.createFanChordBranching(parameterNode, line, regionFolderItem, tempEdgeCurveNode)
 
     # Remove temporary nodes
     slicer.mrmlScene.RemoveNode(tempEdgeCurveNode)
 
-  def createFanChordBranching(self, parameterNode, chordLineNode, regionFolderItem, chordEndPointLocator):
+  def createFanChordBranching(self, parameterNode, chordLineNode, regionFolderItem, tempEdgeCurveNode):
     """
     Create fan branching at the valve end of a primary (edge) chord represented by given markups line node.
 
@@ -943,13 +941,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       raise ValueError("Invalid chord line node")
     leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
-      raise ValueError("Invalid papillary muscle tips node")
+      raise ValueError("Invalid leaflet NURBS node")
+    if not tempEdgeCurveNode or tempEdgeCurveNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid temporary edge curve node")
     if not regionFolderItem:
       raise ValueError("Invalid region folder item ID")
 
     edgeBranchLengthMm = float(parameterNode.GetParameter("EdgeBranchLengthMm"))
     numberOfEdgeFanBranches = round(float(parameterNode.GetParameter("NumberOfEdgeFanBranches")))
-    edgeBranchRadiusMm = float(parameterNode.GetParameter("EdgeBranchRadiusMm"))
+    edgeBranchRadiusMm = float(parameterNode.GetParameter("EdgeBranchRadiusMm"))  #TODO: Improve function so that it uses radius
 
     # Get branching point on chord line
     pointP = np.zeros(3)
@@ -966,52 +966,31 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     branchesFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), f'{chordLineNode.GetName()} - branches')
     shNode.SetItemParent(branchesFolderItem, regionFolderItem)
 
-    # Add central branch
-    branchName = f'{chordLineNode.GetName()}-central'
-    branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
-    self.setupChordLine(branchLine)
-    branchLine.AddControlPointWorld(pointC)
-    branchLine.AddControlPointWorld(pointA)
-    # Put under subject hierarchy folder
-    shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
-
-    # # Get leaflet surface normal at the chord endpoint
-    # closestVertexIndex = chordEndPointLocator.FindClosestPoint(pointA)
-    # leafletSurfaceNormal = leafletSurfaceNormalsArray[closestVertexIndex]
-
-    # # Get perpendicular radius direction
-    # vectorRadiusX = np.cross(vectorPA / np.linalg.norm(vectorPA), leafletSurfaceNormal)
-    # vectorRadiusX = vectorRadiusX * edgeBranchRadiusMm / np.linalg.norm(vectorRadiusX)
-
-    # vectorRadiusY = np.cross(vectorRadiusX, leafletSurfaceNormal)
-    # vectorRadiusY = vectorRadiusY * edgeBranchRadiusMm / np.linalg.norm(vectorRadiusY)
-
     # Add chord branch lines
-    angleIncrementRad = np.pi * 2 / numberOfEdgeFanBranches
+    pointA_Idx = tempEdgeCurveNode.GetClosestControlPointIndexToPositionWorld(pointA)
+    indexOffset = 0
     for branchIdx in range(numberOfEdgeFanBranches):
-      # Get chord branch ideal endpoint
-      angleRad = angleIncrementRad * branchIdx
-      branchEndpointPos = pointA + np.sin(angleRad) * vectorRadiusX + np.cos(angleRad) * vectorRadiusY
+      # Get chord branch endpoint
+      branchEndpointPos = np.zeros(3)
+      pointExists = tempEdgeCurveNode.GetNthControlPointPositionWorld(pointA_Idx + indexOffset, branchEndpointPos)
+      if not pointExists:
+        continue
 
       branchName = f'{chordLineNode.GetName()}-{branchIdx + 1}'
       branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
-      self.setupChordLine(branchLine)
+      self.setupChordLine(branchLine, CHORD_COLORS[1])
       branchLine.AddControlPointWorld(pointC)
       branchLine.AddControlPointWorld(branchEndpointPos)
       # Put under subject hierarchy folder
       shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
 
-      # Snap ideal branch endpoint position to leaflet NURBS grid
-      closestDistance2 = np.inf
-      closestRegionGridPoint = np.zeros(3)
-      leafletGridPoint = np.zeros(3)
-      for gridPointIdx in range(leafletNurbsNode.GetNumberOfControlPoints()):
-        leafletNurbsNode.GetNthControlPointPositionWorld(gridPointIdx, leafletGridPoint)
-        currentDistance2 = vtk.vtkMath.Distance2BetweenPoints(leafletGridPoint, branchEndpointPos)
-        if currentDistance2 < closestDistance2 and vtk.vtkMath.Distance2BetweenPoints(leafletGridPoint, pointC) > 1e-6:
-          closestDistance2 = currentDistance2
-          closestRegionGridPoint = leafletGridPoint.copy()
-      branchLine.SetNthControlPointPositionWorld(1, closestRegionGridPoint)
+      #TODO: Instead of using the radius to distribute the points, for now just use the adjacent edge grid points
+      if indexOffset == 0:
+        indexOffset = 1
+      elif indexOffset > 0:
+        indexOffset *= -1
+      else:
+        indexOffset = -indexOffset + 1
 
   def createBodyChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
@@ -1116,7 +1095,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       # Create line
       chordName = f'{baseName}-body{endPointIndex:02d}'
       line = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", chordName)
-      self.setupChordLine(line)
+      self.setupChordLine(line, CHORD_COLORS[2])
       line.AddControlPointWorld(vtk.vtkVector3d(closestPapillatyMuscleTipPos), papillaryMuscleTipsNode.GetNthControlPointLabel(minDistanceToMeanPoint[1]))
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), chordName)
       # Put under subject hierarchy folder
@@ -1157,7 +1136,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       raise ValueError("Invalid chord line node")
     leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
-      raise ValueError("Invalid papillary muscle tips node")
+      raise ValueError("Invalid leaflet NURBS node")
     if not regionFolderItem:
       raise ValueError("Invalid region folder item ID")
 
@@ -1183,7 +1162,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     # Add central branch
     branchName = f'{chordLineNode.GetName()}-central'
     branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
-    self.setupChordLine(branchLine)
+    self.setupChordLine(branchLine, CHORD_COLORS[3])
     branchLine.AddControlPointWorld(pointC)
     branchLine.AddControlPointWorld(pointA)
     # Put under subject hierarchy folder
@@ -1209,7 +1188,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
       branchName = f'{chordLineNode.GetName()}-{branchIdx + 1}'
       branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
-      self.setupChordLine(branchLine)
+      self.setupChordLine(branchLine, CHORD_COLORS[3])
       branchLine.AddControlPointWorld(pointC)
       branchLine.AddControlPointWorld(branchEndpointPos)
       # Put under subject hierarchy folder
@@ -1263,10 +1242,10 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     chordsPolyData.SetLines(chordLines)
     chordsMesh.SetAndObservePolyData(chordsPolyData)
 
-  def setupChordLine(self, chordLineNode):
+  def setupChordLine(self, chordLineNode, color):
     chordLineNode.SetLocked(True)  # it was left unlocked to allow the user to rearrange the points to achieve more uniform sampling, but with branching it is too complicated for manual modifications
     chordLineNode.CreateDefaultDisplayNodes()
-    # chordLineNode.GetDisplayNode().SetSelectedColor(leafletRegionBoundaryNode.GetDisplayNode().GetSelectedColor())
+    chordLineNode.GetDisplayNode().SetSelectedColor(color)
     chordLineNode.GetDisplayNode().SetPropertiesLabelVisibility(False)
     chordLineNode.GetDisplayNode().SetPointLabelsVisibility(False)
     chordLineNode.GetDisplayNode().SetGlyphTypeFromString("Sphere3D")
