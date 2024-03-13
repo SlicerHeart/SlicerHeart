@@ -122,6 +122,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       (self.ui.createChordsCheckBox, "CreateChords"),
       (self.ui.enableEdgeBranchCalculationCheckBox, "EnableEdgeBranchCalculation"),
       (self.ui.enableBodyBranchCalculationCheckBox, "EnableBodyBranchCalculation"),
+      (self.ui.edgeChordsPerCmSlider, "EdgeChordsPerCm"),
       ]
 
     # Create a new parameterNode
@@ -589,6 +590,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         parameterNode.SetParameter("EdgeBranchRadiusMm", "1")
     if not parameterNode.GetParameter("EnableEdgeBranchCalculation"):
         parameterNode.SetParameter("EnableEdgeBranchCalculation", "true")
+    if not parameterNode.GetParameter("EdgeChordsPerCm"):
+        parameterNode.SetParameter("EdgeChordsPerCm", "3")
     if not parameterNode.GetParameter("BodyBranchLengthMm"):
         parameterNode.SetParameter("BodyBranchLengthMm", "3.5")
     if not parameterNode.GetParameter("NumberOfBodyRadialBranches"):
@@ -838,7 +841,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       raise ValueError("Invalid leaflet NURBS grid surface node")
 
     # Get variables used for calculation
-    chordsPerMm2 = float(parameterNode.GetParameter("ChordsPerCm2") if parameterNode.GetParameter("ChordsPerCm2") else "8") / 100.0  # Divide by 100 because chordsDensity is in length unit (mm)
+    chordsPerMm = float(parameterNode.GetParameter("EdgeChordsPerCm") if parameterNode.GetParameter("EdgeChordsPerCm") else "3") / 10.0  # Divide by 10 because the slider uses cm
     baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
     res = leafletNurbsSurfaceNode.GetGridResolution()  # Increase readability by shortening lines in later function calls
 
@@ -848,7 +851,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     else:
       vGridIndex = res[1] - 1
 
-    # Calculate edge length in the region
+    # Calculate edge length in the region using a temporary curve
     edgePoints = vtk.vtkPoints()
     currentPos = np.zeros(3)
     for u in range(self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1):
@@ -861,7 +864,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     edgeLengthMm = tempEdgeCurveNode.GetMeasurement('length').GetValue()
 
     # Get number of chords placed on the edge for region
-    numberOfChords = int(edgeLengthMm * math.sqrt(chordsPerMm2) + 0.5)
+    numberOfChords = int(edgeLengthMm * chordsPerMm + 0.5)
 
     # Distribute points
     regionEdgeStep = (self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1) / numberOfChords
