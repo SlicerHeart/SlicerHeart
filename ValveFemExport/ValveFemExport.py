@@ -952,7 +952,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
     edgeBranchLengthMm = float(parameterNode.GetParameter("EdgeBranchLengthMm"))
     numberOfEdgeFanBranches = round(float(parameterNode.GetParameter("NumberOfEdgeFanBranches")))
-    edgeBranchRadiusMm = float(parameterNode.GetParameter("EdgeBranchRadiusMm"))  #TODO: Improve function so that it uses radius
+    edgeBranchRadiusMm = float(parameterNode.GetParameter("EdgeBranchRadiusMm"))
 
     # Get branching point on chord line
     pointP = np.zeros(3)
@@ -969,31 +969,50 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     branchesFolderItem = shNode.CreateFolderItem(shNode.GetSceneItemID(), f'{chordLineNode.GetName()} - branches')
     shNode.SetItemParent(branchesFolderItem, regionFolderItem)
 
-    # Add chord branch lines
-    pointA_Idx = tempEdgeCurveNode.GetClosestControlPointIndexToPositionWorld(pointA)
-    indexOffset = 0
-    for branchIdx in range(numberOfEdgeFanBranches):
-      # Get chord branch endpoint
-      branchEndpointPos = np.zeros(3)
-      pointExists = tempEdgeCurveNode.GetNthControlPointPositionWorld(pointA_Idx + indexOffset, branchEndpointPos)
-      if not pointExists:
-        continue
+    # Determine section of edge centered at point A that has 2 radius length (curve length)
+    tempEdgeSectionCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode', f'{chordLineNode.GetName()} EdgeSectionCurve Temp')
+    tempEdgeSectionCurveNode.GetMeasurement('length').SetEnabled(True)
 
+    pointA_Idx = tempEdgeCurveNode.GetClosestControlPointIndexToPositionWorld(pointA)
+    tempEdgeSectionCurveNode.AddControlPointWorld(pointA)
+
+    edgeSectionLengthMm = 0
+    edgeSectionLeftIdx = pointA_Idx  # Left end of the edge section as control point index in temporary edge curve (argument)
+    edgeSectionRightIdx = pointA_Idx  # Right end of the edge section as control point index in temporary edge curve (argument)
+    currentPoint = np.zeros(3)
+    iteration = 0
+    while edgeSectionLengthMm < edgeBranchRadiusMm * 2.0:  # Until section is just longer than radius
+      # Add control point to alternating sides from point A
+      if iteration % 2:  # Towards "right"
+        currentIdx = edgeSectionRightIdx = self.incrementWrappingGridIndex(edgeSectionRightIdx, 1, [tempEdgeCurveNode.GetNumberOfControlPoints(), 0])
+      else:
+        currentIdx = edgeSectionLeftIdx = self.incrementWrappingGridIndex(edgeSectionLeftIdx, -1, [tempEdgeCurveNode.GetNumberOfControlPoints(), 0])
+      tempEdgeCurveNode.GetNthControlPointPosition(currentIdx, currentPoint)
+      if iteration % 2:  # Towards "right"
+        tempEdgeSectionCurveNode.AddControlPointWorld(currentPoint)
+      else:
+        tempEdgeSectionCurveNode.InsertControlPointWorld(0, currentPoint)
+      iteration += 1
+      edgeSectionLengthMm = tempEdgeSectionCurveNode.GetMeasurement('length').GetValue()
+
+    # Resample edge section curve
+    tempEdgeSectionCurveNode.ResampleCurveWorld(edgeSectionLengthMm / (numberOfEdgeFanBranches - 1))
+
+    # Add chord branch lines
+    for branchIdx in range(numberOfEdgeFanBranches):
       branchName = f'{chordLineNode.GetName()}-{branchIdx + 1}'
       branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
       self.setupChordLine(branchLine, CHORD_COLORS[1])
       branchLine.AddControlPointWorld(pointC)
-      branchLine.AddControlPointWorld(branchEndpointPos)
+      # Get closest edge grid point to the ideal branch endpoint position
+      tempEdgeSectionCurveNode.GetNthControlPointPosition(branchIdx, currentPoint)
+      branchEndpointIdx = tempEdgeCurveNode.GetClosestControlPointIndexToPositionWorld(currentPoint)
+      tempEdgeCurveNode.GetNthControlPointPosition(branchEndpointIdx, currentPoint)
+      branchLine.AddControlPointWorld(currentPoint)
       # Put under subject hierarchy folder
       shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
 
-      #TODO: Instead of using the radius to distribute the points, for now just use the adjacent edge grid points
-      if indexOffset == 0:
-        indexOffset = 1
-      elif indexOffset > 0:
-        indexOffset *= -1
-      else:
-        indexOffset = -indexOffset + 1
+    slicer.mrmlScene.RemoveNode(tempEdgeSectionCurveNode)
 
   def createBodyChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
