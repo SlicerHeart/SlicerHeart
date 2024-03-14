@@ -27,7 +27,7 @@ class ValveFemExport(ScriptedLoadableModule):
     self.parent.title = "Valve FEM Export"
     self.parent.categories = ["Cardiac"]
     self.parent.dependencies = []
-    self.parent.contributors = ["Andras Lasso (PerkLab)", "Matthew A Jolley (CHOP)"]
+    self.parent.contributors = ["Andras Lasso (PerkLab)", "Csaba Pinter (Ebatinca)", "Matthew A Jolley (CHOP)"]
     self.parent.helpText = """
 Export leaflets and chords for FEM analysis.
 Usage:
@@ -791,6 +791,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       # Create and distribute points in each rectangle region
       enableEdgeBranchCalculation = parameterNode.GetParameter("EnableEdgeBranchCalculation") == "true"
       enableBodyBranchCalculation = parameterNode.GetParameter("EnableBodyBranchCalculation") == "true"
+      numOfEdgePointsWithMultipleChordBranchesMap = {}
       for regionIndex in range(leafletRegionNodes.GetNumberOfItems()):
         leftUGridIndex = list(linesOrderedByGridU.keys())[regionIndex]
         rightUGridIndex = list(linesOrderedByGridU.keys())[nextIndex(regionIndex)]
@@ -798,12 +799,20 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
           logCallback(f"Creating chord bundles for region {regionIndex + 1} / {leafletRegionNodes.GetNumberOfItems()}...")
         regionFolderItem = None
         if enableEdgeBranchCalculation:
-          regionFolderItem = self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+          (regionFolderItem, numOfEdgePointsWithMultipleChordBranches) = self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+          if numOfEdgePointsWithMultipleChordBranches > 0:
+            numOfEdgePointsWithMultipleChordBranchesMap[regionIndex] = numOfEdgePointsWithMultipleChordBranches
         if enableBodyBranchCalculation:
           regionFolderItem = self.createBodyChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
         # Create mesh to export
         if regionFolderItem:
           self.createChordsMesh(regionFolderItem)
+
+      if numOfEdgePointsWithMultipleChordBranchesMap:
+        message = 'Multiple chord branch endpoints connect to the same leaflet grid point!\n\n'
+        for regionIndex in numOfEdgePointsWithMultipleChordBranchesMap.keys():
+          message += f'Region {regionIndex}: {numOfEdgePointsWithMultipleChordBranchesMap[regionIndex]} branch endpoints coincide\n'
+        slicer.util.warningDisplay(message)
 
     finally:
       slicer.app.resumeRender()
@@ -902,6 +911,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     papillaryMuscleTipsNode.GetNthControlPointPosition(minDistanceToMeanPoint[1], closestPapillatyMuscleTipPos)
 
     # Create all chords and chord branches
+    tempEdgeCurveControlPointsWithBranches = {}
     for endPointIndex, endPoint_World in enumerate(pointPositions):
       # Create line
       chordName = f'{baseName}-edge{endPointIndex:02d}'
@@ -913,10 +923,14 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       shNode.SetItemParent(shNode.GetItemByDataNode(line), regionFolderItem)
 
       # Create chord branching
-      self.createFanChordBranching(parameterNode, line, regionFolderItem, tempEdgeCurveNode)
+      newBranches = self.createFanChordBranching(parameterNode, line, regionFolderItem, tempEdgeCurveNode)
+      tempEdgeCurveControlPointsWithBranches = {k: newBranches.get(k, 0) + tempEdgeCurveControlPointsWithBranches.get(k, 0) for k in set(newBranches) | set(tempEdgeCurveControlPointsWithBranches)}
 
-    # Remove temporary nodes
+    # Remove temporary node
     slicer.mrmlScene.RemoveNode(tempEdgeCurveNode)
+
+    numOfEdgePointsWithMultipleChordBranches = sum(value > 1 for value in tempEdgeCurveControlPointsWithBranches.values())
+    return (regionFolderItem, numOfEdgePointsWithMultipleChordBranches)
 
   def createFanChordBranching(self, parameterNode, chordLineNode, regionFolderItem, tempEdgeCurveNode):
     """
@@ -999,6 +1013,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     tempEdgeSectionCurveNode.ResampleCurveWorld(edgeSectionLengthMm / (numberOfEdgeFanBranches - 1))
 
     # Add chord branch lines
+    newBranches = {}
     for branchIdx in range(numberOfEdgeFanBranches):
       branchName = f'{chordLineNode.GetName()}-{branchIdx + 1}'
       branchLine = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", branchName)
@@ -1007,12 +1022,19 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       # Get closest edge grid point to the ideal branch endpoint position
       tempEdgeSectionCurveNode.GetNthControlPointPosition(branchIdx, currentPoint)
       branchEndpointIdx = tempEdgeCurveNode.GetClosestControlPointIndexToPositionWorld(currentPoint)
+      if branchEndpointIdx in newBranches.keys():
+        newBranches[branchEndpointIdx] = newBranches[branchEndpointIdx] + 1
+      else:
+        newBranches[branchEndpointIdx] = 1
       tempEdgeCurveNode.GetNthControlPointPosition(branchEndpointIdx, currentPoint)
       branchLine.AddControlPointWorld(currentPoint)
       # Put under subject hierarchy folder
       shNode.SetItemParent(shNode.GetItemByDataNode(branchLine), branchesFolderItem)
 
+    # Remove temporary node
     slicer.mrmlScene.RemoveNode(tempEdgeSectionCurveNode)
+
+    return newBranches
 
   def createBodyChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
