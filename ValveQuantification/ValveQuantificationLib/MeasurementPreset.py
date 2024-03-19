@@ -1817,12 +1817,12 @@ def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurf
     smoothPolyFilter.Update()
     return smoothPolyFilter.GetOutput()
 
-  def windowSincPolyData(poly):
+  def windowSincPolyData(poly, passband=0.001):
     windowSincFilter = vtk.vtkWindowedSincPolyDataFilter()
     windowSincFilter.SetInputData(poly)
     windowSincFilter.FeatureEdgeSmoothingOff()
     windowSincFilter.SetFeatureAngle(120)
-    windowSincFilter.SetPassBand(0.001)
+    windowSincFilter.SetPassBand(passband)
     windowSincFilter.SetNumberOfIterations(15)
     windowSincFilter.BoundarySmoothingOff()
     windowSincFilter.NonManifoldSmoothingOn()
@@ -1854,4 +1854,5 @@ def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurf
     remeshed = smoothPolyData(remeshPolyData(remeshed, 10000, 2), valveSurfacePolydata, 50, 1.0)
     remeshed = windowSincPolyData(remeshed)
   remeshed = smoothPolyData(remeshPolyData(remeshed, 10000, 3), valveSurfacePolydata, 100, 0.001)
+  remeshed = windowSincPolyData(remeshed, passband=0.1)
   return remeshed
