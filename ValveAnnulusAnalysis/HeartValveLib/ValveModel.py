@@ -1239,7 +1239,8 @@ class ValveModel:
 
       return segmentInfoSorted
 
-    def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0, mergeMode=None):
+    def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0, segmentIds=None, mergeMode=None,
+                           smoothInZDirection=False):
       # TODO: kernelSizeMm maybe determine this using the size (diameter?) of the annulus
       """
       Create valve surface from the union of all segmented leaflets.
@@ -1251,23 +1252,21 @@ class ValveModel:
       # Create a temporary segment that is a union of all existing segments
       segmentationNode = self.getLeafletSegmentationNode()
       allLeafletsSegId = segmentationNode.GetSegmentation().AddEmptySegment()
-      for leafletModel in self.leafletModels:
-        leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletModel.segmentId)
+
+      if not segmentIds:
+        logging.info("[createValveSurface]: segmentIds were not provided. Getting valve surface from leaflet models directly")
+        segmentIds = [leafletModel.segmentId for leafletModel in self.leafletModels]
+      else:
+        logging.info(f"[createValveSurface]: segmentIds were provided. Getting valve surface by merging {segmentIds}")
+
+      for segId in segmentIds:
+        segmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segId)
         slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
-          leafletSegmentLabelmap, segmentationNode, allLeafletsSegId, mergeMode
+          segmentLabelmap, segmentationNode, allLeafletsSegId, mergeMode
         )
 
-      def surfaceArea(surface):
-        properties = vtk.vtkMassProperties()
-        properties.SetInputData(surface)
-        properties.Update()
-        return properties.GetSurfaceArea()
-
       # Apply smoothing to make sure leaflets are closed
-      self.smoothSegment(segmentationNode, allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
-
-      surfaceAreaBeforeExtraction = \
-        surfaceArea(segmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId))
+      self.smoothSegment(segmentationNode, allLeafletsSegId, kernelSizeMm, smoothInZDirection=smoothInZDirection)
 
       # Temporary node, we don't add it to the scene
       allLeafletsSurfaceModelNode = slicer.vtkMRMLModelNode()
@@ -1288,14 +1287,14 @@ class ValveModel:
       # Delete temporary segment
       segmentationNode.RemoveSegment(allLeafletsSegId)
 
-      surfaceAreaAfterExtraction = surfaceArea(allLeafletsSurfacePolyData)
-      success = int(surfaceAreaAfterExtraction) < int(surfaceAreaBeforeExtraction)
-
-      # NB: For debugging
-      # print("Surface Area (before extraction)", surfaceAreaBeforeExtraction)
-      # print("Surface Area (before extraction)", surfaceAreaAfterExtraction)
-
-      # print("Surface Area is smaller:", success)
+      # check if surface
+      edges = vtk.vtkFeatureEdges()
+      edges.SetInputData(allLeafletsSurfacePolyData)
+      edges.FeatureEdgesOff()
+      edges.BoundaryEdgesOn()
+      edges.NonManifoldEdgesOn()
+      edges.Update()
+      success = edges.GetOutput().GetNumberOfCells() > 0
 
       return allLeafletsSurfacePolyData if success else None
 

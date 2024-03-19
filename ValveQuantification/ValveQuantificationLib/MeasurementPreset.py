@@ -752,7 +752,7 @@ class MeasurementPreset(object):
         HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
       annulusAreaPolyData = self.createPolyDataFromPolygon(annulusPointsProjected.T)
     elif mode == "3D":
-      annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints)
+      annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 3.0)
     else:
       logging.error("Invalid mode: {0}".format(mode))
       return
@@ -1603,18 +1603,12 @@ class MeasurementPreset(object):
     annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.2)
 
     # Create fused leaflet surface
-
-    segmentIdsToIgnore = ["ValveMask"]
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
     segmentation = leafletSegmentationNode.GetSegmentation()
-    segmentIds = vtk.vtkStringArray()
-    segmentation.GetSegmentIDs(segmentIds)
-    allLeafletThickness = list()
+    allLeafletThickness = []
     leafletSurfaces = []
-    for segmentIndex in range(segmentIds.GetNumberOfValues()):
-      segmentId = segmentIds.GetValue(segmentIndex)
-      if segmentId in segmentIdsToIgnore:
-        continue
+    for leafletModel in valveModel.leafletModels:
+      segmentId = leafletModel.segmentId
       segment = segmentation.GetSegment(segmentId)
 
       leafletVolume = self.addSegmentVolumeMeasurement("Leaflet volume - {0}".format(segment.GetName()),
@@ -1642,36 +1636,35 @@ class MeasurementPreset(object):
                            KEY_VALUE: "{:.1f}".format(np.array(allLeafletThickness).mean()),
                            KEY_UNIT: 'mm'})
 
-    kernelSizeMm = 2.0
-    maxKernelSizeMm = 20.0
-    name = valveModel.heartValveNode.GetName()
+    # kernelSizeMm = 2.0
+    # allLeafletSurfacePolyData = extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition,
+    #                                                                          planeNormal, kernelSizeMm,
+    #                                                                          maxKernelSizeMm=3.0)
+    # self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces, valveModel,
+    #                                       planeNormal, strategy="(Morphological_Closing)")
+    #
 
-    allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal, kernelSizeMm)
+    # NB: using a bigger annulus area, so it can better fit to the valve surface
+    annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.4)
+    allLeafletSurfacePolyData = extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces)
+    self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces, valveModel,
+                                          planeNormal) #, strategy="(SmoothPolydata)")
+
+  def addBillowTentingAndAtrialSurface(self, allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+                                       valveModel, planeNormal, strategy=''):
     if not allLeafletSurfacePolyData:
-      logging.warning(f'Could not extract valve surface from {name} with kernel size {kernelSizeMm}')
-
-      while allLeafletSurfacePolyData is None and kernelSizeMm < maxKernelSizeMm:
-        kernelSizeMm += 0.5
-        logging.warning(f'Retrying with kernel size {kernelSizeMm}.')
-        allLeafletSurfacePolyData = valveModel.createValveSurface(
-          planePosition, planeNormal, kernelSizeMm, slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
-        )
-      if not allLeafletSurfacePolyData:
-        logging.warning(f'Could not extract valve surface from {name}')
-        return
+      logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()} using {strategy}')
+      return
 
     # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
     maxLeafletDepthMm = 60
-
     allLeafletSurfacePolyDataWithDistance = \
       self.getSignedDistance(allLeafletSurfacePolyData, annulusAreaPolyData, planeNormal, maxLeafletDepthMm)
-
     # Add colored model of fused leaflet surface
-    self.addModelColoredBySignedDistance('Leaflet area (atrial) - all (3D)', valveModel, allLeafletSurfacePolyDataWithDistance)
-
-    self.addMaximumSurfaceDistanceMeasurement(valveModel, "Tenting height", "Billow height",
+    self.addModelColoredBySignedDistance(f'Leaflet area (atrial) - all (3D){strategy}', valveModel,
+                                         allLeafletSurfacePolyDataWithDistance)
+    self.addMaximumSurfaceDistanceMeasurement(valveModel, f"Tenting height{strategy}", f"Billow height{strategy}",
                                               allLeafletSurfacePolyDataWithDistance, annulusAreaPolyData)
-
     # Add leaflet surface area to measurement list
     # TODO: often the circumference is a bit warped/curved, which increases the surface a bit.
     # It would be nice to straighten the circumference.
@@ -1679,19 +1672,15 @@ class MeasurementPreset(object):
     massProperties = vtk.vtkMassProperties()
     massProperties.SetInputData(allLeafletSurfacePolyData)
     leafletSurfaceArea3d = massProperties.GetSurfaceArea()
-    self.addMeasurement({KEY_NAME: 'Leaflet area (atrial) - all (3D)',
+    self.addMeasurement({KEY_NAME: f'Leaflet area (atrial) - all (3D){strategy}',
                          KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                          KEY_UNIT: 'mm*mm'})
-
     if leafletSurfaces:
-      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces)
-
+      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy)
     # Get leaflet projections on the valve plane normal so that we can split the volume measurements per leaflet
     leafletRois = []
-    for segmentIndex in range(segmentIds.GetNumberOfValues()):
-      segmentId = segmentIds.GetValue(segmentIndex)
-      if segmentId in segmentIdsToIgnore:
-        continue
+    for leafletModel in valveModel.leafletModels:
+      segmentId = leafletModel.segmentId
 
       from HeartValveLib import ValveRoi
       leafletRoi = ValveRoi()
@@ -1715,16 +1704,14 @@ class MeasurementPreset(object):
       else:
         # Coaptation lines are not found
         slicer.mrmlScene.RemoveNode(leafletRoi.roiModelNode)
-
-    self.addVolumeMeasurementBetweenSurfaces("Billow volume", [1.0, 0.2, 0.2], valveModel, allLeafletSurfacePolyData,
+    self.addVolumeMeasurementBetweenSurfaces(f"Billow volume{strategy}", [1.0, 0.2, 0.2], valveModel, allLeafletSurfacePolyData,
                                              annulusAreaPolyData, planeNormal, maxLeafletDepthMm, leafletRois)
-    self.addVolumeMeasurementBetweenSurfaces("Tenting volume", [0.2, 0.2, 1.0], valveModel, allLeafletSurfacePolyData,
+    self.addVolumeMeasurementBetweenSurfaces(f"Tenting volume{strategy}", [0.2, 0.2, 1.0], valveModel, allLeafletSurfacePolyData,
                                              annulusAreaPolyData, planeNormal, -maxLeafletDepthMm, leafletRois)
-
     for leafletRoi in leafletRois:
       slicer.mrmlScene.RemoveNode(leafletRoi.roiModelNode)
 
-  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces):
+  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy=''):
     # calculate all cell center distances from atrial valve surface to individual leaflets
     vtkCenters = vtk.vtkCellCenters()
     vtkCenters.SetInputData(allLeafletSurfacePolyData)
@@ -1760,7 +1747,7 @@ class MeasurementPreset(object):
     for idx, leafletModel in enumerate(valveModel.leafletModels):
       segmentId = leafletModel.segmentId
       segment = segmentation.GetSegment(segmentId)
-      metricName = 'Leaflet area (atrial) - {0} (3D)'.format(segment.GetName())
+      metricName = f'Leaflet area (atrial) - {segment.GetName()} (3D){strategy}'
 
       allLeafletSurfacePolyData.GetPointData().SetActiveScalars(arrayName)
 
@@ -1799,3 +1786,72 @@ class MeasurementPreset(object):
       self.addMeasurement({KEY_NAME: metricName,
                            KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                            KEY_UNIT: 'mm*mm'})
+
+
+def extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition, planeNormal, kernelSizeMm, maxKernelSizeMm):
+  allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal, kernelSizeMm)
+  if not allLeafletSurfacePolyData:  # enable z smoothing
+    logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()} with kernel size {kernelSizeMm}')
+    while allLeafletSurfacePolyData is None and kernelSizeMm < maxKernelSizeMm:
+      kernelSizeMm += 0.5
+      logging.warning(f'Retrying with kernel size {kernelSizeMm}.')
+      allLeafletSurfacePolyData = valveModel.createValveSurface(
+        planePosition, planeNormal, kernelSizeMm,
+        mergeMode=slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK,
+        smoothInZDirection=True
+      )
+  return allLeafletSurfacePolyData
+
+
+def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurfaces):
+  assert leafletSurfaces
+
+  def smoothPolyData(poly, source, iterations=15, relaxationFactor=0.1):
+    smoothPolyFilter = vtk.vtkSmoothPolyDataFilter()
+    smoothPolyFilter.SetInputData(poly)
+    smoothPolyFilter.SetSourceData(source)
+    smoothPolyFilter.SetNumberOfIterations(iterations)
+    smoothPolyFilter.SetRelaxationFactor(relaxationFactor)
+    smoothPolyFilter.BoundarySmoothingOff()
+    smoothPolyFilter.FeatureEdgeSmoothingOn()
+    smoothPolyFilter.Update()
+    return smoothPolyFilter.GetOutput()
+
+  def windowSincPolyData(poly):
+    windowSincFilter = vtk.vtkWindowedSincPolyDataFilter()
+    windowSincFilter.SetInputData(poly)
+    windowSincFilter.FeatureEdgeSmoothingOff()
+    windowSincFilter.SetFeatureAngle(120)
+    windowSincFilter.SetPassBand(0.001)
+    windowSincFilter.SetNumberOfIterations(15)
+    windowSincFilter.BoundarySmoothingOff()
+    windowSincFilter.NonManifoldSmoothingOn()
+    windowSincFilter.NormalizeCoordinatesOn()
+    windowSincFilter.Update()
+    return windowSincFilter.GetOutput()
+
+  def remeshPolyData(poly, nVertices, subdivide):
+    try:
+      import pyacvd
+    except ImportError:
+      slicer.util.pip_install('pyacvd')
+    import pyacvd
+    import pyvista as pv
+    wrapped = pv.wrap(poly)
+    clus = pyacvd.Clustering(wrapped)
+    clus.subdivide(subdivide)
+    clus.cluster(nVertices)
+    return clus.create_mesh()
+
+  append = vtk.vtkAppendPolyData()
+  for leafletSurface in leafletSurfaces:
+    append.AddInputData(leafletSurface)
+  append.Update()
+  valveSurfacePolydata = append.GetOutput()
+
+  remeshed = annulusAreaPolyData
+  for i in range(4):
+    remeshed = smoothPolyData(remeshPolyData(remeshed, 10000, 2), valveSurfacePolydata, 50, 1.0)
+    remeshed = windowSincPolyData(remeshed)
+  remeshed = smoothPolyData(remeshPolyData(remeshed, 10000, 3), valveSurfacePolydata, 100, 0.001)
+  return remeshed
