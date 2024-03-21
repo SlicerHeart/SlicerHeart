@@ -811,7 +811,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       if numOfEdgePointsWithMultipleChordBranchesMap:
         message = 'Multiple chord branch endpoints connect to the same leaflet grid point!\n\n'
         for regionIndex in numOfEdgePointsWithMultipleChordBranchesMap.keys():
-          message += f'Region {regionIndex}: {numOfEdgePointsWithMultipleChordBranchesMap[regionIndex]} branch endpoints coincide\n'
+          message += f'Region {leafletRegionNodes.GetItemAsObject(regionIndex).GetName()}: {numOfEdgePointsWithMultipleChordBranchesMap[regionIndex]} branch endpoints coincide\n'
         slicer.util.warningDisplay(message)
 
     finally:
@@ -998,9 +998,15 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     while edgeSectionLengthMm < edgeBranchRadiusMm * 2.0:  # Until section is just longer than radius
       # Add control point to alternating sides from point A
       if iteration % 2:  # Towards "right"
-        currentIdx = edgeSectionRightIdx = self.incrementWrappingGridIndex(edgeSectionRightIdx, 1, [tempEdgeCurveNode.GetNumberOfControlPoints(), 0])
+        if edgeSectionRightIdx == tempEdgeCurveNode.GetNumberOfControlPoints() - 1:  # We stop at the edge of the curve (cannot wrap as it is an open curve)
+          iteration += 1
+          continue
+        currentIdx = edgeSectionRightIdx = edgeSectionRightIdx + 1
       else:
-        currentIdx = edgeSectionLeftIdx = self.incrementWrappingGridIndex(edgeSectionLeftIdx, -1, [tempEdgeCurveNode.GetNumberOfControlPoints(), 0])
+        if edgeSectionLeftIdx == 0:  # We stop at the edge of the curve (cannot wrap as it is an open curve)
+          iteration += 1
+          continue
+        currentIdx = edgeSectionLeftIdx = edgeSectionLeftIdx - 1
       tempEdgeCurveNode.GetNthControlPointPosition(currentIdx, currentPoint)
       if iteration % 2:  # Towards "right"
         tempEdgeSectionCurveNode.AddControlPointWorld(currentPoint)
