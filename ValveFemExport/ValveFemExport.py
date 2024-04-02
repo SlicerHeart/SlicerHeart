@@ -848,25 +848,43 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS grid surface node")
+    papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
+    if not papillaryMuscleTipsNode:
+      raise RuntimeError('Failed to find papillary muscle tips node')
 
     # Get variables used for calculation
     chordsPerMm = float(parameterNode.GetParameter("EdgeChordsPerCm") if parameterNode.GetParameter("EdgeChordsPerCm") else "3") / 10.0  # Divide by 10 because the slider uses cm
     baseName = f'{leafletNurbsSurfaceNode.GetName()} (region {leftUGridIndex} - {rightUGridIndex})'
     res = leafletNurbsSurfaceNode.GetGridResolution()  # Increase readability by shortening lines in later function calls
 
-    # Get V grid index for edge (closest edge to region)
-    if minVGridIndex < res[1] - maxVGridIndex:
-      vGridIndex = 0
-    else:
-      vGridIndex = res[1] - 1
+    # Get average papillary muscle tip point
+    pos = np.zeros(3)
+    meanPapillaryMuscleTipPoint = np.zeros(3)
+    for i in range(papillaryMuscleTipsNode.GetNumberOfControlPoints()):
+      papillaryMuscleTipsNode.GetNthControlPointPosition(i, pos)
+      meanPapillaryMuscleTipPoint += pos
+    meanPapillaryMuscleTipPoint /= papillaryMuscleTipsNode.GetNumberOfControlPoints()
+    # Get V index that is closer to the average papillary muscle tip point
+    minimumDistance = float('inf')
+    vGridIndex = -1
+    for v in [0, res[1] - 1]:
+      numberOfEdgePoints = self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1
+      pointSum = np.zeros(3)
+      for u in range(numberOfEdgePoints):
+        edgeControlPointIndex = self.controlPointIndex(self.incrementWrappingGridIndex(leftUGridIndex, u, res), v, res)
+        leafletNurbsSurfaceNode.GetNthControlPointPosition(edgeControlPointIndex, pos)
+        pointSum += pos
+      distance = np.linalg.norm(pointSum / numberOfEdgePoints - meanPapillaryMuscleTipPoint)
+      if distance < minimumDistance:
+        minimumDistance = distance
+        vGridIndex = v
 
     # Calculate edge length in the region using a temporary curve
     edgePoints = vtk.vtkPoints()
-    currentPos = np.zeros(3)
     for u in range(self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1):
       edgeControlPointIndex = self.controlPointIndex(self.incrementWrappingGridIndex(leftUGridIndex, u, res), vGridIndex, res)
-      leafletNurbsSurfaceNode.GetNthControlPointPosition(edgeControlPointIndex, currentPos)
-      edgePoints.InsertNextPoint(currentPos[0], currentPos[1], currentPos[2])
+      leafletNurbsSurfaceNode.GetNthControlPointPosition(edgeControlPointIndex, pos)
+      edgePoints.InsertNextPoint(pos[0], pos[1], pos[2])
     tempEdgeCurveNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode', f'{baseName} EdgeCurve Temp')
     tempEdgeCurveNode.SetControlPointPositionsWorld(edgePoints)
     tempEdgeCurveNode.GetMeasurement('length').SetEnabled(True)
@@ -896,10 +914,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       shNode.SetItemParent(regionFolderItem, chordsFolderItemId)
 
     # Automatically find closest papillary muscle tip point for region
-    papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
-    if not papillaryMuscleTipsNode:
-      raise RuntimeError('Failed to find papillary muscle tips node')
-
     minDistanceToMeanPoint = (np.inf, -1)
     for i in range(papillaryMuscleTipsNode.GetNumberOfControlPoints()):
       pos = np.zeros(3)
