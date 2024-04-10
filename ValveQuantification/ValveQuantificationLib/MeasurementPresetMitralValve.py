@@ -145,12 +145,12 @@ class MeasurementPresetMitralValve(MeasurementPreset):
     if fieldId == 'APoint':  # A point (farthest from P)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')
       if pointP is not None:
-        pointAPosition = getFarthestCurvePointIndexToPosition(mitralValveModel.annulusContourCurve, pointP)
+        pointAPosition = getFarthestCurvePointIndexToPosition(mitralValveModel.annulusContourCurveNode, pointP)
         mitralValveModel.setAnnulusMarkupLabel('A', pointAPosition)
     elif fieldId == 'PPoint':  # P point (farthest from A)
       pointA = mitralValveModel.getAnnulusMarkupPositionByLabel('A')
       if pointA is not None:
-        pointPPosition = getFarthestCurvePointIndexToPosition(mitralValveModel.annulusContourCurve, pointA)
+        pointPPosition = getFarthestCurvePointIndexToPosition(mitralValveModel.annulusContourCurveNode, pointA)
         mitralValveModel.setAnnulusMarkupLabel('P', pointPPosition)
     elif fieldId == 'PmPoint':  # PM point (on the other side of the P-A line from AL, P-A orthogonal to AL-PM)
       pointP = mitralValveModel.getAnnulusMarkupPositionByLabel('P')

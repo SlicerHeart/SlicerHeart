@@ -2,6 +2,8 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from ValveQuantificationLib.MeasurementPreset import *
 import ValveQuantificationLib
+from HeartValveLib.util import reload
+from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
 
 #
 # ValveQuantification
@@ -92,7 +94,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     print("Reloading ValveQuantification")
 
     packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'ValveModel', 'ValveSeries', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
+    submoduleNames=['LeafletModel', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
 
     self.reloadPackageWithSubmodules(packageName, submoduleNames)
 
@@ -134,6 +136,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     valveFormLayout = qt.QFormLayout()
     self.layout.addLayout(valveFormLayout)
 
+    self.setupValveSequenceBrowserWidget(valveFormLayout)
     self.setupHeartValveMeasurementSelector(valveFormLayout)
     self.setupValvesSection()
     self.setupFieldsSection()
@@ -155,6 +158,26 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.onHeartValveMeasurementSelect(self.heartValveMeasurementSelector.currentNode())
 
     self.addGUIObservers()
+
+    # Add a spacer to the layout
+    self.layout.addStretch(1)
+
+  def setupValveSequenceBrowserWidget(self, valveFormLayout):
+    self.heartValveBrowserSelector = slicer.qMRMLNodeComboBox()
+    self.heartValveBrowserSelector.nodeTypes = ["vtkMRMLSequenceBrowserNode"]
+    self.heartValveBrowserSelector.setNodeTypeLabel("HeartValveBrowser", "vtkMRMLSequenceBrowserNode")
+    self.heartValveBrowserSelector.addAttribute("vtkMRMLSequenceBrowserNode", "ModuleName", "HeartValve")
+    self.heartValveBrowserSelector.setMRMLScene(slicer.mrmlScene)
+    self.heartValveBrowserSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveBrowserSelect)
+    valveFormLayout.addRow("Valve series:", self.heartValveBrowserSelector)
+
+    frame = qt.QFrame()
+    frame.setLayout(qt.QHBoxLayout())
+    valveFormLayout.addRow("Time points:", frame)
+    self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(parent=frame.layout())
+    self.valveSequenceBrowserWidget.readOnly = True
+
+    self.onHeartValveBrowserSelect(self.heartValveBrowserSelector.currentNode())
 
   def setupHeartValveMeasurementSelector(self, valveFormLayout):
     self.heartValveMeasurementSelector = slicer.qMRMLNodeComboBox()
@@ -349,6 +372,13 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     for parameterName in self.nodeSelectorWidgets:
       self.nodeSelectorWidgets[parameterName].disconnect("currentNodeIDChanged(QString)", self.updateParameterNodeFromGUI)
 
+  def onHeartValveBrowserSelect(self, node):
+    logging.debug("Selected heart valve browser node: {0}".format(node.GetName() if node else "None"))
+    self.setHeartValveBrowserNode(node)
+
+  def setHeartValveBrowserNode(self, heartValveBrowserNode):
+    self.valveSequenceBrowserWidget.valveBrowserNode = heartValveBrowserNode
+
   def onHeartValveMeasurementSelect(self, node):
     logging.debug("Selected heart valve measurement node: {0}".format(node.GetName() if node else "None"))
     self.setHeartValveMeasurementNode(node)
@@ -528,7 +558,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           # point is constrained to the annulus contour, show slider to allow adjustment
           if pointPositionAnnulus is not None:
             from HeartValveLib.util import getClosestCurvePointIndexToPosition
-            annulusContourCurve = valveModel.annulusContourCurve
+            annulusContourCurve = valveModel.annulusContourCurveNode
             closestPointIdOnAnnulusCurve = \
               getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
             pointDistanceAlongCurve = \
@@ -636,7 +666,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         if positionSlider.minimum == positionSlider.maximum:
           # Previously it was not present, update slider
           from HeartValveLib.util import getClosestCurvePointIndexToPosition
-          annulusContourCurve = valveModel.annulusContourCurve
+          annulusContourCurve = valveModel.annulusContourCurveNode
           closestPointIdOnAnnulusCurve = \
             getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
           pointDistanceAlongCurve = \
@@ -714,7 +744,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       if field[FIELD_ON_ANNULUS_CONTOUR] is True:
         from HeartValveLib.util import getClosestPointPositionAlongCurve
         closestPointOnAnnulusCurve = \
-          getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, pointPositionAnnulus)
+          getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, pointPositionAnnulus)
         pointPosition = closestPointOnAnnulusCurve
       else:
         # NB: no snapping or restriction
@@ -731,7 +761,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       valveModel = self.inputValveModels[field[FIELD_VALVE_ID]]
       if value is not None:
         from HeartValveLib.util import getPositionAlongCurve
-        updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, value)
+        updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurveNode, 0, value)
         valveModel.setAnnulusMarkupLabel(
           field[FIELD_NAME],
           updatedPointPos
@@ -758,12 +788,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           if pointPositionAnnulus is None:
             # landmark is not present, add it
             from HeartValveLib.util import getPositionAlongCurve
-            pointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, 0)
+            pointPos = getPositionAlongCurve(valveModel.annulusContourCurveNode, 0, 0)
             valveModel.setAnnulusMarkupLabel(field[FIELD_NAME], pointPos)
             positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
             sliderWasBlocked = positionSlider.blockSignals(True)
             positionSlider.minimum = 0
-            positionSlider.maximum = valveModel.annulusContourCurve.GetCurveLengthWorld()
+            positionSlider.maximum = valveModel.annulusContourCurveNode.GetCurveLengthWorld()
             positionSlider.value = 0
             positionSlider.blockSignals(sliderWasBlocked)
             self.onInputFieldValueChanged(inputFieldIndex, 0)
@@ -796,7 +826,6 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         self.measurementPreset.onInputFieldChanged(None, self.inputValveModels, self.inputFieldValues)
       elif widget==self.outputCollapsibleButton:
         self.updateOutput()
-
 
 class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual

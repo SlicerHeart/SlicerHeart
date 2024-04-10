@@ -242,6 +242,9 @@ class ValveModel:
       if self.getValveVolumeSequenceIndex() < 0:
         self.setValveVolumeSequenceIndex(-1)  # by default it is set to -1 (undefined)
 
+      if self.valveLabelsNode is None:
+        self.valveLabelsNode = self.createAnnulusLabelsMarkupNode()
+
       # Initialize to default value (if not set to some other value already)
       self.getCardiacCyclePhase()
 
