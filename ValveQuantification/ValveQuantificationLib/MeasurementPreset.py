@@ -168,7 +168,7 @@ class MeasurementPreset(object):
   def getAnnulusCircumference(self, valveModel, name='Annulus'):
     return {
       KEY_NAME: '{} circumference (3D)'.format(name),
-      KEY_VALUE: "{:.1f}".format(valveModel.annulusContourCurve.GetCurveLengthWorld()),
+      KEY_VALUE: "{:.1f}".format(valveModel.annulusContourCurveNode.GetCurveLengthWorld()),
       KEY_UNIT: 'mm' }
 
   @staticmethod
@@ -455,12 +455,12 @@ class MeasurementPreset(object):
 
   def createAnnulusContourModelColoredByDistance(self, valveModel, planePosition, planeNormal):
 
-    nInterpolatedPoints = valveModel.annulusContourCurve.GetCurvePoints().GetNumberOfPoints()
+    nInterpolatedPoints = valveModel.annulusContourCurveNode.GetCurvePoints().GetNumberOfPoints()
     if nInterpolatedPoints < 2:
       return
 
     curvePoints = vtk.vtkPoints()
-    curvePoints.DeepCopy(valveModel.annulusContourCurve.GetCurvePoints())
+    curvePoints.DeepCopy(valveModel.annulusContourCurveNode.GetCurvePoints())
 
     lines = vtk.vtkCellArray()
     lines.InsertNextCell(nInterpolatedPoints+1)
@@ -485,7 +485,7 @@ class MeasurementPreset(object):
     tubeFilter.SetInputData(curvePoly)
     # Make tube radius 5% larger than the original contour so that when both
     # are shown in 3D then the colored tube is visible.
-    tubeFilter.SetRadius(valveModel.annulusContourCurve.GetDisplayNode().GetGlyphSize() * 1.05)
+    tubeFilter.SetRadius(valveModel.annulusContourCurveNode.GetDisplayNode().GetGlyphSize() * 1.05)
     tubeFilter.SetNumberOfSides(20)
     tubeFilter.SetCapping(False)
     tubeFilter.Update()
@@ -555,7 +555,7 @@ class MeasurementPreset(object):
   def addAnnulusHeightMeasurements(self, valveModel, planePosition, planeNormal):
     """
     """
-    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     [annulusPointsProjected, _, pointsOnPositiveSideOfPlane] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     distancesFromValvePlane = np.linalg.norm(annulusPoints-annulusPointsProjected, axis=0)
@@ -743,7 +743,7 @@ class MeasurementPreset(object):
                                       invertBendingAngleDirection1, invertBendingAngleDirection2, name)
       return
 
-    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     if mode == "2D":
       # Transform annulus points to plane coordinate system
       [annulusPointsProjected, _, _] = \
@@ -1026,7 +1026,7 @@ class MeasurementPreset(object):
     """
     import math
     from HeartValveLib.util import getPointsOnPlane
-    curveIntersectionPoints = getPointsOnPlane(planePosition, planeNormal, valveModel.annulusContourCurve.GetCurve())
+    curveIntersectionPoints = getPointsOnPlane(planePosition, planeNormal, valveModel.annulusContourCurveNode.GetCurve())
 
     # TODO: handle cases when number of intersection points != 2
     # TODO: it would be more robust to sort based on sortDirectionVector position and pick first and last points
@@ -1622,7 +1622,7 @@ class MeasurementPreset(object):
 
     # Create soap bubble surface
 
-    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.2)
 
     # Create fused leaflet surface
