@@ -750,6 +750,8 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         # NB: no snapping or restriction
         pointPosition = pointPositionAnnulus
 
+      valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+      valveBrowser.addCurrentTimePointToSequence(valveModel.valveLabelsSequenceNode)
       valveModel.setAnnulusMarkupLabel(label, pointPosition)
       self.measurementPreset.onInputFieldChanged(field[FIELD_ID], self.inputValveModels, self.inputFieldValues, computeDependentValues=True)
 

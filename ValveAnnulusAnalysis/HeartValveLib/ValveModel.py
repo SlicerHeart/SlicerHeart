@@ -131,6 +131,14 @@ class ValveModel:
                                              labelsMarkupPointsNode.GetID() if labelsMarkupPointsNode else None)
       self.applyProbeToRasTransformToNode(labelsMarkupPointsNode)
 
+      if labelsMarkupPointsNode:
+        self.valveBrowser.makeTimeSequence(labelsMarkupPointsNode)
+        self.moveNodeToHeartValveFolder(labelsMarkupPointsNode)
+
+    @property
+    def valveLabelsSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("AnnulusLabelsPoints")
+
     @property
     def valveRoiModelNode(self):
       """:returns Model node that displays the valve ROI."""
