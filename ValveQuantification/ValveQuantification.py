@@ -764,6 +764,11 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       if value is not None:
         from HeartValveLib.util import getPositionAlongCurve
         updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurveNode, 0, value)
+
+        # Ensure that we can save the current time point
+        valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+        valveBrowser.addCurrentTimePointToSequence(valveModel.valveLabelsSequenceNode)
+
         valveModel.setAnnulusMarkupLabel(
           field[FIELD_NAME],
           updatedPointPos

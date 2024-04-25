@@ -34,6 +34,8 @@ class ValveModel:
       # List of PapillaryModel objects, one for each papillary muscle
       self.papillaryModels = []
 
+      self.metricsResults = {}
+
       self.cardiacCyclePhasePresets = Constants.CARDIAC_CYCLE_PHASE_PRESETS
 
     @property
