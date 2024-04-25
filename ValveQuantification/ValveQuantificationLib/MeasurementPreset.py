@@ -752,7 +752,7 @@ class MeasurementPreset(object):
         HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
       annulusAreaPolyData = self.createPolyDataFromPolygon(annulusPointsProjected.T)
     elif mode == "3D":
-      annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 3.0)
+      annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints)
     else:
       logging.error("Invalid mode: {0}".format(mode))
       return
@@ -1413,8 +1413,10 @@ class MeasurementPreset(object):
         leafletRoi.roiModelNode.GetPolyData(), measurementName + " - " + segmentName)
       leafletRoiSegmentIds.append(leafletRoiSegmentId)
 
-    # Subtract extruded soap bubble from extruded leaflet surface
+    segmentationNode.SetSourceRepresentationToBinaryLabelmap()
+    segmentationNode.RemoveClosedSurfaceRepresentation()
 
+    # Subtract extruded soap bubble from extruded leaflet surface
     modifierSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, soapBubbleClosedSurfaceSegmentId)
 
     fillValue = 1
@@ -1804,7 +1806,8 @@ def extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition, plan
 
 
 def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurfaces):
-  assert leafletSurfaces
+  if not leafletSurfaces:
+    return None
 
   def smoothPolyData(poly, source, iterations=15, relaxationFactor=0.1):
     smoothPolyFilter = vtk.vtkSmoothPolyDataFilter()
