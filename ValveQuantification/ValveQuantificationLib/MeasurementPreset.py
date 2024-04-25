@@ -132,7 +132,6 @@ class MeasurementPreset(object):
 
   def computeMetrics(self, inputValveModels, folderNode):
     self.folderNode = folderNode
-    self.clearFolder()
     self.metricsMessages = []
     self.metricsTable = MetricsTable(self.QUANTIFICATION_RESULTS_IDENTIFIER)
     self.moveNodeToMeasurementFolder(self.metricsTable.metricTableNode)
@@ -253,8 +252,16 @@ class MeasurementPreset(object):
     result[KEY_UNIT] = 'mm'
     result[KEY_SUCCESS] = True
     createModelMethod = self.createArrowModel if oriented else self.createLineModel
-    lineModel = createModelMethod(result[KEY_NAME], point1_valveModel1, point2_valveModel1)
-    self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, lineModel, shParentFolderId)
+
+    lineModelNode = valveModel1.metricsResults.get(result[KEY_NAME])
+    lineModelSequence = valveModel1.valveBrowser.valveBrowserNode.GetSequenceNode(lineModelNode)
+    if lineModelSequence:
+      valveModel1.valveBrowser.addCurrentTimePointToSequence(lineModelSequence)
+    lineModelNode = createModelMethod(result[KEY_NAME], point1_valveModel1, point2_valveModel1, currentModelNode=lineModelNode)
+    if lineModelSequence is None:
+      valveModel1.valveBrowser.makeTimeSequence(lineModelNode)
+    valveModel1.metricsResults[result[KEY_NAME]] = lineModelNode
+    self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, lineModelNode, shParentFolderId)
 
     return result
 
@@ -343,7 +350,14 @@ class MeasurementPreset(object):
     if radius is None:
       radius = valveModel.getAnnulusContourRadius() * 1.1
 
-    curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility)
+    curveModel = valveModel.metricsResults.get(result[KEY_NAME])
+    curveModelSequence = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(curveModel)
+    if curveModelSequence:
+      valveModel.valveBrowser.addCurrentTimePointToSequence(curveModelSequence)
+    curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility, currentModelNode=curveModel)
+    if curveModelSequence is None:
+      valveModel.valveBrowser.makeTimeSequence(curveModel)
+    valveModel.metricsResults[result[KEY_NAME]] = curveModel
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, curveModel, shParentFolderId)
 
     return result
@@ -571,13 +585,30 @@ class MeasurementPreset(object):
     self.addMeasurement({KEY_NAME: 'Annulus height', KEY_VALUE: "{:.1f}".format(annulusHeightAbove + annulusHeightBelow), KEY_UNIT: 'mm'})
     self.addMeasurement({KEY_NAME: 'Annulus height above', KEY_VALUE: "{:.1f}".format(annulusHeightAbove), KEY_UNIT: 'mm'})
     self.addMeasurement({KEY_NAME: 'Annulus height below', KEY_VALUE: "{:.1f}".format(annulusHeightBelow), KEY_UNIT: 'mm'})
+
     # Add annulus height lines
+    annulusTopLineModel = valveModel.metricsResults.get('Annulus height (above)')
+    annulusTopLineSequence = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(annulusTopLineModel)
+    if annulusTopLineSequence:
+      valveModel.valveBrowser.addCurrentTimePointToSequence(annulusTopLineSequence)
     annulusTopLineModel = self.createLineModel('Annulus height (above)', annulusPoints[:,pointsAbovePlane][:,annulusTopPointIndex],
-      annulusPointsProjected[:,pointsAbovePlane][:,annulusTopPointIndex])
+      annulusPointsProjected[:,pointsAbovePlane][:,annulusTopPointIndex], currentModelNode=annulusTopLineModel)
+    if annulusTopLineSequence is None:
+      valveModel.valveBrowser.makeTimeSequence(annulusTopLineModel)
+    valveModel.metricsResults['Annulus height (above)'] = annulusTopLineModel
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusTopLineModel)
+
+    annulusBottomLineModel = valveModel.metricsResults.get('Annulus height (below)')
+    annulusBottomLineSequence = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(annulusBottomLineModel)
+    if annulusBottomLineSequence:
+      valveModel.valveBrowser.addCurrentTimePointToSequence(annulusBottomLineSequence)
     annulusBottomLineModel = self.createLineModel('Annulus height (below)', annulusPoints[:,pointsBelowPlane][:,annulusBottomPointIndex],
-      annulusPointsProjected[:,pointsBelowPlane][:,annulusBottomPointIndex])
+        annulusPointsProjected[:,pointsBelowPlane][:,annulusBottomPointIndex], currentModelNode=annulusBottomLineModel)
+    if annulusBottomLineSequence is None:
+      valveModel.valveBrowser.makeTimeSequence(annulusBottomLineModel)
+    valveModel.metricsResults['Annulus height (below)'] = annulusBottomLineModel
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusBottomLineModel)
+
     # Add annulus plane model
     self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal)
     # Add annulus contour colored by annulus height
@@ -1086,7 +1117,7 @@ class MeasurementPreset(object):
     return leafletSurfacePolyData, leafletSurfaceArea3d
 
   @staticmethod
-  def createCurveModel(modelName, curvePoints, radius=0.25, color=None, tubeResolution=8, visibility=False):
+  def createCurveModel(modelName, curvePoints, radius=0.25, color=None, tubeResolution=8, visibility=False, currentModelNode=None):
     """
     Create a line model (line segment with spheres at the endpoints)
     :param modelName: Name of the created model node
@@ -1124,7 +1155,11 @@ class MeasurementPreset(object):
     triangles.Update()
 
     modelsLogic = slicer.modules.models.logic()
-    modelNode = modelsLogic.AddModel(triangles.GetOutput())
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(triangles.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(triangles.GetOutput())
     modelNode.SetName(modelName)
     modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
@@ -1223,7 +1258,7 @@ class MeasurementPreset(object):
     return triangulator.GetOutput()
 
   @staticmethod
-  def createLineModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False):
+  def createLineModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False, currentModelNode=None):
     """
     Create a line model (line segment with spheres at the endpoints)
     :param modelName: Name of the created model node
@@ -1264,7 +1299,11 @@ class MeasurementPreset(object):
 
     modelsLogic = slicer.modules.models.logic()
     polyDataAppend.Update()
-    modelNode = modelsLogic.AddModel(polyDataAppend.GetOutput())
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(polyDataAppend.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(polyDataAppend.GetOutput())
     modelNode.SetName(modelName)
     modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
@@ -1272,7 +1311,7 @@ class MeasurementPreset(object):
     return modelNode
 
   @staticmethod
-  def createArrowModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False):
+  def createArrowModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False, currentModelNode=None):
     """
     Create an arrow model from pos1 to pos2
     :param modelName: Name of the created model node
@@ -1534,7 +1573,6 @@ class MeasurementPreset(object):
     modelNode.GetDisplayNode().SetSpecular(0.1)
     modelNode.GetDisplayNode().SetPower(10)
     modelNode.GetDisplayNode().BackfaceCullingOff()
-
     modelNode.GetDisplayNode().SetActiveScalarName('Distance')
 
     useCustomColorNode = True
