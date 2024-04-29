@@ -253,7 +253,7 @@ class MeasurementPreset(object):
     result[KEY_SUCCESS] = True
     createModelMethod = self.createArrowModel if oriented else self.createLineModel
 
-    lineModelNode = self.getOrAddMetricModelNode(point1_valveModel1, result[KEY_NAME])
+    lineModelNode = self.getOrAddMetricModelNode(valveModel1, result[KEY_NAME])
     lineModelNode = createModelMethod(result[KEY_NAME], point1_valveModel1, point2_valveModel1, currentModelNode=lineModelNode)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, lineModelNode, shParentFolderId)
 
@@ -598,12 +598,14 @@ class MeasurementPreset(object):
     # Add annulus plane model
     metricName = 'Annulus plane'
     annulusPlaneModel = self.getOrAddMetricModelNode(valveModel, metricName)
-    annulusPlaneModel = self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal, currentModelNode=annulusPlaneModel)
+    annulusPlaneModel = self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal,
+                                                     currentModelNode=annulusPlaneModel)
 
     # Add annulus contour colored by annulus height
     metricName = 'Annulus contour colored by height'
     annulusContourModel = self.getOrAddMetricModelNode(valveModel, metricName)
-    annulusContourModel = self.createAnnulusContourModelColoredByDistance(valveModel, planePosition, planeNormal, currentModelNode=annulusContourModel)
+    annulusContourModel = self.createAnnulusContourModelColoredByDistance(valveModel, planePosition, planeNormal,
+                                                                          currentModelNode=annulusContourModel)
 
   def addCoaptationMeasurements(self, valveModel):
     for coaptationModel in valveModel.coaptationModels:
@@ -618,8 +620,10 @@ class MeasurementPreset(object):
         self.metricsMessages.append("No coaptation model found. Skipping.")
         continue
 
-      self.addSurfaceAreaMeasurements("{} area (3D)".format(namePrefix),
-                                      surfaceModelNode.GetPolyData(), valveModel)
+      metricName = f'{namePrefix} area (3D)'
+      surfaceModel = self.getOrAddMetricModelNode(valveModel, metricName)
+      self.addSurfaceAreaMeasurements(metricName, surfaceModelNode.GetPolyData(), valveModel,
+                                      currentModelNode=surfaceModel)
 
       self.addMeasurement({KEY_NAME: '{} base line length'.format(namePrefix),
                            KEY_VALUE: "{:.1f}".format(coaptationModel.baseLine.GetCurveLengthWorld()),
@@ -801,12 +805,18 @@ class MeasurementPreset(object):
           [_, planeNormalPlusX, _, planeNormalPlusY, planePosition, halvesNames, _] = \
             self.getClipPlanesNormalsOrigin(valveModel, planePosition, planeNormal, quadrantPointLabels,
                                             clipBetweenQuadrantPoints=clipBetweenQuadrantPoints)
-          self.addCurveBendingAngleMeasurement(f'{name} bending angle{suffix} ({halvesNames[0]}-{halvesNames[1]})',
+          metricName = f'{name} bending angle{suffix} ({halvesNames[0]}-{halvesNames[1]})'
+          angleModel = self.getOrAddMetricModelNode(valveModel, metricName)
+          self.addCurveBendingAngleMeasurement(metricName,
                                                annulusPoints, planePosition, planeNormalPlusX, valveModel,
-                                               invertDirection=invertBendingAngleDirection1)
-          self.addCurveBendingAngleMeasurement(f'{name} bending angle{suffix} ({halvesNames[2]}-{halvesNames[3]})',
+                                               invertDirection=invertBendingAngleDirection1,
+                                               currentModelNode=angleModel)
+          metricName = f'{name} bending angle{suffix} ({halvesNames[2]}-{halvesNames[3]})'
+          angleModel = self.getOrAddMetricModelNode(valveModel, metricName)
+          self.addCurveBendingAngleMeasurement(metricName,
                                                annulusPoints, planePosition, planeNormalPlusY, valveModel,
-                                               invertDirection=invertBendingAngleDirection2)
+                                               invertDirection=invertBendingAngleDirection2,
+                                               currentModelNode=angleModel)
 
         [[planeMinusX, planePlusX, planeMinusY, planePlusY], halvesNames, quadrantNames] = \
           self.getClipPlanes(valveModel, planePosition, planeNormal, quadrantPointLabels,
@@ -1029,7 +1039,7 @@ class MeasurementPreset(object):
                                                    valveModel, planePositions[1], planeNormals[1], name))
 
   def addCurveBendingAngleMeasurement(self, name, curvePoints, separatingPlanePosition, separatingPlaneNormal,
-                                      valveModel, invertDirection=False):
+                                      valveModel, invertDirection=False, currentModelNode=None):
     """Separate the point set using separating plane. Fit a plane to each, and report the orientation difference."""
 
     [_, _, pointsOnPositiveSideOfPlane] = \
@@ -1060,10 +1070,13 @@ class MeasurementPreset(object):
          -thickness / 2.0, thickness / 2.0])
 
       if i == 0:
-        planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color=[0.0, 0.0, 0.2]))
+        if currentModelNode:
+          planeModels.append(currentModelNode)
+        else:
+          planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color=[0.0, 0.0, 0.2]))
         self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, planeModels[i])
       elif i != 0 and len(planeModels):
-        planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds,
+        planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color=[0.0, 0.0, 0.2],
                                                  nodeToBeAddedTo=planeModels[0]))
 
     # Compute angle
@@ -1094,7 +1107,7 @@ class MeasurementPreset(object):
     p1p2SameDirectionAsSortDirection = (vtk.vtkMath.AngleBetweenVectors(sortDirectionVector, p2-p1) < math.pi/2)
     return [p1, p2] if p1p2SameDirectionAsSortDirection else [p2, p1]
 
-  def addLeafletSurfaceArea3D(self, valveModel, leafletSegmentId, measurementName):
+  def addLeafletSurfaceArea3D(self, valveModel, leafletSegmentId, measurementName, currentModelNode=None):
 
     # Get leaflet surface
     leafletModel = valveModel.findLeafletModel(leafletSegmentId)
@@ -1117,8 +1130,12 @@ class MeasurementPreset(object):
     color = segmentation.GetSegment(leafletSegmentId).GetColor()
 
     # Create a copy of the leaflet surface
-    leafletSurfaceModelNode = self.getOrAddMetricModelNode(valveModel, measurementName)
-    leafletSurfaceModelNode.SetAndObservePolyData(leafletSurfacePolyData)
+    if currentModelNode:
+      leafletSurfaceModelNode = currentModelNode
+      leafletSurfaceModelNode.SetAndObservePolyData(leafletSurfacePolyData)
+    else:
+      modelsLogic = slicer.modules.models.logic()
+      leafletSurfaceModelNode = modelsLogic.AddModel(leafletSurfacePolyData)
     leafletSurfaceModelNode.SetName(measurementName)
     leafletSurfaceModelNode.GetDisplayNode().SetColor(color)
     leafletSurfaceModelNode.GetDisplayNode().SetVisibility(False)
@@ -1228,14 +1245,15 @@ class MeasurementPreset(object):
       modelsLogic = slicer.modules.models.logic()
       modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutputPort())
       modelNode.SetName(modelName)
-      displayNode = modelNode.GetDisplayNode()
-      displayNode.SetVisibility(visibility)
-      displayNode.SetOpacity(opacity)
-      displayNode.SetColor(color)
-      if displayAsGrid:
-        displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
-        displayNode.BackfaceCullingOff()
-        displayNode.LightingOff()  # don't make the grid darker if it is rotated
+
+    displayNode = modelNode.GetDisplayNode()
+    displayNode.SetVisibility(visibility)
+    displayNode.SetOpacity(opacity)
+    displayNode.SetColor(color)
+    if displayAsGrid:
+      displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
+      displayNode.BackfaceCullingOff()
+      displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
     return modelNode
 
@@ -1372,7 +1390,7 @@ class MeasurementPreset(object):
     # modelNode.GetDisplayNode().LightingOff() # don't make the line edges darker
     return modelNode
 
-  def addSegmentVolumeMeasurement(self, measurementName, color, segmentationNode, segmentID):
+  def addSegmentVolumeMeasurement(self, measurementName, color, segmentationNode, segmentID, currentModelNode=None):
     import vtkSegmentationCorePython as vtkSegmentationCore
 
     segmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segmentID)
@@ -1413,7 +1431,11 @@ class MeasurementPreset(object):
     modelsLogic = slicer.modules.models.logic()
     modelMesh = vtk.vtkPolyData()
     segmentationNode.GetClosedSurfaceRepresentation(segmentID, modelMesh)
-    volumeModelNode = modelsLogic.AddModel(modelMesh)
+    if currentModelNode:
+      volumeModelNode = currentModelNode
+      volumeModelNode.SetAndObservePolyData(modelMesh)
+    else:
+      volumeModelNode = modelsLogic.AddModel(modelMesh)
     volumeModelNode.SetName(measurementName)
     volumeModelNode.GetDisplayNode().SetColor(color)
     volumeModelNode.GetDisplayNode().SetVisibility(False)
@@ -1529,7 +1551,8 @@ class MeasurementPreset(object):
 
     # Smooth the segment to reduce jaggedness of the generated surface. It reduces volume by about 1-2%.
     valveModel.smoothSegment(segmentationNode, leafletClosedSurfaceSegmentId, kernelSizePixel=[3,3,3], method='median')
-    self.addSegmentVolumeMeasurement(measurementName, color, segmentationNode, leafletClosedSurfaceSegmentId)
+    volumeModel = self.getOrAddMetricModelNode(valveModel, measurementName)
+    self.addSegmentVolumeMeasurement(measurementName, color, segmentationNode, leafletClosedSurfaceSegmentId, volumeModel)
 
     for leafletRoiSegmentId in leafletRoiSegmentIds:
       leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletClosedSurfaceSegmentId)
@@ -1706,8 +1729,11 @@ class MeasurementPreset(object):
                                                        segment.GetColor(), leafletSegmentationNode,
                                                        segmentId)
       try:
-        leafletSurfacePolyData, leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId,
-                                                            "Leaflet area - {0} (3D)".format(segment.GetName()))
+        metricName = "Leaflet area - {0}".format(segment.GetName())
+        leafletSurfaceModelNode = self.getOrAddMetricModelNode(valveModel, metricName)
+        leafletSurfacePolyData, leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId, metricName,
+                                                                                  currentModelNode=leafletSurfaceModelNode)
+
         if leafletSurfaceArea is not None:
           # NB: estimating leaflet thickness by dividing volume by surface area
           allLeafletThickness.append(leafletVolume/leafletSurfaceArea)
@@ -1899,7 +1925,7 @@ class MeasurementPreset(object):
     modelNode = valveModel.metricsResults.get(nodeName)
     if modelNode is None:
       modelsLogic = slicer.modules.models.logic()
-      modelNode = modelsLogic.AddModel()
+      modelNode = modelsLogic.AddModel(vtk.vtkPolyData())
       modelNode.SetName(nodeName)
       valveModel.metricsResults[nodeName] = modelNode
 
@@ -1909,8 +1935,6 @@ class MeasurementPreset(object):
     sequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(modelNode)
     if sequenceNode is None:
       sequenceNode = valveModel.valveBrowser.makeTimeSequence(modelNode)
-
-    sequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(modelNode)
     valveModel.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
 
     return modelNode

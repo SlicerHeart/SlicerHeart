@@ -283,8 +283,10 @@ class MeasurementPresetCavc(MeasurementPreset):
     marginLineModelNode.GetDisplayNode().SetColor(1, 0.5, 0)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, marginLineModelNode)
 
-    self.addSurfaceAreaMeasurements("{} area (3D)".format(namePrefix),
-                                    appendSurface.GetOutput(), valveModel)
+    surfaceMetricName = "{} area (3D)".format(namePrefix)
+    surfaceModel = self.getOrAddMetricModelNode(valveModel, surfaceMetricName)
+    self.addSurfaceAreaMeasurements(surfaceMetricName, appendSurface.GetOutput(), valveModel,
+                                    currentModelNode=surfaceModel)
 
     self.addMeasurement({KEY_NAME: '{} base line length'.format(namePrefix),
                          KEY_VALUE: "{:.1f}".format(np.sum(totalBaselineLengths)),
