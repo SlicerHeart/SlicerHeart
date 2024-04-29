@@ -362,10 +362,15 @@ class ValveBrowser:
         valveModel.updateValveNodeNames()
 
     def makeTimeSequence(self, proxyNode):
-      """Make a time sequence from a single node and add it to this browser node"""
-      if self.valveBrowserNode.GetSequenceNode(proxyNode):
+      """
+      Make a time sequence from a single node and add it to this browser node
+      :param proxyNode: node that a sequence should be created for
+      :return: sequence node
+      """
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(proxyNode)
+      if sequenceNode:
         # It is already a sequence node
-        return
+        return sequenceNode
 
       sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode",
                                                         slicer.mrmlScene.GetUniqueNameByString(proxyNode.GetName()+"Sequence"))
@@ -375,6 +380,7 @@ class ValveBrowser:
       slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(self.valveBrowserNode, proxyNode)
       # Prevent automatic creation of missing items (it would clutter the scene and would be difficult to tell what information is actually specified)
       self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
+      return sequenceNode
 
     def addCurrentTimePointToSequence(self, sequenceNode):
       """Make a time sequence from a single node and add it to this browser node"""
