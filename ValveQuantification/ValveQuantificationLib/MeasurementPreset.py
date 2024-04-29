@@ -253,14 +253,8 @@ class MeasurementPreset(object):
     result[KEY_SUCCESS] = True
     createModelMethod = self.createArrowModel if oriented else self.createLineModel
 
-    lineModelNode = valveModel1.metricsResults.get(result[KEY_NAME])
-    lineModelSequence = valveModel1.valveBrowser.valveBrowserNode.GetSequenceNode(lineModelNode)
-    if lineModelSequence:
-      valveModel1.valveBrowser.addCurrentTimePointToSequence(lineModelSequence)
+    lineModelNode = self.getOrAddMetricModelNode(point1_valveModel1, result[KEY_NAME])
     lineModelNode = createModelMethod(result[KEY_NAME], point1_valveModel1, point2_valveModel1, currentModelNode=lineModelNode)
-    if lineModelSequence is None:
-      valveModel1.valveBrowser.makeTimeSequence(lineModelNode)
-    valveModel1.metricsResults[result[KEY_NAME]] = lineModelNode
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, lineModelNode, shParentFolderId)
 
     return result
@@ -350,14 +344,9 @@ class MeasurementPreset(object):
     if radius is None:
       radius = valveModel.getAnnulusContourRadius() * 1.1
 
-    curveModel = valveModel.metricsResults.get(result[KEY_NAME])
-    curveModelSequence = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(curveModel)
-    if curveModelSequence:
-      valveModel.valveBrowser.addCurrentTimePointToSequence(curveModelSequence)
+    curveModel = self.getOrAddMetricModelNode(pointPos1, result[KEY_NAME])
     curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility, currentModelNode=curveModel)
-    if curveModelSequence is None:
-      valveModel.valveBrowser.makeTimeSequence(curveModel)
-    valveModel.metricsResults[result[KEY_NAME]] = curveModel
+
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, curveModel, shParentFolderId)
 
     return result
@@ -456,7 +445,7 @@ class MeasurementPreset(object):
     result[KEY_SUCCESS] = True
     return result
 
-  def createAnnulusPlaneModel(self, valveModel, annulusPoints, planePosition, planeNormal, name="Annulus plane"):
+  def createAnnulusPlaneModel(self, valveModel, annulusPoints, planePosition, planeNormal, name="Annulus plane", currentModelNode=None):
     [_, annulusPointsProjected_Plane, _] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     thickness = 0.2 # mm
@@ -464,14 +453,16 @@ class MeasurementPreset(object):
     planeBoundsMax = annulusPointsProjected_Plane.max(axis=1)[0:2]
     margin = [ (planeBoundsMax[0]-planeBoundsMin[0])*0.05,  (planeBoundsMax[1]-planeBoundsMin[1])*0.05] # make the plane a bit larger than the annulus (by a 5% margin)
     planeBounds = np.array([planeBoundsMin[0]-margin[0], planeBoundsMax[0]+margin[0], planeBoundsMin[1]-margin[1], planeBoundsMax[1]+margin[1], -thickness/2.0, thickness/2.0])
-    annulusPlane = self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color = [0.0,0.0,0.2])
+    if currentModelNode:
+      currentModelNode.SetAndObservePolyData(None)
+    annulusPlane = self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color = [0.0,0.0,0.2], nodeToBeAddedTo=currentModelNode)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusPlane)
 
-  def createAnnulusContourModelColoredByDistance(self, valveModel, planePosition, planeNormal):
+  def createAnnulusContourModelColoredByDistance(self, valveModel, planePosition, planeNormal, currentModelNode=None):
 
     nInterpolatedPoints = valveModel.annulusContourCurveNode.GetCurvePoints().GetNumberOfPoints()
     if nInterpolatedPoints < 2:
-      return
+      return None
 
     curvePoints = vtk.vtkPoints()
     curvePoints.DeepCopy(valveModel.annulusContourCurveNode.GetCurvePoints())
@@ -527,7 +518,11 @@ class MeasurementPreset(object):
     triangles.Update()
 
     modelsLogic = slicer.modules.models.logic()
-    modelNode = modelsLogic.AddModel(triangles.GetOutput())
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(triangles.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(triangles.GetOutput())
     modelNode.SetName('Annulus contour colored by height')
     displayNode = modelNode.GetDisplayNode()
     displayNode.SetVisibility(False)
@@ -565,6 +560,7 @@ class MeasurementPreset(object):
     displayNode.SetScalarRange(distanceRange)  # just in case if switching to manual scalar range
 
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, modelNode)
+    return modelNode
 
   def addAnnulusHeightMeasurements(self, valveModel, planePosition, planeNormal):
     """
@@ -587,32 +583,27 @@ class MeasurementPreset(object):
     self.addMeasurement({KEY_NAME: 'Annulus height below', KEY_VALUE: "{:.1f}".format(annulusHeightBelow), KEY_UNIT: 'mm'})
 
     # Add annulus height lines
-    annulusTopLineModel = valveModel.metricsResults.get('Annulus height (above)')
-    annulusTopLineSequence = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(annulusTopLineModel)
-    if annulusTopLineSequence:
-      valveModel.valveBrowser.addCurrentTimePointToSequence(annulusTopLineSequence)
-    annulusTopLineModel = self.createLineModel('Annulus height (above)', annulusPoints[:,pointsAbovePlane][:,annulusTopPointIndex],
+    metricName = 'Annulus height (above)'
+    annulusTopLineModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusTopLineModel = self.createLineModel(metricName, annulusPoints[:,pointsAbovePlane][:,annulusTopPointIndex],
       annulusPointsProjected[:,pointsAbovePlane][:,annulusTopPointIndex], currentModelNode=annulusTopLineModel)
-    if annulusTopLineSequence is None:
-      valveModel.valveBrowser.makeTimeSequence(annulusTopLineModel)
-    valveModel.metricsResults['Annulus height (above)'] = annulusTopLineModel
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusTopLineModel)
 
-    annulusBottomLineModel = valveModel.metricsResults.get('Annulus height (below)')
-    annulusBottomLineSequence = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(annulusBottomLineModel)
-    if annulusBottomLineSequence:
-      valveModel.valveBrowser.addCurrentTimePointToSequence(annulusBottomLineSequence)
-    annulusBottomLineModel = self.createLineModel('Annulus height (below)', annulusPoints[:,pointsBelowPlane][:,annulusBottomPointIndex],
+    metricName = 'Annulus height (below)'
+    annulusBottomLineModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusBottomLineModel = self.createLineModel(metricName, annulusPoints[:,pointsBelowPlane][:,annulusBottomPointIndex],
         annulusPointsProjected[:,pointsBelowPlane][:,annulusBottomPointIndex], currentModelNode=annulusBottomLineModel)
-    if annulusBottomLineSequence is None:
-      valveModel.valveBrowser.makeTimeSequence(annulusBottomLineModel)
-    valveModel.metricsResults['Annulus height (below)'] = annulusBottomLineModel
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusBottomLineModel)
 
     # Add annulus plane model
-    self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal)
+    metricName = 'Annulus plane'
+    annulusPlaneModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusPlaneModel = self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal, currentModelNode=annulusPlaneModel)
+
     # Add annulus contour colored by annulus height
-    self.createAnnulusContourModelColoredByDistance(valveModel, planePosition, planeNormal)
+    metricName = 'Annulus contour colored by height'
+    annulusContourModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusContourModel = self.createAnnulusContourModelColoredByDistance(valveModel, planePosition, planeNormal, currentModelNode=annulusContourModel)
 
   def addCoaptationMeasurements(self, valveModel):
     for coaptationModel in valveModel.coaptationModels:
@@ -787,7 +778,9 @@ class MeasurementPreset(object):
       return
 
     # Full area
-    self.addSurfaceAreaMeasurements(f'{name} area ({mode})', annulusAreaPolyData, valveModel)
+    metricName = f'{name} area ({mode})'
+    surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    surfaceAreaModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData, valveModel)
 
     # Count how many quadrant separator points are defined (must be 4 for a complete definition)
     numberOfFoundLabels = 0
@@ -847,28 +840,55 @@ class MeasurementPreset(object):
           valveModel.setAnnulusMarkupLabel('MX', np.mean(np.array([pointMA, pointMP]), axis=0))
 
         # Halves
-        self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[0]})', annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX]
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[0]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX], currentModelNode=surfaceAreaModel
         )
-        self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[1]})', annulusAreaPolyData, valveModel, clipPlanes=[planePlusX]
+
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[1]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planePlusX], currentModelNode=surfaceAreaModel
         )
-        self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[2]})', annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY]
+
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[2]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY],
+          currentModelNode=surfaceAreaModel
         )
-        self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[3]})', annulusAreaPolyData, valveModel, clipPlanes=[planePlusY]
+
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[3]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planePlusY],
+          currentModelNode=surfaceAreaModel
         )
 
         # Quadrants
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[0]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planeMinusX, planeMinusY])
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[1]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planePlusX, planeMinusY])
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[2]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planeMinusX, planePlusY])
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[3]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planePlusX, planePlusY])
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[0]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                                        valveModel, clipPlanes=[planeMinusX, planeMinusY],
+                                                        currentModelNode=quadrantModel)
+
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[1]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                                        valveModel, clipPlanes=[planePlusX, planeMinusY])
+
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[2]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                                        valveModel, clipPlanes=[planeMinusX, planePlusY],
+                                                        currentModelNode=quadrantModel)
+
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[3]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planePlusX, planePlusY],
+                                        currentModelNode=quadrantModel)
 
   @staticmethod
   def createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, radiusScalingFactor=1.0):
@@ -927,9 +947,13 @@ class MeasurementPreset(object):
 
     return annulusAreaPolyData
 
-  def addSurfaceAreaMeasurements(self, name, polyData, valveModel, clipPlanes=None, visibility=False):
+  def addSurfaceAreaMeasurements(self, name, polyData, valveModel, clipPlanes=None, visibility=False, currentModelNode=None):
     modelsLogic = slicer.modules.models.logic()
-    annulusArea3dModel = modelsLogic.AddModel(polyData)
+    if currentModelNode:
+      annulusArea3dModel = currentModelNode
+      annulusArea3dModel.SetAndObservePolyData(polyData)
+    else:
+      annulusArea3dModel = modelsLogic.AddModel(polyData)
     annulusArea3dModel.SetName(name)
     annulusArea3dModel.GetDisplayNode().SetVisibility(visibility)
     annulusArea3dModel.GetDisplayNode().SetColor(valveModel.getBaseColor())
@@ -965,7 +989,7 @@ class MeasurementPreset(object):
     annulusArea2d = massProperties.GetSurfaceArea()
     self.addMeasurement({KEY_NAME: name, KEY_VALUE: "{:.1f}".format(annulusArea2d), KEY_UNIT: 'mm*mm'})
 
-    return annulusArea3dModel.GetPolyData()
+    return annulusArea3dModel
 
   def addSurfaceAngleMeasurement(self, name, polyDataA, polyDataB, valveModel, visibility = False):
     """This method computes angle between two surfaces by fitting plane to them.
@@ -1093,8 +1117,8 @@ class MeasurementPreset(object):
     color = segmentation.GetSegment(leafletSegmentId).GetColor()
 
     # Create a copy of the leaflet surface
-    modelsLogic = slicer.modules.models.logic()
-    leafletSurfaceModelNode = modelsLogic.AddModel(leafletSurfacePolyData)
+    leafletSurfaceModelNode = self.getOrAddMetricModelNode(valveModel, measurementName)
+    leafletSurfaceModelNode.SetAndObservePolyData(leafletSurfacePolyData)
     leafletSurfaceModelNode.SetName(measurementName)
     leafletSurfaceModelNode.GetDisplayNode().SetColor(color)
     leafletSurfaceModelNode.GetDisplayNode().SetVisibility(False)
@@ -1105,6 +1129,7 @@ class MeasurementPreset(object):
     leafletSurfaceModelNode.GetDisplayNode().SetSpecular(0.1)
     leafletSurfaceModelNode.GetDisplayNode().SetPower(10)
     leafletSurfaceModelNode.GetDisplayNode().BackfaceCullingOff()
+
     # Place model into subject and transform hierarchy
     self.moveNodeToMeasurementFolder(leafletSurfaceModelNode)
     leafletSurfaceModelNode.SetAndObserveTransformNodeID(leafletTransformNodeId)
@@ -1840,8 +1865,8 @@ class MeasurementPreset(object):
       geometryFilter.Update()
       leafletSurface = geometryFilter.GetOutput()
 
-      modelsLogic = slicer.modules.models.logic()
-      modelNode = modelsLogic.AddModel(leafletSurface)
+
+      modelNode = self.getOrAddMetricModelNode(valveModel, metricName)
       modelNode.GetDisplayNode().SetVisibility(False)
       modelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
       modelNode.GetDisplayNode().SetColor(leafletModel.getLeafletColor())
@@ -1862,3 +1887,30 @@ class MeasurementPreset(object):
       self.addMeasurement({KEY_NAME: metricName,
                            KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                            KEY_UNIT: 'mm*mm'})
+
+  def getOrAddMetricModelNode(self, valveModel, nodeName, createSequence=True):
+    """
+    Get or create a model node for a metric
+    :param valveModel: ValveModel
+    :param nodeName: name of the model node to get or create
+    :param createSequence: if True then a sequence node is created and a time point is added to it
+    :return: model node
+    """
+    modelNode = valveModel.metricsResults.get(nodeName)
+    if modelNode is None:
+      modelsLogic = slicer.modules.models.logic()
+      modelNode = modelsLogic.AddModel()
+      modelNode.SetName(nodeName)
+      valveModel.metricsResults[nodeName] = modelNode
+
+    if not createSequence:
+      return modelNode
+
+    sequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(modelNode)
+    if sequenceNode is None:
+      sequenceNode = valveModel.valveBrowser.makeTimeSequence(modelNode)
+
+    sequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(modelNode)
+    valveModel.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+
+    return modelNode
