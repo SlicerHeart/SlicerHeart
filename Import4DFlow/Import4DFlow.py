@@ -62,10 +62,13 @@ class Import4DFlowParameterNode:
     inputPlane: vtkMRMLMarkupsPlaneNode
     inputMaskSegmentation: vtkMRMLSegmentationNode
     inputMaskSegmentID: str
+    outputStreamlinesModel: vtkMRMLModelNode
     outputSpeedProfileModel: vtkMRMLModelNode
     outputSpeedProfileTable: vtkMRMLTableNode
     samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2  # distance unit
     speedThreshold: Annotated[float, WithinRange(0.0, 3), SingleStep(0.01), Default(0.1)]  # m/sec
+    streamlinesMaximumLength: Annotated[float, WithinRange(10, 300)] = 200  # distance unit
+    streamlinesBidirectional: bool = True
 
 #
 # Import4DFlowWidget
@@ -309,7 +312,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if success:
             slicer.util.infoDisplay("Export successfully completed.")
 
-
     def onSampleFlowFieldButton(self) -> None:
         """
         Run processing when user clicks "Sample flow field" button.
@@ -322,9 +324,13 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.outputTransform,
                 self._parameterNode.outputTransform.GetNodeReference("magnitudeVolume"),
                 self._parameterNode.samplingDistance,
+                self._parameterNode.outputStreamlinesModel,
                 self._parameterNode.outputSpeedProfileModel,
                 self._parameterNode.inputMaskSegmentation,
-                self._parameterNode.inputMaskSegmentID)
+                self._parameterNode.inputMaskSegmentID,
+                self._parameterNode.streamlinesMaximumLength,
+                self._parameterNode.streamlinesBidirectional,
+                self._parameterNode.speedThreshold)
 
             self.addLog("Compute speed profile table...")
             self._parameterNode.outputSpeedProfileTable = self.logic.computeSpeedProfileTable(
@@ -797,9 +803,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             gridTransformNode: vtkMRMLTransformNode,
             magnitudeVolumeNode: vtkMRMLScalarVolumeNode,
             samplingDistanceMm: float = 2.0,
-            samplingGridModelNode: vtkMRMLModelNode = None,
+            outputStreamlinesModel: vtkMRMLModelNode = None,
+            outputSpeedProfileModel: vtkMRMLModelNode = None,
             maskSegmentationNode: vtkMRMLSegmentationNode = None,
-            maskSegmentID: str = None) -> vtkMRMLModelNode:
+            maskSegmentID: str = None,
+            streamlinesMaximumLengthMm: int = 100,
+            streamlinesBidirectional: bool = True,
+            streamlinesSpeedThresholdMPerSec: float = 0.01) -> vtkMRMLModelNode:
 
         if not crossSectionPlaneNode:
             raise ValueError("Cross-section plane node is invalid")
@@ -823,8 +833,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 originalTransformVisibility = False
 
             originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
-            for itemNumber in range(transformSequenceBrowserNode.GetNumberOfItems()):
-                self.log("Sampling flow field with plane... ({item}/{count})".format(item=itemNumber+1, count=transformSequenceBrowserNode.GetNumberOfItems()))
+            numberOfItems = transformSequenceBrowserNode.GetNumberOfItems()
+            for itemNumber in range(numberOfItems):
+                self.log("Sampling flow field with plane... ({item}/{count})".format(item=itemNumber+1, count=numberOfItems))
 
                 transformSequenceBrowserNode.SetSelectedItemNumber(itemNumber)
 
@@ -852,47 +863,52 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 # Save model to plane
                 modelsLogic = slicer.modules.models.logic()
-                if not samplingGridModelNode:
-                    samplingGridModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "CrossSectionSamplingGrid")
-                    samplingGridModelNode.CreateDefaultDisplayNodes()
-                    displayNode = samplingGridModelNode.GetDisplayNode()
+                if not outputSpeedProfileModel:
+                    outputSpeedProfileModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Speed Profile")
+                    outputSpeedProfileModel.CreateDefaultDisplayNodes()
+                    displayNode = outputSpeedProfileModel.GetDisplayNode()
                     displayNode.SetColor(1, 1, 0)
                     displayNode.SetEdgeVisibility(True)
                     displayNode.BackfaceCullingOff()
                     displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
                 # Add the model to the same sequence browser as the input 4D flow field
+                for modelNode in [outputStreamlinesModel,  outputSpeedProfileModel]:
+                    if not modelNode:
+                        continue
 
-                # Make sure the model is in the same sequence browser as the transform sequence and
-                # model is in not a proxy node of any other sequence browsers
-                foundBrowserNodes = vtk.vtkCollection()
-                sequencesLogic = slicer.modules.sequences.logic()
-                sequencesLogic.GetBrowserNodesForProxyNode(samplingGridModelNode, foundBrowserNodes)
-                modelSequenceNode = None
-                for i in range(foundBrowserNodes.GetNumberOfItems()):
-                    foundBrowserNode = foundBrowserNodes.GetItemAsObject(i)
-                    foundSequenceNode = transformSequenceBrowserNode.GetSequenceNode(samplingGridModelNode)
-                    if foundBrowserNode == transformSequenceBrowserNode:
-                        # Store the sequence node corresponding to the transform sequence browser node
-                        modelSequenceNode = foundSequenceNode
-                    else:
-                        # Remove model from other sequence browser nodes
-                        foundBrowserNode.RemoveSynchronizedSequenceNode(foundSequenceNode.GetID())
+                    # Make sure output models are in the same sequence browser as the transform sequence and
+                    # model is in not a proxy node of any other sequence browsers
+                    foundBrowserNodes = vtk.vtkCollection()
+                    sequencesLogic = slicer.modules.sequences.logic()
+                    sequencesLogic.GetBrowserNodesForProxyNode(modelNode, foundBrowserNodes)
 
-                if not modelSequenceNode:
-                    masterSequenceNode = transformSequenceBrowserNode.GetMasterSequenceNode()
-                    modelSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "Cross-section model sequence")
-                    modelSequenceNode.SetIndexType(masterSequenceNode.GetIndexType())
-                    modelSequenceNode.SetIndexName(masterSequenceNode.GetIndexName())
-                    modelSequenceNode.SetIndexUnit(masterSequenceNode.GetIndexUnit())
-                    slicer.modules.sequences.logic().AddSynchronizedNode(modelSequenceNode, samplingGridModelNode, transformSequenceBrowserNode)
-                    transformSequenceBrowserNode.SetSaveChanges(modelSequenceNode, True)
+                    modelSequenceNode = None
+                    for i in range(foundBrowserNodes.GetNumberOfItems()):
+                        foundBrowserNode = foundBrowserNodes.GetItemAsObject(i)
+                        foundSequenceNode = transformSequenceBrowserNode.GetSequenceNode(modelNode)
+                        if foundBrowserNode == transformSequenceBrowserNode:
+                            # Store the sequence node corresponding to the transform sequence browser node
+                            modelSequenceNode = foundSequenceNode
+                        else:
+                            # Remove model from other sequence browser nodes
+                            foundBrowserNode.RemoveSynchronizedSequenceNode(foundSequenceNode.GetID())
+
+                    if not modelSequenceNode:
+                        masterSequenceNode = transformSequenceBrowserNode.GetMasterSequenceNode()
+                        modelSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", modelNode.GetName() + " Sequence")
+                        modelSequenceNode.SetIndexType(masterSequenceNode.GetIndexType())
+                        modelSequenceNode.SetIndexName(masterSequenceNode.GetIndexName())
+                        modelSequenceNode.SetIndexUnit(masterSequenceNode.GetIndexUnit())
+                        slicer.modules.sequences.logic().AddSynchronizedNode(modelSequenceNode, modelNode, transformSequenceBrowserNode)
+                        transformSequenceBrowserNode.SetSaveChanges(modelSequenceNode, True)
 
                 objectToWorldTransformFilter.Update()
-                samplingGridModelNode.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
+                outputSpeedProfileModel.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
 
                 # Sample displacement field with the model
-                displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(gridTransformNode, magnitudeVolumeNode, False)
+                displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(
+                    gridTransformNode, magnitudeVolumeNode, False, slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode"))
 
                 parameters = {}
 
@@ -900,12 +916,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     # Export mask segment to labelmap node
                     maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
                     slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
-                    slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetColorNode())
+                    slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
 
                     # Probe mask image with model
                     parameters["InputVolume"] = maskLabelmapNode
-                    parameters["InputModel"] = samplingGridModelNode
-                    parameters["OutputModel"] = samplingGridModelNode
+                    parameters["InputModel"] = outputSpeedProfileModel
+                    parameters["OutputModel"] = outputSpeedProfileModel
                     parameters["OutputArrayName"] = "insideMask"
                     probeVolumeWithModel = slicer.modules.probevolumewithmodel
                     probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
@@ -913,19 +929,27 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                         # error
                         errorText = probeVolumeCliNode.GetErrorText()
                         raise ValueError("Probe 4D field execution failed: " + errorText)
+
+                    # slicer.displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode).copy()
+                    # slicer.maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode).copy()
+
+                    displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                    maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
+                    displacementImageArray[maskImageArray==0, :] = 0
+
                     # Clean up
                     if maskLabelmapNode:
                         slicer.mrmlScene.RemoveNode(maskLabelmapNode)
                         maskLabelmapNode = None
 
                     # Save mask array
-                    insideMaskArray = slicer.util.arrayFromModelPointData(samplingGridModelNode, 'insideMask').copy()
+                    insideMaskArray = slicer.util.arrayFromModelPointData(outputSpeedProfileModel, 'insideMask').copy()
                 else:
                     insideMaskArray = None
 
                 parameters["InputVolume"] = displacementImageNode
-                parameters["InputModel"] = samplingGridModelNode
-                parameters["OutputModel"] = samplingGridModelNode
+                parameters["InputModel"] = outputSpeedProfileModel
+                parameters["OutputModel"] = outputSpeedProfileModel
                 parameters["OutputArrayName"] = "displacement"
                 probeVolumeWithModel = slicer.modules.probevolumewithmodel
                 probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
@@ -934,13 +958,30 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     errorText = probeVolumeCliNode.GetErrorText()
                     raise ValueError("Probe 4D field execution failed: " + errorText)
 
-                slicer.mrmlScene.RemoveNode(displacementImageNode)
-                displacementImageNode = None
-
                 if insideMaskArray is not None:
                     # Set all displacements outside the mask to zero
-                    displacementArray = slicer.util.arrayFromModelPointData(samplingGridModelNode, 'displacement')
+                    displacementArray = slicer.util.arrayFromModelPointData(outputSpeedProfileModel, 'displacement')
                     displacementArray[insideMaskArray==0] = (0,0,0)
+
+                # Update streamlines
+                speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
+                streamlinesSeedModel = outputSpeedProfileModel  # the plane profile is also used for generating seed points
+                self._createStreamlines(outputStreamlinesModel, speedImageNodeMPerSec, streamlinesSeedModel,
+                    streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesSpeedThresholdMPerSec)
+                if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
+                    # Initialize streamlines model display node
+                    outputStreamlinesModel.CreateDefaultDisplayNodes()
+                    displayNode = outputStreamlinesModel.GetDisplayNode()
+                    displayNode.SetColor(0, 0, 1)
+                    displayNode.SetEdgeVisibility(True)
+                    displayNode.BackfaceCullingOff()
+                    displayNode.LightingOff()  # don't make the lines darker depending on orientation
+                    displayNode.SetActiveScalarName('Velocity')
+                    displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
+                    displayNode.ScalarVisibilityOn()
+
+                slicer.mrmlScene.RemoveNode(displacementImageNode)
+                displacementImageNode = None
 
         finally:
             # Clean up
@@ -954,7 +995,76 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             if originalTransformVisibility and gridTransformNode.GetDisplayNode():
                 gridTransformNode.GetDisplayNode().SetVisibility(True)
 
-        return samplingGridModelNode
+        return outputSpeedProfileModel
+
+    def _createStreamlines(self, outputStreamlinesModel, speedImageNodeMPerSec, seedPointsModel, maximumLengthMm, bidirectional, speedThresholdMPerSec):
+        import vtkAddon
+        import numpy as np
+
+        seedPoints = seedPointsModel.GetPolyData()
+
+        ijkToRAS = vtk.vtkMatrix4x4()
+        speedImageNodeMPerSec.GetIJKToRASMatrix(ijkToRAS)
+
+        # Get IJK to RAS matrix scale factors
+        spacing = [1, 1, 1]
+        for column in range(3):
+            spacing[column] = np.linalg.norm([ijkToRAS.GetElement(row, column) for row in range(3)])
+
+        # Canonical: axis directions are IJK, origin is at (0,0,0), spacing is the same as in ijkToRAS
+        ijkToCanonical = vtk.vtkMatrix4x4()
+        for column in range(3):
+            ijkToCanonical.SetElement(column, column, spacing[column])
+
+        # Get IJK to canonical matrix
+        rasToIJK = vtk.vtkMatrix4x4()
+        vtk.vtkMatrix4x4.Invert(ijkToRAS, rasToIJK)
+        rasToCanonical = vtk.vtkMatrix4x4()
+        vtk.vtkMatrix4x4.Multiply4x4(ijkToCanonical, rasToIJK, rasToCanonical)
+
+        # Transform seed points to canonical space
+        transformFromRasToCanonicalFilter = vtk.vtkTransformPolyDataFilter()
+        transformFromRasToCanonicalFilter.SetInputData(seedPoints)
+        transformFromRasToCanonical = vtk.vtkTransform()
+        transformFromRasToCanonical.SetMatrix(rasToCanonical)
+        transformFromRasToCanonicalFilter.SetTransform(transformFromRasToCanonical)
+        transformFromRasToCanonicalFilter.Update()
+        seedPointsCanonical = transformFromRasToCanonicalFilter.GetOutput()
+
+        # Define the image in canonical space
+        speedImageData = vtk.vtkImageData()
+        speedImageData.DeepCopy(speedImageNodeMPerSec.GetImageData())
+        speedImageData.SetSpacing(spacing)
+
+        rasToCanonicalDirection = vtk.vtkMatrix3x3()
+        vtkAddon.vtkAddonMathUtilities.GetOrientationMatrix(rasToCanonical, rasToCanonicalDirection)
+        vtk.vtkImageTransform.TransformVectors(rasToCanonicalDirection, [1,1,1], speedImageData.GetPointData().GetScalars())
+
+        streamLine = vtk.vtkStreamTracer()
+        streamLine.SetInputData(speedImageData)
+        streamLine.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, vtk.vtkDataSetAttributes.SCALARS)
+        streamLine.SetSourceData(seedPointsCanonical)
+        streamLine.SetMaximumPropagation(maximumLengthMm)
+        streamLine.SetInitialIntegrationStep(0.1)
+        if bidirectional:
+            streamLine.SetIntegrationDirectionToBoth()
+        else:
+            streamLine.SetIntegrationDirectionToForward()
+        streamLine.SetTerminalSpeed(.05)
+        streamLine.Update()
+
+        # Transform results to RAS space
+        canonicalToRas = vtk.vtkMatrix4x4()
+        vtk.vtkMatrix4x4.Invert(rasToCanonical, canonicalToRas)
+        transformFromCanonicalToRasFilter = vtk.vtkTransformPolyDataFilter()
+        transformFromCanonicalToRasFilter.SetInputData(streamLine.GetOutput())
+        transformCanonicalToRas = vtk.vtkTransform()
+        transformCanonicalToRas.SetMatrix(canonicalToRas)
+        transformFromCanonicalToRasFilter.SetTransform(transformCanonicalToRas)
+        transformFromCanonicalToRasFilter.Update()
+        streamLinesRas = transformFromCanonicalToRasFilter.GetOutput()
+        streamLinesRas.GetPointData().GetArray('ImageScalars').SetName('Velocity')
+        outputStreamlinesModel.SetAndObservePolyData(streamLinesRas)
 
     def computeSpeedProfileTable(
             self,

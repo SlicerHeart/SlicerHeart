@@ -158,7 +158,7 @@
    <item>
     <widget class="ctkCollapsibleButton" name="outputsCollapsibleButton_2">
      <property name="text">
-      <string>Flow field profile</string>
+      <string>Flow field analysis</string>
      </property>
      <layout class="QFormLayout" name="formLayout_5">
       <item row="0" column="0">
@@ -205,6 +205,16 @@
        <widget class="QLabel" name="label_11">
         <property name="text">
          <string>Input mask:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLSegmentSelectorWidget" name="inputMaskSegmentSelectorWidget">
+        <property name="toolTip">
+         <string>If a segment is selected then flow field outside that segment will be set to zero.</string>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
@@ -260,14 +270,14 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="5" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
-         <string>Output model:</string>
+         <string>Output speed profile model:</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="5" column="1">
        <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
         <property name="toolTip">
          <string>Model node that contains speed vectors as point data</string>
@@ -303,14 +313,14 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0">
+      <item row="6" column="0">
        <widget class="QLabel" name="label_9">
         <property name="text">
          <string>Output speed profile table:</string>
         </property>
        </widget>
       </item>
-      <item row="5" column="1">
+      <item row="6" column="1">
        <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
         <property name="toolTip">
          <string>Plot series that contain average speed value vs time.</string>
@@ -349,34 +359,122 @@
         </property>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="8" column="0" colspan="2">
        <widget class="QPushButton" name="sampleFlowFieldButton">
         <property name="enabled">
          <bool>true</bool>
         </property>
         <property name="toolTip">
-         <string>Export flow field profile</string>
+         <string>Compute streamlines and flow field profile</string>
         </property>
         <property name="text">
-         <string>Sample flow field</string>
+         <string>Compute</string>
         </property>
        </widget>
       </item>
-      <item row="7" column="0" colspan="2">
+      <item row="9" column="0" colspan="2">
        <widget class="QPushButton" name="showPlotButton">
         <property name="text">
          <string>Show plot</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
-       <widget class="qMRMLSegmentSelectorWidget" name="inputMaskSegmentSelectorWidget">
-        <property name="toolTip">
-         <string>If a segment is selected then flow field outside that segment will be set to zero.</string>
+      <item row="7" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
+        <property name="title">
+         <string>Streamlines</string>
         </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
+        <layout class="QFormLayout" name="formLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_13">
+           <property name="text">
+            <string>Output streamlines:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="qMRMLNodeComboBox" name="streamlinesOutputModelSelector">
+           <property name="toolTip">
+            <string>Model node that contains streamlines computed from the input plane. Sampling distance, speed threshold, input mask, maximum length, and bidirectional parameters are taken into account.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLModelNode</string>
+            </stringlist>
+           </property>
+           <property name="showChildNodeTypes">
+            <bool>false</bool>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputStreamlinesModel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_5">
+           <property name="text">
+            <string>Maximum length:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkSliderWidget" name="streamlinesMaximumLengthSliderWidget">
+           <property name="toolTip">
+            <string>Distance between sampling points in the plane.</string>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="minimum">
+            <double>-100.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>500.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>0.500000000000000</double>
+           </property>
+           <property name="suffix">
+            <string>mm</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">streamlinesMaximumLength</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_12">
+           <property name="text">
+            <string>Bidirectional:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QCheckBox" name="checkBox">
+           <property name="text">
+            <string> </string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>streamlinesBidirectional</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
      </layout>
@@ -402,6 +500,12 @@
    <class>ctkCollapsibleButton</class>
    <extends>QWidget</extends>
    <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>
@@ -482,7 +586,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>325</x>
-     <y>433</y>
+     <y>459</y>
     </hint>
    </hints>
   </connection>
@@ -498,7 +602,7 @@
     </hint>
     <hint type="destinationlabel">
      <x>325</x>
-     <y>459</y>
+     <y>485</y>
     </hint>
    </hints>
   </connection>
@@ -510,11 +614,11 @@
    <hints>
     <hint type="sourcelabel">
      <x>325</x>
-     <y>459</y>
+     <y>485</y>
     </hint>
     <hint type="destinationlabel">
-     <x>289</x>
-     <y>519</y>
+     <x>307</x>
+     <y>545</y>
     </hint>
    </hints>
   </connection>
@@ -531,6 +635,22 @@
     <hint type="destinationlabel">
      <x>186</x>
      <y>330</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>streamlinesOutputModelSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>2</x>
+     <y>276</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>166</x>
+     <y>420</y>
     </hint>
    </hints>
   </connection>
