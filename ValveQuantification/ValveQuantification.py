@@ -248,10 +248,17 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
                                          lambda toggle: self.onWorkflowStepChanged(self.outputCollapsibleButton,
                                                                                    toggle))
     outputFormLayout = qt.QFormLayout(self.outputCollapsibleButton)
+
+    self.computeButton = qt.QPushButton("Compute")
+    self.computeButton.toolTip = "Compute metrics"
+    outputFormLayout.addRow(self.computeButton)
+    self.computeButton.connect('clicked(bool)', self.updateOutput)
+
     self.computeStatusTextEdit = qt.QPlainTextEdit()
     self.computeStatusTextEdit.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
     self.computeStatusTextEdit.maximumHeight = 75
     outputFormLayout.addRow(self.computeStatusTextEdit)
+
     self.measurementTree = slicer.qMRMLSubjectHierarchyTreeView()
     self.measurementTree.setMRMLScene(slicer.mrmlScene)
     qSize = qt.QSizePolicy()
@@ -831,8 +838,6 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         HeartValveLib.setupDefaultLayout()
         HeartValveLib.showSlices(False)
         self.measurementPreset.onInputFieldChanged(None, self.inputValveModels, self.inputFieldValues)
-      elif widget==self.outputCollapsibleButton:
-        self.updateOutput()
 
 class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual
