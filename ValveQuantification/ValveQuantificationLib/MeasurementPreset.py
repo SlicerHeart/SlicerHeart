@@ -66,9 +66,14 @@ class MetricsTable(object):
   def metricTableNode(self):
     return self._metricsTableNode
 
-  def __init__(self, name):
-    self._metricsTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
-    self._metricsTableNode.SetName(name)
+  def __init__(self, name, tableNode=None):
+    if tableNode is None:
+      self._metricsTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
+      self._metricsTableNode.SetName(name)
+    else:
+      self._metricsTableNode = tableNode
+
+    self._metricsTableNode.RemoveAllColumns()
     self._metricsTableNode.SetUseColumnNameAsColumnHeader(True)
     for col in self.TABLE_COLUMNS:
       self._metricsTableNode.AddColumn().SetName(col)
@@ -89,6 +94,8 @@ class MeasurementPreset(object):
     self.name = None # human-readable name
     self.inputValveIds = [] # machine-readable name of input valves
     self.inputValveNames = {} # map from inputValveId to human-readable name
+
+    self.metricsTable = None
 
     # Points or values defined by the user to define input positions for computations:
     # The user may click in a viewer to specify point position directly (FIELD_TYPE_POINT)
@@ -133,7 +140,23 @@ class MeasurementPreset(object):
   def computeMetrics(self, inputValveModels, folderNode):
     self.folderNode = folderNode
     self.metricsMessages = []
-    self.metricsTable = MetricsTable(self.QUANTIFICATION_RESULTS_IDENTIFIER)
+    tableNode = None
+    if self.metricsTable:
+      tableNode = self.metricsTable.metricTableNode
+
+    valveModel = inputValveModels[next(iter(inputValveModels))]
+    tableSequenceNode = None
+    if tableNode:
+      tableSequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(tableNode)
+
+    if tableSequenceNode:
+      valveModel.valveBrowser.addCurrentTimePointToSequence(tableSequenceNode)
+
+    self.metricsTable = MetricsTable(self.QUANTIFICATION_RESULTS_IDENTIFIER, tableNode)
+
+    if not tableSequenceNode:
+      tableSequenceNode = valveModel.valveBrowser.makeTimeSequence(self.metricsTable.metricTableNode)
+
     self.moveNodeToMeasurementFolder(self.metricsTable.metricTableNode)
     return self.metricsMessages
 
@@ -454,7 +477,7 @@ class MeasurementPreset(object):
     margin = [ (planeBoundsMax[0]-planeBoundsMin[0])*0.05,  (planeBoundsMax[1]-planeBoundsMin[1])*0.05] # make the plane a bit larger than the annulus (by a 5% margin)
     planeBounds = np.array([planeBoundsMin[0]-margin[0], planeBoundsMax[0]+margin[0], planeBoundsMin[1]-margin[1], planeBoundsMax[1]+margin[1], -thickness/2.0, thickness/2.0])
     if currentModelNode:
-      currentModelNode.SetAndObservePolyData(None)
+      currentModelNode.SetAndObservePolyData(vtk.vtkPolyData())
     annulusPlane = self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color = [0.0,0.0,0.2], nodeToBeAddedTo=currentModelNode)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusPlane)
 
@@ -784,7 +807,7 @@ class MeasurementPreset(object):
     # Full area
     metricName = f'{name} area ({mode})'
     surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
-    surfaceAreaModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData, valveModel)
+    self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData, valveModel, currentModelNode=surfaceAreaModel)
 
     # Count how many quadrant separator points are defined (must be 4 for a complete definition)
     numberOfFoundLabels = 0
@@ -852,26 +875,26 @@ class MeasurementPreset(object):
         # Halves
         metricName = f'{name} area{suffix} ({mode}, {halvesNames[0]})'
         surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+        self.addSurfaceAreaMeasurements(
           metricName, annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX], currentModelNode=surfaceAreaModel
         )
 
         metricName = f'{name} area{suffix} ({mode}, {halvesNames[1]})'
         surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+        self.addSurfaceAreaMeasurements(
           metricName, annulusAreaPolyData, valveModel, clipPlanes=[planePlusX], currentModelNode=surfaceAreaModel
         )
 
         metricName = f'{name} area{suffix} ({mode}, {halvesNames[2]})'
         surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+        self.addSurfaceAreaMeasurements(
           metricName, annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY],
           currentModelNode=surfaceAreaModel
         )
 
         metricName = f'{name} area{suffix} ({mode}, {halvesNames[3]})'
         surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        surfaceAreaModel = self.addSurfaceAreaMeasurements(
+        self.addSurfaceAreaMeasurements(
           metricName, annulusAreaPolyData, valveModel, clipPlanes=[planePlusY],
           currentModelNode=surfaceAreaModel
         )
@@ -879,24 +902,25 @@ class MeasurementPreset(object):
         # Quadrants
         metricName = f'{name} area{suffix} ({mode}, {quadrantNames[0]})'
         quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
-                                                        valveModel, clipPlanes=[planeMinusX, planeMinusY],
-                                                        currentModelNode=quadrantModel)
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planeMinusX, planeMinusY],
+                                        currentModelNode=quadrantModel)
 
         metricName = f'{name} area{suffix} ({mode}, {quadrantNames[1]})'
         quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
-                                                        valveModel, clipPlanes=[planePlusX, planeMinusY])
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planePlusX, planeMinusY],
+                                        currentModelNode=quadrantModel)
 
         metricName = f'{name} area{suffix} ({mode}, {quadrantNames[2]})'
         quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
-                                                        valveModel, clipPlanes=[planeMinusX, planePlusY],
-                                                        currentModelNode=quadrantModel)
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planeMinusX, planePlusY],
+                                        currentModelNode=quadrantModel)
 
         metricName = f'{name} area{suffix} ({mode}, {quadrantNames[3]})'
         quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
-        quadrantModel = self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
                                         valveModel, clipPlanes=[planePlusX, planePlusY],
                                         currentModelNode=quadrantModel)
 
@@ -925,7 +949,7 @@ class MeasurementPreset(object):
     targetLandmarkPoints.SetNumberOfPoints(numberOfLandmarkPoints)
     for pointIndex in range(numberOfLandmarkPoints):
       angle = float(pointIndex)/numberOfLandmarkPoints*2.0*math.pi
-      annulusPointIndex = int(round(float(pointIndex)/numberOfLandmarkPoints*numberOfAnnulusPoints))
+      annulusPointIndex = int(np.floor(float(pointIndex)/numberOfLandmarkPoints*numberOfAnnulusPoints))
       sourceLandmarkPoints.SetPoint(pointIndex, math.cos(angle), math.sin(angle), 0)
       targetLandmarkPoints.SetPoint(pointIndex, annulusPoints[:,annulusPointIndex])
 
