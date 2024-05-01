@@ -1407,7 +1407,12 @@ class MeasurementPreset(object):
 
     modelsLogic = slicer.modules.models.logic()
     polyTransformToWorld.Update()
-    modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutput())
+
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(polyTransformToWorld.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutput())
     modelNode.SetName(modelName)
     modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)

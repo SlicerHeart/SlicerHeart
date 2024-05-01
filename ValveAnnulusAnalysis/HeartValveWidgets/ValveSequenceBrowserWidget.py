@@ -115,6 +115,17 @@ class ValveSequenceBrowserWidget:
     self.updateGUIFromMRML()
 
   @property
+  def followerValveBrowserNodes(self):
+    return self._followerValveBrowserNodes
+
+  @followerValveBrowserNodes.setter
+  def followerValveBrowserNodes(self, followerValveBrowserNodes: list):
+    self._followerValveBrowserNodes = followerValveBrowserNodes
+
+  def addFollowerValveBrowserNode(self, followerValveBrowserNode: slicer.vtkMRMLSequenceBrowserNode):
+    self.followerValveBrowserNodes.append(followerValveBrowserNode)
+
+  @property
   def readOnly(self):
     return self._readOnly
 
@@ -157,6 +168,8 @@ class ValveSequenceBrowserWidget:
     self._readOnly = False
 
     self.lastValveBrowserSelectedItemIndex = -1
+
+    self._followerValveBrowserNodes = []
 
     self.setup(parent)
 
@@ -300,5 +313,30 @@ class ValveSequenceBrowserWidget:
           self.valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
 
     self.lastValveBrowserSelectedItemIndex = lastValveBrowserSelectedItemIndex
+    self.updateFollowers()
     self.updateGUIFromMRML()
     self.valveBrowserNodeModified.emit()
+
+  def updateFollowers(self):
+    """
+    Updates the selected value of the follower valve browsers to match the selected value of the main valve browser.
+    """
+    _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+
+    for followerValveBrowserNode in self.followerValveBrowserNodes:
+      if not followerValveBrowserNode:
+        continue
+
+      followerValveBrowser = HeartValveLib.HeartValves.getValveBrowser(followerValveBrowserNode)
+      if not followerValveBrowser:
+        continue
+
+      heartValveSequenceNode = followerValveBrowser.heartValveSequenceNode
+      if not heartValveSequenceNode:
+        continue
+
+      heartValveSequenceIndex = heartValveSequenceNode.GetItemNumberFromIndexValue(indexValue)
+      if heartValveSequenceIndex < 0:
+        continue
+
+      followerValveBrowser.valveBrowserNode.SetSelectedItemNumber(heartValveSequenceIndex)
