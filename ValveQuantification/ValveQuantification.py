@@ -163,21 +163,14 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.layout.addStretch(1)
 
   def setupValveSequenceBrowserWidget(self, valveFormLayout):
-    self.heartValveBrowserSelector = slicer.qMRMLNodeComboBox()
-    self.heartValveBrowserSelector.nodeTypes = ["vtkMRMLSequenceBrowserNode"]
-    self.heartValveBrowserSelector.setNodeTypeLabel("HeartValveBrowser", "vtkMRMLSequenceBrowserNode")
-    self.heartValveBrowserSelector.addAttribute("vtkMRMLSequenceBrowserNode", "ModuleName", "HeartValve")
-    self.heartValveBrowserSelector.setMRMLScene(slicer.mrmlScene)
-    self.heartValveBrowserSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveBrowserSelect)
-    valveFormLayout.addRow("Valve series:", self.heartValveBrowserSelector)
-
+    """
+    Create and setup a ValveSequenceBrowserWidget and add it to the layout.
+    """
     frame = qt.QFrame()
     frame.setLayout(qt.QHBoxLayout())
     valveFormLayout.addRow("Time points:", frame)
     self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(parent=frame.layout())
     self.valveSequenceBrowserWidget.readOnly = True
-
-    self.onHeartValveBrowserSelect(self.heartValveBrowserSelector.currentNode())
 
   def setupHeartValveMeasurementSelector(self, valveFormLayout):
     self.heartValveMeasurementSelector = slicer.qMRMLNodeComboBox()
@@ -378,10 +371,6 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         self.valueEditWidgets[parameterName].disconnect("clicked()", self.updateParameterNodeFromGUI)
     for parameterName in self.nodeSelectorWidgets:
       self.nodeSelectorWidgets[parameterName].disconnect("currentNodeIDChanged(QString)", self.updateParameterNodeFromGUI)
-
-  def onHeartValveBrowserSelect(self, node):
-    logging.debug("Selected heart valve browser node: {0}".format(node.GetName() if node else "None"))
-    self.setHeartValveBrowserNode(node)
 
   def setHeartValveBrowserNode(self, heartValveBrowserNode):
     self.valveSequenceBrowserWidget.valveBrowserNode = heartValveBrowserNode
@@ -635,6 +624,17 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         labelsMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                                      lambda caller, event, valveId=inputValveIds[inputValveIndex]:
                                      self.onAnnulusLabelMarkupModified(valveId)))
+
+    driverValveBrowserNode = None
+    followerValveBrowserNodes = []
+    for _, valveModel in self.inputValveModels.items():
+      valveBrowser = valveModel.getValveBrowserNode()
+      if driverValveBrowserNode is None:
+        driverValveBrowserNode = valveBrowser
+        continue
+      followerValveBrowserNodes.append(valveBrowser)
+    self.setHeartValveBrowserNode(driverValveBrowserNode)
+    self.valveSequenceBrowserWidget.followerValveBrowserNodes = followerValveBrowserNodes
 
   def onAnnulusLabelMarkupModified(self, valveId):
     if not self.measurementPreset:
