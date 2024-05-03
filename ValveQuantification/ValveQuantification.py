@@ -626,15 +626,15 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
                                      self.onAnnulusLabelMarkupModified(valveId)))
 
     driverValveBrowserNode = None
-    followerValveBrowserNodes = []
+    linkedValveBrowserNodes = []
     for _, valveModel in self.inputValveModels.items():
       valveBrowser = valveModel.getValveBrowserNode()
       if driverValveBrowserNode is None:
         driverValveBrowserNode = valveBrowser
         continue
-      followerValveBrowserNodes.append(valveBrowser)
+      linkedValveBrowserNodes.append(valveBrowser)
     self.setHeartValveBrowserNode(driverValveBrowserNode)
-    self.valveSequenceBrowserWidget.followerValveBrowserNodes = followerValveBrowserNodes
+    self.valveSequenceBrowserWidget.linkedValveBrowserNodes = linkedValveBrowserNodes
 
   def onAnnulusLabelMarkupModified(self, valveId):
     if not self.measurementPreset:
