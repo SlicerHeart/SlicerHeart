@@ -74,7 +74,7 @@ class MetricsTable(object):
       self._metricsTableNode = tableNode
 
     self._metricsTableNode.RemoveAllColumns()
-    self._metricsTableNode.SetUseColumnNameAsColumnHeader(True)
+    self._metricsTableNode.SetUseColumnTitleAsColumnHeader(True)
     for col in self.TABLE_COLUMNS:
       self._metricsTableNode.AddColumn().SetName(col)
 

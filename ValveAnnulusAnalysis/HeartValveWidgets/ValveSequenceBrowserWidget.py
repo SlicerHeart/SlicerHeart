@@ -115,15 +115,15 @@ class ValveSequenceBrowserWidget:
     self.updateGUIFromMRML()
 
   @property
-  def followerValveBrowserNodes(self):
-    return self._followerValveBrowserNodes
+  def linkedValveBrowserNodes(self):
+    return self._linkedValveBrowserNodes
 
-  @followerValveBrowserNodes.setter
-  def followerValveBrowserNodes(self, followerValveBrowserNodes: list):
-    self._followerValveBrowserNodes = followerValveBrowserNodes
+  @linkedValveBrowserNodes.setter
+  def linkedValveBrowserNodes(self, linkedValveBrowserNodes: list):
+    self._linkedValveBrowserNodes = linkedValveBrowserNodes
 
-  def addFollowerValveBrowserNode(self, followerValveBrowserNode: slicer.vtkMRMLSequenceBrowserNode):
-    self.followerValveBrowserNodes.append(followerValveBrowserNode)
+  def addlinkedValveBrowserNode(self, linkedValveBrowserNode: slicer.vtkMRMLSequenceBrowserNode):
+    self.linkedValveBrowserNodes.append(linkedValveBrowserNode)
 
   @property
   def readOnly(self):
@@ -169,7 +169,7 @@ class ValveSequenceBrowserWidget:
 
     self.lastValveBrowserSelectedItemIndex = -1
 
-    self._followerValveBrowserNodes = []
+    self._linkedValveBrowserNodes = []
 
     self.setup(parent)
 
@@ -313,30 +313,30 @@ class ValveSequenceBrowserWidget:
           self.valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
 
     self.lastValveBrowserSelectedItemIndex = lastValveBrowserSelectedItemIndex
-    self.updateFollowers()
+    self.updateLinkedSequenceBrowsers()
     self.updateGUIFromMRML()
     self.valveBrowserNodeModified.emit()
 
-  def updateFollowers(self):
+  def updateLinkedSequenceBrowsers(self):
     """
-    Updates the selected value of the follower valve browsers to match the selected value of the main valve browser.
+    Updates the selected value of the linked valve browsers to match the selected value of the main valve browser.
     """
     _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
 
-    for followerValveBrowserNode in self.followerValveBrowserNodes:
-      if not followerValveBrowserNode:
+    for linkedValveBrowserNode in self.linkedValveBrowserNodes:
+      if not linkedValveBrowserNode:
         continue
 
-      followerValveBrowser = HeartValveLib.HeartValves.getValveBrowser(followerValveBrowserNode)
-      if not followerValveBrowser:
+      linkedValveBrowser = HeartValveLib.HeartValves.getValveBrowser(linkedValveBrowserNode)
+      if not linkedValveBrowser:
         continue
 
-      heartValveSequenceNode = followerValveBrowser.heartValveSequenceNode
-      if not heartValveSequenceNode:
+      linkedHeartValveSequenceNode = linkedValveBrowser.heartValveSequenceNode
+      if not linkedHeartValveSequenceNode:
         continue
 
-      heartValveSequenceIndex = heartValveSequenceNode.GetItemNumberFromIndexValue(indexValue)
-      if heartValveSequenceIndex < 0:
+      linkedHeartValveSequenceIndex = linkedHeartValveSequenceNode.GetItemNumberFromIndexValue(indexValue)
+      if linkedHeartValveSequenceIndex < 0:
         continue
 
-      followerValveBrowser.valveBrowserNode.SetSelectedItemNumber(heartValveSequenceIndex)
+      linkedValveBrowser.valveBrowserNode.SetSelectedItemNumber(linkedHeartValveSequenceIndex)
