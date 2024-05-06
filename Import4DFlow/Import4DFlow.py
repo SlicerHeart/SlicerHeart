@@ -552,8 +552,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         transformSequenceNode.SetIndexName(magnitudeVolumeSequenceNode.GetIndexName())
         transformSequenceNode.SetIndexUnit(magnitudeVolumeSequenceNode.GetIndexUnit())
 
-        # Use meter per sec as displacement value (divide by 100) because a typical 50 cm/sec speed
-        # = 0.5 m/sec speed value can be visualized nicely as displacement field
+        # Use m/sec as vector value in the transform (divide cm/sec by 100) because a typical 50 cm/sec speed
+        # = 0.5 m/sec speed value can be visualized nicely as displacement field with typical image spacing
         speedScaleMeterPerSec = [1 / 4096 * venc[i] / 100 for i in range(3)]
 
         # LPS to RAS conversion
@@ -624,7 +624,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
             # Display color legend
             colorLegendDisplayNode = slicer.modules.colors.logic().AddDefaultColorLegendDisplayNode(transformDisplayNode)
-            colorLegendDisplayNode.SetTitleText("speed")
+            colorLegendDisplayNode.SetTitleText("Speed")
             colorLegendDisplayNode.SetLabelFormat("%4.1f m/s")
             #colorLegendDisplayNode.SetScalarRange(0, 1.5)
 
@@ -950,7 +950,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 parameters["InputVolume"] = displacementImageNode
                 parameters["InputModel"] = outputSpeedProfileModel
                 parameters["OutputModel"] = outputSpeedProfileModel
-                parameters["OutputArrayName"] = "displacement"
+                parameters["OutputArrayName"] = "Speed"
                 probeVolumeWithModel = slicer.modules.probevolumewithmodel
                 probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
                 if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
@@ -960,7 +960,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 if insideMaskArray is not None:
                     # Set all displacements outside the mask to zero
-                    displacementArray = slicer.util.arrayFromModelPointData(outputSpeedProfileModel, 'displacement')
+                    displacementArray = slicer.util.arrayFromModelPointData(outputSpeedProfileModel, 'Speed')
                     displacementArray[insideMaskArray==0] = (0,0,0)
 
                 # Update streamlines
@@ -976,8 +976,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     displayNode.SetEdgeVisibility(True)
                     displayNode.BackfaceCullingOff()
                     displayNode.LightingOff()  # don't make the lines darker depending on orientation
-                    displayNode.SetActiveScalarName('Velocity')
-                    displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
+                    displayNode.SetActiveScalarName('Speed')
+                    if gridTransformNode.GetDisplayNode():
+                        # Use the same color table and scaling as the transform node
+                        displayNode.SetAndObserveColorNodeID(gridTransformNode.GetDisplayNode().GetColorNodeID())
+                        displayNode.SetScalarRangeFlag(displayNode.UseColorNodeScalarRange)
+                    else:
+                        displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
                     displayNode.ScalarVisibilityOn()
 
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
@@ -1063,8 +1068,22 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         transformFromCanonicalToRasFilter.SetTransform(transformCanonicalToRas)
         transformFromCanonicalToRasFilter.Update()
         streamLinesRas = transformFromCanonicalToRasFilter.GetOutput()
-        streamLinesRas.GetPointData().GetArray('ImageScalars').SetName('Velocity')
-        outputStreamlinesModel.SetAndObservePolyData(streamLinesRas)
+        pointData = streamLinesRas.GetPointData()
+        # Rename the input array to "Velocity"
+        pointData.GetArray('ImageScalars').SetName('Velocity')
+
+        # Compute the speed (velocity magnitude) for coloring.
+        # If the velocity vector was used for coloring then the streamlines would be colored by
+        # the first component of the velocity vector, which would not be correct.
+        # The "Speed" array should be used for coloring instead.
+        acalc = vtk.vtkArrayCalculator()
+        acalc.AddVectorArrayName("Velocity")
+        acalc.SetResultArrayName("Speed")
+        acalc.SetFunction("mag(Velocity)")
+        acalc.SetInputData(streamLinesRas)
+        acalc.Update()
+
+        outputStreamlinesModel.SetAndObservePolyData(acalc.GetOutput())
 
     def computeSpeedProfileTable(
             self,
@@ -1080,7 +1099,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         timeArray = vtk.vtkDoubleArray()
         timeArray.SetName("time")
         speedArray = vtk.vtkDoubleArray()
-        speedArray.SetName("speed")
+        speedArray.SetName("Speed")
 
         # Turn off transform visibility to speed up browsing
         gridTransformNode = None
@@ -1102,7 +1121,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             self.log("Computing speed profile... ({item}/{count})".format(item=itemNumber+1, count=sequenceBrowserNode.GetNumberOfItems()))
 
             sequenceBrowserNode.SetSelectedItemNumber(itemNumber)
-            speed = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'displacement')
+            speed = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'Speed')
             valuesAboveThreshold = speed[speed>speedThreshold]
             if len(valuesAboveThreshold) > 0:
                 averageSpeed = valuesAboveThreshold.mean()
