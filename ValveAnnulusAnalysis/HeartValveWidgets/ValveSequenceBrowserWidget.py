@@ -327,6 +327,10 @@ class ValveSequenceBrowserWidget:
       if not linkedValveBrowserNode:
         continue
 
+      if linkedValveBrowserNode == self.valveBrowserNode:
+        # Skip the main valve browser if it was included in the linked browser nodes
+        continue
+
       linkedValveBrowser = HeartValveLib.HeartValves.getValveBrowser(linkedValveBrowserNode)
       if not linkedValveBrowser:
         continue
