@@ -334,6 +334,8 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       self.nodeSelectorWidgets[parameterName].setCurrentNodeID(parameterNode.GetNodeReferenceID(parameterName))
       self.nodeSelectorWidgets[parameterName].blockSignals(oldBlockSignalsState)
 
+    self.updateAnnulusValveWidgets()
+
   def updateParameterNodeFromGUI(self):
     parameterNode = self.getParameterNode()
     oldModifiedState = parameterNode.StartModify()
@@ -624,19 +626,51 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         labelsMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                                      lambda caller, event, valveId=inputValveIds[inputValveIndex]:
                                      self.onAnnulusLabelMarkupModified(valveId)))
+    self.updateValveSequenceBrowserWidget()
 
+  def updateValveSequenceBrowserWidget(self):
+    """
+    Update ValveSequenceBrowserWidget to track the selected valve.
+    """
     driverValveBrowserNode = None
     linkedValveBrowserNodes = []
-    for _, valveModel in self.inputValveModels.items():
-      valveBrowser = valveModel.getValveBrowserNode()
-      if driverValveBrowserNode is None:
-        driverValveBrowserNode = valveBrowser
-        continue
-      linkedValveBrowserNodes.append(valveBrowser)
+
+    if self.measurementPreset:
+      for valveId in self.measurementPreset.inputValveIds:
+        valveModel = self.inputValveModels.get(valveId)
+        if valveModel is None:
+          continue
+        valveBrowser = valveModel.getValveBrowserNode()
+        if valveBrowser is None:
+          continue
+
+        if driverValveBrowserNode is None:
+          # The first valve browser node is the driver.
+          driverValveBrowserNode = valveBrowser
+          continue
+        linkedValveBrowserNodes.append(valveBrowser)
+
     self.setHeartValveBrowserNode(driverValveBrowserNode)
     self.valveSequenceBrowserWidget.linkedValveBrowserNodes = linkedValveBrowserNodes
 
+  def updateAnnulusValveWidgets(self):
+    if not self.measurementPreset:
+      return
+
+    inputFields = self.measurementPreset.inputFields
+    for inputFieldIndex in range(len(inputFields)):
+      field = inputFields[inputFieldIndex]
+      valveId = None
+      if FIELD_VALVE_ID not in field.keys():
+        continue
+      valveId = field[FIELD_VALVE_ID]
+      self.updateAnnulusValveSlider(valveId)
+
   def onAnnulusLabelMarkupModified(self, valveId):
+    # If we update the GUI immediately, then the curve may not be updated yet.
+    qt.QTimer.singleShot(0, lambda: self.updateAnnulusValveSlider(valveId))
+
+  def updateAnnulusValveSlider(self, valveId):
     if not self.measurementPreset:
       return
 
@@ -670,22 +704,21 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           positionSlider.blockSignals(sliderWasBlocked)
       else:
         # landmark is present
-        if positionSlider.minimum == positionSlider.maximum:
-          # Previously it was not present, update slider
-          from HeartValveLib.util import getClosestCurvePointIndexToPosition
-          annulusContourCurve = valveModel.annulusContourCurveNode
-          closestPointIdOnAnnulusCurve = \
-            getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
-          pointDistanceAlongCurve = \
-            annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
-          wasBlocked = positionSlider.blockSignals(True)
-          positionSlider.minimum = pointDistanceAlongCurve-20
-          positionSlider.maximum = pointDistanceAlongCurve+20
-          positionSlider.value = pointDistanceAlongCurve
-          positionSlider.blockSignals(wasBlocked)
-          requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
-          if not requiredCheckBox.checked:
-            requiredCheckBox.checked = True
+        from HeartValveLib.util import getClosestCurvePointIndexToPosition
+        annulusContourCurve = valveModel.annulusContourCurveNode
+        curveLength = annulusContourCurve.GetCurveLengthWorld()
+        closestPointIdOnAnnulusCurve = \
+          getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
+        pointDistanceAlongCurve = \
+          annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
+        wasBlocked = positionSlider.blockSignals(True)
+        positionSlider.minimum = 0
+        positionSlider.maximum = curveLength
+        positionSlider.value = pointDistanceAlongCurve
+        positionSlider.blockSignals(wasBlocked)
+        requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
+        if not requiredCheckBox.checked:
+          requiredCheckBox.checked = True
 
   def updateOutput(self):
 
