@@ -115,23 +115,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
-    # Create MRML nodes that act as widgets
-    # We have to create separate markups node for each point field to be able to activate each
-    # point place widget separately.
-    markupsLogic = slicer.modules.markups.logic()
-    for i in range(self.maxNumberPointFields):
-      markupNode = slicer.mrmlScene.GetNodeByID(markupsLogic.AddNewFiducialNode())
-      markupNode.SetHideFromEditors(True)
-      markupNode.SetAttribute(slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(), "1") # prevent the node from showing up in SH
-      markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlace"+str(i)))
-      markupNode.SetSingletonTag("ValveQuantificationPointPlace"+str(i)) # don't delete it if scene is closed
-      markupNode.SetSaveWithScene(False)
-      markupNode.GetDisplayNode().SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlaceDisplay"+str(i)))
-      markupNode.GetDisplayNode().SetSingletonTag("ValveQuantificationPointPlace"+str(i)) # don't delete it if scene is closed
-      markupNode.GetDisplayNode().SetHideFromEditors(True)
-      markupNode.GetDisplayNode().SetSaveWithScene(False)
-      markupNode.SetMarkupLabelFormat("") # don't add labels
-      self.pointFieldMarkupsNode.append(markupNode)
+    self.setupPointFieldMarkupNodes()
 
     valveFormLayout = qt.QFormLayout()
     self.layout.addLayout(valveFormLayout)
@@ -380,6 +364,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
   def onHeartValveMeasurementSelect(self, node):
     logging.debug("Selected heart valve measurement node: {0}".format(node.GetName() if node else "None"))
     self.setHeartValveMeasurementNode(node)
+    self.setupPointFieldMarkupNodes()
 
   def setHeartValveMeasurementNode(self, heartValveMeasurementNode):
     if heartValveMeasurementNode:
@@ -408,6 +393,37 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.measurementTree.setRootItem(shNode.GetSceneItemID())
     self.measurementTree.visible = True
     self.measurementTree.setRootItem(shNode.GetItemByDataNode(heartValveMeasurementNode))
+
+  def setupPointFieldMarkupNodes(self):
+    # Create MRML nodes that act as widgets
+    # We have to create separate markups node for each point field to be able to activate each
+    # point place widget separately.
+    self.pointFieldMarkupsNode = []
+
+    markupsLogic = slicer.modules.markups.logic()
+    for i in range(self.maxNumberPointFields):
+      singletonTag = "ValveQuantificationPointPlace"+str(i)
+      markupNode = slicer.mrmlScene.GetSingletonNode(singletonTag, "vtkMRMLMarkupsFiducialNode")
+      if markupNode is None:
+        markupNode = slicer.mrmlScene.GetNodeByID(markupsLogic.AddNewFiducialNode())
+      markupNode.SetHideFromEditors(True)
+      markupNode.SetAttribute(slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(), "1") # prevent the node from showing up in SH
+      markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlace"+str(i)))
+      markupNode.SetSingletonTag(singletonTag) # don't delete it if scene is closed
+      markupNode.SetSaveWithScene(False)
+      markupNode.SetControlPointLabelFormat("") # don't add labels
+
+      displayNode = slicer.mrmlScene.GetSingletonNode(singletonTag, "vtkMRMLMarkupsDisplayNode")
+      if displayNode is None:
+        markupNode.CreateDefaultDisplayNodes()
+        displayNode = markupNode.GetDisplayNode()
+      markupNode.SetAndObserveDisplayNodeID(displayNode.GetID())
+      displayNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlaceDisplay"+str(i)))
+      displayNode.SetSingletonTag(singletonTag) # don't delete it if scene is closed
+      displayNode.SetHideFromEditors(True)
+      displayNode.SetSaveWithScene(False)
+
+      self.pointFieldMarkupsNode.append(markupNode)
 
   def setDefinitionUrl(self, url):
     if self.definitionsWidget:
