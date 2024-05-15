@@ -92,7 +92,8 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Dict that maps from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet.
         # volumeNodeSet contains:
         #   - 'name': displayable name of the node set
-        #   - 'componentVolumeNodes': list of 3 volume nodes (x, y, z component)
+        #   - 'componentVolumeNodes': list of 3 volume nodes (R, A, S component)
+        #   - 'componentVolumeNodesScaleToCmPerSec': list of 3 scaling factors to convert raw values to speed in cm/sec and RAS direction
         #   - 'magnitudeVolumeNode' magnitude volume node
         self._volumeNodesSets = {}
 
@@ -289,9 +290,9 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
             magnitudeVolumeNode = self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['magnitudeVolumeNode']
             gridTransformNode = self.logic.convertImagesToDisplacementField(
-                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['componentVolumeNodes'],
+                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]["componentVolumeNodes"],
+                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]["componentVolumeNodesScaleToCmPerSec"],
                 magnitudeVolumeNode,
-                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['venc'],
                 self._parameterNode.outputTransform)
 
             self._parameterNode.outputTransform = gridTransformNode
@@ -367,13 +368,21 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         self.logCallback = None
 
-        # Converts direction code (in the DICOM header) to axis index (x, y, z, magnitude)
-        self.axisForDirectionCode = {
-            'through': 0,
-            'inplane_ap': 1,
-            'inplane_fh': 2,
-            'magnitude': 3,
-        }
+        # Converts direction code (in the DICOM header) to axis index (L, P, S)
+        # rl: right-left, ap: anterior-posterior, fh: foot-head
+        # For each configuration: list of (directionCode, invertToRasDirection) triplets (one for each axis).
+        # invertToRasDirection is True if the direction should be inverted to convert to RAS coordinate system.
+        self.axisForDirectionCodes = [
+            [("through", True), ("inplane_ap", True), ('inplane_fh', False)],
+            [("inplane_rl", False), ("through", True), ('inplane_fh', False)],
+            # We have not encountered the following configuration yet, but based on the first two cases (observed in real data sets) it seems possible.
+            # Need to verify the invertToRasDirection flags.
+            [("inplane_rl", True), ("inplane_ap", True), ('through', False)],
+        ]
+
+        # raw magnitude image intensity threshold
+        # (speed values below this threshold are set to zero in the flow field to reduce clutter during visualization)
+        self.magnitudeThreshold = 60
 
     def log(self, text):
         logging.info(text)
@@ -391,19 +400,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         volumeSequenceNode = volumeSequenceBrowserNode.GetSequenceNode(proxyVolumeNode)
         return volumeSequenceNode.GetNumberOfDataNodes()
 
-    def findVolumeNodeSets(self):
-        # Map from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet:
-        # {
-        #   'name': 'Patient Name (study date) / 1',
-        #   'componentVolumeNodes': [volumeNodeX, volumeNodeY, volumeNodeZ],
-        #   'magnitudeVolumeNode': volumeNodeMagnitude,
-        #   'venc': [150, 150, 150]  # velocity encoding, in cm/sec
-        # }
-        volumeNodesSets = {}
-
+    def _findVolumeNodeSetCandidatesInScene(self):
         import pydicom
         import traceback
 
+        volumeNodesSets = {}
         unsortedVolumeNodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
         for volumeNode in unsortedVolumeNodes:
             try:
@@ -421,18 +422,18 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 ds = pydicom.read_file(filename)
                 if (0x0051,0x1014) in ds:
                     # flow vector component image
-                    logging.debug(f"Found a flow vector component image: {volumeNode.GetName()}")
+                    speedAndDirectionCode = ds[0x0051,0x1014].value.decode().strip()
+                    vencCmPerSecInput, directionCodeInput = speedAndDirectionCode.split('_', 1)
+                    vencCmPerSec = float(vencCmPerSecInput[1:])
+                    directionCode = directionCodeInput.strip()
+                    logging.debug(f"Found a flow vector component image candidate [{directionCode}]: {volumeNode.GetName()}")
                     # The tag contains speed and direction, for example:
                     # 'v150_through', 'v150_inplane_ap', 'v150_inplane_fh'
-                    speedAndDirectionCode = ds[0x0051,0x1014].value.decode().strip()
-                    vencInput, directionCodeInput = speedAndDirectionCode.split('_', 1)
-                    venc = float(vencInput[1:])
-                    directionCode = directionCodeInput.strip()
+                    volumeNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
                 elif ("SequenceName" in ds) and ('fl3d' in ds["SequenceName"].value):  # 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
                     # magnitude image
-                    logging.debug(f"Found a magnitude image: {volumeNode.GetName()}")
+                    logging.debug(f"Found a magnitude image candidate: {volumeNode.GetName()}")
                     directionCode = 'magnitude'
-                    venc = 0
                 else:
                     # something else
                     logging.debug(f"Unknown image: {volumeNode.GetName()} - skip")
@@ -450,80 +451,137 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 acquisitionNumberSuffix =  f" / {acquisitionNumber}" if acquisitionNumber > 1 else ""
                 volumeNodeSet = {
                     'name': f"{ds.PatientName.family_comma_given()} ({ds.StudyDate}){acquisitionNumberSuffix}",
-                    'componentVolumeNodes': [None, None, None],  # x, y, z
-                    'magnitudeVolumeNode': None,
-                    'candidateMagnitudeVolumeNodes': [],  # temporary list used only during inspection, as there may be several candidates in the study
-                    'venc': [None, None, None]  # velocity encoding, in cm/sec
+                    'candidateVolumeNodes': [],  # list of potential component or magnitude volume nodes - there may be several candidates in the study
                     }
                 volumeNodesSets[acquisitionID] = volumeNodeSet
 
-            if directionCode == 'magnitude':
-                volumeNodesSets[acquisitionID]['candidateMagnitudeVolumeNodes'].append(volumeNode)
-            else:
-                volumeNodesSets[acquisitionID]['componentVolumeNodes'][self.axisForDirectionCode[directionCode]] = volumeNode
-                volumeNodesSets[acquisitionID]['venc'][self.axisForDirectionCode[directionCode]] = venc
+            volumeNode.SetAttribute("SlicerHeart.directionCode", directionCode)
+            volumeNodesSets[acquisitionID]['candidateVolumeNodes'].append(volumeNode)
 
-        validatedVolumeNodeSets = {}
-        for volumeNodesSet in volumeNodesSets:
-            volumeNodes = volumeNodesSets[volumeNodesSet]['componentVolumeNodes']
-            valid = True
+        return volumeNodesSets
+
+    def _findComponentVolumeNodes(self, volumeNodesSet):
+        """
+        Returns a list of 3 volume nodes (x, y, z) and scale factors (sx, sy, sz).
+        If not found, then returns (None, None).
+        """
+        # Find if there is a axisForDirectionCode mapping which has a corresponding volume
+        # for each component
+        for axisForDirectionCode in self.axisForDirectionCodes:
+            componentVolumeNodes = [None, None, None]
+            componentVolumeNodesScaleToCmPerSec = [0.0, 0.0, 0.0]
+            # axisForDirectionCode example: [("through", True), ("inplane_ap", True), ('inplane_fh', False)]
+            for axis, (directionCode, invertToRasDirection) in enumerate(axisForDirectionCode):
+                for volumeNode in volumeNodesSet['candidateVolumeNodes']:
+                    if volumeNode.GetAttribute("SlicerHeart.directionCode") == directionCode:
+                        # Found a volume for this direction
+                        componentVolumeNodes[axis] = volumeNode
+                                        # Compute absolute speed from encoding speed
+                        vencCmPerSec = float(componentVolumeNodes[axis].GetAttribute("SlicerHeart.vencCmPerSec"))
+                        scaleToCmPerSec = 1 / 4096 * vencCmPerSec
+                        if invertToRasDirection:
+                            scaleToCmPerSec = -scaleToCmPerSec
+                        componentVolumeNodesScaleToCmPerSec[axis] = scaleToCmPerSec
+                        break
+            if not all(componentVolumeNodes):
+                continue
+
+            # Check if number of frames is consistent across component volumes
             numberOfFrames = None
-
-            # Check component volumes
-            for axis in range(len(volumeNodes)):
-                if not volumeNodes[axis]:
-                    logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: missing component ({axis})")
-                    valid = False
-                    break
+            valid = True
+            for axis in range(len(componentVolumeNodes)):
                 if numberOfFrames is None:
-                    numberOfFrames = self._getNumberOfDataNodesInSequence(volumeNodes[axis])
+                    numberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[axis])
                 else:
-                    currentNumberOfFrames = self._getNumberOfDataNodesInSequence(volumeNodes[axis])
+                    currentNumberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[axis])
                     if currentNumberOfFrames != numberOfFrames:
-                        logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
+                        logging.warning(f"Volumes {[volumeNode.GetName() for volumeNode in componentVolumeNodes]} in node set {volumeNodesSet['name']} are discarded: inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
                         valid = False
                         break
             if not valid:
                 continue
 
-            # Check/select magnitude volume
-            volumeNodes = volumeNodesSets[volumeNodesSet]['candidateMagnitudeVolumeNodes']
-            for volumeNode in volumeNodes:
-                currentNumberOfFrames = self._getNumberOfDataNodesInSequence(volumeNode)
-                if currentNumberOfFrames != numberOfFrames:
-                    logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']}: candidate magnitude volume {volumeNode.GetName()} discarded due to inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
-                    continue
-                # Found a good candidate magnitude volume, use it
-                volumeNodesSets[volumeNodesSet]['magnitudeVolumeNode'] = volumeNode
-                break
+            # Component volumes are found and have consistent number of frames
+            return componentVolumeNodes, componentVolumeNodesScaleToCmPerSec
 
-            if not volumeNodesSets[volumeNodesSet]['magnitudeVolumeNode']:
-                logging.warning(f"Volume node set {volumeNodesSets[volumeNodesSet]['name']} is discarded: magnitude volume is not found")
+        return None, None
+
+    def _findMagnitudeVolumeNode(self, volumeNodesSet, componentVolumeNodes):
+        numberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[0])
+        candidateMagnitudeVolumes = [volumeNode for volumeNode in volumeNodesSet['candidateVolumeNodes'] if volumeNode.GetAttribute("SlicerHeart.directionCode") == "magnitude"]
+        for volumeNode in candidateMagnitudeVolumes:
+
+            # Check number of frames
+            currentNumberOfFrames = self._getNumberOfDataNodesInSequence(volumeNode)
+            if currentNumberOfFrames != numberOfFrames:
+                logging.debug(f"Volume node set {volumeNodesSet['name']}: candidate magnitude volume {volumeNode.GetName()} discarded due to inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
                 continue
 
-            validatedVolumeNodeSets[volumeNodesSet] = volumeNodesSets[volumeNodesSet]
+            # Found a suitable magnitude volume
+            return volumeNode
 
-        return validatedVolumeNodeSets
+        return None
 
-    def convertImagesToDisplacementField(self, componentVolumeNodes: list, magnitudeVolumeNode: vtkMRMLScalarVolumeNode, venc: list, gridTransformNode: vtkMRMLTransformNode = None) -> [vtkMRMLTransformNode, vtkMRMLScalarVolumeNode]:
-        volumeSequenceBrowserNodes = []
-        volumeSequenceNodes = []
-        volumeNodes = componentVolumeNodes + [magnitudeVolumeNode]
-        print(volumeNodes)
-        for axis, volumeSequenceProxyNode in enumerate(volumeNodes):
-            if not volumeSequenceProxyNode:
+    def findVolumeNodeSets(self):
+        # Map from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet:
+        # {
+        #   'name': 'Patient Name (study date) / 1',
+        #   'candidateVolumeNodes': result of _findVolumeNodeSetCandidatesInScene, contain volume nodes
+        #       with SlicerHeart.directionCode and SlicerHeart.vencCmPerSec (velocity encoding, in cm/sec) attributes
+        #   'componentVolumeNodes': [volumeNodeX, volumeNodeY, volumeNodeZ]
+        #   'componentVolumeNodesScaleToCmPerSec': [scaleX, scaleY, scaleZ] for setting component volume scale to cm/sec and directions to RAS
+        #   'magnitudeVolumeNode': volumeNodeMagnitude
+        # }
+        candidateVolumeNodesSets = self._findVolumeNodeSetCandidatesInScene()
+        volumeNodesSets = {}
+        for acquisitionID in candidateVolumeNodesSets:
+            volumeNodeSet = candidateVolumeNodesSets[acquisitionID]
+
+            componentVolumeNodes, componentVolumeNodesScaleToCmPerSec = self._findComponentVolumeNodes(volumeNodeSet)
+            if componentVolumeNodes is None or componentVolumeNodesScaleToCmPerSec is None:
+                directionCodes = [volumeNode.GetAttribute("SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
+                logging.debug(f"Volume node set {volumeNodeSet['name']} is discarded: cannot find volume for all directions (found direction: {directionCodes})")
+                continue
+
+            magnitudeVolumeNode = self._findMagnitudeVolumeNode(volumeNodeSet, componentVolumeNodes)
+            if not magnitudeVolumeNode:
+                directionCodes = [volumeNode.GetAttribute("SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
+                logging.debug(f"Volume node set {volumeNodeSet['name']} is discarded: missing magnitude volume")
+                continue
+
+            volumeNodesSets[acquisitionID] = {
+                "name": volumeNodeSet['name'],
+                "componentVolumeNodes": componentVolumeNodes,
+                "componentVolumeNodesScaleToCmPerSec": componentVolumeNodesScaleToCmPerSec,
+                "magnitudeVolumeNode": magnitudeVolumeNode,
+            }
+
+        return volumeNodesSets
+
+    def convertImagesToDisplacementField(self, componentVolumeNodes: list, componentVolumeNodesScaleToCmPerSec: list, magnitudeVolumeNode: vtkMRMLScalarVolumeNode, gridTransformNode: vtkMRMLTransformNode = None) -> [vtkMRMLTransformNode, vtkMRMLScalarVolumeNode]:
+        componentVolumeSequenceBrowserNodes = []
+        componentVolumeSequenceNodes = []
+        for axis, componentVolumeSequenceProxyNode in enumerate(componentVolumeNodes):
+            if not componentVolumeSequenceProxyNode:
                 raise RuntimeError(f"Volume ({axis}) is invalid")
-            volumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(volumeSequenceProxyNode)
-            if not volumeSequenceBrowserNode:
-                raise RuntimeError(f"Volume {volumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
-            volumeSequenceNode = volumeSequenceBrowserNode.GetSequenceNode(volumeSequenceProxyNode)
-            volumeSequenceBrowserNodes.append(volumeSequenceBrowserNode)
-            volumeSequenceNodes.append(volumeSequenceNode)
+            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeSequenceProxyNode)
+            if not componentVolumeSequenceBrowserNode:
+                raise RuntimeError(f"Volume {componentVolumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
+            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeSequenceProxyNode)
+            componentVolumeSequenceBrowserNodes.append(componentVolumeSequenceBrowserNode)
+            componentVolumeSequenceNodes.append(componentVolumeSequenceNode)
+
+        if not magnitudeVolumeNode:
+            raise RuntimeError("Magnitude volume is invalid")
+        magnitudeVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
+        if not magnitudeVolumeSequenceBrowserNode:
+            raise RuntimeError(f"Magnitude volume {volumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
+        magnitudeVolumeSequenceNode = magnitudeVolumeSequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
 
         import numpy as np
-        numberOfFrames = volumeSequenceNodes[0].GetNumberOfDataNodes()
+        numberOfFrames = componentVolumeSequenceNodes[0].GetNumberOfDataNodes()
 
-        volumeSequenceProxyNode = volumeNodes[0]
+        volumeSequenceProxyNode = componentVolumeNodes[0]
         dims = slicer.util.arrayFromVolume(volumeSequenceProxyNode).shape
 
         displacementImage = vtk.vtkImageData()
@@ -544,28 +602,21 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         displacementArray = slicer.util.arrayFromGridTransform(gridTransformNode)  # shape: (96, 160, 64, 3) = (i, j, k, c)
 
-        magnitudeVolumeSequenceNode = volumeSequenceNodes[self.axisForDirectionCode['magnitude']]
-
         transformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "4D flow")
 
         transformSequenceNode.SetIndexType(magnitudeVolumeSequenceNode.GetIndexType())
         transformSequenceNode.SetIndexName(magnitudeVolumeSequenceNode.GetIndexName())
         transformSequenceNode.SetIndexUnit(magnitudeVolumeSequenceNode.GetIndexUnit())
 
-        # Use m/sec as vector value in the transform (divide cm/sec by 100) because a typical 50 cm/sec speed
-        # = 0.5 m/sec speed value can be visualized nicely as displacement field with typical image spacing
-        speedScaleMeterPerSec = [1 / 4096 * venc[i] / 100 for i in range(3)]
-
-        # LPS to RAS conversion
-        directions = [-1, -1, 1]
-
         for volumeIndex in range(numberOfFrames):
             magnitudeVoxelArray = slicer.util.arrayFromVolume(magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)).copy()
             for axis in range(3):
-                volumeSequenceNode = volumeSequenceNodes[axis]
-                voxelArray = slicer.util.arrayFromVolume(volumeSequenceNode.GetNthDataNode(volumeIndex)).copy() * speedScaleMeterPerSec[axis] * directions[axis]
-                #voxelArray = np.ones(voxelArrayX.shape) * 10
-                voxelArray[abs(magnitudeVoxelArray) < 100] = 0
+                volumeSequenceNode = componentVolumeSequenceNodes[axis]
+                # Use m/sec as vector value in the transform (divide cm/sec by 100) because a typical 50 cm/sec speed
+                # = 0.5 m/sec speed value can be visualized nicely as displacement field with typical image spacing
+                scaleToMeterPerSec = componentVolumeNodesScaleToCmPerSec[axis] / 100
+                voxelArray = slicer.util.arrayFromVolume(volumeSequenceNode.GetNthDataNode(volumeIndex)).copy() * scaleToMeterPerSec
+                voxelArray[abs(magnitudeVoxelArray) < self.magnitudeThreshold] = 0
                 displacementArray[:, :, :, axis] = voxelArray
             slicer.util.arrayFromGridTransformModified(gridTransformNode)
             indexValue = magnitudeVolumeSequenceNode.GetNthIndexValue(volumeIndex)
@@ -579,7 +630,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             gridTransformNode.Inverse()
 
         # Create a sequence browser node for the new merged sequence
-        transformSequenceBrowserNode = volumeSequenceBrowserNodes[self.axisForDirectionCode['magnitude']]
+        transformSequenceBrowserNode = magnitudeVolumeSequenceBrowserNode
         transformSequenceBrowserNode.AddSynchronizedSequenceNode(transformSequenceNode)
         slicer.modules.sequences.toolBar().setActiveBrowserNode(transformSequenceBrowserNode)
 
@@ -632,21 +683,25 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         colorMap = gridTransformNode.GetDisplayNode().GetColorNode().GetColorTransferFunction()
         wasModified = gridTransformNode.GetDisplayNode().GetColorNode().StartModify()
         colorMap.RemoveAllPoints()
-        colorTableRangeMm = max(venc) / 100  # m/sec
-        colorMap.AddRGBPoint(colorTableRangeMm * 0.0, 0.0, 0.0, 1.0)
-        colorMap.AddRGBPoint(colorTableRangeMm * 0.2, 0.0, 1.0, 1.0)
-        colorMap.AddRGBPoint(colorTableRangeMm * 0.5, 1.0, 1.0, 0.0)
-        colorMap.AddRGBPoint(colorTableRangeMm * 1.0, 1.0, 0.0, 0.0)
+
+        # Determine color map range based on velocity encoding, so that the color map is consistent across different acquisitions
+        # that use the same velocity encoding (venc) setting.
+        maxVencCmPerSec = max([float(componentVolumeNode.GetAttribute("SlicerHeart.vencCmPerSec")) for componentVolumeNode in componentVolumeNodes])
+        colorTableRangeMeterPerSec = maxVencCmPerSec / 100  # m/sec
+        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.0, 0.0, 0.0, 1.0)
+        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.2, 0.0, 1.0, 1.0)
+        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.5, 1.0, 1.0, 0.0)
+        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 1.0, 1.0, 0.0, 0.0)
         gridTransformNode.GetDisplayNode().GetColorNode().EndModify(wasModified)
 
         # Delete imported component image series from the scene
         for axisIndex in range(3):
-            slicer.mrmlScene.RemoveNode(volumeSequenceNodes[axisIndex].GetStorageNode())
-            slicer.mrmlScene.RemoveNode(volumeSequenceNodes[axisIndex])
-            slicer.mrmlScene.RemoveNode(volumeNodes[axisIndex].GetDisplayNode())
-            slicer.mrmlScene.RemoveNode(volumeNodes[axisIndex].GetStorageNode())
-            slicer.mrmlScene.RemoveNode(volumeNodes[axisIndex])
-            slicer.mrmlScene.RemoveNode(volumeSequenceBrowserNodes[axisIndex])
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNodes[axisIndex].GetStorageNode())
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNodes[axisIndex])
+            slicer.mrmlScene.RemoveNode(componentVolumeNodes[axisIndex].GetDisplayNode())
+            slicer.mrmlScene.RemoveNode(componentVolumeNodes[axisIndex].GetStorageNode())
+            slicer.mrmlScene.RemoveNode(componentVolumeNodes[axisIndex])
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceBrowserNodes[axisIndex])
 
         return gridTransformNode
 
@@ -964,26 +1019,27 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     displacementArray[insideMaskArray==0] = (0,0,0)
 
                 # Update streamlines
-                speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
-                streamlinesSeedModel = outputSpeedProfileModel  # the plane profile is also used for generating seed points
-                self._createStreamlines(outputStreamlinesModel, speedImageNodeMPerSec, streamlinesSeedModel,
-                    streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesSpeedThresholdMPerSec)
-                if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
-                    # Initialize streamlines model display node
-                    outputStreamlinesModel.CreateDefaultDisplayNodes()
-                    displayNode = outputStreamlinesModel.GetDisplayNode()
-                    displayNode.SetColor(0, 0, 1)
-                    displayNode.SetEdgeVisibility(True)
-                    displayNode.BackfaceCullingOff()
-                    displayNode.LightingOff()  # don't make the lines darker depending on orientation
-                    displayNode.SetActiveScalarName('Speed')
-                    if gridTransformNode.GetDisplayNode():
-                        # Use the same color table and scaling as the transform node
-                        displayNode.SetAndObserveColorNodeID(gridTransformNode.GetDisplayNode().GetColorNodeID())
-                        displayNode.SetScalarRangeFlag(displayNode.UseColorNodeScalarRange)
-                    else:
-                        displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
-                    displayNode.ScalarVisibilityOn()
+                if outputStreamlinesModel:
+                    speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
+                    streamlinesSeedModel = outputSpeedProfileModel  # the plane profile is also used for generating seed points
+                    self._createStreamlines(outputStreamlinesModel, speedImageNodeMPerSec, streamlinesSeedModel,
+                        streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesSpeedThresholdMPerSec)
+                    if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
+                        # Initialize streamlines model display node
+                        outputStreamlinesModel.CreateDefaultDisplayNodes()
+                        displayNode = outputStreamlinesModel.GetDisplayNode()
+                        displayNode.SetColor(0, 0, 1)
+                        displayNode.SetEdgeVisibility(True)
+                        displayNode.BackfaceCullingOff()
+                        displayNode.LightingOff()  # don't make the lines darker depending on orientation
+                        displayNode.SetActiveScalarName('Speed')
+                        if gridTransformNode.GetDisplayNode():
+                            # Use the same color table and scaling as the transform node
+                            displayNode.SetAndObserveColorNodeID(gridTransformNode.GetDisplayNode().GetColorNodeID())
+                            displayNode.SetScalarRangeFlag(displayNode.UseColorNodeScalarRange)
+                        else:
+                            displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
+                        displayNode.ScalarVisibilityOn()
 
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
                 displacementImageNode = None
