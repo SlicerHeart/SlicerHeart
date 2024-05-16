@@ -665,7 +665,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             transformDisplayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
 
             # Create color node
-            colorNode = self._createSpeedColorNode(gridTransformNode)
+            colorNode = self._createSpeedColorNode()
             transformDisplayNode.SetAndObserveColorNodeID(colorNode.GetID())
             # Display color legend
             colorLegendDisplayNode = slicer.modules.colors.logic().AddDefaultColorLegendDisplayNode(transformDisplayNode)
