@@ -322,7 +322,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
             self.addLog("Sample flow field...")
-            self._parameterNode.outputSpeedProfileModel = self.logic.sampleFlowFieldWithPlane(
+            self.logic.sampleFlowFieldWithPlane(
                 self._parameterNode.inputPlane,
                 self._parameterNode.outputTransform,
                 self._parameterNode.outputTransform.GetNodeReference("magnitudeVolume"),
@@ -337,11 +337,12 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.outputSpeedVolume,
                 self._parameterNode.speedVolumeProjectedToPlane)
 
-            self.addLog("Compute speed profile table...")
-            self._parameterNode.outputSpeedProfileTable = self.logic.computeSpeedProfileTable(
-                self._parameterNode.outputSpeedProfileModel,
-                self._parameterNode.speedThreshold,
-                self._parameterNode.outputSpeedProfileTable)
+            if self._parameterNode.outputSpeedProfileTable:
+                self.addLog("Compute speed profile table...")
+                self.logic.computeSpeedProfileTable(
+                    self._parameterNode.outputSpeedProfileModel,
+                    self._parameterNode.speedThreshold,
+                    self._parameterNode.outputSpeedProfileTable)
 
     def onShowPlotButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to create plot."):
@@ -914,6 +915,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
             originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
             numberOfItems = transformSequenceBrowserNode.GetNumberOfItems()
+            deleteOutputSpeedProfileModel = False
             for itemNumber in range(numberOfItems):
                 self.log("Sampling flow field with plane... ({item}/{count})".format(item=itemNumber+1, count=numberOfItems))
 
@@ -944,7 +946,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Save model to plane
                 modelsLogic = slicer.modules.models.logic()
                 if not outputSpeedProfileModel:
-                    outputSpeedProfileModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Speed Profile")
+                    # Create model node for the output speed profile, if not provided then we create a temporary one
+                    outputSpeedProfileModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Speed Profile")
+                    deleteOutputSpeedProfileModel = True
+                if not outputSpeedProfileModel.GetDisplayNode():
+                    # Initialize model display node
                     outputSpeedProfileModel.CreateDefaultDisplayNodes()
                     displayNode = outputSpeedProfileModel.GetDisplayNode()
                     displayNode.SetColor(1, 1, 0)
@@ -953,7 +959,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
                 # Add the output nodes to the same sequence browser as the input 4D flow field
-                for node in [outputStreamlinesModel,  outputSpeedProfileModel, outputSpeedVolume]:
+                resultProxyNodes = [outputStreamlinesModel, outputSpeedVolume]
+                if not deleteOutputSpeedProfileModel:
+                    # only create sequence and proxy node if the speed profile model is not temporary
+                    resultProxyNodes.append(outputSpeedProfileModel)
+                for node in resultProxyNodes:
                     if not node:
                         continue
                     self._addNodeToSequenceBrowser(node, transformSequenceBrowserNode)
@@ -1115,8 +1125,14 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
             if originalTransformVisibility and gridTransformNode.GetDisplayNode():
                 gridTransformNode.GetDisplayNode().SetVisibility(True)
-
-        return outputSpeedProfileModel
+            if deleteOutputSpeedProfileModel and outputSpeedProfileModel:
+                slicer.mrmlScene.RemoveNode(outputSpeedProfileModel.GetDisplayNode())
+                slicer.mrmlScene.RemoveNode(outputSpeedProfileModel)
+            if outputStreamlinesModel:
+                # Hack, it is not clear why this is needed, but without this, streamlines are not always displayed
+                displayNode = outputStreamlinesModel.GetDisplayNode()
+                displayNode.SetThresholdEnabled(not displayNode.GetThresholdEnabled())
+                displayNode.SetThresholdEnabled(not displayNode.GetThresholdEnabled())
 
     def _createSpeedColorNode(self):
         """Create a color node that maps (absolute) speed to color.
@@ -1250,7 +1266,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             streamLine.SetIntegrationDirectionToBoth()
         else:
             streamLine.SetIntegrationDirectionToForward()
-        streamLine.SetTerminalSpeed(.05)
+        streamLine.SetTerminalSpeed(speedThresholdMPerSec)
         streamLine.Update()
 
         # Transform results to RAS space
