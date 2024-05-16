@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>475</width>
-    <height>658</height>
+    <height>806</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
@@ -133,17 +133,17 @@
       <string>Valve region</string>
      </property>
      <property name="collapsed">
-      <bool>true</bool>
+      <bool>false</bool>
      </property>
      <layout class="QFormLayout" name="formLayout_4">
-      <item row="0" column="0">
+      <item row="1" column="0">
        <widget class="QLabel" name="label_4">
         <property name="text">
          <string>Scale:</string>
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
+      <item row="1" column="1">
        <widget class="ctkSliderWidget" name="clippingModelScaleSliderWidget">
         <property name="toolTip">
          <string>Scale of clipping frustum in percentage. 100 corresponds to the exact size of the annulus.</string>
@@ -162,14 +162,14 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
          <string>Top distance:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <widget class="ctkSliderWidget" name="clippingModelTopDistanceSliderWidget">
         <property name="toolTip">
          <string>Clipping model top plane distance from center plane.</string>
@@ -188,14 +188,14 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
          <string>Top scale:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="ctkSliderWidget" name="clippingModelTopScaleSliderWidget">
         <property name="toolTip">
          <string>Scale of clipping ellipse at top plane.</string>
@@ -214,14 +214,14 @@
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
          <string>Bottom distance:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="4" column="1">
        <widget class="ctkSliderWidget" name="clippingModelBottomDistanceSliderWidget">
         <property name="toolTip">
          <string>Clipping model bottom plane distance from center plane.</string>
@@ -240,14 +240,14 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="5" column="0">
        <widget class="QLabel" name="label_12">
         <property name="text">
          <string>Bottom scale:</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="5" column="1">
        <widget class="ctkSliderWidget" name="clippingModelBottomScaleSliderWidget">
         <property name="toolTip">
          <string>Scale of clipping ellipse at bottom plane.</string>
@@ -266,7 +266,7 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0" colspan="2">
+      <item row="6" column="0" colspan="2">
        <widget class="QPushButton" name="clippingModelUseAsEditorMaskButton">
         <property name="toolTip">
          <string>Restricts editable area to the annulus region.</string>
@@ -276,7 +276,7 @@
         </property>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="QPushButton" name="clippingModelSequenceApplyButton">
         <property name="toolTip">
          <string>Create a clipped copy of the input image sequence. May make volume rendering and browsing faster.</string>
@@ -285,6 +285,24 @@
          <string>Use for volume rendering</string>
         </property>
        </widget>
+      </item>
+      <item row="0" column="0" colspan="2">
+       <layout class="QHBoxLayout" name="horizontalLayout_8">
+        <item>
+         <widget class="QPushButton" name="addValveRoiButton">
+          <property name="text">
+           <string>Add</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="removeValveRoiButton">
+          <property name="text">
+           <string>Remove</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>

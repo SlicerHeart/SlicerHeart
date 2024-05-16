@@ -127,6 +127,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.addSegmentationButton.clicked.connect(self.onAddSegmentationButtonClicked)
     self.ui.removeSegmentationButton.clicked.connect(self.onRemoveSegmentationButtonClicked)
 
+    self.ui.addValveRoiButton.clicked.connect(self.onAddValveRoiButtonClicked)
+    self.ui.removeValveRoiButton.clicked.connect(self.onRemoveValveRoiButtonClicked)
+
     # initial state is inconsistent, need to switch to reverse before we can set
     # the desired state reliably
     self.ui.clippingCollapsibleButton.collapsed = False
@@ -333,14 +336,14 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def _updateRoiGeometryGui(self):
     if self.valveModel.valveRoi.roiModelNode:
       roiGeometry = self.valveModel.valveRoi.getRoiGeometry()
-      for paramName in self.roiGeometryWidgets.keys():
+      for paramName in self.roiGeometryWidgets:
         widget = self.roiGeometryWidgets[paramName]
         wasBlocked = widget.blockSignals(True)
         widget.enabled = True
         widget.value = roiGeometry[paramName]
         widget.blockSignals(wasBlocked)
     else:
-      for paramName in self.roiGeometryWidgets.keys():
+      for paramName in self.roiGeometryWidgets:
         widget = self.roiGeometryWidgets[paramName]
         widget.enabled = False
 
@@ -392,10 +395,14 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     if (not self.valveModel) or (not self.valveVolumeBrowserNode) or (self.valveVolumeBrowserNode.GetPlaybackActive()):
       self.ui.addSegmentationButton.enabled = False
       self.ui.removeSegmentationButton.enabled = False
+      self.ui.addValveRoiButton.enabled = False
+      self.ui.removeValveRoiButton.enabled = False
     else:
       leafletSegmentationNode = self.valveModel.leafletSegmentationNode
       self.ui.addSegmentationButton.enabled = not leafletSegmentationNode
       self.ui.removeSegmentationButton.enabled = leafletSegmentationNode
+      self.ui.addValveRoiButton.enabled = not self.valveModel.valveRoi.roiModelNode
+      self.ui.removeValveRoiButton.enabled = self.valveModel.valveRoi.roiModelNode
 
   def updateGUIFromValveBrowser(self):
     # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
@@ -404,9 +411,26 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def updateGUIFromValveVolumeBrowser(self):
     pass
 
-  def onAddSegmentationButtonClicked(self):
+  def onAddValveRoiButtonClicked(self):
+    self.valveModel.createValveRoi()
 
-    # TODO: create ROI ttt
+  def onRemoveValveRoiButtonClicked(self):
+    TODO: make this a utility function that deletes current timepoint of a proxy node:
+
+    valveRoiModelNode = self.valveModel.valveRoi.roiModelNode
+    if not valveRoiModelNode:
+      return
+    if not self.valveModel.isNodeSpecifiedForCurrentTimePoint(valveRoiModelNode):
+      return
+    # Remove valve ROI from sequence
+    valvROISequenceNode = self.valveBrowserNode.GetSequenceNode(valveRoiModelNode)
+    valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    valvROISequenceNode.RemoveDataNodeAtValue(indexValue)
+
+    self.updateGUIFromHeartValveNode()
+
+
+  def onAddSegmentationButtonClicked(self):
 
     # Make sure there is a leaflet volume is available
     # (it will be used as source volume for the segmentation)

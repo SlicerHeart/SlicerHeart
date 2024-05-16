@@ -144,7 +144,7 @@ class ValveModel:
     @property
     def valveRoiModelNode(self):
       """:returns Model node that displays the valve ROI."""
-      return self.heartValveNode.GetNodeReference("ValveRoiModel") if self.heartValveNode else None
+      return self._heartValveNodeReferencedProxyNode("ValveRoiModel", forDisplayedHeartValvePhase=True)
 
     @valveRoiModelNode.setter
     def valveRoiModelNode(self, modelNode):
@@ -154,6 +154,9 @@ class ValveModel:
       self.heartValveNode.SetNodeReferenceID("ValveRoiModel", modelNode.GetID() if modelNode else None)
       self.applyProbeToRasTransformToNode(modelNode)
       self.valveRoi.setRoiModelNode(modelNode)
+      if modelNode:
+        self.moveNodeToHeartValveFolder(modelNode)
+        self.valveBrowser.makeTimeSequence(modelNode)
 
     @property
     def leafletVolumeSequenceNode(self):
