@@ -65,10 +65,12 @@ class Import4DFlowParameterNode:
     outputStreamlinesModel: vtkMRMLModelNode
     outputSpeedProfileModel: vtkMRMLModelNode
     outputSpeedProfileTable: vtkMRMLTableNode
+    outputSpeedVolume: vtkMRMLScalarVolumeNode
     samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2  # distance unit
     speedThreshold: Annotated[float, WithinRange(0.0, 3), SingleStep(0.01), Default(0.1)]  # m/sec
     streamlinesMaximumLength: Annotated[float, WithinRange(10, 300)] = 200  # distance unit
     streamlinesBidirectional: bool = True
+    speedVolumeProjectedToPlane: bool = False  # if True then signed speed vector is projected to the measurement plane normal
 
 #
 # Import4DFlowWidget
@@ -331,7 +333,9 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.inputMaskSegmentID,
                 self._parameterNode.streamlinesMaximumLength,
                 self._parameterNode.streamlinesBidirectional,
-                self._parameterNode.speedThreshold)
+                self._parameterNode.speedThreshold,
+                self._parameterNode.outputSpeedVolume,
+                self._parameterNode.speedVolumeProjectedToPlane)
 
             self.addLog("Compute speed profile table...")
             self._parameterNode.outputSpeedProfileTable = self.logic.computeSpeedProfileTable(
@@ -383,6 +387,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         # raw magnitude image intensity threshold
         # (speed values below this threshold are set to zero in the flow field to reduce clutter during visualization)
         self.magnitudeThreshold = 60
+
+        self.dopplerLutRange = [-2, 2]
+        self.dopplerLutThreshold = [-0.25, 0.25]
 
     def log(self, text):
         logging.info(text)
@@ -658,21 +665,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             transformDisplayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
 
             # Create color node
-            colorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLProceduralColorNode")
-            colorNode.UnRegister(None)  # to prevent memory leaks
-            colorNode.SetName(slicer.mrmlScene.GenerateUniqueName("Speed"))
-            colorNode.SetAttribute("Category", "Flow")
-            # The color node is a procedural color node, which is saved using a storage node.
-            # Hidden nodes are not saved if they use a storage node, therefore
-            # the color node must be visible.
-            colorNode.SetHideFromEditors(False)
-            slicer.mrmlScene.AddNode(colorNode)
-            # Add a transfer function with some default values
-            colorMap = colorNode.GetColorTransferFunction()
-            colorMap.AddRGBPoint(0.0, 0.0, 0.0, 0.0)
-            colorMap.AddRGBPoint(1.5, 1.0, 1.0, 1.0)
+            colorNode = self._createSpeedColorNode(gridTransformNode)
             transformDisplayNode.SetAndObserveColorNodeID(colorNode.GetID())
-
             # Display color legend
             colorLegendDisplayNode = slicer.modules.colors.logic().AddDefaultColorLegendDisplayNode(transformDisplayNode)
             colorLegendDisplayNode.SetTitleText("Speed")
@@ -852,6 +846,33 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
 
+    def _addNodeToSequenceBrowser(self, node, sequenceBrowserNode):
+        # Make sure output models are in the same sequence browser as the transform sequence and
+        # model is in not a proxy node of any other sequence browsers
+        foundBrowserNodes = vtk.vtkCollection()
+        sequencesLogic = slicer.modules.sequences.logic()
+        sequencesLogic.GetBrowserNodesForProxyNode(node, foundBrowserNodes)
+
+        sequenceNode = None
+        for i in range(foundBrowserNodes.GetNumberOfItems()):
+            foundBrowserNode = foundBrowserNodes.GetItemAsObject(i)
+            foundSequenceNode = sequenceBrowserNode.GetSequenceNode(node)
+            if foundBrowserNode == sequenceBrowserNode:
+                # Store the sequence node corresponding to the transform sequence browser node
+                sequenceNode = foundSequenceNode
+            else:
+                # Remove model from other sequence browser nodes
+                foundBrowserNode.RemoveSynchronizedSequenceNode(foundSequenceNode.GetID())
+
+        if not sequenceNode:
+            masterSequenceNode = sequenceBrowserNode.GetMasterSequenceNode()
+            sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", node.GetName() + " Sequence")
+            sequenceNode.SetIndexType(masterSequenceNode.GetIndexType())
+            sequenceNode.SetIndexName(masterSequenceNode.GetIndexName())
+            sequenceNode.SetIndexUnit(masterSequenceNode.GetIndexUnit())
+            slicer.modules.sequences.logic().AddSynchronizedNode(sequenceNode, node, sequenceBrowserNode)
+            sequenceBrowserNode.SetSaveChanges(sequenceNode, True)
+
     def sampleFlowFieldWithPlane(
             self,
             crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
@@ -864,7 +885,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             maskSegmentID: str = None,
             streamlinesMaximumLengthMm: int = 100,
             streamlinesBidirectional: bool = True,
-            streamlinesSpeedThresholdMPerSec: float = 0.01) -> vtkMRMLModelNode:
+            streamlinesSpeedThresholdMPerSec: float = 0.01,
+            outputSpeedVolume: vtkMRMLScalarVolumeNode = None,
+            speedVolumeProjectedToPlane: bool = False) -> vtkMRMLModelNode:
+
+        import numpy as np
 
         if not crossSectionPlaneNode:
             raise ValueError("Cross-section plane node is invalid")
@@ -927,36 +952,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     displayNode.BackfaceCullingOff()
                     displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
-                # Add the model to the same sequence browser as the input 4D flow field
-                for modelNode in [outputStreamlinesModel,  outputSpeedProfileModel]:
-                    if not modelNode:
+                # Add the output nodes to the same sequence browser as the input 4D flow field
+                for node in [outputStreamlinesModel,  outputSpeedProfileModel, outputSpeedVolume]:
+                    if not node:
                         continue
-
-                    # Make sure output models are in the same sequence browser as the transform sequence and
-                    # model is in not a proxy node of any other sequence browsers
-                    foundBrowserNodes = vtk.vtkCollection()
-                    sequencesLogic = slicer.modules.sequences.logic()
-                    sequencesLogic.GetBrowserNodesForProxyNode(modelNode, foundBrowserNodes)
-
-                    modelSequenceNode = None
-                    for i in range(foundBrowserNodes.GetNumberOfItems()):
-                        foundBrowserNode = foundBrowserNodes.GetItemAsObject(i)
-                        foundSequenceNode = transformSequenceBrowserNode.GetSequenceNode(modelNode)
-                        if foundBrowserNode == transformSequenceBrowserNode:
-                            # Store the sequence node corresponding to the transform sequence browser node
-                            modelSequenceNode = foundSequenceNode
-                        else:
-                            # Remove model from other sequence browser nodes
-                            foundBrowserNode.RemoveSynchronizedSequenceNode(foundSequenceNode.GetID())
-
-                    if not modelSequenceNode:
-                        masterSequenceNode = transformSequenceBrowserNode.GetMasterSequenceNode()
-                        modelSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", modelNode.GetName() + " Sequence")
-                        modelSequenceNode.SetIndexType(masterSequenceNode.GetIndexType())
-                        modelSequenceNode.SetIndexName(masterSequenceNode.GetIndexName())
-                        modelSequenceNode.SetIndexUnit(masterSequenceNode.GetIndexUnit())
-                        slicer.modules.sequences.logic().AddSynchronizedNode(modelSequenceNode, modelNode, transformSequenceBrowserNode)
-                        transformSequenceBrowserNode.SetSaveChanges(modelSequenceNode, True)
+                    self._addNodeToSequenceBrowser(node, transformSequenceBrowserNode)
 
                 objectToWorldTransformFilter.Update()
                 outputSpeedProfileModel.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
@@ -1041,6 +1041,52 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                             displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
                         displayNode.ScalarVisibilityOn()
 
+                if outputSpeedVolume:
+                    ijkToRAS = vtk.vtkMatrix4x4()
+                    displacementImageNode.GetIJKToRASMatrix(ijkToRAS)
+                    outputSpeedVolume.SetIJKToRASMatrix(ijkToRAS)
+                    displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                    if speedVolumeProjectedToPlane:
+                        # Project speed vector to the plane
+                        # Get plane normal
+                        planeNormal = crossSectionPlaneNode.GetNormal()
+                        # Compute dot product of each element of displacementImageArray by planeNormal.
+                        # Do not iterate through points one by one because it would be too slow
+                        # (use numpy operations instead).
+                        speedVolumeArray = np.sum(displacementImageArray * planeNormal, axis=3)
+                    else:
+                        speedVolumeArray = np.linalg.norm(displacementImageArray, axis=3)
+                    slicer.util.updateVolumeFromArray(outputSpeedVolume, speedVolumeArray)
+
+                    if not outputSpeedVolume.GetScalarVolumeDisplayNode():
+                        speedVolumeArray.CreateDefaultDisplayNodes()
+                    colorNode = outputSpeedVolume.GetScalarVolumeDisplayNode().GetColorNode()
+                    # colorMappingType is Speed (for absolute speed) or SpeedComponent (for Doppler-like signed speed)
+                    currentColorMappingType = colorNode.GetAttribute("SlicerHeart.ColorMappingType") if colorNode else None
+                    requiredColorMappingType = "SpeedComponent" if speedVolumeProjectedToPlane else "Speed"
+                    if currentColorMappingType != requiredColorMappingType:
+                        # Update color table
+                        if currentColorMappingType:
+                            # We need to switch to a different color mapping type, but keep reference to this color node
+                            outputSpeedVolume.SetNodeReferenceID("SlicerHeart."+currentColorMappingType, colorNode.GetID())
+                        colorNode = outputSpeedVolume.GetNodeReference("SlicerHeart." + requiredColorMappingType)
+                        if colorNode:
+                            # There is a saved color table that we can use
+                            colorNodeID = colorNode.GetID()
+                        else:
+                            # Need to create new color node
+                            if speedVolumeProjectedToPlane:
+                                colorNodeID = self._createSpeedComponentColorNode().GetID()
+                                outputSpeedVolume.GetScalarVolumeDisplayNode().SetAutoWindowLevel(False)
+                                outputSpeedVolume.GetScalarVolumeDisplayNode().SetWindowLevelMinMax(*self.dopplerLutRange)
+                            else:
+                                if gridTransformNode.GetDisplayNode():
+                                    # Use the same color table and scaling as the transform node
+                                    colorNodeID = gridTransformNode.GetDisplayNode().GetColorNodeID()
+                                else:
+                                    colorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
+                        outputSpeedVolume.GetScalarVolumeDisplayNode().SetAndObserveColorNodeID(colorNodeID)
+
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
                 displacementImageNode = None
 
@@ -1057,6 +1103,83 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 gridTransformNode.GetDisplayNode().SetVisibility(True)
 
         return outputSpeedProfileModel
+
+    def _createSpeedColorNode(self):
+        """Create a color node that maps (absolute) speed to color.
+        """
+        colorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLProceduralColorNode")
+        colorNode.UnRegister(None)  # to prevent memory leaks
+        colorNode.SetName(slicer.mrmlScene.GenerateUniqueName("Speed"))
+        colorNode.SetAttribute("Category", "Flow")
+        colorNode.SetAttribute("SlicerHeart.ColorMappingType", "Speed")
+        # The color node is a procedural color node, which is saved using a storage node.
+        # Hidden nodes are not saved if they use a storage node, therefore
+        # the color node must be visible.
+        colorNode.SetHideFromEditors(False)
+        slicer.mrmlScene.AddNode(colorNode)
+        # Add a transfer function with some default values
+        colorMap = colorNode.GetColorTransferFunction()
+        colorMap.AddRGBPoint(0.0, 0.0, 0.0, 0.0)
+        colorMap.AddRGBPoint(1.5, 1.0, 1.0, 1.0)
+
+    def _getSpeedComponentTransferFunctions(self):
+        # Create color and opacity functions for Doppler-like visualization
+        lutRange = self.dopplerLutRange
+        lutThreshold = self.dopplerLutThreshold
+
+        colorMap = vtk.vtkColorTransferFunction()
+        colorMap.AddRGBPoint(lutRange[0],        0/255, 255/255, 255/255)  # cyan
+        colorMap.AddRGBPoint(lutRange[0]*0.05,   0/255,   0/255, 255/255)  # blue
+        colorMap.AddRGBPoint(                       0,   0/255,   0/255,   0/255)
+        colorMap.AddRGBPoint(lutRange[1]*0.05, 255/255,   0/255,   0/255)  # red
+        colorMap.AddRGBPoint(lutRange[1],      255/255, 255/255,   0/255)  # yellow
+
+        opacityMap = vtk.vtkPiecewiseFunction()
+        transitionWidth = (lutThreshold[1] - lutThreshold[0]) * 0.1
+        opacityMap.AddPoint(lutRange[0], 1.0)
+        opacityMap.AddPoint(lutThreshold[0], 1.0)
+        opacityMap.AddPoint(lutThreshold[0]+transitionWidth, 0.0)
+        opacityMap.AddPoint(lutThreshold[1]-transitionWidth, 0.0)
+        opacityMap.AddPoint(lutThreshold[1], 1.0)
+        opacityMap.AddPoint(lutRange[1], 1.0)
+
+        return colorMap, opacityMap
+
+    def _createSpeedComponentColorNode(self):
+        """Create a color node that maps (signed) speed component to color
+        for Doppler-like visualization.
+        """
+
+        colorMap, opacityMap = self._getSpeedComponentTransferFunctions()
+
+        # Fill lookup table with the color map and opacity
+        colorTableSize = 256
+        lut = vtk.vtkLookupTable()
+        lut.SetNumberOfTableValues(colorTableSize)
+        for i in range(colorTableSize):
+            x = lutRange[0] + i / (colorTableSize-1) * (lutRange[1] - lutRange[0])
+            rgb = colorMap.GetColor(x)
+            lut.SetTableValue(i, rgb[0], rgb[1], rgb[2], opacityMap.GetValue(x))
+        lut.SetRange(lutRange[0], lutRange[1])
+
+        # Set up color node
+        colorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
+        colorNode.UnRegister(None)  # to prevent memory leaks
+        colorNode.SetName(slicer.mrmlScene.GenerateUniqueName("Speed Component"))
+        colorNode.SetAttribute("Category", "Flow")
+        colorNode.SetAttribute("SlicerHeart.ColorMappingType", "SpeedComponent")
+        colorNode.SetType(slicer.vtkMRMLColorTableNode.User)
+        # The color node is a procedural color node, which is saved using a storage node.
+        # Hidden nodes are not saved if they use a storage node, therefore
+        # the color node must be visible.
+        colorNode.SetHideFromEditors(False)
+        # Store LUT
+        colorNode.SetNumberOfColors(colorTableSize)
+        colorNode.SetAndObserveLookupTable(lut)
+        # Save in the scene
+        slicer.mrmlScene.AddNode(colorNode)
+
+        return colorNode
 
     def _createStreamlines(self, outputStreamlinesModel, speedImageNodeMPerSec, seedPointsModel, maximumLengthMm, bidirectional, speedThresholdMPerSec):
         import vtkAddon
