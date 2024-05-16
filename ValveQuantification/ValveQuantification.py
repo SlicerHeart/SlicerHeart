@@ -229,7 +229,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.computeButton = qt.QPushButton("Compute")
     self.computeButton.toolTip = "Compute metrics"
     outputFormLayout.addRow(self.computeButton)
-    self.computeButton.connect('clicked(bool)', self.updateOutput)
+    self.computeButton.connect('clicked(bool)', self.computeCurrentPhaseMetrics)
 
     self.computeStatusTextEdit = qt.QPlainTextEdit()
     self.computeStatusTextEdit.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
@@ -732,11 +732,11 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         positionSlider.maximum = curveLength
         positionSlider.value = pointDistanceAlongCurve
         positionSlider.blockSignals(wasBlocked)
-        requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
-        if not requiredCheckBox.checked:
-          requiredCheckBox.checked = True
 
-  def updateOutput(self):
+      requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
+      requiredCheckBox.checked = not pointPositionAnnulus is None
+
+  def computeCurrentPhaseMetrics(self):
 
     # Compute metrics and populate the output table
     heartValveMeasurementNode = self.getHeartValveMeasurementNode()
