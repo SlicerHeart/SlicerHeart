@@ -106,6 +106,9 @@
      <property name="text">
       <string>Export flow field to file</string>
      </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
      <layout class="QFormLayout" name="formLayout_4">
       <item row="1" column="0">
        <widget class="QLabel" name="label_8">
@@ -228,7 +231,7 @@
       <item row="2" column="1">
        <widget class="ctkSliderWidget" name="samplingDistanceSliderWidget">
         <property name="toolTip">
-         <string>Distance between sampling points in the plane.</string>
+         <string>Distance between sampling points in the plane. Used for Speed profile and Streamlines.</string>
         </property>
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -270,116 +273,116 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0">
-       <widget class="QLabel" name="label_7">
-        <property name="text">
-         <string>Output speed profile model:</string>
+      <item row="4" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_3">
+        <property name="title">
+         <string>Speed profile</string>
         </property>
+        <layout class="QFormLayout" name="formLayout_7">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_7">
+           <property name="text">
+            <string>Output speed profile model:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
+           <property name="toolTip">
+            <string>Model node that contains speed vectors as point data</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLModelNode</string>
+            </stringlist>
+           </property>
+           <property name="showChildNodeTypes">
+            <bool>false</bool>
+           </property>
+           <property name="baseName">
+            <string>Speed profile model</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputSpeedProfileModel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_9">
+           <property name="text">
+            <string>Output speed profile table:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <layout class="QHBoxLayout" name="horizontalLayout">
+           <item>
+            <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
+             <property name="toolTip">
+              <string>Plot series that contain average speed value vs time.</string>
+             </property>
+             <property name="nodeTypes">
+              <stringlist notr="true">
+               <string>vtkMRMLTableNode</string>
+              </stringlist>
+             </property>
+             <property name="showChildNodeTypes">
+              <bool>false</bool>
+             </property>
+             <property name="baseName">
+              <string>Speed profile table</string>
+             </property>
+             <property name="noneEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="addEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="removeEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="editEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="renameEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="selectNodeUponCreation">
+              <bool>true</bool>
+             </property>
+             <property name="SlicerParameterName" stdset="0">
+              <string notr="true">outputSpeedProfileTable</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="showPlotButton">
+             <property name="text">
+              <string>Show plot</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
        </widget>
       </item>
-      <item row="5" column="1">
-       <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
-        <property name="toolTip">
-         <string>Model node that contains speed vectors as point data</string>
-        </property>
-        <property name="nodeTypes">
-         <stringlist notr="true">
-          <string>vtkMRMLModelNode</string>
-         </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="removeEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="noneDisplay">
-         <string>(Create new model)</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">outputSpeedProfileModel</string>
-        </property>
-       </widget>
-      </item>
-      <item row="6" column="0">
-       <widget class="QLabel" name="label_9">
-        <property name="text">
-         <string>Output speed profile table:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="6" column="1">
-       <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
-        <property name="toolTip">
-         <string>Plot series that contain average speed value vs time.</string>
-        </property>
-        <property name="nodeTypes">
-         <stringlist notr="true">
-          <string>vtkMRMLTableNode</string>
-         </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="removeEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="selectNodeUponCreation">
-         <bool>true</bool>
-        </property>
-        <property name="noneDisplay">
-         <string>(Create new time plot)</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">outputSpeedProfileTable</string>
-        </property>
-       </widget>
-      </item>
-      <item row="9" column="0" colspan="2">
-       <widget class="QPushButton" name="sampleFlowFieldButton">
-        <property name="enabled">
-         <bool>true</bool>
-        </property>
-        <property name="toolTip">
-         <string>Compute streamlines and flow field profile</string>
-        </property>
-        <property name="text">
-         <string>Compute</string>
-        </property>
-       </widget>
-      </item>
-      <item row="10" column="0" colspan="2">
-       <widget class="QPushButton" name="showPlotButton">
-        <property name="text">
-         <string>Show plot</string>
-        </property>
-       </widget>
-      </item>
-      <item row="7" column="0" colspan="2">
+      <item row="5" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Streamlines</string>
@@ -480,7 +483,7 @@
         </layout>
        </widget>
       </item>
-      <item row="8" column="0" colspan="2">
+      <item row="6" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Speed image</string>
@@ -547,6 +550,22 @@
           </widget>
          </item>
         </layout>
+       </widget>
+      </item>
+      <item row="7" column="0" colspan="2">
+       <widget class="QPushButton" name="sampleFlowFieldButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Compute streamlines and flow field profile</string>
+        </property>
+        <property name="text">
+         <string>Compute</string>
+        </property>
+        <property name="default">
+         <bool>true</bool>
+        </property>
        </widget>
       </item>
      </layout>
