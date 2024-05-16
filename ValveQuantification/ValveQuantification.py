@@ -226,8 +226,13 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
                                                                                    toggle))
     outputFormLayout = qt.QFormLayout(self.outputCollapsibleButton)
 
-    self.computeButton = qt.QPushButton("Compute")
-    self.computeButton.toolTip = "Compute metrics"
+    self.computeAllButton = qt.QPushButton("Compute all phases")
+    self.computeAllButton.toolTip = "Compute metrics for all phases"
+    outputFormLayout.addRow(self.computeAllButton)
+    self.computeAllButton.connect('clicked(bool)', self.computeAllPhaseMetrics)
+
+    self.computeButton = qt.QPushButton("Compute current phase")
+    self.computeButton.toolTip = "Compute metrics for the current phase"
     outputFormLayout.addRow(self.computeButton)
     self.computeButton.connect('clicked(bool)', self.computeCurrentPhaseMetrics)
 
@@ -743,6 +748,27 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
 
     messages = self.logic.computeMetrics(heartValveMeasurementNode)
 
+    self.computeStatusTextEdit.plainText = '\n'.join(messages)
+
+    # Not sure why but it seems that the initial hiding of columns has no effect and we have to
+    # repeat it here.
+    self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
+    self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
+
+    self.measurementTree.resizeColumnToContents(0)
+  
+  def computeAllPhaseMetrics(self):
+    heartValveMeasurementNode = self.getHeartValveMeasurementNode()
+    valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+    valveBrowserNode = valveBrowser.valveBrowserNode
+
+    originalIndex = valveBrowserNode.GetSelectedItemNumber()
+    messages = []
+    for timePointIndex in range(valveBrowserNode.GetNumberOfItems()):
+      valveBrowserNode.SetSelectedItemNumber(timePointIndex)
+      messages += self.logic.computeMetrics(heartValveMeasurementNode)
+    valveBrowserNode.SetSelectedItemNumber(originalIndex)
+    
     self.computeStatusTextEdit.plainText = '\n'.join(messages)
 
     # Not sure why but it seems that the initial hiding of columns has no effect and we have to
