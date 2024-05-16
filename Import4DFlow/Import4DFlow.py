@@ -1077,15 +1077,29 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                             # Need to create new color node
                             if speedVolumeProjectedToPlane:
                                 colorNodeID = self._createSpeedComponentColorNode().GetID()
-                                outputSpeedVolume.GetScalarVolumeDisplayNode().SetAutoWindowLevel(False)
-                                outputSpeedVolume.GetScalarVolumeDisplayNode().SetWindowLevelMinMax(*self.dopplerLutRange)
                             else:
                                 if gridTransformNode.GetDisplayNode():
                                     # Use the same color table and scaling as the transform node
                                     colorNodeID = gridTransformNode.GetDisplayNode().GetColorNodeID()
                                 else:
                                     colorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
-                        outputSpeedVolume.GetScalarVolumeDisplayNode().SetAndObserveColorNodeID(colorNodeID)
+                        speedVolumeDisplayNode = outputSpeedVolume.GetScalarVolumeDisplayNode()
+                        speedVolumeDisplayNode.SetAndObserveColorNodeID(colorNodeID)
+
+                        # Set default window/level and threshold settings
+                        # (it could make sense to not overwrite it once it is set by the user, but for now we always set it to default)
+                        if speedVolumeProjectedToPlane:
+                            speedVolumeDisplayNode.SetAutoWindowLevel(False)
+                            speedVolumeDisplayNode.SetWindowLevelMinMax(*self.dopplerLutRange)
+                            speedVolumeDisplayNode.SetApplyThreshold(False)
+                        else:
+                            # Use the transform color node's range
+                            speedVolumeDisplayNode.SetAutoWindowLevel(False)
+                            scalarRange = speedVolumeDisplayNode.GetColorNode().GetScalarsToColors().GetRange()
+                            speedVolumeDisplayNode.SetWindowLevelMinMax(*scalarRange)
+                            speedVolumeDisplayNode.SetApplyThreshold(True)
+                            speedVolumeDisplayNode.SetThreshold(streamlinesSpeedThresholdMPerSec, scalarRange[1])
+
 
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
                 displacementImageNode = None
@@ -1122,6 +1136,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         colorMap.AddRGBPoint(0.0, 0.0, 0.0, 0.0)
         colorMap.AddRGBPoint(1.5, 1.0, 1.0, 1.0)
 
+        return colorNode
+
     def _getSpeedComponentTransferFunctions(self):
         # Create color and opacity functions for Doppler-like visualization
         lutRange = self.dopplerLutRange
@@ -1157,10 +1173,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         lut = vtk.vtkLookupTable()
         lut.SetNumberOfTableValues(colorTableSize)
         for i in range(colorTableSize):
-            x = lutRange[0] + i / (colorTableSize-1) * (lutRange[1] - lutRange[0])
+            x = self.dopplerLutRange[0] + i / (colorTableSize-1) * (self.dopplerLutRange[1] - self.dopplerLutRange[0])
             rgb = colorMap.GetColor(x)
             lut.SetTableValue(i, rgb[0], rgb[1], rgb[2], opacityMap.GetValue(x))
-        lut.SetRange(lutRange[0], lutRange[1])
+        lut.SetRange(self.dopplerLutRange[0], self.dopplerLutRange[1])
 
         # Set up color node
         colorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
