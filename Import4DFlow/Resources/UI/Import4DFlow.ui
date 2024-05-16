@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>350</width>
-    <height>734</height>
+    <height>755</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -164,7 +164,7 @@
       <item row="0" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
-         <string>Input plane:</string>
+         <string>Measurement plane:</string>
         </property>
        </widget>
       </item>
@@ -204,7 +204,7 @@
       <item row="1" column="0">
        <widget class="QLabel" name="label_11">
         <property name="text">
-         <string>Input mask:</string>
+         <string>Mask:</string>
         </property>
        </widget>
       </item>
@@ -359,7 +359,7 @@
         </property>
        </widget>
       </item>
-      <item row="8" column="0" colspan="2">
+      <item row="9" column="0" colspan="2">
        <widget class="QPushButton" name="sampleFlowFieldButton">
         <property name="enabled">
          <bool>true</bool>
@@ -372,7 +372,7 @@
         </property>
        </widget>
       </item>
-      <item row="9" column="0" colspan="2">
+      <item row="10" column="0" colspan="2">
        <widget class="QPushButton" name="showPlotButton">
         <property name="text">
          <string>Show plot</string>
@@ -386,13 +386,62 @@
         </property>
         <layout class="QFormLayout" name="formLayout">
          <item row="0" column="0">
+          <widget class="QLabel" name="label_5">
+           <property name="text">
+            <string>Maximum length:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkSliderWidget" name="streamlinesMaximumLengthSliderWidget">
+           <property name="toolTip">
+            <string>Distance between sampling points in the plane.</string>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="minimum">
+            <double>-100.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>500.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>0.500000000000000</double>
+           </property>
+           <property name="suffix">
+            <string>mm</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">streamlinesMaximumLength</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_12">
+           <property name="text">
+            <string>Bidirectional:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QCheckBox" name="checkBox">
+           <property name="text">
+            <string/>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>streamlinesBidirectional</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
           <widget class="QLabel" name="label_13">
            <property name="text">
             <string>Output streamlines:</string>
            </property>
           </widget>
          </item>
-         <item row="0" column="1">
+         <item row="2" column="1">
           <widget class="qMRMLNodeComboBox" name="streamlinesOutputModelSelector">
            <property name="toolTip">
             <string>Model node that contains streamlines computed from the input plane. Sampling distance, speed threshold, input mask, maximum length, and bidirectional parameters are taken into account.</string>
@@ -428,52 +477,72 @@
            </property>
           </widget>
          </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="8" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
+        <property name="title">
+         <string>Volume rendering</string>
+        </property>
+        <layout class="QFormLayout" name="formLayout_6">
          <item row="1" column="0">
-          <widget class="QLabel" name="label_5">
+          <widget class="QLabel" name="label_14">
            <property name="text">
-            <string>Maximum length:</string>
+            <string>Output speed volume:</string>
            </property>
           </widget>
          </item>
          <item row="1" column="1">
-          <widget class="ctkSliderWidget" name="streamlinesMaximumLengthSliderWidget">
+          <widget class="qMRMLNodeComboBox" name="outputSpeedVolumeSelector">
            <property name="toolTip">
-            <string>Distance between sampling points in the plane.</string>
+            <string>Computed speed. It is the magnitude of the velocity vector if &quot;project to measurement plane&quot; is disabled; otherwise it is the component parallel to the measurement plane normal</string>
            </property>
-           <property name="singleStep">
-            <double>0.100000000000000</double>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLScalarVolumeNode</string>
+            </stringlist>
            </property>
-           <property name="minimum">
-            <double>-100.000000000000000</double>
+           <property name="hideChildNodeTypes">
+            <stringlist notr="true"/>
            </property>
-           <property name="maximum">
-            <double>500.000000000000000</double>
+           <property name="baseName">
+            <string>Speed Volume</string>
            </property>
-           <property name="value">
-            <double>0.500000000000000</double>
+           <property name="noneEnabled">
+            <bool>true</bool>
            </property>
-           <property name="suffix">
-            <string>mm</string>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="interactionNodeSingletonTag">
+            <string notr="true"/>
            </property>
            <property name="SlicerParameterName" stdset="0">
-            <string notr="true">streamlinesMaximumLength</string>
+            <string notr="true">outputSpeedVolume</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_12">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_15">
            <property name="text">
-            <string>Bidirectional:</string>
+            <string>Project to measurement plane:</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
-          <widget class="QCheckBox" name="checkBox">
+         <item row="0" column="1">
+          <widget class="QCheckBox" name="checkBox_2">
+           <property name="toolTip">
+            <string>If enabled then a Doppler-like speed volume will be computed, computing the velocity component parallel to the measurement plane normal.</string>
+           </property>
            <property name="text">
             <string/>
            </property>
            <property name="SlicerParameterName" stdset="0">
-            <string>streamlinesBidirectional</string>
+            <string notr="true">speedVolumeProjectedToPlane</string>
            </property>
           </widget>
          </item>
@@ -588,8 +657,8 @@
      <y>450</y>
     </hint>
     <hint type="destinationlabel">
-     <x>325</x>
-     <y>459</y>
+     <x>331</x>
+     <y>439</y>
     </hint>
    </hints>
   </connection>
@@ -604,8 +673,8 @@
      <y>454</y>
     </hint>
     <hint type="destinationlabel">
-     <x>325</x>
-     <y>485</y>
+     <x>331</x>
+     <y>465</y>
     </hint>
    </hints>
   </connection>
@@ -616,12 +685,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>325</x>
-     <y>485</y>
+     <x>331</x>
+     <y>465</y>
     </hint>
     <hint type="destinationlabel">
-     <x>307</x>
-     <y>545</y>
+     <x>325</x>
+     <y>611</y>
     </hint>
    </hints>
   </connection>
@@ -652,8 +721,24 @@
      <y>276</y>
     </hint>
     <hint type="destinationlabel">
-     <x>166</x>
-     <y>420</y>
+     <x>297</x>
+     <y>506</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputSpeedVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>215</x>
+     <y>728</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>212</x>
+     <y>677</y>
     </hint>
    </hints>
   </connection>
