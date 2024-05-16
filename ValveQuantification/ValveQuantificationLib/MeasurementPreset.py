@@ -548,7 +548,8 @@ class MeasurementPreset(object):
       modelNode = modelsLogic.AddModel(triangles.GetOutput())
     modelNode.SetName('Annulus contour colored by height')
     displayNode = modelNode.GetDisplayNode()
-    displayNode.SetVisibility(False)
+    if currentModelNode is None:
+      displayNode.SetVisibility(False)
     displayNode.SetActiveScalarName('Distance')
     displayNode.ScalarVisibilityOn()
 
@@ -990,7 +991,7 @@ class MeasurementPreset(object):
       annulusArea3dModel = modelsLogic.AddModel(polyData)
     annulusArea3dModel.SetName(name)
     annulusArea3dModel.GetDisplayNode().SetVisibility(visibility)
-    annulusArea3dModel.GetDisplayNode().SetColor(valveModel.getBaseColor())
+    annulusArea3dModel.GetDisplayNode().SetColor([1.0, 0.0, 0.0])
     annulusArea3dModel.GetDisplayNode().SetOpacity(0.6)
     annulusArea3dModel.GetDisplayNode().SetAmbient(0.1)
     annulusArea3dModel.GetDisplayNode().SetDiffuse(0.9)
@@ -1160,9 +1161,9 @@ class MeasurementPreset(object):
     else:
       modelsLogic = slicer.modules.models.logic()
       leafletSurfaceModelNode = modelsLogic.AddModel(leafletSurfacePolyData)
+      leafletSurfaceModelNode.GetDisplayNode().SetVisibility(False)
     leafletSurfaceModelNode.SetName(measurementName)
     leafletSurfaceModelNode.GetDisplayNode().SetColor(color)
-    leafletSurfaceModelNode.GetDisplayNode().SetVisibility(False)
     leafletSurfaceModelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
     leafletSurfaceModelNode.GetDisplayNode().SetOpacity(0.6)
     leafletSurfaceModelNode.GetDisplayNode().SetAmbient(0.1)
@@ -1226,8 +1227,8 @@ class MeasurementPreset(object):
       modelNode.SetAndObservePolyData(triangles.GetOutput())
     else:
       modelNode = modelsLogic.AddModel(triangles.GetOutput())
+      modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.SetName(modelName)
-    modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
 
     return modelNode
@@ -1371,8 +1372,8 @@ class MeasurementPreset(object):
       modelNode.SetAndObservePolyData(polyDataAppend.GetOutput())
     else:
       modelNode = modelsLogic.AddModel(polyDataAppend.GetOutput())
+      modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.SetName(modelName)
-    modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
     # modelNode.GetDisplayNode().LightingOff() # don't make the line edges darker
     return modelNode
@@ -1413,8 +1414,8 @@ class MeasurementPreset(object):
       modelNode.SetAndObservePolyData(polyTransformToWorld.GetOutput())
     else:
       modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutput())
+      modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.SetName(modelName)
-    modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
     # modelNode.GetDisplayNode().LightingOff() # don't make the line edges darker
     return modelNode
@@ -1465,9 +1466,9 @@ class MeasurementPreset(object):
       volumeModelNode.SetAndObservePolyData(modelMesh)
     else:
       volumeModelNode = modelsLogic.AddModel(modelMesh)
+      volumeModelNode.GetDisplayNode().SetVisibility(False)
     volumeModelNode.SetName(measurementName)
     volumeModelNode.GetDisplayNode().SetColor(color)
-    volumeModelNode.GetDisplayNode().SetVisibility(False)
     volumeModelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
     volumeModelNode.GetDisplayNode().SetOpacity(1.0)
     volumeModelNode.GetDisplayNode().SetAmbient(0.1)
@@ -1920,9 +1921,7 @@ class MeasurementPreset(object):
       geometryFilter.Update()
       leafletSurface = geometryFilter.GetOutput()
 
-
       modelNode = self.getOrAddMetricModelNode(valveModel, metricName)
-      modelNode.GetDisplayNode().SetVisibility(False)
       modelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
       modelNode.GetDisplayNode().SetColor(leafletModel.getLeafletColor())
       modelNode.GetDisplayNode().SetOpacity(0.6)
@@ -1957,6 +1956,7 @@ class MeasurementPreset(object):
       modelNode = modelsLogic.AddModel(vtk.vtkPolyData())
       modelNode.SetName(nodeName)
       valveModel.metricsResults[nodeName] = modelNode
+      modelNode.SetDisplayVisibility(False)
 
     if not createSequence:
       return modelNode
