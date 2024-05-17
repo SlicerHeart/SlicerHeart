@@ -415,7 +415,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.valveModel.createValveRoi()
 
   def onRemoveValveRoiButtonClicked(self):
-    TODO: make this a utility function that deletes current timepoint of a proxy node:
+    # TODO: make this a utility function that deletes current timepoint of a proxy node:
 
     valveRoiModelNode = self.valveModel.valveRoi.roiModelNode
     if not valveRoiModelNode:
