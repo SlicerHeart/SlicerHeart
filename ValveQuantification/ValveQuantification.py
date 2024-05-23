@@ -644,7 +644,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.annulusLabelsMarkupNodes[inputValveIndex] = labelsMarkupNode
     if labelsMarkupNode:
       self.annulusLabelsMarkupNodeObservers[inputValveIndex].append(
-        labelsMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+        labelsMarkupNode.AddObserver(vtk.vtkCommand.ModifiedEvent,
                                      lambda caller, event, valveId=inputValveIds[inputValveIndex]:
                                      self.onAnnulusLabelMarkupModified(valveId)))
     self.updateValveSequenceBrowserWidget()
