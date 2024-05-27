@@ -70,6 +70,7 @@ class Import4DFlowParameterNode:
     speedThreshold: Annotated[float, WithinRange(0.0, 3), SingleStep(0.01), Default(0.1)]  # m/sec
     streamlinesMaximumLength: Annotated[float, WithinRange(10, 300)] = 200  # distance unit
     streamlinesBidirectional: bool = True
+    streamlinesComputeAllMetrics: bool = False
     speedVolumeProjectedToPlane: bool = False  # if True then signed speed vector is projected to the measurement plane normal
 
 #
@@ -333,6 +334,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.inputMaskSegmentID,
                 self._parameterNode.streamlinesMaximumLength,
                 self._parameterNode.streamlinesBidirectional,
+                self._parameterNode.streamlinesComputeAllMetrics,
                 self._parameterNode.speedThreshold,
                 self._parameterNode.outputSpeedVolume,
                 self._parameterNode.speedVolumeProjectedToPlane)
@@ -886,6 +888,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             maskSegmentID: str = None,
             streamlinesMaximumLengthMm: int = 100,
             streamlinesBidirectional: bool = True,
+            streamlinesComputeAllMetrics: bool = False,
             streamlinesSpeedThresholdMPerSec: float = 0.01,
             outputSpeedVolume: vtkMRMLScalarVolumeNode = None,
             speedVolumeProjectedToPlane: bool = False) -> vtkMRMLModelNode:
@@ -893,7 +896,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         import numpy as np
 
         if not crossSectionPlaneNode:
-            raise ValueError("Cross-section plane node is invalid")
+            raise ValueError("Measurement plane node is invalid")
 
         transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
         if not transformSequenceBrowserNode:
@@ -1033,7 +1036,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
                     streamlinesSeedModel = outputSpeedProfileModel  # the plane profile is also used for generating seed points
                     self._createStreamlines(outputStreamlinesModel, speedImageNodeMPerSec, streamlinesSeedModel,
-                        streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesSpeedThresholdMPerSec)
+                        streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesComputeAllMetrics, streamlinesSpeedThresholdMPerSec)
                     if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
                         # Initialize streamlines model display node
                         outputStreamlinesModel.CreateDefaultDisplayNodes()
@@ -1213,7 +1216,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         return colorNode
 
-    def _createStreamlines(self, outputStreamlinesModel, speedImageNodeMPerSec, seedPointsModel, maximumLengthMm, bidirectional, speedThresholdMPerSec):
+    def _createStreamlines(self, outputStreamlinesModel, speedImageNodeMPerSec, seedPointsModel, maximumLengthMm, bidirectional, computeAllMetrics, speedThresholdMPerSec):
         import vtkAddon
         import numpy as np
 
@@ -1293,8 +1296,31 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         acalc.SetFunction("mag(Velocity)")
         acalc.SetInputData(streamLinesRas)
         acalc.Update()
+        
+        polydata = acalc.GetOutput()
+        pd = acalc.GetOutput().GetPointData()
+        cd = acalc.GetOutput().GetCellData()
 
-        outputStreamlinesModel.SetAndObservePolyData(acalc.GetOutput())
+        # Remove non-essential arrays
+        if not computeAllMetrics:
+            pd.RemoveArray('AngularVelocity')
+            pd.RemoveArray('Rotation')
+            pd.RemoveArray('Vorticity')
+            pd.RemoveArray('IntegrationTime')
+            pd.RemoveArray('Normals')
+            pd.RemoveArray('Velocity')
+            cd.RemoveArray('ReasonForTermination')
+            cd.RemoveArray('SeedIds')
+        
+        # Convert arrays to float to reduce file size
+        for i in range(pd.GetNumberOfArrays()):
+            dataArray = pd.GetArray(i)
+            if dataArray.GetDataType() == vtk.VTK_DOUBLE:
+                floatArray = vtk.vtkFloatArray()
+                floatArray.DeepCopy(dataArray)
+                pd.AddArray(floatArray)
+
+        outputStreamlinesModel.SetAndObservePolyData(polydata)
 
     def computeSpeedProfileTable(
             self,
