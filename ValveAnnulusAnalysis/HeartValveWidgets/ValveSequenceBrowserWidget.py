@@ -152,6 +152,9 @@ class ValveSequenceBrowserWidget:
     self.ui = slicer.util.loadUI(uiFile)
     self.ui.setMRMLScene(slicer.mrmlScene)
 
+    # NB: the margin of the internal MRMLSequenceBrowserPlayWidget interferes with layout. Setting margin to 0
+    self.ui.heartValveBrowserPlayWidget.layout().margin = 0
+
     self.valveBrowserNodeModified = Signal()
     self.heartValveNodeModified = Signal()
 
