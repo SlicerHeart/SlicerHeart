@@ -381,7 +381,7 @@ class ValveModel:
       modelNode.GetDisplayNode().SetOpacity(0.1)
       modelNode.GetDisplayNode().BackfaceCullingOff()
 
-      self.valveRoi.setRoiModelNode(modelNode)
+      self.valveRoiModelNode = modelNode
 
       return modelNode  # Annulus contour line
 

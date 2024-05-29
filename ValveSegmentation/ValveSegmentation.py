@@ -337,6 +337,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     if self.valveModel.valveRoi.roiModelNode:
       roiGeometry = self.valveModel.valveRoi.getRoiGeometry()
       for paramName in self.roiGeometryWidgets:
+        if not paramName in roiGeometry:
+          continue
         widget = self.roiGeometryWidgets[paramName]
         wasBlocked = widget.blockSignals(True)
         widget.enabled = True
@@ -401,8 +403,12 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       leafletSegmentationNode = self.valveModel.leafletSegmentationNode
       self.ui.addSegmentationButton.enabled = not leafletSegmentationNode
       self.ui.removeSegmentationButton.enabled = leafletSegmentationNode
-      self.ui.addValveRoiButton.enabled = not self.valveModel.valveRoi.roiModelNode
-      self.ui.removeValveRoiButton.enabled = self.valveModel.valveRoi.roiModelNode
+      valveRoiModelNode = self.valveModel.valveRoiModelNode
+      roiModelNodeSpecified = self.valveModel.isNodeSpecifiedForCurrentTimePoint(valveRoiModelNode)
+      self.ui.addValveRoiButton.enabled = not roiModelNodeSpecified
+      self.ui.removeValveRoiButton.enabled = roiModelNodeSpecified
+
+    self._updateRoiGeometryGui()
 
   def updateGUIFromValveBrowser(self):
     # TODO: refactor this method to avoid redundancy with ValveAnnulusAnalysis
@@ -412,7 +418,16 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     pass
 
   def onAddValveRoiButtonClicked(self):
-    self.valveModel.createValveRoi()
+    valveRoiModelNode = self.valveModel.valveRoi.roiModelNode
+    if valveRoiModelNode and self.valveModel.isNodeSpecifiedForCurrentTimePoint(valveRoiModelNode):
+      return
+
+    if valveRoiModelNode is None:
+      self.valveModel.createValveRoiModelNode()
+
+    valveRoiModelNode = self.valveModel.valveRoi.roiModelNode
+    valveROISequenceNode = self.valveBrowserNode.GetSequenceNode(valveRoiModelNode)
+    self.valveBrowser.addCurrentTimePointToSequence(valveROISequenceNode)
 
   def onRemoveValveRoiButtonClicked(self):
     # TODO: make this a utility function that deletes current timepoint of a proxy node:
@@ -530,6 +545,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def onAnnulusMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
     if not self.annulusMarkupNode:
       return
+    self._updateRoiGeometryGui()
     self.updateLeafletClippingModel()
 
   def onClippingModelUseAsEditorMaskClicked(self):
