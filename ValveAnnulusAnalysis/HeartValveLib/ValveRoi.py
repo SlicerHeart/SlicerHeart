@@ -221,7 +221,10 @@ class ValveRoi:
     params = {}
     if self.roiModelNode:
       for paramName in self.GEOMETRY_PARAMS:
-        params[paramName] = float(self.roiModelNode.GetAttribute(paramName))
+        attribute = self.roiModelNode.GetAttribute(paramName)
+        if attribute is None:
+          continue
+        params[paramName] = float(attribute)
     return params
 
   def updateRoi(self):
