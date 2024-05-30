@@ -10,6 +10,7 @@ The software is experimental. Users are advised to check the results in 3D Slice
 ### Export data from the Electroanatomic Mapping System
 
 #### NavX
+
 1.	Load study
 2.	Display data of interest (LAT/bipolar/unipolar)
 3.	File -> Export
@@ -20,7 +21,9 @@ a.	Note: This saves one electrical dataset (e.g. LAT or bipolar or unipolar) per
 6.	The resulting .xml file is ready to be imported into Slicer using EAMapReader
 
 #### CARTO3
+
 Note: Due to a known software bug in Carto 3 version 6 the HD coloring feature needs to be temporarily disabled at the time of map export for the export feature to work as intended. Maps can still be acquired with HD coloring active.
+
 1.	If HD coloring is active, disable it. Biosense Webster field technicians can provide guidance on how to disable and enable this feature.
 2.	On the start-up screen, select “Review Study”. Open study for review
 3.	Select Study -> Export Study Data… from the menu
@@ -34,17 +37,20 @@ Note: Due to a known software bug in Carto 3 version 6 the HD coloring feature n
 11. Re-enable HD coloring as necessary
 
 #### RHYTHMIA
+
 Close study and backup to external drive (no special export needed).
 This backup consists of a folder containing (among others) several files called Study_yyyy_mm_dd_hh-mm.000, .001, .002 and so on, each up to 1 GB in size.
 These files comprise the entire archived study.
 Keep all .000 - .00n files in the same folder and chose the .000 for import (the others will be found accordingly by the importer, as long as the filenames match).
 
 ### Import of data into 3D Slicer
+
 1. Raise the EAMapReader module (Modules drop down menu -> Cardiac Electrophysiology -> EAMapReader)
-2. Click the button for the respective mapping system
-3. Choose the file exported from the mapping system (see above)
+2. Click the button for the respective mapping system. An example data set for CARTO 3 is available [here](https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/Carto3_EA_map.zip).
+3. Choose the file exported from the mapping system
 
 ## Funding acknowledgement
+
 The development of this software tool was in part funded through a research fellowship grant by the the Deutsche Forschungsgemeinschaft (DFG, German Research Foundation) – project no. 380200397 (to Stephan Hohmann).
 
 ## Citation
