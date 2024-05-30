@@ -84,6 +84,7 @@ add_subdirectory(ValveSegmentation)
 add_subdirectory(LeafletAnalysis)
 add_subdirectory(AnnulusShapeAnalyzer)
 add_subdirectory(FluoroFlowCalculator)
+add_subdirectory(EAMapReader)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

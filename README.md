@@ -30,6 +30,8 @@ The extension currently includes the following features (new features are added 
   - Leaflet Mold Generator: tool for automatic generation of 3D-printable molds for making simulated valves out of silicone.
 - Surgical planning:
   - [Baffle planner](Docs/BafflePlanner.md): modeling tool for virtual planning of intracardiac baffle - or any other thin curved surfaces in any clinical specialties (for example, cranial flaps).
+- Electrophysiology:
+  - [EA Map Reader](Docs/EAMapReader.md): read electroanatomical maps from NavX, Carto3, or Rhythmia mapping systems
 
 # Installation and setup
 
