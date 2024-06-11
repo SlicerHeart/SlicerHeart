@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>ValveSequenceRegistration</class>
- <widget class="qMRMLWidget" name="ValveSequenceRegistration">
+ <class>ValveSequenceBrowserWidget</class>
+ <widget class="qMRMLWidget" name="ValveSequenceBrowserWidget">
   <property name="enabled">
    <bool>false</bool>
   </property>
@@ -126,7 +126,7 @@
  <resources/>
  <connections>
   <connection>
-   <sender>ValveSequenceRegistration</sender>
+   <sender>ValveSequenceBrowserWidget</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>heartValveBrowserPlayWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -142,7 +142,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>ValveSequenceRegistration</sender>
+   <sender>ValveSequenceBrowserWidget</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>heartValveBrowserSeekWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>

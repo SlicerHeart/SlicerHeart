@@ -18,6 +18,9 @@ class Signal:
     if slot in self._slots:
       self._slots.remove(slot)
 
+  def disconnectAll(self):
+    self._slots = set()
+
   def emit(self, *args):
     for slot in self._slots:
       slot(*args)
