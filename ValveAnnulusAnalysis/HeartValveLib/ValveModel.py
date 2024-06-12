@@ -105,6 +105,7 @@ class ValveModel:
         self.setLeafletSegmentationNode(self.createLeafletSegmentationNode())
 
       self.updateLeafletModelsFromSegmentation()
+
       self.updateCoaptationModels()
 
     def moveNodeToHeartValveFolder(self, node, subfolderName = None):
@@ -571,7 +572,6 @@ class ValveModel:
         modelsLogic = slicer.modules.models.logic()
         polyData = vtk.vtkPolyData()
         modelNode = modelsLogic.AddModel(polyData)
-        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName+"SurfaceModel"))
         self.moveNodeToHeartValveFolder(modelNode, 'LeafletSurface')
         modelNode.GetDisplayNode().SetColor(segmentColor)
         modelNode.GetDisplayNode().BackfaceCullingOff()
@@ -583,6 +583,7 @@ class ValveModel:
         modelNode.GetDisplayNode().SetPower(10)
         self.setLeafletNodeReference("LeafletSurfaceModel", segmentId, modelNode)
         leafletSurfaceModelNode = modelNode
+      leafletSurfaceModelNode.SetName(segmentName + " SurfaceModel")
       self.applyProbeToRasTransformToNode(leafletSurfaceModelNode)
       leafletModel.setSurfaceModelNode(leafletSurfaceModelNode)
 
@@ -591,7 +592,6 @@ class ValveModel:
         markupsLogic = slicer.modules.markups.logic()
         markupNodeId = markupsLogic.AddNewFiducialNode()
         markupNode = slicer.mrmlScene.GetNodeByID(markupNodeId)
-        markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + "SurfaceBoundaryMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'LeafletSurfaceEdit')
@@ -600,6 +600,7 @@ class ValveModel:
         markupDisplayNode.SetColor(0,0,1)
         self.setLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId, markupNode)
         leafletSurfaceBoundaryMarkupNode = markupNode
+      leafletSurfaceBoundaryMarkupNode.SetName(segmentName + " SurfaceBoundaryMarkup")
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryMarkupNode)
       leafletModel.setSurfaceBoundaryMarkupNode(leafletSurfaceBoundaryMarkupNode)
 
@@ -608,12 +609,12 @@ class ValveModel:
         modelsLogic = slicer.modules.models.logic()
         polyData = vtk.vtkPolyData()
         modelNode = modelsLogic.AddModel(polyData)
-        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName+"SurfaceBoundaryModel"))
         self.moveNodeToHeartValveFolder(modelNode, 'LeafletSurfaceEdit')
         modelNode.GetDisplayNode().SetColor(0,0,1)
         modelNode.GetDisplayNode().SetOpacity(0.2)
         self.setLeafletNodeReference("LeafletSurfaceBoundaryModel", segmentId, modelNode)
         leafletSurfaceBoundaryModelNode = modelNode
+      leafletSurfaceBoundaryModelNode.SetName(segmentName + " SurfaceBoundaryModel")
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryModelNode)
       leafletModel.setSurfaceBoundaryModelNode(leafletSurfaceBoundaryModelNode)
 
@@ -647,6 +648,23 @@ class ValveModel:
       # Add any missing leaflet models
       for segmentId in segmentIds:
         self.addLeafletModel(segmentId)
+
+      self.findAndRemoveOrphanNodes(validSegmentIDs=segmentIds)
+
+    def findAndRemoveOrphanNodes(self, validSegmentIDs):
+      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
+      toDelete = []
+      for subFolderId in ["LeafletSurfaceEdit", "LeafletSurface"]:
+        folderItemId = shNode.GetItemChildWithName(valveNodeItemId, subFolderId)
+        shNode.GetItemChildren(folderItemId, childItemIDs := vtk.vtkIdList())
+        for index in range(childItemIDs.GetNumberOfIds()):
+          dataNode = shNode.GetItemDataNode(childItemIDs.GetId(index))
+          if not dataNode.GetAttribute('SegmentID') in validSegmentIDs:
+            toDelete.append(dataNode)
+      for node in toDelete:
+        logging.debug(f"Found orphan node. Removing {node.GetName()}")
+        slicer.mrmlScene.RemoveNode(node)
 
     def removeCoaptationModel(self, coaptationModelIndex):
       coaptationModel = self.coaptationModels[coaptationModelIndex]

@@ -277,6 +277,9 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
       self.fadeCompleteLeafletCheckbox.setChecked(segmentationDisplayNode.GetOpacity3D()<0.5)
     HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
+    if self.valveModel:
+      self.valveModel.updateLeafletModelsFromSegmentation()
+
   def getFirstVisibleSegmentId(self):
     segmentationNode = self.valveModel.getLeafletSegmentationNode()
     segmentationDisplayNode = segmentationNode.GetDisplayNode()
