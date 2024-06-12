@@ -10,10 +10,12 @@ from HeartValveLib.util import Signal
 import pandas as pd
 
 
+# TODO: collect validation functions and create valve completion class
 getValveVolumeSequenceIndex = lambda valveModel: valveModel.getValveVolumeSequenceIndex()
 hasAnnulusContourDefined = \
   lambda valveModel: valveModel.annulusContourCurveNode.GetNumberOfControlPoints() > 0 if valveModel.annulusContourCurveNode is not None else False
 hasLeafletSegmentation = lambda valveModel: valveModel.leafletSegmentationNode is not None
+
 
 class ValveSeriesInfo(qt.QAbstractTableModel):
 
@@ -89,21 +91,21 @@ class ValveSeriesInfo(qt.QAbstractTableModel):
   def getRowIdxForValveSequenceIndex(self, volumeSequenceIndex):
     try:
       return self._df[self.HEADER_NAMES[0]].tolist().index(volumeSequenceIndex)
-    except ValueError:
+    except (ValueError, TypeError):
       return -1
 
   def analyzeSequence(self):
     valveBrowser = self.valveBrowser
     data = {attr: [] for attr in self.HEADER_NAMES}
     heartValveSequenceNode = valveBrowser.heartValveSequenceNode
-    origIndex = valveBrowser.valveBrowserNode.GetSelectedItemNumber()
+    origIndex = valveBrowser.volumeSequenceBrowserNode.GetSelectedItemNumber()
     for idx in range(heartValveSequenceNode.GetNumberOfDataNodes()):
       valveBrowser.valveBrowserNode.SetSelectedItemNumber(idx)
 
       for colName in self.HEADER_NAMES:
         data[colName].append(self.ATTR_GETTER_FUNCTIONS[colName](valveBrowser.valveModel))
 
-    valveBrowser.valveBrowserNode.SetSelectedItemNumber(origIndex)
+    valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(origIndex)
     return data
 
 
@@ -137,6 +139,7 @@ class ValveSequenceInfoWidget:
     selectionModel = self.ui.valveSeriesInfoView.selectionModel()
     if selectionModel:
       selectionModel.selectionChanged.connect(self._onSelectionChanged)
+    self.ui.updateButton.enabled = valveBrowserNode is not None
 
   @property
   def visible(self):
@@ -180,9 +183,10 @@ class ValveSequenceInfoWidget:
     self._connectSignals()
 
   def _connectSignals(self):
-    pass
+    self.ui.updateButton.clicked.connect(self.update)
 
   def _disconnectSignals(self):
+    self.ui.updateButton.clicked.disconnect(self.update)
     self.selectionChanged.disconnectAll()
     selectionModel = self.ui.valveSeriesInfoView.selectionModel()
     if selectionModel:
@@ -205,7 +209,11 @@ class ValveSequenceInfoWidget:
 
   def selectOrClearVolumeSequenceIndex(self, volumeSequenceIndex):
     selectionModel = self.ui.valveSeriesInfoView.selectionModel()
+    if selectionModel is None:
+      return
     model = selectionModel.model
+    if model is None:
+      return
     rowIdx = model.getRowIdxForValveSequenceIndex(volumeSequenceIndex)
     if rowIdx != -1:
       self.ui.valveSeriesInfoView.selectRow(rowIdx)
