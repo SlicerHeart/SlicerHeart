@@ -1296,7 +1296,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         acalc.SetFunction("mag(Velocity)")
         acalc.SetInputData(streamLinesRas)
         acalc.Update()
-        
+
         polydata = acalc.GetOutput()
         pd = acalc.GetOutput().GetPointData()
         cd = acalc.GetOutput().GetCellData()
@@ -1311,7 +1311,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             pd.RemoveArray('Velocity')
             cd.RemoveArray('ReasonForTermination')
             cd.RemoveArray('SeedIds')
-        
+
         # Convert arrays to float to reduce file size
         for i in range(pd.GetNumberOfArrays()):
             dataArray = pd.GetArray(i)
@@ -1408,6 +1408,804 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # Show plot in layout
         slicer.modules.plots.logic().ShowChartInLayout(plotChartNode)
+
+#
+# 4D MRI phase unwrapping
+# The class is based on MIT-licensed code published at:
+# https://git.web.rug.nl/p305235/Phase_Unwrapping_Comparison/src/branch/main/python_code/unwrapper.py
+# as supplementary material to the paper: https://onlinelibrary.wiley.com/doi/10.1002/mrm.29767
+#
+
+{
+  "mesh_file": "../data/slice_Hz5.7.h5",
+  "dt": 0.030,
+  "VENC": 77,
+  "shape": "scalar", #only scalar data right now
+  "io": {
+    "in_file": "../data/slice5.7/GroundTruth_meas/postprocess/SNR6V60/", #path to file to unwrap
+    "savepath": "../results/slice5.7/SNR6V60_30ms/", #path to folder where to save results
+    "write_checkpoints": false,
+    "write_xdmf": true
+  },
+  "realizations": {
+    "apply": true,
+    "seed_init": 100,
+    "total_number": 50,
+    "save_all_errors": true
+  },
+  "unwrapping": {
+    "Temporal": {
+      "apply": true,
+      "t_ref": 0,
+      "path_addon": "temporal/"
+    },
+    "lap3d": {
+      "apply": true,
+      "path_addon": "lap3d/"
+    },
+    "lap4d": {
+      "apply": true,
+      "path_addon": "lap4d/"
+    },
+    "Probability": {
+      "apply": true,
+      "nlow": 10,
+      "nhigh": 10,
+      "t_low": 0.32,
+      "t_high": 0.75,
+      "w_s": 1.0,
+      "w_t": 2.5,
+      "path_addon": "prob/"
+    },
+    "omme": {
+      "apply": true,
+      "apply_to_previous": false,
+      "high_venc": 126,
+      "mid_venc": 38,
+      "highvenc_file": "../data/slice5.7/GroundTruth_meas/",
+      "midvenc_file": "../data/slice5.7/GroundTruth_meas/postprocess/SNR6V60/",
+      "path_addon": "omme/"
+    },
+    "lee": {
+      "apply": false,
+      "apply_to_previous": false,
+      "highvenc_file": "../data/slice5.7/GroundTruth_meas/",
+      "lowvenc_file": "../data/slice5.7/GroundTruth_meas/postprocess/SNR12V60_s100/",
+      "path_addon": "lee/"
+    }
+  },
+  "eval": {
+    "apply": true,
+    "eval_omme": false,
+    "ground_file": "../data/slice5.7/GroundTruth_meas/",
+    "method": "error",
+    "lumen": true,
+    "save_errors": true
+  },
+  "mesh": {
+    "mesh_type": "slice",
+    "dxs": [0.25, 0.25, 0.25]
+  }
+}
+
+# # Import modules here
+# from __future__ import print_function
+# import numpy as np
+# import math
+# from fenics import *
+# from numpy.core.fromnumeric import shape
+# from numpy.lib.npyio import save
+# import scipy.sparse as sp
+# from scipy.sparse import csc_matrix
+# from scipy.sparse.linalg import spsolve
+# import decimal
+# import time
+
+class Unwrapper:
+    def __init__(self, options):
+        #self.method = options['method']
+        self.in_file = options['io']['in_file']
+        self.savepath = options['io']['savepath']
+        self.save_checkpoints = options['io']['write_checkpoints']
+        self.save_xdmf = options['io']['write_xdmf']
+        self.venc = options['VENC']
+        self.dt = options['dt']
+        self.mesh_options = options['mesh']
+
+        #get method-specific parameters from the options
+
+        if 'Temporal' in options['unwrapping']:
+            self.t_ref = options['unwrapping']['Temporal']['t_ref']
+        #if self.method == 'Probability':
+        if 'Probability' in options['unwrapping']:
+            self.n_low = options['unwrapping']['Probability']['nlow']
+            self.n_high = options['unwrapping']['Probability']['nhigh']
+            self.t_low = options['unwrapping']['Probability']['t_low']
+            self.t_high = options['unwrapping']['Probability']['t_high']
+            self.w_s = options['unwrapping']['Probability']['w_s']
+            self.w_t = options['unwrapping']['Probability']['w_t']
+
+        self.path_addons = {}
+        for method in options['unwrapping']:
+            self.path_addons[method] = options['unwrapping'][method]['path_addon']
+
+        #get mesh from the input file, with  boundaries
+        self.mesh = Mesh()
+        h5 = HDF5File(self.mesh.mpi_comm(), options['mesh_file'], 'r')
+        h5.read(self.mesh, 'mesh', False)
+        if h5.has_dataset('boundaries'):
+            self.bnds = MeshFunction('size_t', self.mesh, self.mesh.topology().dim()-1)
+            h5.read(self.bnds, 'boundaries')
+
+        #assuming we only ever work in one function space
+        self.mesh_type = self.mesh_options['mesh_type']
+        if self.mesh_type == 'slice':
+            self.V = FunctionSpace(self.mesh, 'DG', 0)
+        else:
+            self.V = FunctionSpace(self.mesh, 'P', 1)
+
+    def set_method(self, new_method):
+        self.method = new_method
+
+    def save(self, u_list, filelist, save_checkpoints = False, savepath = False):
+        comm = self.mesh.mpi_comm()
+        if not savepath:
+            savepath = str(self.savepath)
+        xdmf_u = XDMFFile(savepath + 'u.xdmf')
+        u = Function(self.V)
+        u.rename('velocity', 'u')
+        for l in range(len(u_list)):
+            # writing xdmf
+            u.assign(u_list[l])
+            xdmf_u.write(u, l*self.dt)
+            # writing checkpoint
+            if save_checkpoints:
+                if filelist:
+                    print('saving checkpoint', l)
+                    ckpath = filelist[l].replace(self.in_file, savepath)
+                    hdf = HDF5File(comm, ckpath, 'w')
+                    hdf.write(u, '/u', float(l*self.dt))
+                    hdf.close()
+                else:
+                    print('saving checkpoint', l)
+                    ckpath = savepath
+                    name = '/u{i}'.format(i = math.ceil(l*self.dt*1000)) + '.h5'
+                    hdf = HDF5File(comm, ckpath + name, 'w')
+                    hdf.write(u, '/u', float(l*self.dt))
+                    hdf.close()
+
+    def make_numpy_box(self, velocity, save_numpy = True, save_box = False):
+        '''
+        makes numpy array from fenics functions on aorta mesh
+        Args (list): velocity input
+        Return (list): numpy array
+        can also save intermittent fenics function on box mesh
+        '''
+        #this only works for scalar data for now!
+        #find mesh dimensions and stuff
+        self.Lt = len(velocity)
+        coords = self.mesh.coordinates()
+        [x0, x1] = [np.min(coords[:, 0]), np.max(coords[:, 0])]
+        [y0, y1] = [np.min(coords[:, 1]), np.max(coords[:, 1])]
+        [z0, z1] = [np.min(coords[:, 2]), np.max(coords[:, 2])]
+        [dx, dy, dz] = self.mesh_options['dxs']
+        [Lx, Ly, Lz] = [math.ceil((x1-x0)/dx), math.ceil((y1-y0)/dy), math.ceil((z1 - z0)/dz)]
+        # new spatial coordinates for the box-mesh
+        deltax = (dx*(Lx) - (x1 - x0))/2
+        deltay = (dy*(Ly) - (y1 - y0))/2
+        deltaz = (dz*(Lz) - (z1 - z0))/2
+        x0_new = x0 - deltax
+        x1_new = x1 + deltax
+        y0_new = y0 - deltay
+        y1_new = y1 + deltay
+        z0_new = z0 - deltaz
+        z1_new = z1 + deltaz
+        # Defining the box-mesh
+        if self.mesh_type == 'aorta':
+            boxmesh = BoxMesh(Point(x0_new,y0_new,z0_new),Point(x1_new,y1_new,z1_new),Lx,Ly,Lz)
+            Vbox = FunctionSpace(boxmesh, 'P', 1)
+            Xt = Vbox.tabulate_dof_coordinates()
+        else:
+            Xt = self.V.tabulate_dof_coordinates()
+
+        # This array contains indexes instead of coordinates
+        SqXt = np.zeros(Xt.shape)
+        decimal.getcontext().rounding = decimal.ROUND_HALF_UP
+        for k in range(Xt.shape[0]):
+            xkprime = round((Xt[k][0] - x0_new)/dx, 2)
+            xk = int(decimal.Decimal(xkprime).to_integral_value())
+            ykprime = round((Xt[k][1] - y0_new)/dy, 2)
+            yk = int(decimal.Decimal(ykprime).to_integral_value())
+            zkprime = round((Xt[k][2] - z0_new)/dx, 2)
+            zk = int(decimal.Decimal(zkprime).to_integral_value())
+            SqXt[k, 0] = int(xk)
+            SqXt[k, 1] = int(yk)
+            SqXt[k, 2] = int(zk)
+        SqXt = SqXt.astype(int)
+
+        u = Function(self.V)
+        S = np.zeros((Lx+1, Ly+1, Lz+1, self.Lt))
+        t = 0
+        velocity_box = {}
+        print('interpolating...')
+        for t in range(self.Lt):
+            u = velocity[t]
+            if self.mesh_type == 'aorta':
+                ubox = Function(Vbox)
+                LagrangeInterpolator.interpolate(ubox, u)
+                u2 = Function(Vbox)
+                u2.assign(ubox)
+                velocity_box[t] = u2
+                values = ubox.vector()[:]
+            else:
+                values = u.vector()[:]
+
+            for k in range(Xt.shape[0]):
+                S[SqXt[k, 0], SqXt[k,1], SqXt[k,2], t] = values[k]
+            t+=1
+        if save_box == True:
+            print('saving new meshes')
+            xdmf = XDMFFile(self.in_file + 'ubox.xdmf')
+            for t in range(self.Lt):
+                velocity_box[t].rename('velocity', 'u')
+                xdmf.write(velocity_box[t], t*self.dt)
+        if save_numpy == True:
+            np.save(self.in_file + 'u', S)
+        return S
+
+    def make_aorta_mesh(self, S, save_aorta = True, save_box = False):
+        '''
+        interpolate numpy array into aorta mesh
+        Args(numpy array): S input data
+        Return (list of fenics functions): same data, in aorta mesh
+        can also save an intermittent fenics function on a box mesh
+        '''
+        #this only works for scalar data for now!
+        coords = self.mesh.coordinates()
+        [x0, x1] = [np.min(coords[:, 0]), np.max(coords[:, 0])]
+        [y0, y1] = [np.min(coords[:, 1]), np.max(coords[:, 1])]
+        [z0, z1] = [np.min(coords[:, 2]), np.max(coords[:, 2])]
+
+        [dx, dy, dz] = self.mesh_options['dxs']
+        [Lx, Ly, Lz] = [math.ceil((x1-x0)/dx), math.ceil((y1-y0)/dy), math.ceil((z1 - z0)/dz)]
+        # new spatial coordinates for the box-mesh
+        deltax = (dx*(Lx) - (x1 - x0))/2
+        deltay = (dy*(Ly) - (y1 - y0))/2
+        deltaz = (dz*(Lz) - (z1 - z0))/2
+        x0_new = x0 - deltax
+        x1_new = x1 + deltax
+        y0_new = y0 - deltay
+        y1_new = y1 + deltay
+        z0_new = z0 - deltaz
+        z1_new = z1 + deltaz
+        # Defining the box-mesh
+        mesh0 = BoxMesh(Point(x0_new,y0_new,z0_new),Point(x1_new,y1_new,z1_new),Lx,Ly,Lz)
+        P1 = FunctionSpace(mesh0, 'P', 1)
+        Xt = P1.tabulate_dof_coordinates()
+
+        # This array contains indexes instead of coordinates
+        SqXt = np.zeros(Xt.shape)
+        decimal.getcontext().rounding = decimal.ROUND_HALF_UP
+        for k in range(Xt.shape[0]):
+            xkprime = round((Xt[k][0] - x0_new)/dx, 2)
+            xk = int(decimal.Decimal(xkprime).to_integral_value())
+            ykprime = round((Xt[k][1] - y0_new)/dy, 2)
+            yk = int(decimal.Decimal(ykprime).to_integral_value())
+            zkprime = round((Xt[k][2] - z0_new)/dx, 2)
+            zk = int(decimal.Decimal(zkprime).to_integral_value())
+            SqXt[k,0] = int(xk)
+            SqXt[k,1] = int(yk)
+            SqXt[k,2] = int(zk)
+
+        SqXt = SqXt.astype(int) # To ensure int values!
+        v = Function(self.V)
+        velocity = [Function(self.V) for i in range(self.Lt)]
+        velocity_box = [Function(P1) for i in range(self.Lt)]
+        for t in range(self.Lt):
+            v1 = Function(P1)
+            values = np.zeros(v1.vector()[:].shape)
+            for k in range(Xt.shape[0]):
+                values[k] = S[SqXt[k, 0], SqXt[k, 1], SqXt[k, 2], t]
+            v1.vector()[:] = values
+            velocity_box[t] = v1
+            v = Function(self.V)
+            LagrangeInterpolator.interpolate(v, v1)
+            if self.mesh_type == 'slice':
+                #due to problems with interpolating into hexahedral meshes (it interpolates with fake zeros somehow?)
+                #this multiplication is necessary for the slices
+                v.vector()[:] *= 2
+            velocity[t] = v
+        if save_aorta == True:
+            self.save(velocity, False, False, savepath=self.savepath + 'aorta/')
+        if save_box == True:
+            self.save(velocity_box, False, False, savepath = self.savepath + 'box/')
+        return velocity
+
+    def lap_unwrap(self, phiwin, nd = 3):
+        '''
+        Args (numpy array): wrapped phase
+        Return (numpy array): unwrapped phase
+        '''
+        si = [phiwin.shape[0], phiwin.shape[1], phiwin.shape[2], phiwin.shape[3]]
+        phiw = phiwin
+        if self.mesh_type == 'slice':
+            if nd == 3:
+                [X, Y] = np.mgrid[-si[0]/2:si[0]/2, -si[1]/2:si[1]/2]
+                ss = 4
+                mod = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) - 4
+                modi = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) - 4
+                modi[math.floor(si[0]/2), math.floor(si[1]/2)] = 1
+            else:
+                [X, Y, T] = np.mgrid[-si[0]/2:si[0]/2, -si[1]/2:si[1]/2, -si[3]/2:si[3]/2]
+                ss = 4
+                ts = 2
+                mod = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) + ts*np.cos(pi*T/si[3]) - ss - ts
+                modi = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) + ts*np.cos(pi*T/si[3]) - ss - ts
+                modi[math.floor(si[0]/2), math.floor(si[1]/2), math.floor(si[3]/2)] = 1
+            phiw = phiwin[:, :, 1, :]
+            si = [si[0], si[1], si[3]]
+            def lap(phi):
+                '''computes laplacian with priorly defined stencil'''
+                K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+                K = np.multiply(K, mod)
+                return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+            def ilap(phi):
+                K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+                K = K / modi
+                return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+            lap_phiw = np.zeros(si)
+            lap_phi_vec = np.zeros(si)
+            phi_vec = np.zeros(si)
+            nr = np.zeros(si)
+            if nd == 3:
+                for t in range(self.Lt):
+                    #compute Laplacian of the correct phase
+                    lap_phi_vec[:,:,t] = np.cos(phiw[:,:,t])*lap(np.sin(phiw[:,:,t])) - np.sin(phiw[:,:,t])*lap(np.cos(phiw[:,:,t]))
+                    lap_phiw[:, :, t] = lap(phiw[:, :, t])
+                    phi_vec[:, :, t] = ilap(lap_phi_vec[:, :, t] - lap_phiw[:, :, t])
+            if nd == 4:
+                lap_phiw = lap(phiw)
+                lap_phi_vec = np.cos(phiw)*lap(np.sin(phiw)) - np.sin(phiw)*lap(np.cos(phiw))
+                phi_vec = ilap(lap_phi_vec - lap_phiw)
+            nr = np.round(phi_vec/(2*pi))
+            nrout = np.zeros(phiwin.shape)
+            nrout[:, :, 1, :] = nr
+            print(np.count_nonzero(nr))
+            u = self.make_aorta_mesh((phiwin + 2*pi*nrout)*self.venc/pi, False, False)
+            return u
+        if nd <=3:
+            [X, Y, Z] = np.mgrid[-si[0]/2:si[0]/2, -si[1]/2:si[1]/2, -si[2]/2:si[2]/2]
+            ss = 6
+            mod = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) - ss + 2*np.cos(pi*Z/si[2])
+            modi = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) - ss + 2*np.cos(pi*Z/si[2])
+            modi[math.floor(si[0]/2), math.floor(si[1]/2), math.floor(si[2]/2)] = 1
+            def lap(phi):
+                '''computes laplacian with priorly defined stencil'''
+                K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+                K = np.multiply(K, mod)
+                return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+            def ilap(phi):
+                K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+                K = K / modi
+                return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+            lap_phiw = np.zeros(si)
+            lap_phi_vec = np.zeros(si)
+            phi_vec = np.zeros(si)
+            nr = np.zeros(si)
+            for t in range(self.Lt):
+                #compute Laplacian of the correct phase
+                lap_phi_vec[:,:,:,t] = np.cos(phiw[:,:,:,t])*lap(np.sin(phiw[:,:,:,t])) - np.sin(phiw[:,:,:,t])*lap(np.cos(phiw[:,:,:,t]))
+                lap_phiw[:, :, :, t] = lap(phiw[:, :, :, t])
+                phi_vec[:, :, :, t] = ilap(lap_phi_vec[:, :, :, t] - lap_phiw[:, :, :, t])
+            nr = np.round(phi_vec/(2*pi))
+            nrout = np.zeros(phiwin.shape)
+            nrout = nr
+            print(np.count_nonzero(nr))
+            if nd == 3:
+                u = self.make_aorta_mesh((phiwin + 2*pi*nrout)*self.venc/pi, False, False)
+                return u
+            else:
+                #define boundary conditions
+                if self.mesh_type == 'slice':
+                    lap_phi_out = np.zeros(phiwin.shape)
+                    lap_phi_out[:,:,1,:] = lap_phi_vec[:,:,0,:]
+                    lap_phiw_out = np.zeros(phiwin.shape)
+                    lap_phiw_out[:,:,1,:] = lap_phiw[:,:,0,:]
+                else:
+                    lap_phi_out = lap_phi_vec
+                    lap_phiw_out = lap_phiw
+                lap_phi = self.make_aorta_mesh(lap_phi_out, False, False)
+                phi_w= self.make_aorta_mesh(phiwin, False, False)
+                lap_phi_w = self.make_aorta_mesh(lap_phiw_out, False, False)
+                u = [Function(self.V) for i in range(self.Lt)]
+                def boundary_D(x, on_boundary):
+                    return on_boundary
+                for t in range(self.Lt):
+                    if self.mesh_type == 'aorta':
+                        bc_phi = DirichletBC(self.V, phi_w[t], self.bnds, 1)
+                    else:
+                        bc_phi = DirichletBC(self.V, phi_w[t], boundary_D)
+                    #bc_phi = DirichletBC(self.V, Constant(0.0), self.bnds, 1)
+                    ds = Measure("ds", subdomain_data=self.bnds)
+                    g_phi = Constant(0.0)
+                    phi = TrialFunction(self.V)
+                    v = TestFunction(self.V)
+                    a = dot(grad(phi), grad(v))*dx
+                    #L = (lap_phi[t] - lap_phi_w[t])*v*dx + g_phi*v*ds
+                    L = lap_phi[t]*v*dx
+                    phi = Function(self.V)
+                    solve(a == L, phi, bc_phi)
+                    nr = Function(self.V)
+                    nr.vector()[:] = np.round((phi.vector()[:])/(2*pi))
+                    #u[t].assign(phi_w[t]*self.venc/pi + nr*2*self.venc)
+                    u[t].assign(phi*self.venc/pi)
+                return u
+        if nd == 4:
+            [X, Y, Z, T] = np.mgrid[-si[0]/2:si[0]/2, -si[1]/2:si[1]/2, -si[2]/2:si[2]/2, -si[3]/2:si[3]/2]
+            ts = 2
+            ss = 6
+            if self.mesh_type == 'slice':
+                ss = 4
+            mod = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) + 2*np.cos(pi*Z/si[2]) + ts*np.cos(pi*T/si[3]) - ss - ts
+            modi = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) + 2*np.cos(pi*Z/si[2]) + ts*np.cos(pi*T/si[3]) - ss - ts
+            modi[math.floor(si[0]/2), math.floor(si[1]/2), math.floor(si[2]/2), math.floor(si[3]/2)] = 1
+            def lap(phi):
+                '''computes laplacian with priorly defined stencil'''
+                K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+                K = np.multiply(K, mod)
+                return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+            def ilap(phi):
+                K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+                K = K / modi
+                return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+            lap_phiw = lap(phiw)
+            lap_phi_vec = np.cos(phiw)*lap(np.sin(phiw)) - np.sin(phiw)*lap(np.cos(phiw))
+            phi_vec = ilap(lap_phi_vec - lap_phiw)
+            nr = np.round(phi_vec/(2*pi))
+            nrout = nr
+            print(np.count_nonzero(nr))
+            u = self.make_aorta_mesh((phiwin + 2*pi*nrout)*self.venc/pi, False, False)
+            return u
+
+    def temporal_unwrap(self, phi_w):
+        '''
+        unwrapping with the temporal method described in Xiang, 1995
+        Args (list): wrapped phase
+        Return (list): unwrapped phase
+        '''
+        def wrap(u):
+            ''' wraps all values of u into the interval (-pi, pi)'''
+            u_array = u.vector()[:]
+            for i, x in enumerate(u_array):
+                while x<-pi or x>pi:
+                    if x>pi:
+                        u_array[i] = x - 2*pi
+                        x = x - 2*pi
+                    if x<-pi:
+                        u_array[i] = x + 2*pi
+                        x = x + 2*pi
+            u.vector()[:] = u_array
+            return u
+        phi_diff = [Function(self.V) for i in range(len(phi_w))]
+        phi = [Function(self.V) for i in range(len(phi_w))]
+        phi[self.t_ref] = phi_w[self.t_ref]
+        for t in range(self.t_ref, len(phi_w)-1):
+            phi_diff[t].vector()[:] = phi_w[t+1].vector()[:] - phi_w[t].vector()[:]
+            phi_diff[t] = wrap(phi_diff[t])
+            phi[t+1] = phi[t] + phi_diff[t]
+        for t in reversed(range(0, self.t_ref)):
+            phi_diff[t].vector()[:] = phi_w[t+1].vector()[:] - phi_w[t].vector()[:]
+            phi_diff[t] = wrap(phi_diff[t])
+            phi[t] = phi[t+1] - phi_diff[t]
+        return phi
+
+    def probability_unwrap(self, phi_w):
+        '''
+        unwraps with probability-based method described in Loecher et al., 2011
+        Args (list): wrapped phase
+        Return (list): unwrapped phase
+        '''
+        timesteps = len(phi_w)
+        if self.mesh_type == 'aorta':
+            def prob_pass(phi_w, threshold, v_to_d, mesh, neighborhoods, w_s, w_t):
+                '''
+                performs one single pass over all vertices, estimating probability that they're wrapped and unwrapping if necessary
+                '''
+                coords = mesh.coordinates()
+                prob = [[0]*mesh.num_vertices() for i in range(timesteps+1)]
+                phi = phi_w
+
+                for v in vertices(mesh):
+                    for t in range(0, timesteps):
+                        #sum the gradients of the neighbours
+                        grad_sum = 0
+                        dofs = v_to_d[v.index()]
+                        value = phi_w[t].vector()[dofs]
+                        for idx in neighborhoods[v.index()]:
+                            grad_sum = grad_sum + w_s * (phi_w[t](coords[idx]) - value)
+                        if t>0:
+                            grad_sum = grad_sum + w_t*(phi_w[t-1].vector()[dofs] - value)
+                        if t < timesteps-1:
+                            grad_sum = grad_sum + w_t*(phi_w[t+1].vector()[dofs] - value)
+                        #calculate probability
+                        tot = max(0.000001, w_s*len(neighborhoods[v.index()]) + w_t*int(t>0) + w_t*int(t<timesteps+1))
+                        prob[t][v.index()] = grad_sum/(2*pi*tot)
+                        if prob[t][v.index()] > threshold:
+                            phi[t].vector()[dofs] = phi_w[t].vector()[dofs] + 2*pi
+                        if prob[t][v.index()] < -threshold:
+                            phi[t].vector()[dofs] = phi_w[t].vector()[dofs] - 2*pi
+                return phi
+
+            #prepare vertex-dof maps
+            v_to_d=vertex_to_dof_map(self.V)
+
+            #find all neighborhood vertices
+            neighborhoods = [0]*self.mesh.num_vertices()
+            for v in vertices(self.mesh):
+                neighborhood = [Edge(self.mesh, i).entities(0) for i in v.entities(1)]
+                neighborhood = np.array(neighborhood).flatten()
+                neighborhood = neighborhood[np.where(neighborhood != v.index())[0]]
+                neighborhoods[v.index()] = neighborhood
+
+            #low threshold passes
+            phi = prob_pass(phi_w, self.t_low, v_to_d, self.mesh, neighborhoods, self.w_s, self.w_t)
+            for i in range(self.n_low-1):
+                phi = prob_pass(phi, self.t_low, v_to_d, self.mesh, neighborhoods, self.w_s, self.w_t)
+            #high threshold passes
+            for i in range(self.n_high):
+                phi = prob_pass(phi, self.t_high, v_to_d, self.mesh, neighborhoods, self.w_s, self.w_t)
+            return phi
+        else:
+            phiw = self.make_numpy_box(phi_w, False, False)
+            si = phiw.shape
+            def prob_pass(phiw, threshold, w_s, w_t):
+                phi = np.copy(phiw)
+                pw = 0
+                for x in range(si[0]):
+                    for y in range(si[1]):
+                        for z in range(si[2]):
+                            for t in range(si[3]):
+                                grad_sum = 0
+                                val = phiw[x, y, z, t]
+                                tot = 0
+                                if 0<x:
+                                    grad_sum += w_s*(phiw[x-1, y, z, t] - val)
+                                    tot +=w_s
+                                if x<si[0]-1:
+                                    grad_sum += w_s*(phiw[x+1, y, z, t] - val)
+                                    tot +=w_s
+                                if 0<y:
+                                    grad_sum += w_s*(phiw[x, y-1, z, t] - val)
+                                    tot +=w_s
+                                if y<si[1]-1:
+                                    grad_sum += w_s*(phiw[x, y+1, z, t] - val)
+                                    tot +=w_s
+                                if 0<z:
+                                    grad_sum += w_s*(phiw[x, y, z-1, t] - val)
+                                    tot +=w_s
+                                if z<si[2]-1:
+                                    grad_sum += w_s*(phiw[x, y, z+1, t] - val)
+                                    tot +=w_s
+                                if 0<t:
+                                    grad_sum += w_t*(phiw[x, y, z, t-1] - val)
+                                    tot +=w_t
+                                if t<si[3]-1:
+                                    grad_sum += w_t*(phiw[x, y, z, t+1] - val)
+                                    tot +=w_t
+                                prob = grad_sum /(2*pi*tot)
+                                if prob > threshold:
+                                    phi[x, y, z, t] = val + 2*pi
+                                    pw +=1
+                                if prob < -threshold:
+                                    phi[x, y, z, t] = val - 2*pi
+                                    pw +=1
+                print('wrapped pixels: ', pw)
+                return phi
+
+            phi = prob_pass(phiw, self.t_low, self.w_s, self.w_t)
+            for i in range(self.n_low - 1):
+                phi = prob_pass(phi, self.t_low, self.w_s, self.w_t)
+            for i in range(self.n_high):
+                phi = prob_pass(phi, self.t_high, self.w_s, self.w_t)
+            r_phi = self.make_aorta_mesh(phi, False, False)
+            return r_phi
+
+    def dual_venc(self, high_venc_files, low_venc_files, addon = False):
+        print('unwrapping with dual venc')
+        if not addon:
+            addon = self.path_addons['lee']
+        #read files with low venc
+        t = 0
+        u = Function(self.V)
+        low_venc = [Function(self.V) for i in range(len(low_venc_files))]
+        for file in low_venc_files:
+            h5u = HDF5File(self.mesh.mpi_comm(), file, 'r')
+            h5u.read(u, 'u')
+            low_venc[t].assign(u)
+            t +=1
+        #read files with high venc
+        t = 0
+        u = Function(self.V)
+        high_venc = [Function(self.V) for i in range(len(high_venc_files))]
+        for file in high_venc_files:
+            if isinstance(file, str):
+                h5u = HDF5File(self.mesh.mpi_comm(), file, 'r')
+                h5u.read(u, 'u')
+                high_venc[t].assign(u)
+            else:
+                high_venc[t].assign(file)
+            t +=1
+        self.Lt = len(low_venc_files)
+        u = low_venc
+        for t in range(self.Lt):
+            diff = high_venc[t].vector()[:] - low_venc[t].vector()[:]
+            n = np.round(diff/self.venc)
+            u[t].vector()[:] += n*self.venc
+        if self.save_xdmf:
+            self.save(u, False, self.save_checkpoints, self.savepath + addon)
+        return u
+
+    def omme(self, velocities, vencs):
+        uw = Function(self.V)
+        uw_vec = np.zeros(velocities[0].shape)
+        #venc_uw = np.lcm.reduce(vencs)
+        venc_uw = np.max(vencs)
+        min_ind = np.argmin(vencs)
+        min_venc = np.min(vencs)
+        nb_samples = math.ceil(venc_uw/min_venc)+2
+        range_u = np.arange(-nb_samples, nb_samples+1)*min_venc
+        u = np.outer(velocities[min_ind][:],np.ones((1, len(range_u)))) + np.outer(np.ones((len(velocities[0][:]), 1)),range_u)
+        for k in range(len(velocities[0])):
+            J = 0
+            u_k = u[k, abs(u[k,:]) <= venc_uw]
+            for v_ind in range(len(vencs)):
+                J = J - np.cos(np.pi * (velocities[v_ind][k] - u_k)/vencs[v_ind])
+            ind_k = np.argmin(J)
+            uw_vec[k] = u_k[ind_k]
+        uw.vector()[:] = uw_vec
+        return uw
+
+    def multi_venc(self, venc_files, vencs, addon = False):
+        if not addon:
+            addon = self.path_addons['omme']
+        self.Lt = len(venc_files[0])
+        print('unwrapping with %i vencs'%len(vencs))
+        uw = []
+        for t in range(self.Lt):
+            velocities = []
+            for filelist in venc_files:
+                if isinstance(filelist[t], str):
+                    u = Function(self.V)
+                    h5u = HDF5File(self.mesh.mpi_comm(), filelist[t], 'r')
+                    h5u.read(u, 'u')
+                    velocities.append(u.vector()[:])
+                else:
+                    velocities.append(filelist[t].vector()[:])
+            uw.append(self.omme(velocities, vencs))
+        if self.save_xdmf:
+            self.save(uw, False, self.save_checkpoints, self.savepath + addon)
+        print('done!')
+        return uw
+
+    def unwrap(self, filelist, method = 'Temporal'):
+        '''
+        unwraps the velocity data :)
+        Args (list/numpy array): filelist, list of files to unwrap OR one numpy array to unwrap
+        Return (list): unwrapped velocity
+        '''
+        #get files from file list
+        if isinstance(filelist, str) and (filelist.endswith('npy') or filelist.endswith('npz')):
+            #using numpy array saves with default folder structure, ie all h5 files in one folder
+            if filelist.endswith('npy'):
+                u_in = np.load(filelist)
+            if filelist.endswith('npz'):
+                S = np.load(filelist)
+                u_in = S['u']
+            filelist = False
+            self.Lt = u_in.shape[3]
+        else:
+            t = 0
+            u = Function(self.V)
+            u_in = [Function(self.V) for i in range(len(filelist))]
+            for file in filelist:
+                h5u = HDF5File(self.mesh.mpi_comm(), file, 'r')
+                h5u.read(u, 'u')
+                u_in[t].assign(u)
+                t +=1
+            self.Lt = len(filelist)
+        if self.Lt == 0:
+            raise Exception('No input files found!')
+        if method.startswith('lap'):
+            if type(u_in) == np.ndarray:
+                vx = u_in
+            else:
+                print('transforming to numpy array')
+                vx = self.make_numpy_box(u_in, save_numpy = False, save_box = False)
+            #transform to phase
+            print('unwrapping with laplacian method...')
+            start_l = time.time()
+            phase = np.asarray(vx * pi / self.venc)
+            if method.endswith('3d'):
+                u_list = self.lap_unwrap(phase, nd=3)
+            if method.endswith('4d'):
+                u_list = self.lap_unwrap(phase, nd=4)
+            if method.endswith('fenics'):
+                u_list = self.lap_unwrap(phase, nd=0)
+            end_l = time.time()
+            print('done!')
+            print('total time for Laplacian: ' + str(end_l - start_l))
+        if method == 'Temporal':
+            if type(u_in) == np.ndarray:
+                print('transforming to aorta mesh')
+                u_wrapped = self.make_aorta_mesh(u_in, save_aorta=False, save_box=False)
+            else:
+                u_wrapped = u_in
+            print('unwrapping with temporal method...')
+            phi_w = [Function(self.V) for i in range(len(u_wrapped))]
+            u_list = [Function(self.V) for i in range(len(u_wrapped))]
+            for t, u in enumerate(u_wrapped):
+                phi_w[t].assign(u * pi / self.venc)
+            phi = self.temporal_unwrap(phi_w)
+            for t, phit in enumerate(phi):
+                u_list[t].assign(phit * self.venc / pi)
+            print('done!')
+        if method == 'Probability':
+            if type(u_in) == np.ndarray:
+                print('transforming to aorta mesh')
+                u_wrapped = self.make_aorta_mesh(u_in, save_aorta=False, save_box=False)
+            else:
+                u_wrapped = u_in
+            print('unwrapping with probability method...')
+            phi_w = [Function(self.V) for i in range(len(u_wrapped))]
+            u_list = [Function(self.V) for i in range(len(u_wrapped))]
+            for t, u in enumerate(u_wrapped):
+                phi_w[t].assign(u_wrapped[t] * pi/ self.venc)
+            phi = self.probability_unwrap(phi_w)
+            for t, phit in enumerate(phi):
+                u_list[t].assign(phit * self.venc / pi)
+            print('done!')
+        if self.save_xdmf:
+            self.save(u_in, filelist, self.save_checkpoints, self.savepath + 'wrapped/')
+            self.save(u_list, filelist, self.save_checkpoints, self.savepath + self.path_addons[method])
+        return u_list
+
+    def get_lumen(self, ground_truth):
+       #separate only lumen voxels here
+        lumen_indxs = []
+        for k in range(len(ground_truth[0].vector()[:])):
+            for t in range(self.Lt):
+                #not-lumen voxels should always be zero in ground truth
+                if ground_truth[t].vector()[k] != 0:
+                    lumen_indxs.append(k)
+                    break
+        self.lumen_indxs = lumen_indxs
+        return lumen_indxs
+
+    def eval(self, wrapped, ground_truth, method = 'error'):
+        lumen_indxs = getattr(self, 'lumen_indxs', range(len(ground_truth[0].vector()[:])))
+        if method == 'number':
+            n = 0
+            for t in range(self.Lt):
+                for k in lumen_indxs:
+                    if abs(wrapped[t].vector()[k] - ground_truth[t].vector()[k]) > 0.1:
+                        n += 1
+            print('number of wraps: ', n)
+            print('percentage of wraps:', n / (self.Lt * len(lumen_indxs)) * 100)
+            return n
+        if method == 'error':
+            #concatenate all timesteps together
+            length = len(ground_truth[0].vector()[lumen_indxs])
+            ground = np.zeros((self.Lt*length))
+            u = np.zeros((self.Lt*length))
+            for t in range(self.Lt):
+                ground[t*length:(t+1)*length] = ground_truth[t].vector()[lumen_indxs]
+                u[t*length:(t+1)*length] = wrapped[t].vector()[lumen_indxs]
+            #compute norms
+            error = np.linalg.norm(u-ground)/np.linalg.norm(ground)
+            print('error: ', error)
+            return error
+        return 0
+
 #
 # Import4DFlowTest
 #
