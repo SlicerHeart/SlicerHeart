@@ -71,14 +71,15 @@ class ValveSeriesInfo(qt.QAbstractTableModel):
         if type(val) is bool:
           return ""
         return str(val)
-      elif role in [qt.Qt.BackgroundRole, qt.Qt.DecorationRole]:
+      elif role == qt.Qt.DecorationRole:
         val = self._df.iat[index.row(), index.column()].item()
         if not type(val) is bool:
           return None
-        if role == qt.Qt.BackgroundRole:
-          return self.GREEN_COLOR if val else self.RED_COLOR
-        elif role == qt.Qt.DecorationRole:
-          return slicer.app.style().standardIcon(qt.QStyle.SP_DialogApplyButton if val else qt.QStyle.SP_DialogCancelButton)
+
+        icon = slicer.app.style().standardIcon(qt.QStyle.SP_DialogApplyButton if val else qt.QStyle.SP_DialogCancelButton)
+        icon.addPixmap(icon.pixmap(qt.QSize(16, 16)), qt.QIcon.Normal)
+        icon.addPixmap(icon.pixmap(qt.QSize(16, 16)), qt.QIcon.Selected)
+        return icon
     if role == qt.Qt.TextAlignmentRole:
       return qt.Qt.AlignCenter
     return None
@@ -107,7 +108,6 @@ class ValveSeriesInfo(qt.QAbstractTableModel):
 
     valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(origIndex)
     return data
-
 
 
 class ValveSequenceInfoWidget:
@@ -179,6 +179,11 @@ class ValveSequenceInfoWidget:
   def setup(self, parent):
     if parent is not None:
       parent.addWidget(self.ui)
+
+    palette = self.ui.valveSeriesInfoView.palette
+    palette.setBrush(qt.QPalette.Highlight, qt.QBrush(qt.QColor(125,125,125,180)))
+    # palette.setBrush(qt.QPalette.HighlightedText, qt.QBrush(qt.Qt.black))
+    self.ui.valveSeriesInfoView.setPalette(palette)
 
     self._connectSignals()
 
