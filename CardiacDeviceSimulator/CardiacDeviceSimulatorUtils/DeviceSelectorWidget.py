@@ -40,7 +40,9 @@ class DeviceSelectorWidget(DeviceWidget):
     #self.layout().addWidget(self.deviceWidgetFrame)
 
   def createDeviceButton(self, deviceClass):
-    deviceWidgetButton = qt.QPushButton()
+    deviceWidgetButton = qt.QToolButton()
+    deviceWidgetButton.setToolButtonStyle(qt.Qt.ToolButtonTextUnderIcon)
+    deviceWidgetButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding, qt.QSizePolicy.Maximum)
     icon = deviceClass.getIcon()
     if icon:
       deviceWidgetButton.setIcon(icon)
@@ -48,6 +50,7 @@ class DeviceSelectorWidget(DeviceWidget):
     deviceWidgetButton.checkable = True
     deviceWidgetButton.name = deviceClass.ID
     deviceWidgetButton.setToolTip(deviceClass.NAME)
+    deviceWidgetButton.text = deviceClass.ID
     return deviceWidgetButton
 
   def setParameterNode(self, parameterNode):
