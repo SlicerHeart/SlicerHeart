@@ -68,12 +68,6 @@ class ValveClipDeviceSimulatorWidget(CardiacDeviceSimulatorWidget):
     if not self.setupSuccessful:
       return
 
-    if int(slicer.app.revision) < 29848:
-      # Requires fix in markups curve coordinate systems (integrated around April 10, 2021)
-      slicer.util.errorDisplay(f"ValveClip Device Simulator module requires Slicer core version\nSlicer-4.13.0-2021-04-16 (rev 29848) or later.",
-        detailedText="In earlier Slicer versions, device clip motion may be unstable.")
-
-    #self.devicePositioningWidget.vesselGroupBox.hide()
     self.devicePositioningWidget.parent().hide()
 
     self.deviceControlSection = ctk.ctkCollapsibleButton()

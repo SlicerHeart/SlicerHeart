@@ -41,7 +41,7 @@ class CardiacDeviceSimulator(ScriptedLoadableModule):
       scriptedPlugin = slicer.qSlicerSubjectHierarchyScriptedPlugin(None)
       scriptedPlugin.setPythonSource(hvp.CardiacDeviceSubjectHierarchyPlugin.filePath)
 
-    slicer.app.connect("startupCompleted()", initSubjectHierarchyPlugin)
+    slicer.app.startupCompleted.connect(initSubjectHierarchyPlugin)
 
 #
 # CardiacDeviceSimulatorWidget
@@ -107,7 +107,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.parameterNodeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onParameterNodeSelectionChanged)
 
     self.deviceSelectorWidget = DeviceSelectorWidget(self.deviceClasses)
-    _, self.deviceSelectionSection = UIHelper.addCommonSection("Device Selection", self.layout, self.moduleSectionButtonsGroup,
+    _, self.deviceSelectionSection = UIHelper.addCommonSection("Device selection", self.layout, self.moduleSectionButtonsGroup,
       collapsed=False, widget=self.deviceSelectorWidget)
 
     self.deviceWidgets = [self.deviceSelectorWidget]
@@ -115,7 +115,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.devicePositioningSection = None
     if self.DEVICE_POSITIONING_NEEDED:
       self.devicePositioningWidget = DevicePositioningWidget()
-      _, self.devicePositioningSection = UIHelper.addCommonSection("Device Positioning", self.layout, self.moduleSectionButtonsGroup,
+      _, self.devicePositioningSection = UIHelper.addCommonSection("Device positioning", self.layout, self.moduleSectionButtonsGroup,
         collapsed=True, widget=self.devicePositioningWidget)
       self.deviceWidgets.append(self.devicePositioningWidget)
       self.devicePositioningSection.toggled.connect(self.onDevicePositioningToggled)
@@ -123,7 +123,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.deviceDeformationSection = None
     if self.DEVICE_DEFORMATION_NEEDED:
       self.deviceDeformationWidget = DeviceDeformationWidget()
-      _, self.deviceDeformationSection = UIHelper.addCommonSection("Device Deformation", self.layout, self.moduleSectionButtonsGroup,
+      _, self.deviceDeformationSection = UIHelper.addCommonSection("Device deformation", self.layout, self.moduleSectionButtonsGroup,
         collapsed=True, widget=self.deviceDeformationWidget)
       self.deviceWidgets.append(self.deviceDeformationWidget)
 
@@ -1363,7 +1363,7 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
         pointOnVessel = originalHandlePoint
 
       if allowDeviceExpansionToVesselWalls:
-        
+
         try:
           # Current API (Slicer-4.13 February 2022)
           deformedHandlesNode.SetNthFiducialPosition(handleID, pointOnVessel)

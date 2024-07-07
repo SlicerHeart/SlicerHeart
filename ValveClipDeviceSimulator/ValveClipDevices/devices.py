@@ -210,7 +210,7 @@ class ValveClipBase(CardiacDeviceBase):
       for pointIndex in range(numberOfControlPointsToAdd):
         centerlineNode.AddControlPointWorld(vtk.vtkVector3d(0, 0, 0))
 
-      slicer.modules.markups.logic().SetAllMarkupsVisibility(centerlineNode, False)
+      slicer.modules.markups.logic().SetAllControlPointsVisibility(centerlineNode, False)
 
       beforeArcLength = parameterValues["sleeveTranslation"]
       afterArcLength = parameterValues["sleeveTipLength"] + parameterValues["catheterTranslation"]
@@ -234,7 +234,7 @@ class ValveClipBase(CardiacDeviceBase):
         controlPointPosition = controlPointPosition[0:3]
         centerlineNode.SetNthControlPointPositionWorld(controlPointIndex, controlPointPosition)
 
-      slicer.modules.markups.logic().SetAllMarkupsVisibility(centerlineNode, False) # Hide all control points
+      slicer.modules.markups.logic().SetAllControlPointsVisibility(centerlineNode, False) # Hide all control points
 
       centerlineNode.EndModify(centerlineWasModified)
 
@@ -334,7 +334,7 @@ class ValveClipBase(CardiacDeviceBase):
       guideCurveNode.SetControlPointPositionsWorld(interactionInterpolatedCurvePoints)
       guideCurveNode.ResampleCurveWorld(resampledControlPointsDistance)
       guideCurveNode.SetNumberOfPointsPerInterpolatingSegment(1) # Limit number of points
-      slicer.modules.markups.logic().SetAllMarkupsVisibility(guideCurveNode, False) # Hide all control points
+      slicer.modules.markups.logic().SetAllControlPointsVisibility(guideCurveNode, False) # Hide all control points
 
       guideCurveWasModified = guideCurveNode.StartModify()
 

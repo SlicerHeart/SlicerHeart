@@ -3,7 +3,6 @@ from CardiacDeviceSimulatorUtils.widgethelper import UIHelper
 from CardiacDeviceSimulatorUtils.widgethelper import DeviceWidget
 from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
 
-
 class DeviceSelectorWidget(DeviceWidget):
   """Shows list of devices (as button row), presets, and sliders to modify presets
   """
@@ -33,11 +32,8 @@ class DeviceSelectorWidget(DeviceWidget):
       vBoxDeviceButtonGroup.layout().addWidget(deviceWidgetButton,
         int(currentWidgetIndex/numberOfColumns), currentWidgetIndex % numberOfColumns)
 
-    self.deviceButtonGroup.connect('buttonClicked(QAbstractButton*)', self.onSwitchDevice)
+    self.deviceButtonGroup.buttonClicked.connect(self.onSwitchDevice)
     self.layout().addWidget(vBoxDeviceButtonGroup)
-
-    #self.deviceWidgetFrame = qt.QFrame()
-    #self.layout().addWidget(self.deviceWidgetFrame)
 
   def createDeviceButton(self, deviceClass):
     deviceWidgetButton = qt.QToolButton()
