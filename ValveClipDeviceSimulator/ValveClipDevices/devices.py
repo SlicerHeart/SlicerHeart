@@ -168,8 +168,10 @@ class ValveClipBase(CardiacDeviceBase):
       vtk.vtkMatrix4x4.Multiply4x4(guideTipToWorldTransformMatrix, sleeveElbowToGuideTipTransformMatrix, sleeveElbowToWorldTransformMatrix)
 
       # Pulley rotation angles
-      psi_x = math.pi / 180.0 * parameterValues["sleeveTipDeflectionAP"]
-      psi_y = math.pi / 180.0 * parameterValues["sleeveTipDeflectionML"]
+      sleeveTipDeflectionAP = parameterValues["sleeveTipDeflectionAP"] if "sleeveTipDeflectionAP" in parameterValues.keys() else parameterValues["sleeveTipDeflectionFE"]  # Support both MitraClip and TriClip
+      psi_x = math.pi / 180.0 * sleeveTipDeflectionAP
+      sleeveTipDeflectionML = parameterValues["sleeveTipDeflectionML"] if "sleeveTipDeflectionML" in parameterValues.keys() else 0.0  # Support both MitraClip and TriClip
+      psi_y = math.pi / 180.0 * sleeveTipDeflectionML
 
       # Device parameters
       l = arcLength = parameterValues["sleeveArcLength"]  # arc length of the steerable device
@@ -357,8 +359,10 @@ class ValveClipBase(CardiacDeviceBase):
         guideTipElbowToWorldTransform.Concatenate(guideTipElbowToGuideTipRotatedBaseTransformMatrix)
 
         # Pulley rotation angles
-        psi_x = math.pi / 180.0 * parameterValues["guideTipDeflection"]
-        psi_y = 0.0
+        guideTipDeflectionSL = parameterValues["guideTipDeflection"] if "guideTipDeflection" in parameterValues.keys() else parameterValues["guideTipDeflectionSL"]  # Support both MitraClip and TriClip
+        psi_x = math.pi / 180.0 * guideTipDeflectionSL
+        guideTipDeflectionAP = parameterValues["guideTipDeflectionAP"] if "guideTipDeflectionAP" in parameterValues.keys() else 0.0  # Support both MitraClip and TriClip
+        psi_y = math.pi / 180.0 * guideTipDeflectionAP
 
         # Device parameters
         d_b = 2.5  # distance between backbone and tendon; outer diameter of the guide is 5.3mm, so max distance is 2.65 #TODO: as device parameter
