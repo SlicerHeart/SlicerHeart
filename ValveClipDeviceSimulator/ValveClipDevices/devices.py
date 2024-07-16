@@ -168,7 +168,7 @@ class ValveClipBase(CardiacDeviceBase):
       vtk.vtkMatrix4x4.Multiply4x4(guideTipToWorldTransformMatrix, sleeveElbowToGuideTipTransformMatrix, sleeveElbowToWorldTransformMatrix)
 
       # Pulley rotation angles
-      sleeveTipDeflectionAP = parameterValues["sleeveTipDeflectionAP"] if "sleeveTipDeflectionAP" in parameterValues.keys() else parameterValues["sleeveTipDeflectionFE"]  # Support both MitraClip and TriClip
+      sleeveTipDeflectionAP = parameterValues["sleeveTipDeflectionAP"] if "sleeveTipDeflectionAP" in parameterValues.keys() else -parameterValues["sleeveTipDeflectionFE"]  # Support both MitraClip and TriClip
       psi_x = math.pi / 180.0 * sleeveTipDeflectionAP
       sleeveTipDeflectionML = parameterValues["sleeveTipDeflectionML"] if "sleeveTipDeflectionML" in parameterValues.keys() else 0.0  # Support both MitraClip and TriClip
       psi_y = math.pi / 180.0 * sleeveTipDeflectionML
@@ -359,10 +359,10 @@ class ValveClipBase(CardiacDeviceBase):
         guideTipElbowToWorldTransform.Concatenate(guideTipElbowToGuideTipRotatedBaseTransformMatrix)
 
         # Pulley rotation angles
-        guideTipDeflectionSL = parameterValues["guideTipDeflection"] if "guideTipDeflection" in parameterValues.keys() else parameterValues["guideTipDeflectionSL"]  # Support both MitraClip and TriClip
-        psi_x = math.pi / 180.0 * guideTipDeflectionSL
-        guideTipDeflectionAP = parameterValues["guideTipDeflectionAP"] if "guideTipDeflectionAP" in parameterValues.keys() else 0.0  # Support both MitraClip and TriClip
-        psi_y = math.pi / 180.0 * guideTipDeflectionAP
+        guideTipDeflection = parameterValues["guideTipDeflection"] if "guideTipDeflection" in parameterValues.keys() else parameterValues["guideTipDeflectionAP"]  # Support both MitraClip and TriClip
+        psi_x = math.pi / 180.0 * guideTipDeflection
+        guideTipDeflectionLateral = parameterValues["guideTipDeflectionSL"] if "guideTipDeflectionSL" in parameterValues.keys() else 0.0  # Support both MitraClip and TriClip
+        psi_y = math.pi / 180.0 * guideTipDeflectionLateral
 
         # Device parameters
         d_b = 2.5  # distance between backbone and tendon; outer diameter of the guide is 5.3mm, so max distance is 2.65 #TODO: as device parameter
