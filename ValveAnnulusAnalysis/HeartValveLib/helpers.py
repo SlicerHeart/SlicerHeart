@@ -169,10 +169,22 @@ def setValveModelDataVisibility(valveModel, **kwargs):
   :return:
   """
   # TODO: add papillary models and coaptations
-  valveModel.getAnnulusContourMarkupNode().SetDisplayVisibility(kwargs.get("annulus", False))
-  valveModel.getAnnulusLabelsMarkupNode().SetDisplayVisibility(kwargs.get("annulusLabels", False))
-  valveModel.getLeafletSegmentationNode().SetDisplayVisibility(kwargs.get("segmentation", False))
-  valveModel.getValveRoiModelNode().SetDisplayVisibility(kwargs.get("roi", False))
+  annulusContourMarkupNode = valveModel.getAnnulusContourMarkupNode()
+  if annulusContourMarkupNode:
+    annulusContourMarkupNode.SetDisplayVisibility(kwargs.get("annulus", False))
+
+  annulusLabelsMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
+  if annulusLabelsMarkupNode:
+    annulusLabelsMarkupNode.SetDisplayVisibility(kwargs.get("annulusLabels", False))
+
+  leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
+  if leafletSegmentationNode:
+    leafletSegmentationNode.SetDisplayVisibility(kwargs.get("segmentation", False))
+
+  valveRoiModelNode = valveModel.getValveRoiModelNode()
+  if valveRoiModelNode:
+    valveRoiModelNode.SetDisplayVisibility(kwargs.get("roi", False))
+
   for leafletModel in valveModel.leafletModels:
     # TODO
     show = kwargs.get("leafletModels", False)

@@ -9,6 +9,12 @@
         "CodeValue": "85756007",
         "Type": [
           {
+            "CodeMeaning": "leaflet",
+            "CodingSchemeDesignator": "SCT",
+            "CodeValue": "6530003",
+            "recommendedDisplayRGBValue": [0, 0, 255]
+          },
+          {
             "CodeMeaning": "mitral anterior leaflet",
             "CodingSchemeDesignator": "SlicerHeart",
             "CodeValue": "sh-leaflet-mv-a",
