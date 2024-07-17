@@ -159,6 +159,10 @@ class ValveModel:
         self.valveBrowser.makeTimeSequence(modelNode)
 
     @property
+    def valveRoiSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("ValveRoiModel")
+
+    @property
     def leafletVolumeSequenceNode(self):
       return self._heartValveNodeReferencedSequenceNode("LeafletVolume")
 
