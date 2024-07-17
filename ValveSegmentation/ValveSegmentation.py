@@ -63,6 +63,11 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.annulusMarkupNode = None
     self.annulusMarkupNodeObserver = None
 
+    # Needed for observing the leaflet segmentation node so that the terminology can be updated on added segments.
+    self.leafletSegmentationNodeSegmentAddedObserver = None
+
+    self.updatingSegments = False
+
     # Used for delayed node delete
     self.nodesToRemove = []
 
@@ -70,6 +75,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.roiGeometryWidgets = {}
 
     self.inverseVolumeRendering = False
+
+    self.editingSequenceValue = None
 
   @property
   def valveVolumeNode(self):
@@ -281,6 +288,15 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       self.setAndObserveAnnulusMarkupNode()
       return
 
+    segmentationNode = None
+    if self.valveModel:
+      segmentationNode = self.valveModel.getLeafletSegmentationNode()
+
+    leafletClippingModel = None
+    if self.valveModel:
+      leafletClippingModel = self.valveModel.getValveRoiModelNode()
+    self.ui.clippingModelUseAsEditorMaskButton.enabled = segmentationNode is not None and leafletClippingModel is not None
+
   def updateParameterNodeFromGUI(self):
     parameterNode = self.getParameterNode()
     oldModifiedState = parameterNode.StartModify()
@@ -313,10 +329,14 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     annulusMarkupNode = self.valveModel.getAnnulusContourMarkupNode() if self.valveModel else None
     self.setAndObserveAnnulusMarkupNode(annulusMarkupNode)
 
+    segmentationNode = self.valveModel.getLeafletSegmentationNode()
+    self.setAndObserveLeafletSegmentationNode(segmentationNode)
+
     # Update GUI button enabled/disabled state
     self.setGuiEnabled(heartValveNode is not None)
     valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
-    self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None)
+    leafletClippingModel = self.getLeafletClippingModelNode()
+    self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None or leafletClippingModel is None)
 
     if not self.ui.segmentationEditingCollapsibleButton.collapsed:
       self.ui.clippingCollapsibleButton.collapsed = False
@@ -334,7 +354,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.ui.valveVolumeSelector.setCurrentNode(self.valveModel.getValveVolumeNode())
 
   def _updateRoiGeometryGui(self):
-    if self.valveModel.valveRoi.roiModelNode:
+    if self.valveModel.valveRoi.roiModelNode and self.valveModel.valveRoi.roiModelNode.GetMesh():
       roiGeometry = self.valveModel.valveRoi.getRoiGeometry()
       for paramName in self.roiGeometryWidgets:
         if not paramName in roiGeometry:
@@ -378,6 +398,12 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def onValveBrowserNodeModified(self, observer=None, eventid=None):
     self.updateGUIFromValveBrowser()
 
+    if self.editingSequenceValue:
+      self.updateSegmentIDs()
+
+    _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    self.editingSequenceValue = indexValue
+
   def updateGUIFromValveBrowser(self):
     self.updateGUIFromHeartValveNode()
 
@@ -408,6 +434,10 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       self.ui.addValveRoiButton.enabled = not roiModelNodeSpecified
       self.ui.removeValveRoiButton.enabled = roiModelNodeSpecified
 
+    leafletSegmentationNodeSpecified = self.valveModel.isNodeSpecifiedForCurrentTimePoint(
+      self.valveModel.leafletSegmentationNode)
+    self.ui.segmentEditorWidget.enabled = leafletSegmentationNodeSpecified
+
     self._updateRoiGeometryGui()
 
   def updateGUIFromValveBrowser(self):
@@ -429,6 +459,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     valveROISequenceNode = self.valveBrowserNode.GetSequenceNode(valveRoiModelNode)
     self.valveBrowser.addCurrentTimePointToSequence(valveROISequenceNode)
 
+    self.updateLeafletClippingModel()
+
   def onRemoveValveRoiButtonClicked(self):
     # TODO: make this a utility function that deletes current timepoint of a proxy node:
 
@@ -438,12 +470,11 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     if not self.valveModel.isNodeSpecifiedForCurrentTimePoint(valveRoiModelNode):
       return
     # Remove valve ROI from sequence
-    valvROISequenceNode = self.valveBrowserNode.GetSequenceNode(valveRoiModelNode)
     valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    valvROISequenceNode.RemoveDataNodeAtValue(indexValue)
+    self.valveModel.valveRoiSequenceNode.RemoveDataNodeAtValue(indexValue)
 
     self.updateGUIFromHeartValveNode()
-
+    self._updateRoiGeometryGui()
 
   def onAddSegmentationButtonClicked(self):
 
@@ -461,7 +492,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
         # Sequence already exists, just add a new time point
         self.valveBrowser.addCurrentTimePointToSequence(leafletVolumeSequenceNode)
         leafletVolumeNode = self.valveModel.leafletVolumeNode
-        newLeafletVolumeNode.CopyContents(newLeafletVolumeNode)
+        leafletVolumeNode.CopyContent(newLeafletVolumeNode)
         slicer.mrmlScene.RemoveNode(newLeafletVolumeNode)
       else:
         # Set a new leaflet volume node
@@ -482,7 +513,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
         name = f"{self.valveModel.heartValveNode.GetName()}-LeafletSegmentation"
         newLeafletSegmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", name)
         newLeafletSegmentationNode.SetNodeReferenceID(newLeafletSegmentationNode.GetReferenceImageGeometryReferenceRole(), leafletVolumeNode.GetID())
-        self.valveModel.leafletSegmentationNode = newLeafletSegmentationNode
+        newLeafletSegmentationNode.CreateDefaultDisplayNodes()
+        newLeafletSegmentationNode.GetDisplayNode().SetRemoveUnusedDisplayProperties(False)
+        self.setAndObserveLeafletSegmentationNode(newLeafletSegmentationNode)
       leafletSegmentationNode = self.valveModel.leafletSegmentationNode
 
       # NB: sometimes segmentation node is already set within mrmlSegmentEditorNode which is why the segment list doesn't
@@ -490,7 +523,36 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       self.ui.segmentEditorWidget.setSegmentationNode(None)
       self.ui.segmentEditorWidget.setSegmentationNode(leafletSegmentationNode)
 
-    # TODO: add default segments?
+    # If there are segments defined in another timepoint, then sync those segments here.
+    # All the other timepoints should have the same segments defined.
+    self.updatingSegments = True
+    leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
+    if leafletSegmentationSequenceNode:
+      for i in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+        segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(i)
+        if segmentationNode is None:
+          continue
+        segmentation = segmentationNode.GetSegmentation()
+
+        segmentIDs = segmentation.GetSegmentIDs()
+        if len(segmentIDs) == 0:
+          continue
+
+        for segmentID in segmentIDs:
+          if not leafletSegmentationNode.GetSegmentation().GetSegment(segmentID):
+            # Add segment to sequence
+            terminologyStringRef = vtk.reference("")
+            segmentation.GetSegment(segmentID).GetTag("TerminologyEntry", terminologyStringRef)
+            terminologyEntry = terminologyStringRef.get()
+            if segmentID != HeartValveLib.VALVE_MASK_SEGMENT_ID\
+                and slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminologyEntry, self.ui.segmentEditorWidget.defaultTerminologyEntry):
+              newSegmentID = leafletSegmentationNode.GetSegmentation().AddEmptySegment()
+            else:
+              newSegmentID = leafletSegmentationNode.GetSegmentation().AddEmptySegment(segmentID)
+            newSegment = leafletSegmentationNode.GetSegmentation().GetSegment(newSegmentID)
+            self.copySegmentProperties(segmentation.GetSegment(segmentID), newSegment)
+        break
+    self.updatingSegments = False
 
     self.updateGUIFromHeartValveNode()
 
@@ -547,6 +609,211 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       return
     self._updateRoiGeometryGui()
     self.updateLeafletClippingModel()
+    self.updateGUIFromParameterNode()
+
+  def setAndObserveLeafletSegmentationNode(self, valveSegmentationNode=None):
+    """
+    Observe added/removed/modified segments in the segmentation node.
+    """
+    logging.debug(
+      "Observe leaflet segmentation node: {0}".format(
+        valveSegmentationNode.GetName() if valveSegmentationNode else "None"))
+    if valveSegmentationNode == self.valveModel.leafletSegmentationNode and self.leafletSegmentationNodeSegmentAddedObserver:
+      # no change and node is already observed
+      logging.debug("Already observed")
+      return
+
+    # Remove observer to old node
+    if self.valveModel.leafletSegmentationNode:
+      if self.leafletSegmentationNodeSegmentAddedObserver:
+        self.valveModel.leafletSegmentationNode.RemoveObserver(self.leafletSegmentationNodeSegmentAddedObserver)
+      self.leafletSegmentationNodeSegmentAddedObserver = None
+
+    # Set and observe new node
+    self.valveModel.leafletSegmentationNode = valveSegmentationNode
+    if self.valveModel.leafletSegmentationNode:
+      self.leafletSegmentationNodeSegmentAddedObserver = \
+        self.valveModel.leafletSegmentationNode.AddObserver(slicer.vtkSegmentation.SegmentAdded,
+                                                            self.onLeafletSegmentationNodeSegmentAdded)
+
+  @vtk.calldata_type(vtk.VTK_STRING)
+  def onLeafletSegmentationNodeSegmentAdded(self, segmentationNode=None, event=None, segmentID=None):
+    if segmentationNode is None or segmentID is None or segmentID == "":
+      return
+    # Wait for the segment editor widget to update before updating the terminology
+    qt.QTimer.singleShot(0, lambda: self.updateNewSegmentTerminology(segmentationNode, segmentID))
+
+  def updateNewSegmentTerminology(self, segmentationNode, segmentID):
+    """
+    Update the terminology of the new segment to the default terminology.
+    """
+    if segmentationNode is None:
+      return
+    segment = segmentationNode.GetSegmentation().GetSegment(segmentID)
+    if segment is None:
+      return
+    # Ensure that we use the default terminology for new segments
+    segment.SetTag("TerminologyEntry", self.ui.segmentEditorWidget.defaultTerminologyEntry)
+
+  def updateSegmentIDs(self):
+    if self.editingSequenceValue is None:
+      return
+
+    _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    if indexValue == self.editingSequenceValue:
+      logging.debug("updateSegmentIDs: Still on the same timepoint")
+      return
+
+    terminologyToSegmentID = {}
+
+    # Iterate over all the segmentation nodes in the sequence
+    leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
+    if leafletSegmentationSequenceNode is None:
+      return
+
+    for i in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+      currentValue = leafletSegmentationSequenceNode.GetNthIndexValue(i)
+      if currentValue == self.editingSequenceValue:
+        continue
+
+      segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(i)
+      if segmentationNode is None:
+        continue
+
+      segmentation = segmentationNode.GetSegmentation()
+      for segmentID in segmentation.GetSegmentIDs():
+        terminologyStringRef = vtk.reference("")
+        segment = segmentation.GetSegment(segmentID)
+        segment.GetTag("TerminologyEntry", terminologyStringRef)
+        terminologyEntry = terminologyStringRef.get()
+        if terminologyEntry is None or terminologyEntry == "":
+          continue
+
+        if slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminologyEntry, self.ui.segmentEditorWidget.defaultTerminologyEntry):
+          # Default terminology. It is not necessary to sync this segment ID.
+          continue
+
+        if not terminologyEntry in terminologyToSegmentID:
+          terminologyToSegmentID[terminologyEntry] = []
+
+        terminologyToSegmentID[terminologyEntry].append(segmentID)
+
+    editingSegmentationNode = leafletSegmentationSequenceNode.GetDataNodeAtValue(self.editingSequenceValue)
+    if editingSegmentationNode is None:
+      return
+
+    editingSegmentation = editingSegmentationNode.GetSegmentation()
+    segments = []
+    oldSegmentIDs = {}
+    for index in range(editingSegmentation.GetNumberOfSegments()):
+      segment = editingSegmentation.GetNthSegment(index)
+      segmentID = editingSegmentation.GetNthSegmentID(index)
+      segments.append(segment)
+      oldSegmentIDs[segment] = segmentID
+
+    editingSegmentation.RemoveAllSegments()
+    for segment in segments:
+      terminologyStringRef = vtk.reference("")
+      segment.GetTag("TerminologyEntry", terminologyStringRef)
+      terminologyEntry = terminologyStringRef.get()
+      segmentID = None
+      oldSegmentID = oldSegmentIDs[segment]
+      if terminologyEntry in terminologyToSegmentID:
+        segmentIDs = terminologyToSegmentID[terminologyEntry]
+        if len(segmentIDs) > 0:
+          # Remove the first segmentID for the terminology entry
+          segmentID = segmentIDs.pop(0)
+
+      if segmentID is None:
+        # There is no terminology-based segment ID in use.
+        # Try to keep the old segment ID if it doesn't conflict with another segment ID
+        # in the terminology-based or existing segment IDs
+        oldIDConflict = segmentID in editingSegmentation.GetSegmentIDs()
+        for _, value in terminologyToSegmentID.items():
+          if oldIDConflict:
+            break
+          for id in value:
+            if id == oldSegmentID:
+              # Old segmentID overlaps with another terminology-based segment ID
+              oldIDConflict = True
+              break
+
+        if not oldIDConflict:
+          # Old segmentID doesn't overlap with any terminology-based or existing segment IDs
+          segmentID = oldSegmentID
+
+      displayNode = editingSegmentationNode.GetDisplayNode()
+      if displayNode and segmentID:
+        self.copySegmentDisplayProperties(displayNode, oldSegmentID, segmentID)
+
+      editingSegmentation.AddSegment(segment, segmentID if segmentID else "")
+
+    segmentationNode = self.valveModel.leafletSegmentationNode
+
+  def copySegmentDisplayProperties(self, displayNode, segmentID, newSegmentID):
+    if displayNode is None:
+      logging.error("copySegmentDisplayProperties: displayNode is invalid")
+      return
+
+    displayNode.SetSegmentVisibility(newSegmentID, displayNode.GetSegmentVisibility(segmentID))
+    displayNode.SetSegmentVisibility2DFill(newSegmentID, displayNode.GetSegmentVisibility2DFill(segmentID))
+    displayNode.SetSegmentOpacity(newSegmentID, displayNode.GetSegmentOpacity(segmentID))
+    displayNode.SetSegmentVisibility3D(newSegmentID, displayNode.GetSegmentVisibility3D(segmentID))
+
+  def updateSegments(self):
+    if self.valveModel.leafletSegmentationNode is None or self.valveModel.leafletSegmentationSequenceNode is None:
+      return
+
+    if self.updatingSegments:
+      return
+
+    try:
+      self.updatingSegments = True
+
+      segmentIDs = self.valveModel.leafletSegmentationNode.GetSegmentation().GetSegmentIDs()
+
+      leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
+      if leafletSegmentationSequenceNode is None:
+        return
+
+      # Iterate over all the sequence nodes
+      for i in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+        segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(i)
+        if segmentationNode is None:
+          continue
+
+        segmentation = segmentationNode.GetSegmentation()
+        for segmentID in segmentIDs:
+          if not segmentation.GetSegment(segmentID):
+            # Add segment to sequence
+            segmentation.AddEmptySegment(segmentID)
+        for segmentID in segmentation.GetSegmentIDs():
+          if segmentID not in segmentIDs:
+            # Remove segment from sequence
+            segmentation.RemoveSegment(segmentID)
+
+        for segmentID in segmentIDs:
+          currentSegment = self.valveModel.leafletSegmentationNode.GetSegmentation().GetSegment(segmentID)
+          sequenceSegment = segmentationNode.GetSegmentation().GetSegment(segmentID)
+          self.copySegmentProperties(currentSegment, sequenceSegment)
+
+    finally:
+      self.updatingSegments = False
+
+  def copySegmentProperties(self, sourceSegment, destinationSegment):
+    """
+    Copy segment properties from source to destination segment.
+    """
+    if not sourceSegment or not destinationSegment:
+      logging.error("copySegmentProperties: source or destination segment is invalid")
+      return
+    destinationSegment.SetName(sourceSegment.GetName())
+    destinationSegment.SetColor(sourceSegment.GetColor())
+    terminologyStringRef = vtk.reference("")
+    if sourceSegment.GetTag("TerminologyEntry", terminologyStringRef):
+      terminologyEntry = terminologyStringRef.get()
+      if not slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminologyEntry, self.ui.segmentEditorWidget.defaultTerminologyEntry):
+        destinationSegment.SetTag("TerminologyEntry", terminologyStringRef.get())
 
   def onClippingModelUseAsEditorMaskClicked(self):
     import vtkSegmentationCorePython as vtkSegmentationCore
