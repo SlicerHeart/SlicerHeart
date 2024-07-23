@@ -523,35 +523,36 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       self.ui.segmentEditorWidget.setSegmentationNode(None)
       self.ui.segmentEditorWidget.setSegmentationNode(leafletSegmentationNode)
 
-    # If there are segments defined in another timepoint, then sync those segments here.
-    # All the other timepoints should have the same segments defined.
-    self.updatingSegments = True
-    leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
-    if leafletSegmentationSequenceNode:
-      for i in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
-        segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(i)
-        if segmentationNode is None:
-          continue
-        segmentation = segmentationNode.GetSegmentation()
+      # If there are segments defined in another timepoint, then sync those segments here.
+      # All the other timepoints should have the same segments defined.
+      self.updatingSegments = True
+      leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
+      if leafletSegmentationSequenceNode:
+        for i in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+          segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(i)
+          if segmentationNode is None:
+            continue
+          segmentation = segmentationNode.GetSegmentation()
 
-        segmentIDs = segmentation.GetSegmentIDs()
-        if len(segmentIDs) == 0:
-          continue
+          segmentIDs = segmentation.GetSegmentIDs()
+          if len(segmentIDs) == 0:
+            continue
 
-        for segmentID in segmentIDs:
-          if not leafletSegmentationNode.GetSegmentation().GetSegment(segmentID):
-            # Add segment to sequence
-            terminologyStringRef = vtk.reference("")
-            segmentation.GetSegment(segmentID).GetTag("TerminologyEntry", terminologyStringRef)
-            terminologyEntry = terminologyStringRef.get()
-            if segmentID != HeartValveLib.VALVE_MASK_SEGMENT_ID\
-                and slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminologyEntry, self.ui.segmentEditorWidget.defaultTerminologyEntry):
-              newSegmentID = leafletSegmentationNode.GetSegmentation().AddEmptySegment()
-            else:
-              newSegmentID = leafletSegmentationNode.GetSegmentation().AddEmptySegment(segmentID)
-            newSegment = leafletSegmentationNode.GetSegmentation().GetSegment(newSegmentID)
-            self.copySegmentProperties(segmentation.GetSegment(segmentID), newSegment)
-        break
+          for segmentID in segmentIDs:
+            if not leafletSegmentationNode.GetSegmentation().GetSegment(segmentID):
+              # Add segment to sequence
+              terminologyStringRef = vtk.reference("")
+              segmentation.GetSegment(segmentID).GetTag("TerminologyEntry", terminologyStringRef)
+              terminologyEntry = terminologyStringRef.get()
+              if segmentID != HeartValveLib.VALVE_MASK_SEGMENT_ID\
+                  and slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminologyEntry, self.ui.segmentEditorWidget.defaultTerminologyEntry):
+                newSegmentID = leafletSegmentationNode.GetSegmentation().AddEmptySegment()
+              else:
+                newSegmentID = leafletSegmentationNode.GetSegmentation().AddEmptySegment(segmentID)
+              newSegment = leafletSegmentationNode.GetSegmentation().GetSegment(newSegmentID)
+              self.copySegmentProperties(segmentation.GetSegment(segmentID), newSegment)
+          break
+
     self.updatingSegments = False
 
     self.updateGUIFromHeartValveNode()
@@ -1385,24 +1386,76 @@ class ValveSegmentationTest(ScriptedLoadableModuleTest):
   def setUp(self):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
-    slicer.mrmlScene.Clear(0)
+    # Requires an existing scene with a heart valve node and contour present.
+
+    self.widget = slicer.modules.valvesegmentation.widgetRepresentation().self()
+    self.logic = self.widget.logic
+
+    from HeartValveLib.helpers import getAllHeartValveNodes
+    valveNodes = list(getAllHeartValveNodes())
+    if len(valveNodes) == 0:
+      logging.error("No heart valve nodes found")
+      return False
+
+    valveNode = valveNodes[0]
+    self.browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(valveNode)
+    self.widget.ui.heartValveBrowserSelector.setCurrentNode(self.browserNode)
+
+    # Iterate through the sequence and remove each item
+    for i in range(self.browserNode.GetNumberOfItems()):
+      self.browserNode.SetSelectedItemNumber(i)
+      self.widget.onRemoveSegmentationButtonClicked()
+
+    return True
 
   def runTest(self):
     """Run as few or as many tests as needed here.
     """
-    self.setUp()
-    self.test_ValveSegmentation1()
+    if not self.setUp():
+      slicer.util.errorDisplay("Failed to set up test")
+      return
 
-  def test_ValveSegmentation1(self):
-    """ Ideally you should have several levels of tests.  At the lowest level
-    tests should exercise the functionality of the logic with different inputs
-    (both valid and invalid).  At higher levels your tests should emulate the
-    way the user would interact with your code and confirm that it still works
-    the way you intended.
-    One of the most important features of the tests is that it should alert other
-    developers when their changes will have an impact on the behavior of your
-    module.  For example, if a developer removes a feature that you depend on,
-    your test should break so they know that the feature is needed.
-    """
+    self.test_ValveSegmentation_Mask()
+    self.test_ValveSegmentation_Sequence()
 
-    self.delayDisplay("No tests are implemented")
+  def test_ValveSegmentation_Mask(self):
+    self.browserNode.SetSelectedItemNumber(0)
+
+    self.widget.onAddSegmentationButtonClicked()
+    self.widget.onAddValveRoiButtonClicked()
+    self.widget.onClippingModelUseAsEditorMaskClicked()
+
+  def test_ValveSegmentation_Sequence(self):
+    self.browserNode.SetSelectedItemNumber(0)
+    segmentation = self.widget.valveModel.getLeafletSegmentationNode()
+    if not segmentation:
+      logging.error("No segmentation found")
+      return
+
+    segmentation.GetSegmentation().AddEmptySegment("TestSegment")
+    if segmentation.GetSegmentation().GetNumberOfSegments() != 2:
+      slicer.util.errorDisplay(
+        f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 2")
+      return
+
+    # Adding a segmentation at a new index should populate the segmentation with the same segments.
+    self.browserNode.SetSelectedItemNumber(1)
+    self.widget.onAddSegmentationButtonClicked()
+    self.widget.onAddValveRoiButtonClicked()
+    self.widget.onClippingModelUseAsEditorMaskClicked()
+    if segmentation.GetSegmentation().GetNumberOfSegments() != 2:
+      slicer.util.errorDisplay(
+        f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 2")
+      return
+
+    segmentation.GetSegmentation().AddEmptySegment("TestSegment")
+    if segmentation.GetSegmentation().GetNumberOfSegments() != 3:
+      slicer.util.errorDisplay(
+        f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 3")
+      return
+
+    self.browserNode.SetSelectedItemNumber(0)
+    if segmentation.GetSegmentation().GetNumberOfSegments() != 2:
+      slicer.util.errorDisplay(
+        f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 2")
+      return
