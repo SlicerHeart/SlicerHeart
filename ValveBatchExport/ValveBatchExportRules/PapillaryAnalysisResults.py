@@ -12,7 +12,7 @@ class PapillaryAnalysisResultsExportRule(ValveBatchExportRule):
 
   BRIEF_USE = "Valve papillary analysis results (.csv)"
   DETAILED_DESCRIPTION = """
-  Export results computed in Valve papillary analysis module. All metrics will be recomputed using current software 
+  Export results computed in Valve papillary analysis module. All metrics will be recomputed using current software
   version
   """
   COLUMNS = ['Filename', 'Phase', 'Valve']
@@ -86,16 +86,19 @@ class PapillaryAnalysisResultsExportRule(ValveBatchExportRule):
       self._processScene(sceneFileName, measurementNodes)
     else:
       for valveModel in getAllHeartValveModelNodes():
-        cardiacCyclePhase = valveModel.getCardiacCyclePhase()
-        shortname = valveModel.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
-        if shortname in self.EXPORT_PHASES:
-          logging.info(f"Creating temporary papillary measurement node for {shortname}")
-          try:
-            tempMeasurementNode = self.createTemporaryPMHeartValveNode(valveModel)
-          except Exception as exc:
-            logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
-            continue
-          measurementNodes.append(tempMeasurementNode)
+        sequenceBrowserNode = valveModel.valveBrowserNode
+        for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+          sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
+          cardiacCyclePhase = valveModel.getCardiacCyclePhase()
+          shortname = valveModel.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
+          if shortname in self.EXPORT_PHASES:
+            logging.info(f"Creating temporary papillary measurement node for {shortname}")
+            try:
+              tempMeasurementNode = self.createTemporaryPMHeartValveNode(valveModel)
+            except Exception as exc:
+              logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
+              continue
+            measurementNodes.append(tempMeasurementNode)
 
       self._processScene(sceneFileName, measurementNodes)
 

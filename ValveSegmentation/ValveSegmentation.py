@@ -1432,7 +1432,7 @@ class ValveSegmentationTest(ScriptedLoadableModuleTest):
       logging.error("No segmentation found")
       return
 
-    segmentation.GetSegmentation().AddEmptySegment("TestSegment")
+    segmentation.GetSegmentation().AddEmptySegment()
     if segmentation.GetSegmentation().GetNumberOfSegments() != 2:
       slicer.util.errorDisplay(
         f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 2")
@@ -1448,7 +1448,7 @@ class ValveSegmentationTest(ScriptedLoadableModuleTest):
         f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 2")
       return
 
-    segmentation.GetSegmentation().AddEmptySegment("TestSegment")
+    segmentation.GetSegmentation().AddEmptySegment()
     if segmentation.GetSegmentation().GetNumberOfSegments() != 3:
       slicer.util.errorDisplay(
         f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 3")

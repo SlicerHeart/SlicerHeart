@@ -52,39 +52,45 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
 
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = \
-        self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, suffix="annulus")
 
-      if self.EXPORT_ANNULUS_AS_MODEL:
-        from HeartValveLib.util import createTubeModelFromPointArray
-        modelNode = \
-          createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve),
-                                        radius=valveModel.getAnnulusContourRadius())[0]
-        storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelStorageNode")
-        storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.vtk"))
-        if not storageNode.WriteData(modelNode):
-          self.addLog(f"  Annulus contour model export skipped (file writing failed) - {valveModelName}")
-        slicer.mrmlScene.RemoveNode(storageNode)
-        slicer.mrmlScene.RemoveNode(modelNode)
+      sequenceBrowserNode = valveModel.valveBrowserNode
+      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
 
-      if self.CMD_FLAG_SEGMENTATION:
-        segNode = getSegmentationFromAnnulusContourNode(valveModel)
-        if not segNode:
-          raise self.AnnulusExportFailed()
-        labelNode = createLabelNodeFromVisibleSegments(segNode, valveModel, "Annulus")
-        slicer.mrmlScene.RemoveNode(segNode)
-        slicer.util.saveNode(labelNode, os.path.join(self.outputDir, f"{valveModelName}.seg.nrrd"))
+        frameNumber = self.getAssociatedFrameNumber(valveModel)
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        valveType = valveModel.getValveType()
+        cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
+        self.addLog(f"{filename} Processing {valveType} {cardiacCyclePhaseName} frame {frameNumber}")
+        valveModelName = \
+          self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, suffix="annulus")
+
+        if self.EXPORT_ANNULUS_AS_MODEL:
+          from HeartValveLib.util import createTubeModelFromPointArray
+          modelNode = \
+            createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode),
+                                          radius=valveModel.getAnnulusContourRadius())[0]
+          storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelStorageNode")
+          storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.vtk"))
+          if not storageNode.WriteData(modelNode):
+            self.addLog(f"  Annulus contour model export skipped (file writing failed) - {valveModelName}")
+          slicer.mrmlScene.RemoveNode(storageNode)
+          slicer.mrmlScene.RemoveNode(modelNode)
+
+        if self.CMD_FLAG_SEGMENTATION:
+          segNode = getSegmentationFromAnnulusContourNode(valveModel)
+          if not segNode:
+            raise self.AnnulusExportFailed()
+          labelNode = createLabelNodeFromVisibleSegments(segNode, valveModel, "Annulus")
+          slicer.mrmlScene.RemoveNode(segNode)
+          slicer.util.saveNode(labelNode, os.path.join(self.outputDir, f"{valveModelName}.seg.nrrd"))
 
 
 def getSegmentationFromAnnulusContourNode(valveModel):
   import slicer
   from HeartValveLib.util import createTubeModelFromPointArray
   annulusModelNode = \
-    createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve, world=True),
+    createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode, world=True),
                                   radius=valveModel.getAnnulusContourRadius()*2)[0]
   segmentationNode = getNewSegmentationNodeFromModel(valveModel.getValveVolumeNode(), annulusModelNode)
   slicer.mrmlScene.RemoveNode(annulusModelNode)

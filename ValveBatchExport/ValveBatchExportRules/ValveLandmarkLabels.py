@@ -83,42 +83,46 @@ class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
 
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      fileExtension = "seg.nrrd"
+      sequenceBrowserNode = valveModel.valveBrowserNode
+      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
 
-      if self.ONE_FILE_PER_LANDMARK:
-        lms = []
-        if self.EXPORT_QUADRANT_LANDMARKS:
-          lms.extend(VALVE_QUADRANT_LANDMARKS[valveType])
-        if self.EXPORT_COMMISSURAL_LANDMARKS:
-          lms.extend(VALVE_COMMISSURAL_LANDMARKS[valveType])
+        frameNumber = self.getAssociatedFrameNumber(valveModel)
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        valveType = valveModel.getValveType()
+        cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
+        valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
+        fileExtension = "seg.nrrd"
 
-        for lm in lms:
-          pos = valveModel.getAnnulusMarkupPositionByLabel(lm)
-          if pos is None:
-            continue
-          labelNode = getLabelFromLandmarkPositions(lm, [pos], valveModel)
-          slicer.util.saveNode(labelNode,
-                               os.path.join(self.outputDir, f"{valveModelName}_landmark_{lm}.{fileExtension}"))
-      else:
-        if self.EXPORT_QUADRANT_LANDMARKS:
-          positions = valveModel.getAnnulusMarkupPositionsByLabels(VALVE_QUADRANT_LANDMARKS[valveType])
-          positions = list(filter(lambda pos: pos is not None, positions))
-          if positions:
-            labelNode = getLabelFromLandmarkPositions("quadrant_landmarks", positions, valveModel)
-            slicer.util.saveNode(labelNode, os.path.join(self.outputDir,
-                                                         f"{valveModelName}_quadrant_landmarks.{fileExtension}"))
-        if self.EXPORT_COMMISSURAL_LANDMARKS:
-          positions = valveModel.getAnnulusMarkupPositionsByLabels(VALVE_COMMISSURAL_LANDMARKS[valveType])
-          positions = list(filter(lambda pos: pos is not None, positions))
-          if positions:
-            labelNode = getLabelFromLandmarkPositions("commissural_landmarks", positions, valveModel)
-            slicer.util.saveNode(labelNode, os.path.join(self.outputDir,
-                                                         f"{valveModelName}_commissural_landmarks.{fileExtension}"))
+        if self.ONE_FILE_PER_LANDMARK:
+          lms = []
+          if self.EXPORT_QUADRANT_LANDMARKS:
+            lms.extend(VALVE_QUADRANT_LANDMARKS[valveType])
+          if self.EXPORT_COMMISSURAL_LANDMARKS:
+            lms.extend(VALVE_COMMISSURAL_LANDMARKS[valveType])
+
+          for lm in lms:
+            pos = valveModel.getAnnulusMarkupPositionByLabel(lm)
+            if pos is None:
+              continue
+            labelNode = getLabelFromLandmarkPositions(lm, [pos], valveModel)
+            slicer.util.saveNode(labelNode,
+                                 os.path.join(self.outputDir, f"{valveModelName}_landmark_{lm}.{fileExtension}"))
+        else:
+          if self.EXPORT_QUADRANT_LANDMARKS:
+            positions = valveModel.getAnnulusMarkupPositionsByLabels(VALVE_QUADRANT_LANDMARKS[valveType])
+            positions = list(filter(lambda pos: pos is not None, positions))
+            if positions:
+              labelNode = getLabelFromLandmarkPositions("quadrant_landmarks", positions, valveModel)
+              slicer.util.saveNode(labelNode, os.path.join(self.outputDir,
+                                                           f"{valveModelName}_quadrant_landmarks.{fileExtension}"))
+          if self.EXPORT_COMMISSURAL_LANDMARKS:
+            positions = valveModel.getAnnulusMarkupPositionsByLabels(VALVE_COMMISSURAL_LANDMARKS[valveType])
+            positions = list(filter(lambda pos: pos is not None, positions))
+            if positions:
+              labelNode = getLabelFromLandmarkPositions("commissural_landmarks", positions, valveModel)
+              slicer.util.saveNode(labelNode, os.path.join(self.outputDir,
+                                                           f"{valveModelName}_commissural_landmarks.{fileExtension}"))
 
 
 def getLabelFromLandmarkPositions(name, positions, valveModel):

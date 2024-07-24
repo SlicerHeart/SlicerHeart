@@ -49,47 +49,52 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
 
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
 
-      if leafletSegmentationNode is None:
-        self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
-        continue
-      segmentationBounds = [0, -1, 0, -1, 0, -1]
-      leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
-      if segmentationBounds[0] > segmentationBounds[1] or \
-        segmentationBounds[2] > segmentationBounds[3] or \
-        segmentationBounds[4] > segmentationBounds[5]:
-        self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
-        continue
+      sequenceBrowserNode = valveModel.valveBrowserNode
+      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
 
-      if deleteValveMask(leafletSegmentationNode) is True:
-        self.addLog(
-          f"Found segment with id {HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID}. Deleted segment for export")
+        frameNumber = self.getAssociatedFrameNumber(valveModel)
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        valveType = valveModel.getValveType()
+        cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
+        valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
+        leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
 
-      if self.ONE_FILE_PER_SEGMENT:
-        self._saveSegmentsIntoSeparateFiles(leafletSegmentationNode, valveModelName)
-      else:
-        if leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 1:
-          self.addLog("Sorting individual leaflets")
-          m = checkAndSortSegments(leafletSegmentationNode, valveModel.getValveType()) # sort segments
-          if m:
-            self.addLog(m)
-          outputFileName = f"{valveModelName}_leaflets.seg.nrrd"
+        if leafletSegmentationNode is None:
+          self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
+          continue
+        segmentationBounds = [0, -1, 0, -1, 0, -1]
+        leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
+        if segmentationBounds[0] > segmentationBounds[1] or \
+          segmentationBounds[2] > segmentationBounds[3] or \
+          segmentationBounds[4] > segmentationBounds[5]:
+          self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
+          continue
+
+        if deleteValveMask(leafletSegmentationNode) is True:
+          self.addLog(
+            f"Found segment with id {HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID}. Deleted segment for export")
+
+        if self.ONE_FILE_PER_SEGMENT:
+          self._saveSegmentsIntoSeparateFiles(leafletSegmentationNode, valveModelName)
         else:
-          self.addLog("Only single segmentation found")
-          outputFileName = f"{valveModelName}_whole_valve.seg.nrrd"
+          if leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 1:
+            self.addLog("Sorting individual leaflets")
+            m = checkAndSortSegments(leafletSegmentationNode, valveModel.getValveType()) # sort segments
+            if m:
+              self.addLog(m)
+            outputFileName = f"{valveModelName}_leaflets.seg.nrrd"
+          else:
+            self.addLog("Only single segmentation found")
+            outputFileName = f"{valveModelName}_whole_valve.seg.nrrd"
 
-        storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationStorageNode")
-        storageNode.SetFileName(os.path.join(self.outputDir, outputFileName))
+          storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationStorageNode")
+          storageNode.SetFileName(os.path.join(self.outputDir, outputFileName))
 
-        if not storageNode.WriteData(leafletSegmentationNode):
-          self.addLog(f"  Leaflet segmentation export skipped (file writing failed) - {valveModelName}")
-        slicer.mrmlScene.RemoveNode(storageNode)
+          if not storageNode.WriteData(leafletSegmentationNode):
+            self.addLog(f"  Leaflet segmentation export skipped (file writing failed) - {valveModelName}")
+          slicer.mrmlScene.RemoveNode(storageNode)
 
   def _saveSegmentsIntoSeparateFiles(self, segmentationNode, prefix):
     segmentationsLogic = slicer.modules.segmentations.logic()
