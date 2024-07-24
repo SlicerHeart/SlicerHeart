@@ -75,14 +75,19 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
 
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
-      if self.EXPORT_CURVE_POINT_COORDINATES:
-        self.addAnnulusContourCurvePoints(sceneFileName, valveModel)
-      if self.EXPORT_CONTROL_POINT_COORDINATES:
-        self.addAnnulusContourControlPoints(sceneFileName, valveModel)
+
+      sequenceBrowserNode = valveModel.valveBrowserNode
+      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
+
+        if self.EXPORT_CURVE_POINT_COORDINATES:
+          self.addAnnulusContourCurvePoints(sceneFileName, valveModel)
+        if self.EXPORT_CONTROL_POINT_COORDINATES:
+          self.addAnnulusContourControlPoints(sceneFileName, valveModel)
 
   def addAnnulusContourCurvePoints(self, sceneFileName, valveModel):
     # Add a row for each contour point
-    curvePoints = valveModel.annulusContourCurve.GetCurve().GetPoints()
+    curvePoints = valveModel.annulusContourCurveNode.GetCurve().GetPoints()
     numberOfAnnulusContourPoints = curvePoints.GetNumberOfPoints()
     startingRowIndex = self.curveResultsTableNode.GetNumberOfRows()
     filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
@@ -99,9 +104,9 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
       pos = valveModel.getAnnulusMarkupPositionByLabel(label)
 
       closestPointIdOnAnnulusCurve = \
-        getClosestCurvePointIndexToPosition(valveModel.annulusContourCurve, pos)
+        getClosestCurvePointIndexToPosition(valveModel.annulusContourCurveNode, pos)
       closestPointPositionOnAnnulusCurve = \
-        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, pos)
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, pos)
 
       if np.linalg.norm(
           np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > valveModel.getAnnulusContourRadius() * 1.5:
@@ -112,7 +117,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
   def addAnnulusContourControlPoints(self, sceneFileName, valveModel):
     filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
     # Add a row for each control point
-    markupsNode = valveModel.annulusContourCurve
+    markupsNode = valveModel.annulusContourCurveNode
     numberOfAnnulusContourPoints = markupsNode.GetNumberOfControlPoints()
     startingRowIndex = self.controlResultsTableNode.GetNumberOfRows()
     valveType = valveModel.heartValveNode.GetAttribute('ValveType')
@@ -127,9 +132,9 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
     for label in valveModel.getAnnulusMarkupLabels():
       pos = valveModel.getAnnulusMarkupPositionByLabel(label)
       closestControlPointIdOnAnnulusCurve = \
-        getClosestControlPointIndexToPositionWorld(valveModel.annulusContourCurve, pos)
+        getClosestControlPointIndexToPositionWorld(valveModel.annulusContourCurveNode, pos)
       closestPointPositionOnAnnulusCurve = [0.0, 0.0, 0.0]
-      valveModel.annulusContourCurve.GetNthControlPointPosition(closestControlPointIdOnAnnulusCurve, 
+      valveModel.annulusContourCurveNode.GetNthControlPointPosition(closestControlPointIdOnAnnulusCurve,
                                                                 closestPointPositionOnAnnulusCurve)
       if np.linalg.norm(np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > valveModel.getAnnulusContourRadius() * 1.5:
         # it is not a label on the annulus (for example, centroid), ignore it

@@ -67,25 +67,30 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
 
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
 
-      if leafletSegmentationNode is None:
-        self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
-        continue
-      segmentationBounds = [0, -1, 0, -1, 0, -1]
-      leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
-      if segmentationBounds[0] > segmentationBounds[1] or \
-        segmentationBounds[2] > segmentationBounds[3] or \
-        segmentationBounds[4] > segmentationBounds[5]:
-        self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
-        continue
+      sequenceBrowserNode = valveModel.valveBrowserNode
+      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
 
-      self._saveSegmentsIntoSeparateFiles(valveModel, valveModelName)
+        frameNumber = self.getAssociatedFrameNumber(valveModel)
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        valveType = valveModel.getValveType()
+        cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
+        valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
+        leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
+
+        if leafletSegmentationNode is None:
+          self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
+          continue
+        segmentationBounds = [0, -1, 0, -1, 0, -1]
+        leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
+        if segmentationBounds[0] > segmentationBounds[1] or \
+          segmentationBounds[2] > segmentationBounds[3] or \
+          segmentationBounds[4] > segmentationBounds[5]:
+          self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
+          continue
+
+        self._saveSegmentsIntoSeparateFiles(valveModel, valveModelName)
 
   def _saveSegmentsIntoSeparateFiles(self, valveModel, prefix):
     segmentationNode = valveModel.getLeafletSegmentationNode()
