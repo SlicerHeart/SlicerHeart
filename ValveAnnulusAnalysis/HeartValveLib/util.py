@@ -76,3 +76,16 @@ def createTubeModelFromPointArray(pointArray, loop=True, visible=True, color=Non
     slicer.mrmlScene.RemoveNode(pointModelNode.GetDisplayNode())
     slicer.mrmlScene.RemoveNode(pointModelNode)
     return [tubeModelNode]
+
+
+def toWorldCoordinates(node, posLocal):
+  import numpy as np
+  posWorld = np.zeros(3)
+  node.TransformPointToWorld(posLocal, posWorld)
+  return posWorld
+
+
+def getClosestCurvePointIndexToPosition(markupsCurveNode, position):
+  return markupsCurveNode.GetClosestCurvePointIndexToPositionWorld(
+    toWorldCoordinates(markupsCurveNode, position)
+  )
