@@ -163,6 +163,10 @@ class ValveModel:
       return self._heartValveNodeReferencedSequenceNode("ValveRoiModel")
 
     @property
+    def valveType(self):
+      return self.heartValveNode.GetAttribute("ValveType") if self.heartValveNode else None
+
+    @property
     def leafletVolumeSequenceNode(self):
       return self._heartValveNodeReferencedSequenceNode("LeafletVolume")
 
@@ -557,18 +561,21 @@ class ValveModel:
         leafletSurfaceBoundaryMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryMarkupNode)
       leafletModel.setSurfaceBoundaryMarkupNode(leafletSurfaceBoundaryMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(leafletSurfaceBoundaryMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(leafletSurfaceBoundaryMarkupNode)
 
       # Move items to folders - for legacy scenes
       self.moveNodeToHeartValveFolder(leafletSurfaceModelNode, 'LeafletSurface')
       self.moveNodeToHeartValveFolder(leafletSurfaceBoundaryMarkupNode, 'LeafletSurfaceEdit')
 
     def updateLeafletModelsFromSegmentation(self):
+      import HeartValveLib
       segmentIds = []
       segmentationNode = self.leafletSegmentationNode
       if segmentationNode:
         from HeartValveLib.util import getAllSegmentIDs
         for segmentId in getAllSegmentIDs(segmentationNode):
-          if segmentId == VALVE_MASK_SEGMENT_ID:
+          if segmentId == HeartValveLib.VALVE_MASK_SEGMENT_ID:
             continue
           segmentIds.append(segmentId)
 
@@ -616,6 +623,9 @@ class ValveModel:
       slicer.mrmlScene.RemoveNode(baseLineMarkupNode)
       slicer.mrmlScene.RemoveNode(marginLineMarkupNode)
 
+    def getCoaptationModelSequenceNode(self, coaptationModelNode):
+      return self.valveBrowserNode.GetSequenceNode(coaptationModelNode)
+
     def addCoaptationModel(self, coaptationModelIndex=-1):
       if coaptationModelIndex<0:
         coaptationModelIndex = len(self.coaptationModels)
@@ -646,6 +656,8 @@ class ValveModel:
         coaptationSurfaceModelNode = modelNode
       self.applyProbeToRasTransformToNode(coaptationSurfaceModelNode)
       coaptationModel.setSurfaceModelNode(coaptationSurfaceModelNode)
+      if self.valveBrowserNode.GetSequenceNode(coaptationSurfaceModelNode) is None:
+        self.valveBrowser.makeTimeSequence(coaptationSurfaceModelNode)
 
       baseLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
       if not baseLineMarkupNode:
@@ -660,6 +672,8 @@ class ValveModel:
         baseLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(baseLineMarkupNode)
       coaptationModel.setBaseLineMarkupNode(baseLineMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(baseLineMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(baseLineMarkupNode)
 
       marginLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
       if not marginLineMarkupNode:
@@ -675,6 +689,8 @@ class ValveModel:
         marginLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(marginLineMarkupNode)
       coaptationModel.setMarginLineMarkupNode(marginLineMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(marginLineMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(marginLineMarkupNode)
 
       coaptationModel.updateSurfaceModelName(self)
       return coaptationModel
@@ -1009,6 +1025,8 @@ class ValveModel:
       allLeafletsModel.setSegmentId(allLeafletsSegId)
       allLeafletsModel.setSurfaceModelNode(allLeafletsSurfaceModelNode)
       allLeafletsModel.setSurfaceBoundaryMarkupNode(allLeafletsSurfaceBoundaryMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(allLeafletsSurfaceBoundaryMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(allLeafletsSurfaceBoundaryMarkupNode)
 
       #allLeafletsModel.autoDetectSurfaceBoundary(self, planePosition, planeNormal)
       allLeafletsModel.createSurfaceBoundaryFromCurve(planePosition, planeNormal, self.annulusContourCurveNode)

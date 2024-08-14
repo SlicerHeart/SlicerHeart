@@ -2,7 +2,7 @@ import vtk, qt, ctk, slicer
 import logging
 import numpy as np
 from slicer.ScriptedLoadableModule import *
-
+from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
 
 class LeafletAnalysis(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
@@ -84,6 +84,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     valveFormLayout.addRow("Heart valve: ", self.heartValveSelector)
     self.heartValveSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onHeartValveSelect)
 
+    self.addValveSequenceBrowserWidget()
     self.addSurfaceExtractionSection()
     self.addCoaptationSection()
 
@@ -99,6 +100,24 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     self.onHeartValveSelect(self.heartValveSelector.currentNode())
 
     self.leafletSurfaceExtractionCollapsibleButton.collapsed = False
+
+  def addValveSequenceBrowserWidget(self):
+    """
+    Create and setup a ValveSequenceBrowserWidget and add it to the layout.
+    """
+    frame = qt.QFrame()
+    frame.setLayout(qt.QHBoxLayout())
+    self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(parent=frame.layout())
+    self.valveSequenceBrowserWidget.valveBrowserNodeModified.connect(self.onValveSequenceBrowserNodeModified)
+    self.valveSequenceBrowserWidget.heartValveNodeModified.connect(self.onValveSequenceBrowserNodeModified)
+    self.valveSequenceBrowserWidget.readOnly = True
+
+    formLayout = qt.QFormLayout()
+    formLayout.addRow("Time points:", frame)
+
+    frame = qt.QFrame()
+    frame.setLayout(formLayout)
+    self.layout.addWidget(frame)
 
   def addSurfaceExtractionSection(self):
 
@@ -177,9 +196,67 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     self.showAllCoaptationSurfacesButton.clicked.connect(self.showAllCoaptations)
     self.coaptationFormLayout.addRow(self.showAllCoaptationSurfacesButton)
     self.addCoaptationTreeView()
+
+    self.sequenceWidget = qt.QWidget()
+    sequenceLayout = qt.QHBoxLayout()
+    self.sequenceWidget.setLayout(sequenceLayout)
+
+    self.addCoaptationTimePointButton = qt.QPushButton("Add time point")
+    self.addCoaptationTimePointButton.setToolTip("Add time point to the valve sequence")
+    self.addCoaptationTimePointButton.connect('clicked()', self.onAddCoaptationTimePoint)
+    sequenceLayout.addWidget(self.addCoaptationTimePointButton)
+
+    self.removeCoaptationTimePointButton = qt.QPushButton("Remove time point")
+    self.removeCoaptationTimePointButton.setToolTip("Remove time point from the valve sequence")
+    self.removeCoaptationTimePointButton.connect('clicked()', self.onRemoveCoaptationTimePoint)
+    sequenceLayout.addWidget(self.removeCoaptationTimePointButton)
+
+    self.coaptationFormLayout.addRow(self.sequenceWidget)
+
     self.addBaseLineMarkupPlaceWidget()
     self.addCoaptationPointSelectorSlider()
     self.addMarginLineMarkupPlaceWidget()
+
+  def onAddCoaptationTimePoint(self):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    selectedSurfaceId = self.coaptationTreeView.currentItem()
+    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
+    selectedCoaptationModel = self.valveModel.findCoaptationModel(selectedSurface)
+    if selectedCoaptationModel is None:
+      return
+
+    coaptationNodes = [
+      selectedCoaptationModel.getBaseLineMarkupNode(),
+      selectedCoaptationModel.getMarginLineMarkupNode(),
+      selectedCoaptationModel.surfaceModelNode
+    ]
+    for node in coaptationNodes:
+      sequenceNode = self.valveModel.valveBrowserNode.GetSequenceNode(node)
+      if sequenceNode is None:
+        continue
+      self.valveModel.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+    self.coaptationSurfaceSelectionChanged()
+
+  def onRemoveCoaptationTimePoint(self):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    selectedSurfaceId = self.coaptationTreeView.currentItem()
+    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
+    selectedCoaptationModel = self.valveModel.findCoaptationModel(selectedSurface)
+    if selectedCoaptationModel is None:
+      return
+
+    coaptationNodes = [
+      selectedCoaptationModel.getBaseLineMarkupNode(),
+      selectedCoaptationModel.getMarginLineMarkupNode(),
+      selectedCoaptationModel.surfaceModelNode
+    ]
+    for node in coaptationNodes:
+      sequenceNode = self.valveModel.valveBrowserNode.GetSequenceNode(node)
+      if sequenceNode is None:
+        continue
+      _, indexValue = self.valveModel.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      sequenceNode.RemoveDataNodeAtValue(indexValue)
+    self.coaptationSurfaceSelectionChanged()
 
   def addCoaptationTreeView(self):
     self.coaptationTreeView = slicer.qMRMLSubjectHierarchyTreeView()
@@ -232,43 +309,55 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     if self.valveModel is None:
       return
 
+    valveROIModelNode = self.valveModel.valveRoiModelNode
+
     if widget == self.leafletSurfaceExtractionCollapsibleButton:
       # exit from surface editing mode
       self.leafletSegmentSelector.setSelectedSegmentIDs([])
       if toggle:
         self.valveModel.updateLeafletModelsFromSegmentation()
-        self.valveModel.annulusContourCurve.GetDisplayNode().SetVisibility(False)
-        self.valveModel.getValveRoiModelNode().GetDisplayNode().SetVisibility(False)
+        self.valveModel.annulusContourCurveNode.GetDisplayNode().SetVisibility(False)
+        if valveROIModelNode:
+          valveROIModelNode.GetDisplayNode().SetVisibility(False)
       else:
-        self.valveModel.annulusContourCurve.GetDisplayNode().SetVisibility(True)
-        self.valveModel.getValveRoiModelNode().GetDisplayNode().SetVisibility(True)
+        self.valveModel.annulusContourCurveNode.GetDisplayNode().SetVisibility(True)
+        if valveROIModelNode:
+          valveROIModelNode.GetDisplayNode().SetVisibility(True)
         # show all segments
-        segmentationNode = self.valveModel.getLeafletSegmentationNode()
-        segmentationDisplayNode = segmentationNode.GetDisplayNode()
+        segmentationNode = self.valveModel.leafletSegmentationNode
+        segmentationDisplayNode = segmentationNode.GetDisplayNode() if segmentationNode else None
         for leafletModel in self.valveModel.leafletModels:
-          segmentationDisplayNode.SetSegmentVisibility(leafletModel.segmentId, True)
-          leafletModel.surfaceModelNode.GetDisplayNode().SetVisibility(False)
+          if segmentationDisplayNode:
+            segmentationDisplayNode.SetSegmentVisibility(leafletModel.segmentId, True)
+          surfaceModelDisplayNode = leafletModel.surfaceModelNode.GetDisplayNode()
+          if surfaceModelDisplayNode:
+            surfaceModelDisplayNode.SetVisibility(False)
     elif widget == self.coaptationCollapsibleButton:
       # exit from surface editing mode
       self.coaptationTreeView.setCurrentItem(0)
       self.coaptationSurfaceSelectionChanged()
       if toggle:
         self.valveModel.updateCoaptationModels()
-        self.valveModel.getValveRoiModelNode().GetDisplayNode().SetVisibility(False)
+        if valveROIModelNode:
+          valveROIModelNode.GetDisplayNode().SetVisibility(False)
       else:
-        self.valveModel.getValveRoiModelNode().GetDisplayNode().SetVisibility(True)
+        if valveROIModelNode:
+          valveROIModelNode.GetDisplayNode().SetVisibility(True)
+
+  def onValveSequenceBrowserNodeModified(self, browserNode=None, event=None):
+    self.onHeartValveSelect(self.heartValveSelector.currentNode())
 
   def onHeartValveSelect(self, heartValveNode):
     logging.debug("Selected heart valve node: {0}".format(heartValveNode.GetName() if heartValveNode else "None"))
 
-    if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
+    if self.valveModel and self.valveModel.heartValveNode == heartValveNode:
       return
 
     self.valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
 
     self.setGuiEnabled(heartValveNode is not None)
 
-    segmentationNode = self.valveModel.getLeafletSegmentationNode() if self.valveModel else None
+    segmentationNode = self.valveModel.leafletSegmentationNode if self.valveModel else None
     self.leafletSegmentSelector.setSegmentationNode(segmentationNode)
 
     if segmentationNode:
@@ -276,8 +365,15 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
       self.fadeCompleteLeafletCheckbox.setChecked(segmentationDisplayNode.GetOpacity3D()<0.5)
     HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
+    browserNode = self.valveModel.valveBrowserNode if self.valveModel else None
+    self.valveSequenceBrowserWidget.valveBrowserNode = browserNode
+
+    # Update workflow steps
+    self.onWorkflowStepChanged(self.leafletSurfaceExtractionCollapsibleButton, self.leafletSurfaceExtractionCollapsibleButton.collapsed)
+    self.onWorkflowStepChanged(self.coaptationCollapsibleButton, self.coaptationCollapsibleButton.collapsed)
+
   def getFirstVisibleSegmentId(self):
-    segmentationNode = self.valveModel.getLeafletSegmentationNode()
+    segmentationNode = self.valveModel.leafletSegmentationNode
     segmentationDisplayNode = segmentationNode.GetDisplayNode()
 
     from HeartValveLib.util import getAllSegmentIDs
@@ -325,11 +421,12 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
       if self.getNumberOfControlPoints(selectedLeafletModel.getSurfaceBoundaryMarkupNode()) == 0:
         self.fadeCompleteLeafletCheckbox.setChecked(False)
 
-    segmentationNode = self.valveModel.getLeafletSegmentationNode()
-    segmentationDisplayNode = segmentationNode.GetDisplayNode()
+    segmentationNode = self.valveModel.leafletSegmentationNode
+    segmentationDisplayNode = segmentationNode.GetDisplayNode() if segmentationNode else None
     for leafletModel in self.valveModel.leafletModels:
       selected = (leafletModel.segmentId == selectedSegmentId)
-      segmentationDisplayNode.SetSegmentVisibility(leafletModel.segmentId, selected or (selectedSegmentId is None))
+      if segmentationDisplayNode:
+        segmentationDisplayNode.SetSegmentVisibility(leafletModel.segmentId, selected or (selectedSegmentId is None))
       leafletModel.surfaceModelNode.GetDisplayNode().SetVisibility(selected or (selectedSegmentId is None))
       leafletModel.getSurfaceBoundaryMarkupNode().GetDisplayNode().SetVisibility(selected)
       leafletModel.getSurfaceBoundaryMarkupNode().SetLocked(not selected)
@@ -391,10 +488,11 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     self.fadeCompleteLeafletCheckbox.setChecked(True)
 
   def onFadeCompleteLeaflet(self, toggled):
-    segmentationNode = self.valveModel.getLeafletSegmentationNode()
-    segmentationDisplayNode = segmentationNode.GetDisplayNode()
+    segmentationNode = self.valveModel.leafletSegmentationNode
+    segmentationDisplayNode = segmentationNode.GetDisplayNode() if segmentationNode else None
     opacity = 0.1 if toggled else 1.0
-    segmentationDisplayNode.SetOpacity3D(opacity)
+    if segmentationDisplayNode:
+      segmentationDisplayNode.SetOpacity3D(opacity)
 
   def showAllLeaflets(self):
     self.leafletSegmentSelector.clearSelection()
@@ -405,6 +503,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     coaptationModel = self.valveModel.addCoaptationModel()
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     self.coaptationTreeView.setCurrentItem(shNode.GetItemByDataNode(coaptationModel.surfaceModelNode))
+    self.onAddCoaptationTimePoint()
 
   def showAllCoaptations(self):
     self.coaptationTreeView.setCurrentItem(0)
@@ -417,7 +516,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
 
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
 
-    valveNodeItemId = shNode.GetItemByDataNode(self.valveModel.getHeartValveNode())
+    valveNodeItemId = shNode.GetItemByDataNode(self.valveModel.heartValveNode)
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     folderItemId = shNode.GetItemChildWithName(valveNodeItemId, 'Coaptation')
     self.coaptationTreeView.setVisible(folderItemId != 0)
@@ -453,12 +552,19 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(
       slicer.vtkMRMLInteractionNode.ViewTransform)
 
+    currentTimePointSpecified = self.valveModel.isNodeSpecifiedForCurrentTimePoint(selectedCoaptationModel.surfaceModelNode) if selectedCoaptationModel else False
+
+    self.addCoaptationTimePointButton.setEnabled(not currentTimePointSpecified and selectedCoaptationModel)
+    self.removeCoaptationTimePointButton.setEnabled(currentTimePointSpecified and selectedCoaptationModel)
+
     self.coaptationBaseLineMarkupPlaceWidget.setPlaceModeEnabled(False)
     self.coaptationBaseLineMarkupPlaceWidget.setCurrentNode(baseLineMarkupNode)
+    self.coaptationBaseLineMarkupPlaceWidget.enabled = currentTimePointSpecified
     self.setAndObserveCoaptationBaseLineMarkupNode(baseLineMarkupNode)
 
     self.coaptationMarginLineMarkupPlaceWidget.setPlaceModeEnabled(False)
     self.coaptationMarginLineMarkupPlaceWidget.setCurrentNode(marginLineMarkupNode)
+    self.coaptationMarginLineMarkupPlaceWidget.enabled = currentTimePointSpecified
     self.setAndObserveCoaptationMarginLineMarkupNode(marginLineMarkupNode)
 
   def setAndObserveCoaptationBaseLineMarkupNode(self, coaptationBaseLineMarkupNode):
@@ -608,6 +714,9 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     if not selectedCoaptationModel:
       return
     self.valveModel.removeCoaptationModel(self.valveModel.coaptationModels.index(selectedCoaptationModel))
+    valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+    valveItemIndex, indexValue = valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    self.valveModel.valveRoiSequenceNode.RemoveDataNodeAtValue(indexValue)
 
   def onReload(self):
     logging.debug("Reloading LeafletAnalysis")
