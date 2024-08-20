@@ -346,6 +346,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def onValveSequenceBrowserNodeModified(self, browserNode=None, event=None):
     self.onHeartValveSelect(self.heartValveSelector.currentNode())
+    self.coaptationSurfaceSelectionChanged()
 
   def onHeartValveSelect(self, heartValveNode):
     logging.debug("Selected heart valve node: {0}".format(heartValveNode.GetName() if heartValveNode else "None"))
@@ -554,8 +555,8 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
 
     currentTimePointSpecified = self.valveModel.isNodeSpecifiedForCurrentTimePoint(selectedCoaptationModel.surfaceModelNode) if selectedCoaptationModel else False
 
-    self.addCoaptationTimePointButton.setEnabled(not currentTimePointSpecified and selectedCoaptationModel)
-    self.removeCoaptationTimePointButton.setEnabled(currentTimePointSpecified and selectedCoaptationModel)
+    self.addCoaptationTimePointButton.enabled = not currentTimePointSpecified and selectedCoaptationModel
+    self.removeCoaptationTimePointButton.enabled = currentTimePointSpecified and selectedCoaptationModel
 
     self.coaptationBaseLineMarkupPlaceWidget.setPlaceModeEnabled(False)
     self.coaptationBaseLineMarkupPlaceWidget.setCurrentNode(baseLineMarkupNode)
