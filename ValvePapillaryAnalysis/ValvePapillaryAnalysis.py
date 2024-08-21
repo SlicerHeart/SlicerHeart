@@ -3,7 +3,7 @@ from slicer.ScriptedLoadableModule import *
 import logging
 import HeartValveLib
 from HeartValveLib.Constants import PAPILLARY_MUSCLE_POINT_LABELS
-
+from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
 
 class ValvePapillaryAnalysis(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
@@ -56,7 +56,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.papillaryMusclePointNames = PAPILLARY_MUSCLE_POINT_LABELS
 
     self.papillaryLineMarkupNode = None
-    self.papillaryLineMarkupNodeObserver = None
+    self.papillaryLineMarkupNodeObservers = []
 
     # Stores the currently selected HeartValveNode (scripted loadable module node)
     # and also provides methods to operate on it.
@@ -87,6 +87,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
     self.setupHeartValveSelector()
+    self.setupSequenceBrowserWidget()
     self.setupPapillaryMusclesSection()
     self.setupQuantificationSection()
     self.layout.addStretch(1)
@@ -100,6 +101,12 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.onHeartValveSelect(self.heartValveSelector.currentNode())
     self.addGUIObservers()
 
+  def setupSequenceBrowserWidget(self):
+    self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(self.layout)
+    self.valveSequenceBrowserWidget.valveBrowserNodeModified.connect(self.onValveSequenceBrowserNodeModified)
+    self.valveSequenceBrowserWidget.heartValveNodeModified.connect(self.onValveSequenceBrowserNodeModified)
+    self.valveSequenceBrowserWidget.readOnly = True
+
   def setupPapillaryMusclesSection(self):
     self.papillaryMusclesCollapsibleButton = ctk.ctkCollapsibleButton()
     self.papillaryMusclesCollapsibleButton.objectName = "PapillaryMuscles"
@@ -109,6 +116,20 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
 
     self.addShowAllPapillaryMusclesButton()
     self.addPapillaryMusclesTreeView()
+
+    addTimePointWidget = qt.QWidget()
+    addTimePointLayout = qt.QHBoxLayout(addTimePointWidget)
+    addTimePointLayout.setContentsMargins(0, 0, 0, 0)
+    self.papillaryMusclesCollapsibleButton.layout().addRow(addTimePointWidget)
+
+    self.addTimePointButton = qt.QPushButton("Add time point")
+    self.addTimePointButton.connect('clicked()', self.onAddTimePoint)
+    addTimePointLayout.addWidget(self.addTimePointButton)
+
+    self.removeTimePointButton = qt.QPushButton("Remove time point")
+    self.removeTimePointButton.connect('clicked()', self.onRemoveTimePoint)
+    addTimePointLayout.addWidget(self.removeTimePointButton)
+
     self.addPapillaryMusclePlaceWidget()
     self.addMuscleCenteringButtons()
     self.addOrthogonalSlicerRotationSliderWidget()
@@ -150,6 +171,47 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
                                                       self.onPapillaryLineMarkupPlaceModeChanged)
     self.papillaryMusclesCollapsibleButton.layout().addRow("Add/remove muscle point:",
                                                            self.papillaryMuscleLineMarkupPlaceWidget)
+
+  def onAddTimePoint(self):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
+    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
+
+    papillaryModel = self.valveModel.findPapillaryModel(selectedSurface)
+    if papillaryModel is None:
+      logging.error("Selected papillary muscle not found")
+      return
+
+    selectedPapillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
+    sequenceNode = self.valveModel.valveBrowserNode.GetSequenceNode(selectedPapillaryMarkupNode)
+    if sequenceNode is None:
+      logging.error("Selected papillary muscle not found in sequence browser")
+      return
+
+    self.valveModel.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+    self.updateTimePointButtons()
+    self.onPapillaryLineMarkupNodeModified()
+
+  def onRemoveTimePoint(self):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
+    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
+
+    papillaryModel = self.valveModel.findPapillaryModel(selectedSurface)
+    if papillaryModel is None:
+      logging.error("Selected papillary muscle not found")
+      return
+
+    selectedPapillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
+    sequenceNode = self.valveModel.valveBrowserNode.GetSequenceNode(selectedPapillaryMarkupNode)
+    if sequenceNode is None:
+      logging.error("Selected papillary muscle not found in sequence browser")
+      return
+
+    _, indexValue = self.valveModel.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    sequenceNode.RemoveDataNodeAtValue(indexValue)
+    self.updateTimePointButtons()
+    self.onPapillaryLineMarkupNodeModified()
 
   def addMuscleCenteringButtons(self):
     self.showMuscleButtons = []
@@ -245,6 +307,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
       oldBlockSignalsState = widget.blockSignals(True)
       widget.setCurrentNodeID(self.parameterNode.GetNodeReferenceID(parameterName))
       widget.blockSignals(oldBlockSignalsState)
+    self.updateTimePointButtons()
 
   def updateParameterNodeFromGUI(self):
     oldModifiedState = self.parameterNode.StartModify()
@@ -280,10 +343,19 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.updateGuiEnabled()
     HeartValveLib.goToAnalyzedFrame(self.valveModel)
 
+    # Update browser node for selected valve
+    browserNode = self.valveModel.valveBrowserNode if self.valveModel else None
+    self.valveSequenceBrowserWidget.valveBrowserNode = browserNode
+
   def updateGuiEnabled(self):
     valveModuleSelected = self.valveModel is not None
     self.papillaryMusclesCollapsibleButton.setEnabled(valveModuleSelected)
     self.quantificationCollapsibleButton.setEnabled(valveModuleSelected)
+
+  def onValveSequenceBrowserNodeModified(self):
+    self.updateTimePointButtons()
+    self.updatePapillaryMuscleWidgets()
+    self.onPapillaryLineMarkupNodeModified()
 
   def onOrthogonalSlicerRotationAngleChanged(self, newRotationValue):
     if not self.valveModel:
@@ -309,7 +381,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
         logging.warning('onResetAnnulusView failed: valve volume does not contain a valid image')
 
     if resetViewOrientations and self.valveModel:
-      HeartValveLib.setupDefaultSliceOrientation(resetFov=resetFov, valveModel=self.valveModel,
+      HeartValveLib.setupDefaultSliceOrientation(resetFov=resetFov, valveModelOrBrowser=self.valveModel,
                                                  show3DSliceName=self.orthogonalSlice2.GetName())
 
   def onShowMusclePoint(self, musclePointIndex=None, excludeSliceViewName=None, forcedOrthoRotationUsingSlider=False):
@@ -407,6 +479,8 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
   def trackFiducialInSliceView(self):
     # Get the view where the user is dragging the markup and don't change that view
     # (it would move the image while the user is marking a point on it and so the screw would drift)
+    if self.papillaryLineMarkupNode is None:
+      return
     excludeSliceView = self.papillaryLineMarkupNode.GetAttribute('Markups.MovingInSliceView')
     movingMarkupIndex = self.papillaryLineMarkupNode.GetAttribute('Markups.MovingMarkupIndex')
     if excludeSliceView and movingMarkupIndex:
@@ -416,7 +490,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.papillaryMusclesTreeView.setCurrentItem(0)
     # force showing of all leaflets, even if selection did not change
     self.papillaryMuscleModelSelectionChanged()
-    HeartValveLib.setupDefaultSliceOrientation(resetFov=True, valveModel=self.valveModel,
+    HeartValveLib.setupDefaultSliceOrientation(resetFov=True, valveModelOrBrowser=self.valveModel,
                                                show3DSliceName=self.orthogonalSlice2.GetName())
 
     for papillaryModel in self.valveModel.papillaryModels:
@@ -455,29 +529,52 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(
       slicer.vtkMRMLInteractionNode.ViewTransform)
 
-    self.papillaryMuscleLineMarkupPlaceWidget.setPlaceModeEnabled(False)
-    self.papillaryMuscleLineMarkupPlaceWidget.setCurrentNode(papillaryLineMarkupNode)
     self.setAndObservePapillaryLineMarkupNode(papillaryLineMarkupNode)
 
     if papillaryLineMarkupNode and papillaryLineMarkupNode.GetNumberOfControlPoints() > 0:
       self.onShowMusclePoint(0)
 
+    self.updateTimePointButtons()
+
+  def updateTimePointButtons(self):
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    if shNode is None:
+      return
+    selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
+    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
+    selectedPapillaryModel = self.valveModel.findPapillaryModel(selectedSurface) if selectedSurface else None
+    papillaryLineMarkupNode = selectedPapillaryModel.getPapillaryLineMarkupNode() if selectedPapillaryModel else None
+    defined = self.valveModel.isNodeSpecifiedForCurrentTimePoint(papillaryLineMarkupNode) if papillaryLineMarkupNode else False
+
+    self.addTimePointButton.enabled = not defined and papillaryLineMarkupNode is not None
+    self.removeTimePointButton.enabled = defined and papillaryLineMarkupNode is not None
+
+    self.papillaryMuscleLineMarkupPlaceWidget.setPlaceModeEnabled(False)
+    self.papillaryMuscleLineMarkupPlaceWidget.setCurrentNode(papillaryLineMarkupNode)
+    self.papillaryMuscleLineMarkupPlaceWidget.enabled = defined and papillaryLineMarkupNode is not None
+
   def setAndObservePapillaryLineMarkupNode(self, papillaryLineMarkupNode):
     logging.debug("Observe papillary line node: {0}".format(papillaryLineMarkupNode.GetName() if papillaryLineMarkupNode else "None"))
-    if papillaryLineMarkupNode == self.papillaryLineMarkupNode and self.papillaryLineMarkupNodeObserver:
+    if papillaryLineMarkupNode == self.papillaryLineMarkupNode and len(self.papillaryLineMarkupNodeObservers) > 0:
       # no change and node is already observed
       logging.debug("Already observed")
       return
     # Remove observer to old node
-    if self.papillaryLineMarkupNode and self.papillaryLineMarkupNodeObserver:
-      self.papillaryLineMarkupNode.RemoveObserver(self.papillaryLineMarkupNodeObserver)
-      self.papillaryLineMarkupNodeObserver = None
+    if self.papillaryLineMarkupNode:
+      for observer in self.papillaryLineMarkupNodeObservers:
+        self.papillaryLineMarkupNode.RemoveObserver(observer)
+      self.papillaryLineMarkupNodeObservers = []
     # Set and observe new node
     self.papillaryLineMarkupNode = papillaryLineMarkupNode
     if self.papillaryLineMarkupNode:
-      self.papillaryLineMarkupNodeObserver = \
+      self.papillaryLineMarkupNodeObservers = [
         self.papillaryLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                                                 self.onPapillaryLineMarkupNodeModified),
+        self.papillaryLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointAddedEvent,
+                                                 self.onPapillaryLineMarkupNodeModified),
+        self.papillaryLineMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
                                                  self.onPapillaryLineMarkupNodeModified)
+        ]
       self.papillaryLineMarkupNode.MaximumNumberOfControlPoints = len(self.papillaryMusclePointNames)
 
     # Update model
@@ -490,7 +587,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     selectedPapillaryModel = self.valveModel.findPapillaryModel(selectedLineModel)
     return selectedPapillaryModel
 
-  def onPapillaryLineMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
+  def updatePapillaryMuscleWidgets(self):
 
     if not self.papillaryLineMarkupNode:
       for showMuscleButton in self.showMuscleButtons:
@@ -527,7 +624,14 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     for muscleIndex, showMuscleButton in enumerate(self.showMuscleButtons):
       showMuscleButton.enabled = numberOfPapillaryLineMarkups > muscleIndex
 
+  def onPapillaryLineMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
+    self.updatePapillaryMuscleWidgets()
     self.trackFiducialInSliceView()
+
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
+    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
+    selectedPapillaryModel = self.valveModel.findPapillaryModel(selectedSurface)
     self.updateQuantification(selectedPapillaryModel)
 
   def onPapillaryLineMarkupPlaceModeChanged(self, placeActive):

@@ -438,6 +438,10 @@ class ValveModel:
       papillaryLineMarkupNode.GetDisplayNode().SetSelectedColor(annulusContourMarkupsNode.GetDisplayNode().GetSelectedColor())
       papillaryModel.setPapillaryLineMarkupNode(papillaryLineMarkupNode)
 
+      papillaryLineSequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryLineMarkupNode)
+      if papillaryLineSequenceNode is None:
+        self.valveBrowser.makeTimeSequence(papillaryLineMarkupNode)
+
       return papillaryModel
 
     def findPapillaryModel(self, papillaryLineMarkupsNode):
