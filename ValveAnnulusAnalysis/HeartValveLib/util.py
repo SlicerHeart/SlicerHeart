@@ -143,3 +143,12 @@ def remeshPolyData(poly, nVertices, subdivide):
   clus.subdivide(subdivide)
   clus.cluster(nVertices)
   return clus.create_mesh()
+
+
+def mergePolydata(*args):
+  import vtk
+  append = vtk.vtkAppendPolyData()
+  for arg in args:
+    append.AddInputData(arg)
+  append.Update()
+  return append.GetOutput()

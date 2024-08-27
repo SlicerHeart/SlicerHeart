@@ -911,7 +911,7 @@ class ValveSegmentationLogic(ScriptedLoadableModuleLogic):
   """
 
   @staticmethod
-  def getLeafletVolumeClippedAxisAligned(valveModel):
+  def getLeafletVolumeClippedAxisAligned(valveModel, volumeSpacing=0.3):
     """
     :returns vtkOrientedImageData (defined in the Probe coordinate system) on success. None on failure.
     """
@@ -928,8 +928,6 @@ class ValveSegmentationLogic(ScriptedLoadableModuleLogic):
     # leafletVolumeClippedAxisAlignedNode will be used as a reference volume
     # (that defines the output geometry) and also as output volume
     # (where the resampled input volume is copied to)
-
-    volumeSpacing = 0.3
 
     volumeToAxialSlice = vtk.vtkMatrix4x4()
     slicer.vtkMRMLTransformNode.GetMatrixTransformBetweenNodes(valveVolumeNode.GetParentTransformNode(),

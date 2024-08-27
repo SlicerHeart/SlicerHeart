@@ -9,7 +9,7 @@ import vtk.util.numpy_support as VN
 import logging
 import HeartValveLib
 from HeartValveLib.helpers import getBinaryLabelmapRepresentation
-from HeartValveLib.util import translatePolyData, smoothPolyData, windowSincPolyData, remeshPolyData
+from HeartValveLib.util import translatePolyData, smoothPolyData, windowSincPolyData, remeshPolyData, mergePolydata
 import vtkSegmentationCorePython as vtkSegmentationCore
 
 FIELD_ID = 'id' # machine-readable ID to easily refer to a field in the source code
@@ -1639,13 +1639,8 @@ class MeasurementPreset(object):
                            KEY_VALUE: "{:.1f}".format(np.array(allLeafletThickness).mean()),
                            KEY_UNIT: 'mm'})
 
-    append = vtk.vtkAppendPolyData()
-    for leafletSurface in leafletSurfaces:
-      append.AddInputData(leafletSurface)
-    append.Update()
-    valveSurfacePolydata = append.GetOutput()
-
-    if len(leafletSurfaces) > 1:
+    valveSurfacePolydata = mergePolydata(*leafletSurfaces)
+    try:
       # Smooth PolyData
       # NB: using a bigger annulus area, so it can better fit/wrap to the valve surface
       annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 5.0)
@@ -1695,12 +1690,8 @@ class MeasurementPreset(object):
       #                                         valveModel,
       #                                         planeNormal, strategy="(Wrap Solidify)")
 
-    else:
-      try:
-        self.addBillowTentingAndAtrialSurface(valveSurfacePolydata, annulusAreaPolyData, leafletSurfaces, valveModel,
-                                              planeNormal)
-      except AttributeError:
-        self.addMessage("Valve Surface not extracted")
+    except AttributeError:
+      self.addMessage("Valve Surface not extracted")
 
   def addBillowTentingAndAtrialSurface(self, allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
                                        valveModel, planeNormal, strategy=''):
@@ -1860,11 +1851,7 @@ def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurf
   if not leafletSurfaces:
     return None
 
-  append = vtk.vtkAppendPolyData()
-  for leafletSurface in leafletSurfaces:
-    append.AddInputData(leafletSurface)
-  append.Update()
-  valveSurfacePolydata = append.GetOutput()
+  valveSurfacePolydata = mergePolydata(*leafletSurfaces)
 
   remeshed = annulusAreaPolyData
   for i in range(iterations):
@@ -1873,7 +1860,6 @@ def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurf
   remeshed = smoothPolyData(remeshPolyData(remeshed, nVertices, subdivide), valveSurfacePolydata, smoothIterations, relaxationFactor)
   remeshed = windowSincPolyData(remeshed, passband=0.1)
   return remeshed
-
 
 
 def extractValveSurfaceWithWrapSolidify(planeNormal, planePosition, valveModel, annulusAreaPolyData, kernelSizeMm):
