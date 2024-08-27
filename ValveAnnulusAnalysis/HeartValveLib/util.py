@@ -89,3 +89,57 @@ def getClosestCurvePointIndexToPosition(markupsCurveNode, position):
   return markupsCurveNode.GetClosestCurvePointIndexToPositionWorld(
     toWorldCoordinates(markupsCurveNode, position)
   )
+
+
+def translatePolyData(polydata, normal, multiplier):
+  import vtk
+  transform = vtk.vtkTransform()
+  transform.Translate(*(normal * multiplier))
+  transform.Update()
+
+  polyScaleTransform = vtk.vtkTransformPolyDataFilter()
+  polyScaleTransform.SetTransform(transform)
+  polyScaleTransform.SetInputData(polydata)
+  polyScaleTransform.Update()
+
+  return polyScaleTransform.GetOutput()
+
+
+def smoothPolyData(poly, source, iterations=15, relaxationFactor=0.1):
+  import vtk
+  smoothPolyFilter = vtk.vtkSmoothPolyDataFilter()
+  smoothPolyFilter.SetInputData(poly)
+  smoothPolyFilter.SetSourceData(source)
+  smoothPolyFilter.SetNumberOfIterations(iterations)
+  smoothPolyFilter.SetRelaxationFactor(relaxationFactor)
+  smoothPolyFilter.BoundarySmoothingOff()
+  smoothPolyFilter.FeatureEdgeSmoothingOn()
+  smoothPolyFilter.Update()
+  return smoothPolyFilter.GetOutput()
+
+def windowSincPolyData(poly, passband=0.001):
+  import vtk
+  windowSincFilter = vtk.vtkWindowedSincPolyDataFilter()
+  windowSincFilter.SetInputData(poly)
+  windowSincFilter.FeatureEdgeSmoothingOff()
+  windowSincFilter.SetFeatureAngle(120)
+  windowSincFilter.SetPassBand(passband)
+  windowSincFilter.SetNumberOfIterations(15)
+  windowSincFilter.BoundarySmoothingOff()
+  windowSincFilter.NonManifoldSmoothingOn()
+  windowSincFilter.NormalizeCoordinatesOn()
+  windowSincFilter.Update()
+  return windowSincFilter.GetOutput()
+
+def remeshPolyData(poly, nVertices, subdivide):
+  try:
+    import pyacvd
+  except ImportError:
+    slicer.util.pip_install('pyacvd')
+  import pyacvd
+  import pyvista as pv
+  wrapped = pv.wrap(poly)
+  clus = pyacvd.Clustering(wrapped)
+  clus.subdivide(subdivide)
+  clus.cluster(nVertices)
+  return clus.create_mesh()

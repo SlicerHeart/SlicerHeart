@@ -9,6 +9,7 @@ import vtk.util.numpy_support as VN
 import logging
 import HeartValveLib
 from HeartValveLib.helpers import getBinaryLabelmapRepresentation
+from HeartValveLib.util import translatePolyData, smoothPolyData, windowSincPolyData, remeshPolyData
 import vtkSegmentationCorePython as vtkSegmentationCore
 
 FIELD_ID = 'id' # machine-readable ID to easily refer to a field in the source code
@@ -1638,19 +1639,68 @@ class MeasurementPreset(object):
                            KEY_VALUE: "{:.1f}".format(np.array(allLeafletThickness).mean()),
                            KEY_UNIT: 'mm'})
 
-    # kernelSizeMm = 2.0
-    # allLeafletSurfacePolyData = extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition,
-    #                                                                          planeNormal, kernelSizeMm,
-    #                                                                          maxKernelSizeMm=3.0)
-    # self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces, valveModel,
-    #                                       planeNormal, strategy="(Morphological_Closing)")
-    #
+    append = vtk.vtkAppendPolyData()
+    for leafletSurface in leafletSurfaces:
+      append.AddInputData(leafletSurface)
+    append.Update()
+    valveSurfacePolydata = append.GetOutput()
 
-    # NB: using a bigger annulus area, so it can better fit to the valve surface
-    annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.4)
-    allLeafletSurfacePolyData = extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces)
-    self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces, valveModel,
-                                          planeNormal) #, strategy="(SmoothPolydata)")
+    if len(leafletSurfaces) > 1:
+      # Smooth PolyData
+      # NB: using a bigger annulus area, so it can better fit/wrap to the valve surface
+      annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 5.0)
+
+      # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
+      maxLeafletDepthMm = 60
+
+      # NB: get largest distance in atrial direction and translate 3d annulus plane there to drop the blanket
+      allLeafletSurfacePolyDataWithDistance = \
+        self.getSignedDistance(valveSurfacePolydata, annulusAreaPolyData, -planeNormal, maxLeafletDepthMm)
+
+      distances = \
+        vtk.util.numpy_support.vtk_to_numpy(
+          allLeafletSurfacePolyDataWithDistance.GetCellData().GetArray("Distance")
+        )
+
+      annulusAreaPolyDataBigger = translatePolyData(annulusAreaPolyDataBigger, -planeNormal, max(distances) * 1.2)
+
+      allLeafletSurfacePolyData = \
+        extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces, iterations=3,
+                                                    nVertices=5000, subdivide=2, smoothIterations=100,
+                                                    relaxationFactor=0.7)
+
+      if allLeafletSurfacePolyData:
+        self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+                                              valveModel,
+                                              planeNormal)  # , strategy="(SmoothPolydata)")
+
+      # NB: Morphological_Closing
+
+      # kernelSizeMm = 2.0
+      # allLeafletSurfacePolyData = extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition,
+      #                                                                          planeNormal, kernelSizeMm,
+      #                                                                          maxKernelSizeMm=3.0)
+      #
+      # if allLeafletSurfacePolyData:
+      #   self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+      #                                         valveModel,
+      #                                         planeNormal) #, strategy="(Morphological_Closing)")
+
+      # NB: Wrap Solidify
+      # allLeafletSurfacePolyData = extractValveSurfaceWithWrapSolidify(planeNormal, planePosition, valveModel,
+      #                                                                 annulusAreaPolyData, kernelSizeMm)
+      #
+      # if allLeafletSurfacePolyData:
+      #   self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+      #                                         valveModel,
+      #                                         planeNormal, strategy="(Wrap Solidify)")
+
+    else:
+      try:
+        self.addBillowTentingAndAtrialSurface(valveSurfacePolydata, annulusAreaPolyData, leafletSurfaces, valveModel,
+                                              planeNormal)
+      except AttributeError:
+        self.addMessage("Valve Surface not extracted")
 
   def addBillowTentingAndAtrialSurface(self, allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
                                        valveModel, planeNormal, strategy=''):
@@ -1805,46 +1855,10 @@ def extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition, plan
   return allLeafletSurfacePolyData
 
 
-def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurfaces):
+def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurfaces, iterations=4, nVertices=10000,
+                                                subdivide=2, smoothIterations=50, relaxationFactor=1.0):
   if not leafletSurfaces:
     return None
-
-  def smoothPolyData(poly, source, iterations=15, relaxationFactor=0.1):
-    smoothPolyFilter = vtk.vtkSmoothPolyDataFilter()
-    smoothPolyFilter.SetInputData(poly)
-    smoothPolyFilter.SetSourceData(source)
-    smoothPolyFilter.SetNumberOfIterations(iterations)
-    smoothPolyFilter.SetRelaxationFactor(relaxationFactor)
-    smoothPolyFilter.BoundarySmoothingOff()
-    smoothPolyFilter.FeatureEdgeSmoothingOn()
-    smoothPolyFilter.Update()
-    return smoothPolyFilter.GetOutput()
-
-  def windowSincPolyData(poly, passband=0.001):
-    windowSincFilter = vtk.vtkWindowedSincPolyDataFilter()
-    windowSincFilter.SetInputData(poly)
-    windowSincFilter.FeatureEdgeSmoothingOff()
-    windowSincFilter.SetFeatureAngle(120)
-    windowSincFilter.SetPassBand(passband)
-    windowSincFilter.SetNumberOfIterations(15)
-    windowSincFilter.BoundarySmoothingOff()
-    windowSincFilter.NonManifoldSmoothingOn()
-    windowSincFilter.NormalizeCoordinatesOn()
-    windowSincFilter.Update()
-    return windowSincFilter.GetOutput()
-
-  def remeshPolyData(poly, nVertices, subdivide):
-    try:
-      import pyacvd
-    except ImportError:
-      slicer.util.pip_install('pyacvd')
-    import pyacvd
-    import pyvista as pv
-    wrapped = pv.wrap(poly)
-    clus = pyacvd.Clustering(wrapped)
-    clus.subdivide(subdivide)
-    clus.cluster(nVertices)
-    return clus.create_mesh()
 
   append = vtk.vtkAppendPolyData()
   for leafletSurface in leafletSurfaces:
@@ -1853,9 +1867,165 @@ def extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyData, leafletSurf
   valveSurfacePolydata = append.GetOutput()
 
   remeshed = annulusAreaPolyData
-  for i in range(4):
-    remeshed = smoothPolyData(remeshPolyData(remeshed, 10000, 2), valveSurfacePolydata, 50, 1.0)
+  for i in range(iterations):
+    remeshed = smoothPolyData(remeshPolyData(remeshed, nVertices, subdivide), valveSurfacePolydata, smoothIterations, relaxationFactor)
     remeshed = windowSincPolyData(remeshed)
-  remeshed = smoothPolyData(remeshPolyData(remeshed, 10000, 3), valveSurfacePolydata, 100, 0.001)
+  remeshed = smoothPolyData(remeshPolyData(remeshed, nVertices, subdivide), valveSurfacePolydata, smoothIterations, relaxationFactor)
   remeshed = windowSincPolyData(remeshed, passband=0.1)
   return remeshed
+
+
+
+def extractValveSurfaceWithWrapSolidify(planeNormal, planePosition, valveModel, annulusAreaPolyData, kernelSizeMm):
+  logging.warning(f'Running Wrap Solidify')
+
+  class SegmentEditorWidget(object):
+    """ Create segment editor to get access to effects
+
+    Usage:
+        ```
+          with SegmentEditorWidget() as segmentEditorWidget:
+            ... # Do something
+        ```
+    """
+
+    def __init__(self):
+      self.segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+      self.segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+      self.segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+      self.segmentEditorNode.SetOverwriteMode(self.segmentEditorNode.OverwriteNone)
+      self.segmentEditorWidget.setMRMLSegmentEditorNode(self.segmentEditorNode)
+
+    def __enter__(self):
+      return self.segmentEditorWidget
+
+    def __exit__(self, exc_type, exc_value, tb):
+      if exc_type is not None:
+        import traceback
+        traceback.print_exception(exc_type, exc_value, tb)
+      self.segmentEditorWidget = None
+      slicer.mrmlScene.RemoveNode(self.segmentEditorNode)
+      return True
+
+  with SegmentEditorWidget() as segmentEditorWidget:
+    segmentEditorWidget.setActiveEffectByName('Wrap Solidify')
+    if segmentEditorWidget.activeEffect() is None:
+      raise ImportError("Wrap Solidify extension needs to be installed.")
+
+  segmentationNode = valveModel.getLeafletSegmentationNode()
+
+  def getAllSegmentIDs(segNode):
+    segmentIDs = vtk.vtkStringArray()
+    segNode.GetSegmentation().GetSegmentIDs(segmentIDs)
+    return [segmentIDs.GetValue(idx) for idx in range(segmentIDs.GetNumberOfValues())]
+
+  def smooth(segID, method):
+    segmentEditorWidget.setCurrentSegmentID(segID)
+    segmentEditorWidget.setActiveEffectByName("Smoothing")
+    effect = segmentEditorWidget.activeEffect()
+    effect.setParameter("SmoothingMethod", method)
+    effect.setParameter("KernelSizeMm", 1.0)
+    effect.self().onApply()
+
+  def subtract(segId, subtrahendSegId):
+    segmentEditorWidget.setCurrentSegmentID(segId)
+    segmentEditorWidget.setActiveEffectByName('Logical operators')
+    subtractEffect = segmentEditorWidget.activeEffect()
+    subtractEffect.setParameter("Operation", "SUBTRACT")
+    subtractEffect.setParameter("ModifierSegmentID", subtrahendSegId)
+    subtractEffect.self().onApply()
+
+  def removeIslands(segId, minimumSize=200):
+    segmentEditorWidget.setCurrentSegmentID(segId)
+    segmentEditorWidget.setActiveEffectByName("Islands")
+    islandsEffect = segmentEditorWidget.activeEffect()
+    islandsEffect.setParameter("MinimumSize", minimumSize)
+    islandsEffect.self().onApply()
+
+  def clone(segId):
+    newSegId = segmentationNode.GetSegmentation().AddEmptySegment()
+    labelmap = getBinaryLabelmapRepresentation(segmentationNode, segId)
+    slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+      labelmap, segmentationNode, newSegId,
+      slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
+    )
+    return newSegId
+
+  mergedLeafletsSegId = segmentationNode.GetSegmentation().AddEmptySegment()
+  for leafletModel in valveModel.leafletModels:
+    leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletModel.segmentId)
+    slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+      leafletSegmentLabelmap, segmentationNode, mergedLeafletsSegId,
+      slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
+    )
+
+  # TODO: problematic for valves with a lot of billow
+  extruder = vtk.vtkLinearExtrusionFilter()
+  extruder.SetInputData(annulusAreaPolyData)
+  extruder.SetExtrusionTypeToVectorExtrusion()
+  extruder.SetVector(planeNormal)
+  extruder.SetScaleFactor(-2)
+  extruder.Update()
+
+  extrudedAnnulusPlaneSegmentId = \
+    segmentationNode.AddSegmentFromClosedSurfaceRepresentation(extruder.GetOutput(), "extruded annulus plane")
+  mergedLeafletsCappedSegId = segmentationNode.GetSegmentation().AddEmptySegment()
+  for segId in [mergedLeafletsSegId, extrudedAnnulusPlaneSegmentId]:
+    leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segId)
+    slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+      leafletSegmentLabelmap, segmentationNode, mergedLeafletsCappedSegId,
+      slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK
+    )
+
+  toDelete = [extrudedAnnulusPlaneSegmentId, mergedLeafletsCappedSegId]  # mergedLeafletsSegId,
+  # See all attributes: print(slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode"))
+  with SegmentEditorWidget() as segmentEditorWidget:
+    segmentEditorWidget.setSegmentationNode(segmentationNode)
+    segmentEditorWidget.setMasterVolumeNode(valveModel.getLeafletVolumeNode())
+
+    smooth(mergedLeafletsCappedSegId, "MORPHOLOGICAL_CLOSING")
+
+    # wrap solidify
+    segmentEditorWidget.setActiveEffectByName('Wrap Solidify')
+    wrapSolidifyEffect = segmentEditorWidget.activeEffect()
+    wrapSolidifyEffect.setParameter("region", "outerSurface")
+    wrapSolidifyEffect.setParameter("smoothingFactor", 0.0)
+    wrapSolidifyEffect.setParameter("remeshOversampling", 3.0)
+    wrapSolidifyEffect.setParameter("shrinkwrapIterations", 5)
+    wrapSolidifyEffect.setParameter("outputType", "newSegment")
+    wrapSolidifyEffect.self().onApply()
+    solidifiedSegId = getAllSegmentIDs(segmentationNode)[-1]
+    toDelete.append(solidifiedSegId)
+
+    subtract(solidifiedSegId, mergedLeafletsCappedSegId)
+    # smooth(solidifiedSegId, "MEDIAN")
+    removeIslands(solidifiedSegId)
+
+    shellSegId = clone(solidifiedSegId)
+    toDelete.append(shellSegId)
+
+    # hollow
+    segmentEditorWidget.setCurrentSegmentID(shellSegId)
+    segmentEditorWidget.setActiveEffectByName("Hollow")
+    effect = segmentEditorWidget.activeEffect()
+    effect.setParameter("ShellMode", "INSIDE_SURFACE")
+    effect.setParameter("ShellThicknessMm", 1.0)
+    effect.self().onApply()
+
+    # hole itself
+    holeSegId = clone(shellSegId)
+    toDelete.append(holeSegId)
+
+    subtract(holeSegId, solidifiedSegId)
+    subtract(holeSegId, mergedLeafletsCappedSegId)
+    removeIslands(holeSegId)
+
+    allLeafletSurfacePolyData = valveModel.createValveSurface(
+      planePosition, planeNormal, kernelSizeMm,
+      mergeMode=slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MASK,
+      segmentIds=[mergedLeafletsSegId, holeSegId],
+      smoothInZDirection=True
+    )
+  for segID in toDelete:
+    segmentationNode.RemoveSegment(segID)
+  return allLeafletSurfacePolyData
