@@ -647,6 +647,10 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         labelsMarkupNode.AddObserver(vtk.vtkCommand.ModifiedEvent,
                                      lambda caller, event, valveId=inputValveIds[inputValveIndex]:
                                      self.onAnnulusLabelMarkupModified(valveId)))
+      self.annulusLabelsMarkupNodeObservers[inputValveIndex].append(
+        labelsMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                                     lambda caller, event, valveId=inputValveIds[inputValveIndex]:
+                                     self.onAnnulusLabelMarkupModified(valveId)))
     self.updateValveSequenceBrowserWidget()
 
   def updateValveSequenceBrowserWidget(self):
@@ -756,7 +760,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
 
     self.measurementTree.resizeColumnToContents(0)
-  
+
   def computeAllPhaseMetrics(self):
     heartValveMeasurementNode = self.getHeartValveMeasurementNode()
     valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
@@ -768,7 +772,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       valveBrowserNode.SetSelectedItemNumber(timePointIndex)
       messages += self.logic.computeMetrics(heartValveMeasurementNode)
     valveBrowserNode.SetSelectedItemNumber(originalIndex)
-    
+
     self.computeStatusTextEdit.plainText = '\n'.join(messages)
 
     # Not sure why but it seems that the initial hiding of columns has no effect and we have to
