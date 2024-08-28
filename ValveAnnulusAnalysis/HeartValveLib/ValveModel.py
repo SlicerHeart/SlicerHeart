@@ -850,6 +850,7 @@ class ValveModel:
       if annulusMarkupIndex<0:
         return
       self.valveLabelsNode.RemoveNthControlPoint(annulusMarkupIndex)
+      self.valveLabelsNode.Modified()
 
     def setAnnulusMarkupLabel(self, label, position):
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
