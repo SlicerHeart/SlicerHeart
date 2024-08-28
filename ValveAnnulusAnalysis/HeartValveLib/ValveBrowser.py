@@ -75,14 +75,15 @@ class ValveBrowser:
       heartValveNode = self.valveBrowserNode.GetProxyNode(self.valveBrowserNode.GetMasterSequenceNode())
       return heartValveNode
 
-    def addTimePoint(self, indexValue):
+    def addTimePoint(self, indexValue, valveName="HeartValve"):
       heartValveSequenceNode = self.heartValveSequenceNode
 
       if heartValveSequenceNode.GetNumberOfDataNodes() == 0:
+        valveName = slicer.mrmlScene.GetUniqueNameByString(valveName)
         logging.debug("Did not find valve node, create a new one")
         heartValveNode = slicer.vtkMRMLScriptedModuleNode()
         heartValveNode.SetHideFromEditors(False)  # allow it to appear in subject hierarchy and node selectors
-        heartValveNode.SetName(slicer.mrmlScene.GetUniqueNameByString("HeartValve"))
+        heartValveNode.SetName(valveName)
         heartValveNode.SetAttribute("ModuleName", "HeartValve")
         slicer.mrmlScene.AddNode(heartValveNode)
         heartValveSequenceNode.SetDataNodeAtValue(heartValveNode, indexValue)
@@ -90,6 +91,7 @@ class ValveBrowser:
         slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
         # Create new heart valve model from the valve model sequence proxy node
         heartValveNode = self.heartValveNode
+        heartValveNode.SetName(valveName)
         HeartValves.getValveModel(heartValveNode)
         self.moveNodeToValveBrowserFolder(heartValveNode)
       else:

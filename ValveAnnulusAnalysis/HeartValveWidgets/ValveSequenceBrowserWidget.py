@@ -250,7 +250,7 @@ class ValveSequenceBrowserWidget:
       logging.info(f"Add time point")
       if not volumeSequenceIndexValue:
         raise RuntimeError("Failed to add time point, could not get volume sequence")
-      self.valveBrowser.addTimePoint(volumeSequenceIndexValue)
+      self.valveBrowser.addTimePoint(volumeSequenceIndexValue, self.valveBrowser.valveBrowserNode.GetName())
       self.heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
 
     self.updateGUIFromMRML()
