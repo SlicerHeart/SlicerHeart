@@ -1402,6 +1402,10 @@ class ValveSegmentationTest(ScriptedLoadableModuleTest):
     self.widget.ui.heartValveBrowserSelector.setCurrentNode(self.browserNode)
 
     # Iterate through the sequence and remove each item
+    if self.browserNode.GetNumberOfItems() < 2:
+      logging.error("Test requires at least 2 items in the sequence")
+      return False
+
     for i in range(self.browserNode.GetNumberOfItems()):
       self.browserNode.SetSelectedItemNumber(i)
       self.widget.onRemoveSegmentationButtonClicked()
@@ -1424,6 +1428,15 @@ class ValveSegmentationTest(ScriptedLoadableModuleTest):
     self.widget.onAddSegmentationButtonClicked()
     self.widget.onAddValveRoiButtonClicked()
     self.widget.onClippingModelUseAsEditorMaskClicked()
+
+    segmentation = self.widget.valveModel.getLeafletSegmentationNode()
+    if not segmentation:
+      logging.error("No segmentation found")
+      return
+    if segmentation.GetSegmentation().GetNumberOfSegments() != 1:
+      slicer.util.errorDisplay(
+        f"Unexpected number of segments {segmentation.GetSegmentation().GetNumberOfSegments()} instead of 2")
+      return
 
   def test_ValveSegmentation_Sequence(self):
     self.browserNode.SetSelectedItemNumber(0)
