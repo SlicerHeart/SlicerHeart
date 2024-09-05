@@ -966,43 +966,48 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     """
     slicer.mrmlScene.Clear(0)
 
+    self.valveVolumeSequenceBrowser = self.loadValveSampleData(sampleDataName = "Mitral")
+
   def runTest(self):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
     self.test_Mitral()
+    self.test_Aortic()
 
   def test_Mitral(self):
+    valveAnnulusAnalysisGui = slicer.modules.ValveAnnulusAnalysisWidget
+    self.heartValveBrowserNode = valveAnnulusAnalysisGui.ui.heartValveBrowserSelector.addNode()
+
     import numpy as np
 
     self.delayDisplay("Start test_Mitral.")
 
     slicer.util.selectModule('ValveAnnulusAnalysis')
-    slicer.mrmlScene.Clear(0)
     slicer.app.processEvents()
 
     # Common between all valves
-    valveVolumeSequenceBrowser = self.loadValveSampleData(sampleDataName = "Mitral")
     cardiacCyclePhase = "mid-systole"
-    analyzedFrame = 5
     probePosition = "TTE apical"
+    valveType = "mitral"
 
     # -------------------------------------------
     self.delayDisplay("Define mitral valve")
 
-    valveType = "mitral"
-
     # Get this setting the valve orientation sliders and then calling:
     #   arrayFromTransformMatrix(getNode('AxialSliceToRasTransform'))
     # then replace translation values by valve center position
-    axialSliceToRasTransformMatrixArray = np.array([[-0.9868942 , -0.0809964 , -0.13957089,  -9.8],
+    axialSliceToRasTransformMatrixArray = np.array([
+        [-0.9868942 , -0.0809964 , -0.13957089,  -9.8],
         [-0.15818841,  0.65649567,  0.73755669,  -9.9],
         [ 0.03188845,  0.74996838, -0.66070422,  13.7],
         [ 0.        ,  0.        ,  0.        ,  1.        ]])
 
+
     # Get this by copying `AnnulusContourMarkup` points to new closed curve node `CC`,
     # resample to 12 control points, and call:  arrayFromMarkupsControlPoints(getNode("CC"))
-    annulusMarkupControlPointsArray = np.array([[ 86.98819733,  84.78613281,  99.99595642],
+    annulusMarkupControlPointsArray = np.array([
+        [ 86.98819733,  84.78613281,  99.99595642],
         [ 87.25099182,  92.59313202,  96.04943085],
         [ 91.62657166, 100.28668976,  95.93429565],
         [ 99.54394531, 103.84978485,  97.02439117],
@@ -1013,26 +1018,65 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
         [111.96864319,  75.6263504 ,  92.28639984],
         [104.68697357,  72.24358368,  95.78388977],
         [ 98.42464447,  73.57678986, 101.90380859],
-        [ 91.8348999 ,  78.74420166, 104.18357086]])
+        [ 91.8348999 ,  78.74420166, 104.18357086]
+        ])
 
-    self.runSingleCase(valveVolumeSequenceBrowser, cardiacCyclePhase, analyzedFrame, probePosition,
+    analyzedFrame = 5
+    self.runSingleCase(self.valveVolumeSequenceBrowser, cardiacCyclePhase, analyzedFrame, probePosition,
                        valveType, axialSliceToRasTransformMatrixArray, annulusMarkupControlPointsArray)
 
-    # -------------------------------------------
-    self.delayDisplay("Define aortic valve (needed for additional valve quantification metrics")
+    annulusMarkupControlPointsArray = np.array([
+        [87.24764147491025,   84.88706670737565, 100.12486271115256],
+        [86.76681082786808,   92.47491454299224,  93.31991338690447],
+        [90.77637953823361,  100.06069485455528,  94.4198678303726 ],
+        [99.6505556804849,   103.90832342899871,  96.47194101186545],
+        [108.37462655851719, 103.01181134187098,  95.55523893648467],
+        [115.91622972835299,  98.89828314199092,  93.31283523876996],
+        [119.29093789211909,  90.90980422124345,  92.78906250515676],
+        [117.0944188642662,   82.30288144361978,  91.4009854482324 ],
+        [112.75891090512965,  74.96626165261362,  90.98602426094786],
+        [104.02038743952518,  71.99752687124698,  94.98181036145459],
+        [97.61549643264212,   73.28475034162071, 100.69455197826119],
+        [92.43985482522082,  79.01178281624864,  103.34057479198324]
+        ])
 
+    analyzedFrame = 24
+    self.runSingleCase(self.valveVolumeSequenceBrowser, cardiacCyclePhase, analyzedFrame, probePosition,
+                       valveType, axialSliceToRasTransformMatrixArray, annulusMarkupControlPointsArray)
+
+    self.delayDisplay("Completed test_Mitral.")
+
+  def test_Aortic(self):
+    valveAnnulusAnalysisGui = slicer.modules.ValveAnnulusAnalysisWidget
+    self.heartValveBrowserNode = valveAnnulusAnalysisGui.ui.heartValveBrowserSelector.addNode()
+
+    import numpy as np
+
+    self.delayDisplay("Start test_Aortic.")
+
+    slicer.util.selectModule('ValveAnnulusAnalysis')
+    slicer.app.processEvents()
+
+    # Common between all valves
+    cardiacCyclePhase = "mid-systole"
+    probePosition = "TTE apical"
     valveType = "aortic"
+
+    # -------------------------------------------
+    self.delayDisplay("Define aortic valve")
 
     # Get this setting the valve orientation sliders and then calling:
     #   arrayFromTransformMatrix(getNode('AxialSliceToRasTransform_1'))
-    axialSliceToRasTransformMatrixArray = np.array([[-0.79650815,  0.12000408, -0.59259969, 13.088414  ],
+    axialSliceToRasTransformMatrixArray = np.array([
+      [-0.79650815,  0.12000408, -0.59259969, 13.088414  ],
        [ 0.05817409,  0.99076903,  0.12244386, -1.09962848],
        [ 0.60182299,  0.06305333, -0.79613622, 26.9744882 ],
        [ 0.        ,  0.        ,  0.        ,  1.        ]])
 
     # Get this by copying `AnnulusContourMarkup` points to new closed curve node `CC`,
     # resample to 12 control points, and call:  arrayFromMarkupsControlPoints(getNode("CC"))
-    annulusMarkupControlPointsArray = np.array([[ 87.46756744,  79.60205078, 104.07534027],
+    annulusMarkupControlPointsArray = np.array([
+       [ 87.46756744,  79.60205078, 104.07534027],
        [ 93.12380981,  77.26019287, 104.3655014 ],
        [ 97.81135559,  73.91616058, 102.28562927],
        [ 99.61608124,  69.64796448,  98.37429047],
@@ -1043,12 +1087,31 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
        [ 79.13238525,  69.24201202,  89.41408539],
        [ 77.02110291,  73.69961548,  93.07071686],
        [ 77.78422546,  77.62684631,  97.65192413],
-       [ 81.85909271,  79.77548218, 101.64229584]])
-
-    self.runSingleCase(valveVolumeSequenceBrowser, cardiacCyclePhase, analyzedFrame, probePosition,
+       [ 81.85909271,  79.77548218, 101.64229584]
+       ])
+    analyzedFrame = 5
+    self.runSingleCase(self.valveVolumeSequenceBrowser, cardiacCyclePhase, analyzedFrame, probePosition,
                        valveType, axialSliceToRasTransformMatrixArray, annulusMarkupControlPointsArray)
 
-    self.delayDisplay("Completed test_Mitral.")
+    annulusMarkupControlPointsArray = np.array([
+       [ 99.06072036606591, 66.76962402156143,  95.04010256715353  ],
+       [ 94.54263497210358, 63.703036581032556, 90.29506546364776  ],
+       [ 89.9567024230366,  62.53853856176393,  87.27035722766847  ],
+       [ 82.84905796462583, 63.50898719645261,  85.13467753986419  ],
+       [ 78.16684960338218, 67.50735327941044,  86.81692004070561  ],
+       [ 76.21692245463584, 72.38806095160338,  90.4746590977632   ],
+       [ 76.09617998850793, 76.7076031684951,   94.39563486796946  ],
+       [ 78.01371647706137, 79.19176674356933,  97.49711451611478  ],
+       [ 83.72543241359858, 80.99407077937738,  101.58800251918217 ],
+       [ 89.38005949091624, 80.82862374940436,  103.84494893348253 ],
+       [ 93.1144315625748,  78.08531071265323,  102.91308514779152 ],
+       [ 95.25182061907623, 75.4254206141699,   101.37756150443366 ]
+       ])
+    analyzedFrame = 24
+    self.runSingleCase(self.valveVolumeSequenceBrowser, cardiacCyclePhase, analyzedFrame, probePosition,
+                       valveType, axialSliceToRasTransformMatrixArray, annulusMarkupControlPointsArray)
+
+    self.delayDisplay("Completed test_Aortic.")
 
   def loadValveSampleData(self, sampleDataName):
     """Returns sequence browser node"""
@@ -1065,7 +1128,6 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     valveVolumeSequence = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLSequenceNode")
     sequencesLogic = slicer.util.getModuleLogic('Sequences')
     valveVolumeSequenceBrowser = sequencesLogic.GetFirstBrowserNodeForSequenceNode(valveVolumeSequence)
-    #valveVolume = valveVolumeSequenceBrowser.GetProxyNode(valveVolumeSequence)
 
     return valveVolumeSequenceBrowser
 
@@ -1087,9 +1149,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
     # -------------------------------------------
     self.delayDisplay("Setup heart valve node")
 
-    heartValveBrowserNode = valveAnnulusAnalysisGui.ui.heartValveBrowserSelector.addNode()
-
-    valveAnnulusAnalysisGui.ui.heartValveBrowserSelector.setCurrentNode(heartValveBrowserNode)
+    valveAnnulusAnalysisGui.ui.heartValveBrowserSelector.setCurrentNode(self.heartValveBrowserNode)
     valveAnnulusAnalysisGui.ui.valveTypeSelector.currentText = valveType
 
     # -------------------------------------------
@@ -1130,7 +1190,7 @@ class ValveAnnulusAnalysisTest(ScriptedLoadableModuleTest):
         slicer.app.processEvents()
         time.sleep(0.1)
 
-    valveBrowser = HeartValveLib.HeartValves.getValveBrowser(heartValveBrowserNode)
+    valveBrowser = HeartValveLib.HeartValves.getValveBrowser(self.heartValveBrowserNode)
     self.assertIsNotNone(valveBrowser)
 
     # Jump to the slice positions and orientations prescribed for this test.
