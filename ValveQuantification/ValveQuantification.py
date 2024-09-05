@@ -1065,6 +1065,7 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
                        ["PM", [-88.52909851074219, -95.75225830078125, 95.63932800292969], 16.6],
                        ["AL", [-116.85599517822266, -81.13494110107422, 92.84961700439453], None]]
 
+    browserNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLSequenceBrowserNode")
     self.runSingleCase(presetName, valveNodes, referencePoints)
 
   def runSingleCase(self, presetName, valveNodes, referencePoints):
@@ -1082,32 +1083,31 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
     for nodeSelectorIndex, heartValveNode in enumerate(valveNodes):
       valveQuantificationGui.inputValveNodeSelectors[nodeSelectorIndex].setCurrentNode(heartValveNode)
 
+    valveBrowserNode = valveQuantificationGui.valveSequenceBrowserWidget.valveBrowser.valveBrowserNode
+
     self.delayDisplay("Set reference points.")
     valveQuantificationGui.fieldsCollapsibleButton.collapsed = False
-    for pointLabel, pointCoordinate, sliderPosition in referencePoints:
-      self.delayDisplay(f"Define reference point {pointLabel}")
 
-      # Find reference point index
-      foundPoint = False
-      for pointIndex in range(len(valveQuantificationGui.inputReferenceNameLabels)):
-        if valveQuantificationGui.inputReferenceNameLabels[pointIndex].text == f"{pointLabel} point":
-          foundPoint = True
-          break
-      self.assertTrue(foundPoint, f"Reference point {pointLabel} not found")
+    for index in range(valveBrowserNode.GetNumberOfItems()):
+      valveBrowserNode.SetSelectedItemNumber(index)
 
-      #valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].checked = True
-      slicer.app.processEvents()
-      valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].click()
-      slicer.app.processEvents()
-      if sliderPosition is not None:
-        valveQuantificationGui.inputReferenceValueSliders[pointIndex].value = sliderPosition
-
-      #valveQuantificationGui.inputReferencePointPlaceWidgets = []
-      #valveQuantificationGui.inputReferenceResetButtons = []
-      #valveQuantificationGui.inputReferenceValueSliders[pointIndex].value += 5 + pointIndex * 0.3
-
-      # slicer.modules.ValveQuantificationWidget.inputReferenceRequiredCheckBoxes[0].click()
-      # slicer.modules.ValveQuantificationWidget.inputReferenceValueSliders[0].value = 93
+      for pointLabel, pointCoordinate, sliderPosition in referencePoints:
+        self.delayDisplay(f"Define reference point {pointLabel}")
+  
+        # Find reference point index
+        foundPoint = False
+        for pointIndex in range(len(valveQuantificationGui.inputReferenceNameLabels)):
+          if valveQuantificationGui.inputReferenceNameLabels[pointIndex].text == f"{pointLabel} point":
+            foundPoint = True
+            break
+        self.assertTrue(foundPoint, f"Reference point {pointLabel} not found")
+  
+        #valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].checked = True
+        slicer.app.processEvents()
+        valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].click()
+        slicer.app.processEvents()
+        if sliderPosition is not None:
+          valveQuantificationGui.inputReferenceValueSliders[pointIndex].value = sliderPosition
 
     self.delayDisplay("Compute results.")
     valveQuantificationGui.outputCollapsibleButton.collapsed = False
