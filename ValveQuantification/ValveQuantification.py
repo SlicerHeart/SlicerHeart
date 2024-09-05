@@ -1029,6 +1029,7 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
     """
     self.setUp()
     self.test_ValveQuantificationMitral()
+    self.test_ValveQuantificationOutput()
 
   def getHeartValveNode(self, nameFragment):
     """Find heart valve node in the scene that contins the specified name fragment in its name"""
@@ -1114,3 +1115,9 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
     valveQuantificationGui.outputCollapsibleButton.collapsed = False
 
     self.delayDisplay("Completed test_ValveQuantificationMitral.")
+
+  def test_ValveQuantificationOutput(self):
+    self.delayDisplay("Start test_ValveQuantificationOutput.")
+    valveQuantificationGui = slicer.modules.ValveQuantificationWidget
+    valveQuantificationGui.computeAllButton.click()
+    self.delayDisplay("Completed test_ValveQuantificationOutput.")
