@@ -1424,31 +1424,31 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
   "io": {
     "in_file": "../data/slice5.7/GroundTruth_meas/postprocess/SNR6V60/", #path to file to unwrap
     "savepath": "../results/slice5.7/SNR6V60_30ms/", #path to folder where to save results
-    "write_checkpoints": false,
-    "write_xdmf": true
+    "write_checkpoints": False,
+    "write_xdmf": True
   },
   "realizations": {
-    "apply": true,
+    "apply": True,
     "seed_init": 100,
     "total_number": 50,
-    "save_all_errors": true
+    "save_all_errors": True
   },
   "unwrapping": {
     "Temporal": {
-      "apply": true,
+      "apply": True,
       "t_ref": 0,
       "path_addon": "temporal/"
     },
     "lap3d": {
-      "apply": true,
+      "apply": True,
       "path_addon": "lap3d/"
     },
     "lap4d": {
-      "apply": true,
+      "apply": True,
       "path_addon": "lap4d/"
     },
     "Probability": {
-      "apply": true,
+      "apply": True,
       "nlow": 10,
       "nhigh": 10,
       "t_low": 0.32,
@@ -1458,8 +1458,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
       "path_addon": "prob/"
     },
     "omme": {
-      "apply": true,
-      "apply_to_previous": false,
+      "apply": True,
+      "apply_to_previous": False,
       "high_venc": 126,
       "mid_venc": 38,
       "highvenc_file": "../data/slice5.7/GroundTruth_meas/",
@@ -1467,20 +1467,20 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
       "path_addon": "omme/"
     },
     "lee": {
-      "apply": false,
-      "apply_to_previous": false,
+      "apply": False,
+      "apply_to_previous": False,
       "highvenc_file": "../data/slice5.7/GroundTruth_meas/",
       "lowvenc_file": "../data/slice5.7/GroundTruth_meas/postprocess/SNR12V60_s100/",
       "path_addon": "lee/"
     }
   },
   "eval": {
-    "apply": true,
-    "eval_omme": false,
+    "apply": True,
+    "eval_omme": False,
     "ground_file": "../data/slice5.7/GroundTruth_meas/",
     "method": "error",
-    "lumen": true,
-    "save_errors": true
+    "lumen": True,
+    "save_errors": True
   },
   "mesh": {
     "mesh_type": "slice",
