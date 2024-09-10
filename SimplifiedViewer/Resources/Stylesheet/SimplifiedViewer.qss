@@ -1,27 +1,27 @@
 /* Set the background color */
 QWidget {
-    background-color: #323232;
+    background-color: palette(Base);
     font-size: 28px;
 }
 
 /* Set the font and text color for QLabel */
 QLabel {
-    color: #FFFFFF;
+    color: palette(Text);
 }
 
 /* Set the background color and text color for QPushButton */
 QAbstractButton {
-    background-color: #6B0002;
-    color: #FFFFFF;
+    background-color: palette(Button);
+    color: palette(Light);
     padding: 20px 20px;
     border-radius: 0px;
 }
 
 /* Set the hover and pressed state for QPushButton */
 QAbstractButton:hover {
-    background-color: #870000;
+    background-color: palette(Mid);
 }
 
 QAbstractButton:pressed {
-    background-color: #4F0001;
+    background-color: palette(Dark);
 }

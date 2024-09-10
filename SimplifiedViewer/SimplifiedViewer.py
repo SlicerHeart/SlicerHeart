@@ -107,6 +107,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
 
+        if self.parent.isEntered:
+            self.enter()
+
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
         self.removeObservers()
@@ -173,13 +176,51 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         settings.setValue('SimplifiedViewer/FullInterfaceVisible', visible)
         self.updateViewerWidgets()
 
+        stylesheet = ""
+        palette = qt.QPalette()
         if not visible:
+            base = "#0c0c14"
+            alternateBase = "#000000"
+            button = "#3c94b4"
+            light = "#d5e8ec"
+            midLight = "#8cbccb"
+            mid = "#73b0c2"
+            dark = "#215163"
+            paletteColors = {
+                qt.QPalette.Window : base,
+                qt.QPalette.WindowText : light,
+                qt.QPalette.Base : base,
+                qt.QPalette.AlternateBase : alternateBase,
+                qt.QPalette.ToolTipBase : light,
+                qt.QPalette.ToolTipText : alternateBase,
+                #qt.QPalette.PlaceholderText : light, # Qt 6.0
+                qt.QPalette.Text : light,
+                qt.QPalette.Button : button,
+                qt.QPalette.ButtonText : light,
+                qt.QPalette.BrightText : mid,
+
+                qt.QPalette.Light : light,
+                qt.QPalette.Midlight : midLight,
+                qt.QPalette.Mid : mid,
+                qt.QPalette.Dark : dark,
+                qt.QPalette.Shadow : base,
+
+                qt.QPalette.Highlight : button,
+                #qt.QPalette.Accent : button, # Qt 6.6
+                qt.QPalette.HighlightedText : midLight,
+
+                qt.QPalette.Link : midLight,
+                qt.QPalette.LinkVisited : dark,
+            }
+            for role, color in paletteColors.items():
+                palette.setColor(role, qt.QColor(color))
+            
             stylesheetPath = self.resourcePath("Stylesheet/SimplifiedViewer.qss")
             with open(stylesheetPath, 'r') as f:
                 stylesheet = f.read()
-                slicer.app.setStyleSheet(stylesheet)
-        else:
-            slicer.app.setStyleSheet("")
+
+        slicer.app.setPalette(palette)
+        slicer.app.setStyleSheet(stylesheet)
 
     def getFull3DSlicerInterfaceVisible(self):
         # Get the full 3D Slicer interface
