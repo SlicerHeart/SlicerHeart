@@ -17,9 +17,12 @@ QAbstractButton {
     border-radius: 0px;
 }
 
-/* Set the hover and pressed state for QPushButton */
-QAbstractButton:hover {
+QAbstractButton:checked {
     background-color: palette(Mid);
+}
+
+QAbstractButton:hover {
+    background-color: palette(MidLight);
 }
 
 QAbstractButton:pressed {

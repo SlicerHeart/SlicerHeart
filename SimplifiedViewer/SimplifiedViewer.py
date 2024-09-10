@@ -184,7 +184,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             button = "#3c94b4"
             light = "#d5e8ec"
             midLight = "#8cbccb"
-            mid = "#73b0c2"
+            mid = "#2F738C"
             dark = "#215163"
             paletteColors = {
                 qt.QPalette.Window : base,
@@ -197,7 +197,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 qt.QPalette.Text : light,
                 qt.QPalette.Button : button,
                 qt.QPalette.ButtonText : light,
-                qt.QPalette.BrightText : mid,
+                qt.QPalette.BrightText : midLight,
 
                 qt.QPalette.Light : light,
                 qt.QPalette.Midlight : midLight,
@@ -205,9 +205,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 qt.QPalette.Dark : dark,
                 qt.QPalette.Shadow : base,
 
-                qt.QPalette.Highlight : button,
+                qt.QPalette.Highlight : midLight,
                 #qt.QPalette.Accent : button, # Qt 6.6
-                qt.QPalette.HighlightedText : midLight,
+                qt.QPalette.HighlightedText : dark,
 
                 qt.QPalette.Link : midLight,
                 qt.QPalette.LinkVisited : dark,
