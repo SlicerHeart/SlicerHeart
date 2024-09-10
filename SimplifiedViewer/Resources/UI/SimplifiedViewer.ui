@@ -12,13 +12,6 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QPushButton" name="toggleFullInterfaceButton">
-     <property name="text">
-      <string>Toggle full 3D Slicer interface</string>
-     </property>
-    </widget>
-   </item>
-   <item>
     <widget class="QPushButton" name="loadSampleDataButton">
      <property name="text">
       <string>Load sample data</string>
@@ -64,6 +57,13 @@
        </widget>
       </item>
      </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="toggleFullInterfaceButton">
+     <property name="text">
+      <string>Toggle full 3D Slicer interface</string>
+     </property>
     </widget>
    </item>
    <item>
