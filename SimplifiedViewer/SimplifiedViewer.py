@@ -28,7 +28,7 @@ class SimplifiedViewer(ScriptedLoadableModule):
         self.parent.title = _("Simplified Viewer")
         # TODO: set categories (folders where the module shows up in the module selector)
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
-        self.parent.dependencies = []  # TODO: add here list of module names that this module requires
+        self.parent.dependencies = []
         self.parent.contributors = ["Kyle Sunderland (PerkLab)", "Andras Lasso (PerkLab)"]
         self.parent.helpText = _("Simplified viewer module for SlicerHeart.")
         # TODO: replace with organization, grant and thanks
@@ -181,12 +181,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         else:
             slicer.app.setStyleSheet("")
 
-        # Disable slice annotations
-        if not visible:
-            sliceAnnotations = slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations
-            sliceAnnotations.sliceViewAnnotationsEnabled = False
-            sliceAnnotations.updateSliceViewFromGUI()
-
     def getFull3DSlicerInterfaceVisible(self):
         # Get the full 3D Slicer interface
         return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
@@ -214,6 +208,13 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                     viewNode.SetBackgroundColor2(0,0,0)
                     viewNode.SetBoxVisible(False)
                     HeartValveLib.HeartValves.setHeartOrientationmarker(viewNode.GetID())
+
+        # Disable slice annotations
+        if not full3DSlicerInterfaceVisible:
+            if slicer.modules.DataProbeInstance.infoWidget:
+                sliceAnnotations = slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations
+                sliceAnnotations.sliceViewAnnotationsEnabled = False
+                sliceAnnotations.updateSliceViewFromGUI()
 
     def onLayoutChanged(self):
         """
