@@ -8,6 +8,8 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/Icons/LayoutFourUpView.png
+  Resources/Icons/LayoutConventionalView.png
   Resources/UI/${MODULE_NAME}.ui
   Resources/Stylesheet/${MODULE_NAME}.qss
   )
