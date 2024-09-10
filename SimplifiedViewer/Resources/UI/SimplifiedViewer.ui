@@ -19,6 +19,54 @@
     </widget>
    </item>
    <item>
+    <widget class="QPushButton" name="loadSampleDataButton">
+     <property name="text">
+      <string>Load sample data</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="qMRMLSequenceBrowserPlayWidget" name="sequenceBrowserWidget">
+     <property name="RecordingControlsVisible">
+      <bool>false</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="resetViewsButton">
+     <property name="text">
+      <string>Reset views</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="label">
+     <property name="text">
+      <string>View layout:</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="widget" native="true">
+     <layout class="QGridLayout" name="gridLayout">
+      <item row="0" column="0">
+       <widget class="QPushButton" name="conventionalViewButton">
+        <property name="text">
+         <string>Conventional</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QPushButton" name="fourUpViewButton">
+        <property name="text">
+         <string>Four-up</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
@@ -40,7 +88,29 @@
    <header>qMRMLWidget.h</header>
    <container>1</container>
   </customwidget>
+  <customwidget>
+   <class>qMRMLSequenceBrowserPlayWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSequenceBrowserPlayWidget.h</header>
+  </customwidget>
  </customwidgets>
  <resources/>
- <connections/>
+ <connections>
+  <connection>
+   <sender>SimplifiedViewer</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>sequenceBrowserWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>162</x>
+     <y>155</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>162</x>
+     <y>88</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
 </ui>

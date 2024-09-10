@@ -85,8 +85,17 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # in batch mode, without a graphical user interface.
         self.logic = SimplifiedViewerLogic()
 
+        # Widget updates
+        playbackSpinBox = self.ui.sequenceBrowserWidget.findChild("QDoubleSpinBox", "doubleSpinBox_VcrPlaybackRate")
+        playbackSpinBox.visible = False
+        self.ui.sequenceBrowserWidget.RecordingControlsVisible = False
+
         # Connections
         self.ui.toggleFullInterfaceButton.connect('clicked(bool)', self.toggleFull3DSlicerInterfaceVisible)
+        self.ui.loadSampleDataButton.connect('clicked(bool)', self.onLoadSampleDataButtonClicked)
+        self.ui.resetViewsButton.connect('clicked()', self.onResetViewsButtonClicked)
+        self.ui.conventionalViewButton.connect('clicked(bool)', self.onConventionalViewButtonClicked)
+        self.ui.fourUpViewButton.connect('clicked(bool)', self.onFourUpViewButtonClicked)
 
         layoutManager = slicer.app.layoutManager()
         layoutManager.connect('layoutChanged(int)', self.onLayoutChanged)
@@ -164,6 +173,20 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         settings.setValue('SimplifiedViewer/FullInterfaceVisible', visible)
         self.updateViewerWidgets()
 
+        if not visible:
+            stylesheetPath = self.resourcePath("Stylesheet/SimplifiedViewer.qss")
+            with open(stylesheetPath, 'r') as f:
+                stylesheet = f.read()
+                slicer.app.setStyleSheet(stylesheet)
+        else:
+            slicer.app.setStyleSheet("")
+
+        # Disable slice annotations
+        if not visible:
+            sliceAnnotations = slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations
+            sliceAnnotations.sliceViewAnnotationsEnabled = False
+            sliceAnnotations.updateSliceViewFromGUI()
+
     def getFull3DSlicerInterfaceVisible(self):
         # Get the full 3D Slicer interface
         return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
@@ -173,20 +196,72 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Update the viewer widgets to match the current full 3D Slicer interface visibility.
         Customizes the appearance of the viewers.
         """
+        import HeartValveLib
         full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
         layoutManager = slicer.app.layoutManager()
         for viewWidget in layoutManager.viewWidgets():
             if isinstance(viewWidget, slicer.qMRMLSliceWidget):
                 viewWidget.setSliceOffsetSliderOrientation(qt.Qt.Vertical if not full3DSlicerInterfaceVisible else qt.Qt.Horizontal)
                 viewWidget.sliceController().setVisible(full3DSlicerInterfaceVisible)
+                sliceLogic = viewWidget.sliceLogic()
+                sliceViewNode = sliceLogic.GetSliceNode()
+                HeartValveLib.HeartValves.setHeartOrientationmarker(sliceViewNode.GetID())
             elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
                 viewWidget.threeDController().setVisible(full3DSlicerInterfaceVisible)
-    
+                if not full3DSlicerInterfaceVisible:
+                    viewNode = viewWidget.mrmlViewNode()
+                    viewNode.SetBackgroundColor(0,0,0)
+                    viewNode.SetBackgroundColor2(0,0,0)
+                    viewNode.SetBoxVisible(False)
+                    HeartValveLib.HeartValves.setHeartOrientationmarker(viewNode.GetID())
+
     def onLayoutChanged(self):
         """
         Called when the layout is changed. This is used to update the viewer widgets
         """
         self.updateViewerWidgets()
+
+    def onLoadSampleDataButtonClicked(self):
+        """
+        Load sample data
+        """
+        with slicer.util.RenderBlocker():
+            slicer.mrmlScene.Clear()
+            import SampleData
+            SampleData.SampleDataLogic().downloadSample("Mitral")
+
+            browserNode = slicer.util.getNode("Mitral_US_1 browser")
+            self.ui.sequenceBrowserWidget.setMRMLSequenceBrowserNode(browserNode)
+
+            volumeNode = slicer.util.getNode("Mitral_US_1")
+            volumeRenderingLogic = slicer.modules.volumerendering.logic()
+            displayNode = volumeRenderingLogic.CreateDefaultVolumeRenderingNodes(volumeNode)
+            displayNode.GetVolumePropertyNode().Copy(volumeRenderingLogic.GetPresetByName("US-Red-Tinge"))
+
+            slicer.app.layoutManager().resetThreeDViews()
+            self.onResetViewsButtonClicked()
+
+    def onResetViewsButtonClicked(self):
+        """
+        Reset the view position and orientation
+        """
+        slicer.app.layoutManager().resetThreeDViews()
+        slicer.app.layoutManager().resetSliceViews()
+
+    def onConventionalViewButtonClicked(self):
+        """
+        Set the layout to the conventional view
+        """
+        layoutManager = slicer.app.layoutManager()
+        layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView)
+
+    def onFourUpViewButtonClicked(self):
+        """
+        Set the layout to the four up view
+        """
+        layoutManager = slicer.app.layoutManager()
+        layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
+
 
 #
 # SimplifiedViewerLogic
