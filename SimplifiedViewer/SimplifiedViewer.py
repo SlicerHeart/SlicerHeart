@@ -25,20 +25,14 @@ class SimplifiedViewer(ScriptedLoadableModule):
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        self.parent.title = _("SimplifiedViewer")  # TODO: make this more human readable by adding spaces
+        self.parent.title = _("Simplified Viewer")
         # TODO: set categories (folders where the module shows up in the module selector)
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
         self.parent.dependencies = []  # TODO: add here list of module names that this module requires
-        self.parent.contributors = ["Kyle Sunderland (PerkLab)", "Andras Lasso (PerkLab)"]  # TODO: replace with "Firstname Lastname (Organization)"
-        # TODO: update with short description of the module and a link to online module documentation
-        # _() function marks text as translatable to other languages
-        self.parent.helpText = _("""
-Simplified viewer module for SlicerHeart.
-""")
+        self.parent.contributors = ["Kyle Sunderland (PerkLab)", "Andras Lasso (PerkLab)"]
+        self.parent.helpText = _("Simplified viewer module for SlicerHeart.")
         # TODO: replace with organization, grant and thanks
-        self.parent.acknowledgementText = _("""
-This file was originally developed by Kyle Sunderland (PerkLab), Andras Lasso (PerkLab).
-""")
+        self.parent.acknowledgementText = _("This file was originally developed by Kyle Sunderland (PerkLab), Andras Lasso (PerkLab).")
 
 
 #
@@ -93,6 +87,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Connections
         self.ui.toggleFullInterfaceButton.connect('clicked(bool)', self.toggleFull3DSlicerInterfaceVisible)
+
+        layoutManager = slicer.app.layoutManager()
+        layoutManager.connect('layoutChanged(int)', self.onLayoutChanged)
 
         # These connections ensure that we update parameter node when scene is closed
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
@@ -165,11 +162,31 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setPythonConsoleVisible(visible)
         settings = qt.QSettings()
         settings.setValue('SimplifiedViewer/FullInterfaceVisible', visible)
+        self.updateViewerWidgets()
 
     def getFull3DSlicerInterfaceVisible(self):
         # Get the full 3D Slicer interface
         return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
 
+    def updateViewerWidgets(self):
+        """
+        Update the viewer widgets to match the current full 3D Slicer interface visibility.
+        Customizes the appearance of the viewers.
+        """
+        full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
+        layoutManager = slicer.app.layoutManager()
+        for viewWidget in layoutManager.viewWidgets():
+            if isinstance(viewWidget, slicer.qMRMLSliceWidget):
+                viewWidget.setSliceOffsetSliderOrientation(qt.Qt.Vertical if not full3DSlicerInterfaceVisible else qt.Qt.Horizontal)
+                viewWidget.sliceController().setVisible(full3DSlicerInterfaceVisible)
+            elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
+                viewWidget.threeDController().setVisible(full3DSlicerInterfaceVisible)
+    
+    def onLayoutChanged(self):
+        """
+        Called when the layout is changed. This is used to update the viewer widgets
+        """
+        self.updateViewerWidgets()
 
 #
 # SimplifiedViewerLogic
