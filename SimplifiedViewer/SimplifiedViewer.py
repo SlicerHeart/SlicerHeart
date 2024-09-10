@@ -88,7 +88,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Widget updates
         playbackSpinBox = self.ui.sequenceBrowserWidget.findChild("QDoubleSpinBox", "doubleSpinBox_VcrPlaybackRate")
         playbackSpinBox.visible = False
-        self.ui.sequenceBrowserWidget.RecordingControlsVisible = False
 
         self.ui.conventionalViewButton.text = ""
         self.ui.conventionalViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutConventionalView.png"))
@@ -169,6 +168,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.setFull3DSlicerInterfaceVisible(not self.getFull3DSlicerInterfaceVisible())
 
     def setFull3DSlicerInterfaceVisible(self, visible: bool):
+        settings = qt.QSettings()
+        settings.setValue('SimplifiedViewer/FullInterfaceVisible', visible)
+
         # Set the full 3D Slicer interface visibility
         slicer.util.setToolbarsVisible(visible)
         slicer.util.setMenuBarsVisible(visible)
@@ -178,13 +180,26 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setDataProbeVisible(visible)
         slicer.util.setStatusBarVisible(visible)
         slicer.util.setPythonConsoleVisible(visible)
-        settings = qt.QSettings()
-        settings.setValue('SimplifiedViewer/FullInterfaceVisible', visible)
-        self.updateViewerWidgets()
 
+        # Update widgets with the new display properties
+        self.updateViewerWidgets()
+        self.updateApplicationPalette()
+        self.updateApplicationStylesheet()
+
+    def getFull3DSlicerInterfaceVisible(self):
+        return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
+
+    def updateApplicationStylesheet(self):
         stylesheet = ""
+        if not self.getFull3DSlicerInterfaceVisible():       
+            stylesheetPath = self.resourcePath("Stylesheet/SimplifiedViewer.qss")
+            with open(stylesheetPath, 'r') as f:
+                stylesheet = f.read()
+        slicer.app.setStyleSheet(stylesheet)
+
+    def updateApplicationPalette(self):
         palette = qt.QPalette()
-        if not visible:
+        if not self.getFull3DSlicerInterfaceVisible():
             base = "#0c0c14"
             alternateBase = "#000000"
             button = "#3c94b4"
@@ -220,17 +235,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             }
             for role, color in paletteColors.items():
                 palette.setColor(role, qt.QColor(color))
-            
-            stylesheetPath = self.resourcePath("Stylesheet/SimplifiedViewer.qss")
-            with open(stylesheetPath, 'r') as f:
-                stylesheet = f.read()
-
         slicer.app.setPalette(palette)
-        slicer.app.setStyleSheet(stylesheet)
-
-    def getFull3DSlicerInterfaceVisible(self):
-        # Get the full 3D Slicer interface
-        return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
 
     def updateViewerWidgets(self):
         """
@@ -280,6 +285,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
             browserNode = slicer.util.getNode("Mitral_US_1 browser")
             self.ui.sequenceBrowserWidget.setMRMLSequenceBrowserNode(browserNode)
+            self.ui.sequenceBrowserSeekWidget.setMRMLSequenceBrowserNode(browserNode)
 
             volumeNode = slicer.util.getNode("Mitral_US_1")
             volumeRenderingLogic = slicer.modules.volumerendering.logic()

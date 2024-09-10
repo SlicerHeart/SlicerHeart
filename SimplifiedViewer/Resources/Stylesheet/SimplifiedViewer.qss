@@ -1,30 +1,62 @@
 /* Set the background color */
-QWidget {
+QWidget
+{
     background-color: palette(Base);
     font-size: 28px;
 }
 
 /* Set the font and text color for QLabel */
-QLabel {
+QLabel
+{
     color: palette(Text);
 }
 
 /* Set the background color and text color for QPushButton */
-QAbstractButton {
+QAbstractButton
+{
     background-color: palette(Button);
     color: palette(Light);
     padding: 20px 20px;
     border-radius: 0px;
 }
 
-QAbstractButton:checked {
+QAbstractButton:checked
+{
     background-color: palette(Mid);
 }
 
-QAbstractButton:hover {
+QAbstractButton:hover
+{
     background-color: palette(MidLight);
 }
 
-QAbstractButton:pressed {
+QAbstractButton:pressed
+{
     background-color: palette(Dark);
+}
+
+QSlider:horizontal
+{
+    height: 30px;
+    margin-left: 10px;
+    margin-right: 10px;
+    selection-background-color: palette(Light);
+}
+
+QSlider::handle:horizontal
+{
+    background: palette(Button);
+    border: 1px solid palette(Base);
+    width: 20px;
+    height: 20px;
+    margin: -10px 10px;
+    border-radius: 10px;
+}
+
+QSlider::groove:horizontal
+{
+    margin: 3px;
+    height: 3px;
+    border: 3px solid;
+    background: palette(Light)
 }

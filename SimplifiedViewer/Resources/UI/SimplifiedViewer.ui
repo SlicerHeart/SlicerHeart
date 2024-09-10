@@ -26,6 +26,9 @@
     </widget>
    </item>
    <item>
+    <widget class="qMRMLSequenceBrowserSeekWidget" name="sequenceBrowserSeekWidget"/>
+   </item>
+   <item>
     <widget class="QPushButton" name="resetViewsButton">
      <property name="text">
       <string>Reset views</string>
@@ -98,6 +101,11 @@
    <extends>qMRMLWidget</extends>
    <header>qMRMLSequenceBrowserPlayWidget.h</header>
   </customwidget>
+  <customwidget>
+   <class>qMRMLSequenceBrowserSeekWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSequenceBrowserSeekWidget.h</header>
+  </customwidget>
  </customwidgets>
  <resources/>
  <connections>
@@ -114,6 +122,22 @@
     <hint type="destinationlabel">
      <x>162</x>
      <y>88</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>SimplifiedViewer</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>sequenceBrowserSeekWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>162</x>
+     <y>155</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>162</x>
+     <y>104</y>
     </hint>
    </hints>
   </connection>
