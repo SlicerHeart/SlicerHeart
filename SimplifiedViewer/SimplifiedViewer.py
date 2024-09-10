@@ -90,6 +90,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         playbackSpinBox.visible = False
         self.ui.sequenceBrowserWidget.RecordingControlsVisible = False
 
+        self.ui.conventionalViewButton.text = ""
+        self.ui.conventionalViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutConventionalView.png"))
+
+        self.ui.fourUpViewButton.text = ""
+        self.ui.fourUpViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutFourUpView.png"))
+
         # Connections
         self.ui.toggleFullInterfaceButton.connect('clicked(bool)', self.toggleFull3DSlicerInterfaceVisible)
         self.ui.loadSampleDataButton.connect('clicked(bool)', self.onLoadSampleDataButtonClicked)
