@@ -10,6 +10,12 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
   Resources/Icons/LayoutFourUpView.png
   Resources/Icons/LayoutConventionalView.png
+  Resources/Icons/SeekFirst.svg
+  Resources/Icons/SeekPrevious.svg
+  Resources/Icons/SeekPlay.svg
+  Resources/Icons/SeekNext.svg
+  Resources/Icons/SeekLast.svg
+  Resources/Icons/SeekLoop.svg
   Resources/UI/${MODULE_NAME}.ui
   Resources/Stylesheet/${MODULE_NAME}.qss
   )

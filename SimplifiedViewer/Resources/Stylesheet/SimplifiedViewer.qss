@@ -45,21 +45,19 @@ QAbstractButton:pressed
     background-color: palette(Dark);
 }
 
-QSlider:horizontal
+QSlider
 {
     height: 30px;
+    width: 30px;
     margin-left: 10px;
     margin-right: 10px;
     selection-background-color: palette(Light);
 }
 
-QSlider:handle:horizontal
+QSlider:handle
 {
     background: palette(Button);
     border: 1px solid palette(Base);
-    width: 10px;
-    height: 20px;
-    margin: -10px 10px;
 }
 
 QSlider:handle:hover
@@ -70,6 +68,18 @@ QSlider:handle:hover
 QSlider:handle:pressed
 {
     background: palette(Dark);
+}
+
+QSlider:handle:horizontal
+{
+    width: 10px;
+    height: 20px;
+    margin: -10px 10px;
+}
+
+QSlider:handle:disabled
+{
+    background-color: palette(Dark);
 }
 
 QSlider:groove:horizontal
@@ -87,11 +97,6 @@ QSlider:add-page:horizontal
 QSlider:sub-page:horizontal
 {
     background: palette(Mid);
-}
-
-QSlider:handle:disabled
-{
-    background-color: palette(Dark);
 }
 
 QSlider:groove:disabled

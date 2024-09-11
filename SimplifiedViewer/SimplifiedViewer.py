@@ -89,6 +89,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         playbackSpinBox = self.ui.sequenceBrowserWidget.findChild("QDoubleSpinBox", "doubleSpinBox_VcrPlaybackRate")
         playbackSpinBox.visible = False
 
+        self.ui.sequenceBrowserSeekWidget.label_IndexName.hide()
+
         self.ui.conventionalViewButton.text = ""
         self.ui.conventionalViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutConventionalView.png"))
 
@@ -101,6 +103,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.resetViewsButton.connect('clicked()', self.onResetViewsButtonClicked)
         self.ui.conventionalViewButton.connect('clicked(bool)', self.onConventionalViewButtonClicked)
         self.ui.fourUpViewButton.connect('clicked(bool)', self.onFourUpViewButtonClicked)
+        self.ui.sequenceBrowserWidget.pushButton_VcrPlayPause.connect('clicked(bool)', self.updateSvgIcons)
 
         layoutManager = slicer.app.layoutManager()
         layoutManager.connect('layoutChanged(int)', self.onLayoutChanged)
@@ -184,8 +187,52 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Update widgets with the new display properties
         self.updateViewerWidgets()
         self.updateApplicationPalette()
+        self.updateSvgIcons()
         self.updateApplicationStylesheet()
 
+    def updateSvgIcons(self):
+        """
+        Update the SVG icons for the sequence browser playback buttons
+        """
+        playbackActive = False
+        if self.ui.sequenceBrowserWidget.pushButton_VcrPlayPause.isChecked():
+            playbackActive = True
+
+        palette = slicer.app.palette()
+        sizePx = 32
+        color = palette.color(qt.QPalette.Text)
+
+        # Vectors and icons by Css.gg: https://github.com/astrit/css.gg?ref=svgrepo.com
+        # MIT License via https://www.svgrepo.com
+        widgetPathMap = {
+            self.ui.sequenceBrowserWidget.pushButton_VcrFirst:     "Icons/SeekFirst.svg",
+            self.ui.sequenceBrowserWidget.pushButton_VcrPrevious:  "Icons/SeekPrevious.svg",
+            self.ui.sequenceBrowserWidget.pushButton_VcrPlayPause: "Icons/SeekPlay.svg" if not playbackActive else "Icons/SeekPause.svg",
+            self.ui.sequenceBrowserWidget.pushButton_VcrNext:      "Icons/SeekNext.svg",
+            self.ui.sequenceBrowserWidget.pushButton_VcrLast:      "Icons/SeekLast.svg",
+            self.ui.sequenceBrowserWidget.pushButton_VcrLoop:      "Icons/SeekLoop.svg",
+        }
+        for widget, iconPath in widgetPathMap.items():
+            icon = self.loadSvg(self.resourcePath(iconPath), sizePx, color)
+            widget.setIcon(qt.QIcon(icon))
+            widget.setIconSize(qt.QSize(sizePx, sizePx))
+
+    def loadSvg(self, svg_filename: str, size: int, color: qt.QColor) -> qt.QIcon:
+        """
+        https://stackoverflow.com/questions/75440429/qt-render-svg-with-custom-color/75443894#75443894
+        """
+        # Load the SVG file into string
+        with open(svg_filename, 'r') as file:
+            svg_data = file.read()
+
+        # Replace #000000 with the desired color
+        svg_data = svg_data.replace("#000000", color.name())
+
+        # Create a QIcon from the QPixmap
+        pixmap = qt.QPixmap()
+        pixmap.loadFromData(svg_data.encode())
+        return qt.QIcon(pixmap.scaledToHeight(size, qt.Qt.KeepAspectRatio))
+        
     def getFull3DSlicerInterfaceVisible(self):
         return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
 
