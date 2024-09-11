@@ -191,7 +191,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def updateApplicationStylesheet(self):
         stylesheet = ""
-        if not self.getFull3DSlicerInterfaceVisible():       
+        if not self.getFull3DSlicerInterfaceVisible():
             stylesheetPath = self.resourcePath("Stylesheet/SimplifiedViewer.qss")
             with open(stylesheetPath, 'r') as f:
                 stylesheet = f.read()

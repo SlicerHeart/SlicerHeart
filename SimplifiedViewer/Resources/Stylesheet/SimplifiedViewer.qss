@@ -20,6 +20,16 @@ QAbstractButton
     border-radius: 0px;
 }
 
+QAbstractButton:focus {
+    border: none;
+    outline: none;
+}
+
+QAbstractButton:disabled
+{
+    background-color: palette(Dark);
+}
+
 QAbstractButton:checked
 {
     background-color: palette(Mid);
@@ -43,20 +53,58 @@ QSlider:horizontal
     selection-background-color: palette(Light);
 }
 
-QSlider::handle:horizontal
+QSlider:handle:horizontal
 {
     background: palette(Button);
     border: 1px solid palette(Base);
-    width: 20px;
+    width: 10px;
     height: 20px;
     margin: -10px 10px;
-    border-radius: 10px;
 }
 
-QSlider::groove:horizontal
+QSlider:handle:hover
+{
+    background: palette(MidLight);
+}
+
+QSlider:handle:pressed
+{
+    background: palette(Dark);
+}
+
+QSlider:groove:horizontal
 {
     margin: 3px;
     height: 3px;
     border: 3px solid;
-    background: palette(Light)
+}
+
+QSlider:add-page:horizontal
+{
+    background: palette(Dark);
+}
+
+QSlider:sub-page:horizontal
+{
+    background: palette(Mid);
+}
+
+QSlider:handle:disabled
+{
+    background-color: palette(Dark);
+}
+
+QSlider:groove:disabled
+{
+    background-color: palette(Dark);
+}
+
+QSlider:add-page:horizontal:disabled
+{
+    background: palette(Dark);
+}
+
+QSlider:sub-page:horizontal:disabled
+{
+    background: palette(Dark);
 }
