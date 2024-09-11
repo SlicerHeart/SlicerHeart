@@ -90,6 +90,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         playbackSpinBox.visible = False
 
         self.ui.sequenceBrowserSeekWidget.label_IndexName.hide()
+        self.ui.sequenceBrowserWidget.pushButton_VcrRecord.hide()
+        self.ui.sequenceBrowserWidget.pushButton_Snapshot.hide()
 
         self.ui.conventionalViewButton.text = ""
         self.ui.conventionalViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutConventionalView.png"))
@@ -227,11 +229,13 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Replace #000000 with the desired color
         svg_data = svg_data.replace("#000000", color.name())
+        svg_data = svg_data.replace('width="24"', f'width="{size}"')
+        svg_data = svg_data.replace('height="24"', f'height="{size}"')
 
         # Create a QIcon from the QPixmap
-        pixmap = qt.QPixmap()
+        pixmap = qt.QPixmap(500,500)
         pixmap.loadFromData(svg_data.encode())
-        return qt.QIcon(pixmap.scaledToHeight(size, qt.Qt.KeepAspectRatio))
+        return qt.QIcon(pixmap.scaledToHeight(size, qt.Qt.SmoothTransformation))
         
     def getFull3DSlicerInterfaceVisible(self):
         return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
