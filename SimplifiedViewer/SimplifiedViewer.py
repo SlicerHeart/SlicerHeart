@@ -90,6 +90,10 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         playbackSpinBox.visible = False
 
         self.ui.sequenceBrowserSeekWidget.label_IndexName.hide()
+        # change widget margins
+        self.ui.sequenceBrowserWidget.layout().setContentsMargins(0, 0, 0, 0)
+        self.ui.sequenceBrowserSeekWidget.layout().setContentsMargins(0, 0, 0, 0)
+
         self.ui.sequenceBrowserWidget.pushButton_VcrRecord.hide()
         self.ui.sequenceBrowserWidget.pushButton_Snapshot.hide()
 
@@ -129,6 +133,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node exists and observed
         self.initializeParameterNode()
         self.setFull3DSlicerInterfaceVisible(self.getFull3DSlicerInterfaceVisible())
+        self.updateSequenceBrowserWidgets()
 
     def exit(self) -> None:
         """Called each time the user opens a different module."""
@@ -334,17 +339,22 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             import SampleData
             SampleData.SampleDataLogic().downloadSample("Mitral")
 
-            browserNode = slicer.util.getNode("Mitral_US_1 browser")
-            self.ui.sequenceBrowserWidget.setMRMLSequenceBrowserNode(browserNode)
-            self.ui.sequenceBrowserSeekWidget.setMRMLSequenceBrowserNode(browserNode)
+            self.updateSequenceBrowserWidgets()
 
             volumeNode = slicer.util.getNode("Mitral_US_1")
             volumeRenderingLogic = slicer.modules.volumerendering.logic()
             displayNode = volumeRenderingLogic.CreateDefaultVolumeRenderingNodes(volumeNode)
             displayNode.GetVolumePropertyNode().Copy(volumeRenderingLogic.GetPresetByName("US-Red-Tinge"))
 
-            slicer.app.layoutManager().resetThreeDViews()
             self.onResetViewsButtonClicked()
+    
+    def updateSequenceBrowserWidgets(self):
+        try:
+            browserNode = slicer.util.getNode("Mitral_US_1 browser")
+            self.ui.sequenceBrowserWidget.setMRMLSequenceBrowserNode(browserNode)
+            self.ui.sequenceBrowserSeekWidget.setMRMLSequenceBrowserNode(browserNode)
+        except:
+            pass
 
     def onResetViewsButtonClicked(self):
         """
