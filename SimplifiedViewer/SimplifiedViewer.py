@@ -52,7 +52,6 @@ class SimplifiedViewerParameterNode:
 # SimplifiedViewerWidget
 #
 
-
 class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     """Uses ScriptedLoadableModuleWidget base class, available at:
     https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
@@ -191,6 +190,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setStatusBarVisible(visible)
         slicer.util.setPythonConsoleVisible(visible)
 
+        self.reloadCollapsibleButton.visible = visible
+
         # Update widgets with the new display properties
         self.updateViewerWidgets()
         self.updateApplicationPalette()
@@ -241,7 +242,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         pixmap = qt.QPixmap(500,500)
         pixmap.loadFromData(svg_data.encode())
         return qt.QIcon(pixmap.scaledToHeight(size, qt.Qt.SmoothTransformation))
-        
+
     def getFull3DSlicerInterfaceVisible(self):
         return slicer.util.settingsValue('SimplifiedViewer/FullInterfaceVisible', False, converter=slicer.util.toBool)
 
@@ -347,7 +348,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             displayNode.GetVolumePropertyNode().Copy(volumeRenderingLogic.GetPresetByName("US-Red-Tinge"))
 
             self.onResetViewsButtonClicked()
-    
+
     def updateSequenceBrowserWidgets(self):
         try:
             browserNode = slicer.util.getNode("Mitral_US_1 browser")
