@@ -454,6 +454,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     if not parameterNode:
       return
     self.updateGUIFromValveVolumeBrowser()
+    self.updateGuiEnabled()
 
   def updateParameterNodeFromGUI(self):
     parameterNode = self.getParameterNode()
@@ -477,6 +478,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
     heartValveNode = valveBrowser.heartValveNode if valveBrowser else None
     self.onHeartValveSelect(heartValveNode)
+    self.updateGuiEnabled()
 
   def onHeartValveSelect(self, node):
     # Go to display step before switching to another valve (but only if the current node is valid
@@ -687,9 +689,11 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def onValveBrowserNodeModified(self):
     self.updateGUIFromHeartValveNode()
+    self.updateGuiEnabled()
 
   def onHeartValveNodeModified(self):
     self.updateGUIFromHeartValveNode()
+    self.updateGuiEnabled()
 
   def updateGUIFromValveVolumeBrowser(self):
     self.valveSequenceBrowserWidget.updateGUIFromMRML()
