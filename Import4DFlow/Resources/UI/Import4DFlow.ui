@@ -12,53 +12,6 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_3">
-     <item>
-      <widget class="QLabel" name="label_2">
-       <property name="text">
-        <string>Flow field:</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
-       <property name="toolTip">
-        <string>Pick the output to the algorithm.</string>
-       </property>
-       <property name="nodeTypes">
-        <stringlist notr="true">
-         <string>vtkMRMLTransformNode</string>
-        </stringlist>
-       </property>
-       <property name="showChildNodeTypes">
-        <bool>false</bool>
-       </property>
-       <property name="noneEnabled">
-        <bool>true</bool>
-       </property>
-       <property name="addEnabled">
-        <bool>true</bool>
-       </property>
-       <property name="removeEnabled">
-        <bool>true</bool>
-       </property>
-       <property name="editEnabled">
-        <bool>true</bool>
-       </property>
-       <property name="renameEnabled">
-        <bool>true</bool>
-       </property>
-       <property name="noneDisplay">
-        <string>(Create new)</string>
-       </property>
-       <property name="SlicerParameterName" stdset="0">
-        <string notr="true">outputTransform</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item>
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
      <property name="text">
       <string>Convert image to flow field</string>
@@ -85,7 +38,7 @@
         </item>
        </layout>
       </item>
-      <item row="1" column="0" colspan="2">
+      <item row="2" column="0" colspan="2">
        <widget class="QPushButton" name="convertButton">
         <property name="enabled">
          <bool>false</bool>
@@ -95,6 +48,49 @@
         </property>
         <property name="text">
          <string>Convert</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Output flow field:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
+        <property name="toolTip">
+         <string>Pick the output to the algorithm.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLTransformNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="noneDisplay">
+         <string>(Create new)</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string notr="true">outputFlowField</string>
         </property>
        </widget>
       </item>
@@ -159,439 +155,6 @@
     </widget>
    </item>
    <item>
-    <widget class="ctkCollapsibleButton" name="outputsCollapsibleButton_2">
-     <property name="text">
-      <string>Flow field analysis</string>
-     </property>
-     <layout class="QFormLayout" name="formLayout_5">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_6">
-        <property name="text">
-         <string>Measurement plane:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="inputPlaneSelector">
-        <property name="toolTip">
-         <string>Result with inverted threshold will be written into this volume</string>
-        </property>
-        <property name="nodeTypes">
-         <stringlist notr="true">
-          <string>vtkMRMLMarkupsPlaneNode</string>
-         </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
-        </property>
-        <property name="noneEnabled">
-         <bool>false</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="removeEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">inputPlane</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_11">
-        <property name="text">
-         <string>Mask:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="qMRMLSegmentSelectorWidget" name="inputMaskSegmentSelectorWidget">
-        <property name="toolTip">
-         <string>If a segment is selected then flow field outside that segment will be set to zero.</string>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_3">
-        <property name="text">
-         <string>Sampling distance:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="ctkSliderWidget" name="samplingDistanceSliderWidget">
-        <property name="toolTip">
-         <string>Distance between sampling points in the plane. Used for Speed profile and Streamlines.</string>
-        </property>
-        <property name="singleStep">
-         <double>0.100000000000000</double>
-        </property>
-        <property name="minimum">
-         <double>-100.000000000000000</double>
-        </property>
-        <property name="maximum">
-         <double>500.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>0.500000000000000</double>
-        </property>
-        <property name="suffix">
-         <string>mm</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">samplingDistance</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QLabel" name="label_4">
-        <property name="text">
-         <string>Speed threshold:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="ctkSliderWidget" name="speedThresholdSliderWidget">
-        <property name="toolTip">
-         <string>Samples below this threshold will be excluded from the time plot computation.</string>
-        </property>
-        <property name="suffix">
-         <string>m/s</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">speedThreshold</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0" colspan="2">
-       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_3">
-        <property name="title">
-         <string>Speed profile</string>
-        </property>
-        <layout class="QFormLayout" name="formLayout_7">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_7">
-           <property name="text">
-            <string>Output speed profile model:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
-           <property name="toolTip">
-            <string>Model node that contains speed vectors as point data</string>
-           </property>
-           <property name="nodeTypes">
-            <stringlist notr="true">
-             <string>vtkMRMLModelNode</string>
-            </stringlist>
-           </property>
-           <property name="showChildNodeTypes">
-            <bool>false</bool>
-           </property>
-           <property name="baseName">
-            <string>Speed profile model</string>
-           </property>
-           <property name="noneEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="addEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="removeEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="editEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="renameEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">outputSpeedProfileModel</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_9">
-           <property name="text">
-            <string>Output speed profile table:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <layout class="QHBoxLayout" name="horizontalLayout">
-           <item>
-            <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
-             <property name="toolTip">
-              <string>Plot series that contain average speed value vs time.</string>
-             </property>
-             <property name="nodeTypes">
-              <stringlist notr="true">
-               <string>vtkMRMLTableNode</string>
-              </stringlist>
-             </property>
-             <property name="showChildNodeTypes">
-              <bool>false</bool>
-             </property>
-             <property name="baseName">
-              <string>Speed profile table</string>
-             </property>
-             <property name="noneEnabled">
-              <bool>true</bool>
-             </property>
-             <property name="addEnabled">
-              <bool>true</bool>
-             </property>
-             <property name="removeEnabled">
-              <bool>true</bool>
-             </property>
-             <property name="editEnabled">
-              <bool>true</bool>
-             </property>
-             <property name="renameEnabled">
-              <bool>true</bool>
-             </property>
-             <property name="selectNodeUponCreation">
-              <bool>true</bool>
-             </property>
-             <property name="SlicerParameterName" stdset="0">
-              <string notr="true">outputSpeedProfileTable</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QPushButton" name="showPlotButton">
-             <property name="text">
-              <string>Show plot</string>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="5" column="0" colspan="2">
-       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
-        <property name="title">
-         <string>Streamlines</string>
-        </property>
-        <layout class="QFormLayout" name="formLayout">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_5">
-           <property name="text">
-            <string>Maximum length:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="ctkSliderWidget" name="streamlinesMaximumLengthSliderWidget">
-           <property name="toolTip">
-            <string>Distance between sampling points in the plane.</string>
-           </property>
-           <property name="singleStep">
-            <double>0.100000000000000</double>
-           </property>
-           <property name="minimum">
-            <double>-100.000000000000000</double>
-           </property>
-           <property name="maximum">
-            <double>500.000000000000000</double>
-           </property>
-           <property name="value">
-            <double>0.500000000000000</double>
-           </property>
-           <property name="suffix">
-            <string>mm</string>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">streamlinesMaximumLength</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_12">
-           <property name="text">
-            <string>Bidirectional:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QCheckBox" name="checkBox">
-           <property name="text">
-            <string/>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string>streamlinesBidirectional</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="0">
-          <widget class="QLabel" name="label_13">
-           <property name="text">
-            <string>Output streamlines:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="1">
-          <widget class="qMRMLNodeComboBox" name="streamlinesOutputModelSelector">
-           <property name="toolTip">
-            <string>Model node that contains streamlines computed from the input plane. Sampling distance, speed threshold, input mask, maximum length, and bidirectional parameters are taken into account.</string>
-           </property>
-           <property name="nodeTypes">
-            <stringlist notr="true">
-             <string>vtkMRMLModelNode</string>
-            </stringlist>
-           </property>
-           <property name="showChildNodeTypes">
-            <bool>false</bool>
-           </property>
-           <property name="baseName">
-            <string>Streamlines</string>
-           </property>
-           <property name="noneEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="addEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="removeEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="editEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="renameEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">outputStreamlinesModel</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_16">
-           <property name="text">
-            <string>Compute all metrics:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="QCheckBox" name="streamlinesComputeAllMetricsCheckBox">
-           <property name="toolTip">
-            <string>Compute vorticity, velocity vector, etc., which might be useful, but makes centerlines takes 4x more storage space</string>
-           </property>
-           <property name="text">
-            <string/>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string>streamlinesComputeAllMetrics</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="6" column="0" colspan="2">
-       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
-        <property name="title">
-         <string>Speed image</string>
-        </property>
-        <layout class="QFormLayout" name="formLayout_6">
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_14">
-           <property name="text">
-            <string>Output speed image:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="qMRMLNodeComboBox" name="outputSpeedVolumeSelector">
-           <property name="toolTip">
-            <string>Computed speed. It is the magnitude of the velocity vector if &quot;project to measurement plane&quot; is disabled; otherwise it is the component parallel to the measurement plane normal</string>
-           </property>
-           <property name="nodeTypes">
-            <stringlist notr="true">
-             <string>vtkMRMLScalarVolumeNode</string>
-            </stringlist>
-           </property>
-           <property name="hideChildNodeTypes">
-            <stringlist notr="true"/>
-           </property>
-           <property name="baseName">
-            <string>Speed Image</string>
-           </property>
-           <property name="noneEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="editEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="renameEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="interactionNodeSingletonTag">
-            <string notr="true"/>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">outputSpeedVolume</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_15">
-           <property name="text">
-            <string>Project to measurement plane:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QCheckBox" name="checkBox_2">
-           <property name="toolTip">
-            <string>If enabled then a Doppler-like speed volume will be computed, computing the velocity component parallel to the measurement plane normal.</string>
-           </property>
-           <property name="text">
-            <string/>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">speedVolumeProjectedToPlane</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="7" column="0" colspan="2">
-       <widget class="QPushButton" name="sampleFlowFieldButton">
-        <property name="enabled">
-         <bool>true</bool>
-        </property>
-        <property name="toolTip">
-         <string>Compute streamlines and flow field profile</string>
-        </property>
-        <property name="text">
-         <string>Compute</string>
-        </property>
-        <property name="default">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
@@ -614,12 +177,6 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>ctkCollapsibleGroupBox</class>
-   <extends>QGroupBox</extends>
-   <header>ctkCollapsibleGroupBox.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
    <class>ctkComboBox</class>
    <extends>QComboBox</extends>
    <header>ctkComboBox.h</header>
@@ -628,11 +185,6 @@
    <class>ctkPathLineEdit</class>
    <extends>QWidget</extends>
    <header>ctkPathLineEdit.h</header>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>
@@ -644,11 +196,6 @@
    <extends>QWidget</extends>
    <header>qMRMLWidget.h</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSegmentSelectorWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSegmentSelectorWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
@@ -664,120 +211,8 @@
      <y>135</y>
     </hint>
     <hint type="destinationlabel">
-     <x>287</x>
-     <y>29</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>Import4DFlow</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>inputPlaneSelector</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>190</x>
-     <y>452</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>325</x>
-     <y>313</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>Import4DFlow</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>outputSpeedProfileModelSelector</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>232</x>
-     <y>450</y>
-    </hint>
-    <hint type="destinationlabel">
      <x>331</x>
-     <y>439</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>Import4DFlow</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>outputSpeedProfileTableSelector</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>153</x>
-     <y>454</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>331</x>
-     <y>465</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>outputSpeedProfileTableSelector</sender>
-   <signal>currentNodeChanged(bool)</signal>
-   <receiver>showPlotButton</receiver>
-   <slot>setEnabled(bool)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>331</x>
-     <y>465</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>325</x>
-     <y>611</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>Import4DFlow</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>inputMaskSegmentSelectorWidget</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>19</x>
-     <y>5</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>186</x>
-     <y>330</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>Import4DFlow</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>streamlinesOutputModelSelector</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>2</x>
-     <y>276</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>297</x>
-     <y>506</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>Import4DFlow</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>outputSpeedVolumeSelector</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>215</x>
-     <y>728</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>212</x>
-     <y>677</y>
+     <y>89</y>
     </hint>
    </hints>
   </connection>
