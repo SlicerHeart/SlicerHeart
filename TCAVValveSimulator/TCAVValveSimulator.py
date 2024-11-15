@@ -104,6 +104,14 @@ class TCAVValveSimulatorLogic(CardiacDeviceSimulatorLogic):
     except slicer.util.MRMLNodeNotFoundException:
       return None
 
+  def __init__(self, parent=None):
+    super().__init__(parent)
+    self.aorticAnnulusFiducialNode = None
+
+  def setCenterlineNode(self, centerlineCurveNode):
+    super().setCenterlineNode(centerlineCurveNode)
+    self.setAorticAnnulusFiducialNode(self.aorticAnnulusFiducialNode)
+
   def setAorticAnnulusFiducialNode(self, aorticAnnulusNode):
     self.aorticAnnulusFiducialNode = aorticAnnulusNode
 
@@ -117,8 +125,7 @@ class TCAVValveSimulatorLogic(CardiacDeviceSimulatorLogic):
         # fall back to older API
         numberOfCenterLineFiducials = centerLineNode.GetNumberOfFiducials()
 
-    numberOfAorticAnnulusFiducials = 0
-    if self.aorticAnnulusFiducialNode:
+    if centerLineNode and self.aorticAnnulusFiducialNode:
       try:
         # Slicer-4.13 (February 2022) and later
         numberOfAorticAnnulusFiducials = self.aorticAnnulusFiducialNode.GetNumberOfControlPoints()
@@ -126,15 +133,15 @@ class TCAVValveSimulatorLogic(CardiacDeviceSimulatorLogic):
         # fall back to older API
         numberOfAorticAnnulusFiducials = self.aorticAnnulusFiducialNode.GetNumberOfFiducials()
 
-    if numberOfAorticAnnulusFiducials > 0 and numberOfCenterLineFiducials == 0:
-      probeToRasTransformNode = self.getProbeToRasTransform()
-      if probeToRasTransformNode:
-        centerLineNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID()
-                                                    if probeToRasTransformNode else None)
-      aorticAnnulusCentroid = self.getAnnulusCentroidPosition(self.aorticAnnulusFiducialNode)
-      centerLineNode.AddControlPoint(vtk.vtkVector3d(aorticAnnulusCentroid))
-    else:
-      logging.info("Aortic annulus has no points or center line already has more than 0 markups.")
+      if numberOfAorticAnnulusFiducials > 0 and numberOfCenterLineFiducials == 0:
+        probeToRasTransformNode = self.getProbeToRasTransform()
+        if probeToRasTransformNode:
+          centerLineNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID()
+                                                      if probeToRasTransformNode else None)
+        aorticAnnulusCentroid = self.getAnnulusCentroidPosition(self.aorticAnnulusFiducialNode)
+        centerLineNode.AddControlPoint(vtk.vtkVector3d(aorticAnnulusCentroid))
+      else:
+        logging.info("Aortic annulus has no points or center line already has more than 0 markups.")
 
   def getAnnulusCentroidPosition(self, markupsNode):
     return np.mean(np.array(self.getMarkupsPointPositions(markupsNode)), axis=0)
