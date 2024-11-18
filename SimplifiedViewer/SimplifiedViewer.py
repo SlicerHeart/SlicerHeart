@@ -45,8 +45,10 @@ class SimplifiedViewerParameterNode:
     """
     The parameters needed by the module.
     """
-    pass
-
+    selectedNodes: list[slicer.vtkMRMLNode] # Selected nodes to display
+    sequenceBrowserNode: slicer.vtkMRMLSequenceBrowserNode # Sequence browser node
+    clipNode: slicer.vtkMRMLClipNode # Clip node
+    clipPlaneNode: slicer.vtkMRMLMarkupsPlaneNode # Clip plane node
 
 #
 # SimplifiedViewerWidget
@@ -64,10 +66,18 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
+        self.clippingAvailable = False
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
         ScriptedLoadableModuleWidget.setup(self)
+
+        try:
+            slicer.vtkMRMLClipNode
+            self.clippingAvailable = True
+        except:
+            self.clippingAvailable = False
+        logging.info(f"Clipping available: {self.clippingAvailable}")
 
         # Load widget from .ui file (created by Qt Designer).
         # Additional widgets can be instantiated manually and added to self.layout.
@@ -110,6 +120,13 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.fourUpViewButton.connect('clicked(bool)', self.onFourUpViewButtonClicked)
         self.ui.sequenceBrowserWidget.pushButton_VcrPlayPause.connect('clicked(bool)', self.updateSvgIcons)
 
+        self.ui.checkableNodeComboBox.connect('checkedNodesChanged()', self.onSelectedNodesChanged)
+        self.ui.sequenceBrowserSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onSequenceBrowserNodeChanged)
+
+        self.ui.redSliceClipCheckBox.connect('toggled(bool)', self.onClippingSliceChanged)
+        self.ui.greenSliceClipCheckBox.connect('toggled(bool)', self.onClippingSliceChanged)
+        self.ui.yellowSliceClipCheckBox.connect('toggled(bool)', self.onClippingSliceChanged)
+
         layoutManager = slicer.app.layoutManager()
         layoutManager.connect('layoutChanged(int)', self.onLayoutChanged)
 
@@ -137,9 +154,11 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def exit(self) -> None:
         """Called each time the user opens a different module."""
         # Do not react to parameter node changes (GUI will be updated when the user enters into the module)
-        if self._parameterNode:
-            self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
-            self._parameterNodeGuiTag = None
+        self.removeObservers(self.onParameterNodeModified)
+
+    def onParameterNodeModified(self, caller, event) -> None:
+        """Called when the parameter node is modified."""
+        self.updateGUIFromMRML()
 
     def onSceneStartClose(self, caller, event) -> None:
         """Called just before the scene is closed."""
@@ -159,18 +178,40 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.setParameterNode(self.logic.getParameterNode())
 
+        if self.clippingAvailable:
+            if self._parameterNode.clipNode is None:
+                self._parameterNode.clipNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipNode", "SimplifiedViewerClip")
+
+            sliceNodes = [
+                slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeRed"),
+                slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeGreen"),
+                slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeYellow")]
+            for sliceNode in sliceNodes:
+                if self._parameterNode.clipNode.HasClippingNodeID(sliceNode.GetID()):
+                    continue
+                self._parameterNode.clipNode.AddAndObserveClippingNodeID(sliceNode.GetID())
+                self._parameterNode.clipNode.SetClippingNodeState(sliceNode, slicer.vtkMRMLClipNode.ClipOff)                
+
+            if self._parameterNode.clipPlaneNode is None:
+                self._parameterNode.clipPlaneNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", "SimplifiedViewerClippingPlane")
+                self._parameterNode.clipPlaneNode.SetNormal(0, 1.0, 0)
+                self._parameterNode.clipPlaneNode.SetOrigin(0, 0, 0)
+                self._parameterNode.clipPlaneNode.CreateDefaultDisplayNodes()
+                self._parameterNode.clipPlaneNode.SetDisplayVisibility(False)
+                self._parameterNode.clipNode.AddAndObserveClippingNodeID(self._parameterNode.clipPlaneNode.GetID())
+
     def setParameterNode(self, inputParameterNode: Optional[SimplifiedViewerParameterNode]) -> None:
         """
         Set and observe parameter node.
         Observation is needed because when the parameter node is changed then the GUI must be updated immediately.
         """
-        if self._parameterNode:
-            self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
+        oldParameterNode = self._parameterNode
         self._parameterNode = inputParameterNode
+        self.removeObservers(self.onParameterNodeModified)
         if self._parameterNode:
-            # Note: in the .ui file, a Qt dynamic property called "SlicerParameterName" is set on each
-            # ui element that needs connection.
-            self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
+            self.addObserver(inputParameterNode, vtk.vtkCommand.ModifiedEvent, self.onParameterNodeModified)
+        if oldParameterNode != self._parameterNode:
+            self.onParameterNodeModified(None, None)
 
     def toggleFull3DSlicerInterfaceVisible(self):
         # Toggle the full 3D Slicer interface
@@ -191,6 +232,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setPythonConsoleVisible(visible)
 
         self.reloadCollapsibleButton.visible = visible
+        self.ui.setupCollapsibleButton.visible = visible
+
+        self.ui.clippingControlWidget.visible = self.clippingAvailable
 
         # Update widgets with the new display properties
         self.updateViewerWidgets()
@@ -340,22 +384,130 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             import SampleData
             SampleData.SampleDataLogic().downloadSample("Mitral")
 
-            self.updateSequenceBrowserWidgets()
-
             volumeNode = slicer.util.getNode("Mitral_US_1")
             volumeRenderingLogic = slicer.modules.volumerendering.logic()
             displayNode = volumeRenderingLogic.CreateDefaultVolumeRenderingNodes(volumeNode)
             displayNode.GetVolumePropertyNode().Copy(volumeRenderingLogic.GetPresetByName("US-Red-Tinge"))
 
+            self._parameterNode.selectedNodes = [volumeNode]
+            browserNode = slicer.util.getNode("Mitral_US_1 browser")
+            self._parameterNode.sequenceBrowserNode = browserNode
+
             self.onResetViewsButtonClicked()
 
+    def updateGUIFromMRML(self):
+        """
+        Update the GUI from the parameter node
+        """
+        self.updateInputWidgets()
+        self.updateSelectedNodeWidget()
+        self.updateSequenceBrowserWidgets()
+
+    def updateInputWidgets(self):
+        """
+        Update the input widgets
+        """
+        wasBlocking = self.ui.checkableNodeComboBox.blockSignals(True)
+        for node in self.ui.checkableNodeComboBox.uncheckedNodes():
+            self.ui.checkableNodeComboBox.setCheckState(node, qt.Qt.Checked if node in self._parameterNode.selectedNodes else qt.Qt.Unchecked)
+        for node in self.ui.checkableNodeComboBox.checkedNodes():
+            self.ui.checkableNodeComboBox.setCheckState(node, qt.Qt.Checked if node in self._parameterNode.selectedNodes else qt.Qt.Unchecked)
+        self.ui.checkableNodeComboBox.blockSignals(wasBlocking)
+
+        wasBlocking = self.ui.sequenceBrowserSelector.blockSignals(True)
+        self.ui.sequenceBrowserSelector.setCurrentNode(self._parameterNode.sequenceBrowserNode)
+        self.ui.sequenceBrowserSelector.blockSignals(wasBlocking)
+
     def updateSequenceBrowserWidgets(self):
-        try:
-            browserNode = slicer.util.getNode("Mitral_US_1 browser")
-            self.ui.sequenceBrowserWidget.setMRMLSequenceBrowserNode(browserNode)
-            self.ui.sequenceBrowserSeekWidget.setMRMLSequenceBrowserNode(browserNode)
-        except:
-            pass
+        sequenceBrowserNode = self._parameterNode.sequenceBrowserNode if self._parameterNode else None
+        wasBlocking = self.ui.sequenceBrowserSelector.blockSignals(True)
+        self.ui.sequenceBrowserSelector.setCurrentNode(sequenceBrowserNode)
+        self.ui.sequenceBrowserSelector.blockSignals(wasBlocking)
+        self.ui.sequenceBrowserWidget.setMRMLSequenceBrowserNode(sequenceBrowserNode)
+        self.ui.sequenceBrowserWidget.visible = sequenceBrowserNode is not None
+        self.ui.sequenceBrowserSeekWidget.setMRMLSequenceBrowserNode(sequenceBrowserNode)
+        self.ui.sequenceBrowserSeekWidget.visible = sequenceBrowserNode is not None
+
+    def updateSelectedNodeWidget(self):
+        """
+        Update the selected node widget
+        """
+        # remove existing widgets from selectedNodeWidget
+        if self.ui.selectedNodeWidget.layout():
+          for i in range(self.ui.selectedNodeWidget.layout().count()):
+              item = self.ui.selectedNodeWidget.layout().itemAt(i)
+              if item:
+                  item.widget().deleteLater()
+        else:
+            self.ui.selectedNodeWidget.setLayout(qt.QGridLayout())
+
+        if not self._parameterNode:
+            return
+
+        # add new widgets to selectedNodeWidget grid layout
+        row = 0
+        for node in self._parameterNode.selectedNodes:
+            nodeID = node.GetID()
+            displayNode = node.GetDisplayNode()
+
+            column = 0
+
+            label = qt.QLabel(node.GetName())
+            self.ui.selectedNodeWidget.layout().addWidget(label, row, column)
+            column += 1
+
+            visibilityCheckBox = qt.QCheckBox("Visibility")            
+            visibilityCheckBox.connect('toggled(bool)', lambda checked, nodeID=nodeID: self.onVisibilityChanged(checked, nodeID))
+            visibilityCheckBox.checked = node.GetDisplayVisibility()
+            self.ui.selectedNodeWidget.layout().addWidget(visibilityCheckBox, row, column)
+            column += 1
+
+            if self.clippingAvailable:
+                clippingCheckBox = qt.QCheckBox("Clipping")
+                clippingCheckBox.checked = displayNode.GetClipping() if displayNode else False
+                clippingCheckBox.connect('toggled(bool)', lambda checked, nodeID=nodeID: self.onClippingChanged(checked, nodeID))
+
+                self.ui.selectedNodeWidget.layout().addWidget(clippingCheckBox, row, column)
+                column += 1
+
+            row += 1
+    
+    def onVisibilityChanged(self, checked: bool, nodeID: str):
+        """
+        Update the visibility of the node
+        """
+        node = slicer.mrmlScene.GetNodeByID(nodeID)
+        for i in range(node.GetNumberOfDisplayNodes()):
+            displayNode = node.GetNthDisplayNode(i)
+            displayNode.SetVisibility(checked)
+
+    def onClippingChanged(self, checked: bool, nodeID: str):
+        """
+        Update the clipping of the node
+        """
+        node = slicer.mrmlScene.GetNodeByID(nodeID)
+        for i in range(node.GetNumberOfDisplayNodes()):
+            displayNode = node.GetNthDisplayNode(i)
+            displayNode.SetClipping(checked)
+            if checked and displayNode.GetClipNode() is None:
+                displayNode.SetAndObserveClipNodeID(self._parameterNode.clipNode.GetID())
+            if displayNode.IsA("vtkMRMLVolumeRenderingDisplayNode"):
+                displayNode.SetClippingSoftEdgeVoxels(2.0)
+            if displayNode.IsA("vtkMRMLModelDisplayNode") or displayNode.IsA("vtkMRMLSegmentationDisplayNode"):
+                displayNode.SetClippingCapSurface(checked)
+
+    def onSelectedNodesChanged(self):
+        """
+        Update the selected nodes in the parameter node
+        """
+        selectedNodes = self.ui.checkableNodeComboBox.checkedNodes()
+        self._parameterNode.selectedNodes = selectedNodes
+
+    def onSequenceBrowserNodeChanged(self):
+        """
+        Update the sequence browser node in the parameter node
+        """
+        self._parameterNode.sequenceBrowserNode = self.ui.sequenceBrowserSelector.currentNode()
 
     def onResetViewsButtonClicked(self):
         """
@@ -377,7 +529,18 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         layoutManager = slicer.app.layoutManager()
         layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
-
+    
+    def onClippingSliceChanged(self):
+        """
+        Update the clipping visibility
+        """
+        clipNode = self._parameterNode.clipNode
+        redSlice = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeRed")
+        clipNode.SetClippingNodeState(redSlice, slicer.vtkMRMLClipNode.ClipNegativeSpace if self.ui.redSliceClipCheckBox.checked else slicer.vtkMRMLClipNode.ClipOff)
+        greenSlice = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeGreen")
+        clipNode.SetClippingNodeState(greenSlice, slicer.vtkMRMLClipNode.ClipNegativeSpace if self.ui.greenSliceClipCheckBox.checked else slicer.vtkMRMLClipNode.ClipOff)
+        yellowSlice = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeYellow")
+        clipNode.SetClippingNodeState(yellowSlice, slicer.vtkMRMLClipNode.ClipNegativeSpace if self.ui.yellowSliceClipCheckBox.checked else slicer.vtkMRMLClipNode.ClipOff)
 
 #
 # SimplifiedViewerLogic
@@ -401,6 +564,8 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
     def getParameterNode(self):
         return SimplifiedViewerParameterNode(super().getParameterNode())
 
+    def updateNodeVisibility(self):
+        pass
 
 #
 # SimplifiedViewerTest
