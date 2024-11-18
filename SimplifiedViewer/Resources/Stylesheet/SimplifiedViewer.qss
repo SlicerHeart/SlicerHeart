@@ -1,17 +1,23 @@
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 /* Set the background color */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 QWidget
 {
     background-color: palette(Base);
     font-size: 28px;
 }
 
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 /* Set the font and text color for QLabel */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 QLabel
 {
     color: palette(Text);
 }
 
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 /* Set the background color and text color for QPushButton */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 QAbstractButton
 {
     background-color: palette(Button);
@@ -45,6 +51,36 @@ QAbstractButton:pressed
     background-color: palette(Dark);
 }
 
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+/* Set the background color and text color for QCheckBox */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+QCheckBox
+{
+    background-color: None;
+}
+QCheckBox::checked
+{
+    background-color: None;
+}
+QCheckBox:hover
+{
+    background-color: None;
+}
+
+QCheckBox::indicator::checked
+{
+    background-color: palette(MidLight);
+    border: 1px solid palette(Mid)
+}
+QCheckBox::indicator::unchecked
+{
+    background-color: palette(Dark);
+    border: 1px solid palette(Mid)
+}
+
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+/* Set the background color and text color for QSlider */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 QSlider
 {
     height: 30px;
