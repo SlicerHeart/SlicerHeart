@@ -125,21 +125,21 @@
       <item row="1" column="2">
        <widget class="QCheckBox" name="yellowSliceClipCheckBox">
         <property name="text">
-         <string>Yellow slice</string>
+         <string>Sagittal slice</string>
         </property>
        </widget>
       </item>
       <item row="1" column="1">
        <widget class="QCheckBox" name="greenSliceClipCheckBox">
         <property name="text">
-         <string>Green slice</string>
+         <string>Coronal slice</string>
         </property>
        </widget>
       </item>
       <item row="1" column="0">
        <widget class="QCheckBox" name="redSliceClipCheckBox">
         <property name="text">
-         <string>Red slice</string>
+         <string>Axial slice</string>
         </property>
        </widget>
       </item>
