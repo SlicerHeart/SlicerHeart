@@ -47,8 +47,7 @@ class SimplifiedViewerParameterNode:
     """
     selectedNodes: list[slicer.vtkMRMLNode] # Selected nodes to display
     sequenceBrowserNode: slicer.vtkMRMLSequenceBrowserNode # Sequence browser node
-    clipNode: slicer.vtkMRMLClipNode # Clip node
-    clipPlaneNode: slicer.vtkMRMLMarkupsPlaneNode # Clip plane node
+    clipNode: slicer.vtkMRMLNode # Clip node
 
 #
 # SimplifiedViewerWidget
@@ -58,6 +57,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     """Uses ScriptedLoadableModuleWidget base class, available at:
     https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
     """
+    sequenceWidget = None
 
     def __init__(self, parent=None) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -102,15 +102,43 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # change widget margins
         self.ui.sequenceBrowserWidget.layout().setContentsMargins(0, 0, 0, 0)
         self.ui.sequenceBrowserSeekWidget.layout().setContentsMargins(0, 0, 0, 0)
+        labels = self.ui.sequenceBrowserSeekWidget.findChildren("QLabel")
+        for label in labels:
+            label.hide()
 
         self.ui.sequenceBrowserWidget.pushButton_VcrRecord.hide()
         self.ui.sequenceBrowserWidget.pushButton_Snapshot.hide()
+
+        if self.sequenceWidget:
+            self.sequenceWidget.hide()
+            self.sequenceWidget.setParent(None)
+            self.sequenceWidget.deleteLater()
+
+        self.sequenceWidget = qt.QWidget()
+        self.sequenceWidget.setObjectName("sequenceWidget")
+        self.sequenceWidget.setLayout(qt.QVBoxLayout())
+        self.sequenceWidget.layout().setMargin(0)
+        self.sequenceWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
+        self.sequenceWidget.layout().setSpacing(0)
+        self.sequenceWidget.layout().addWidget(self.ui.sequenceBrowserWidget)
+        self.sequenceWidget.layout().addWidget(self.ui.sequenceBrowserSeekWidget)
+        self.sequenceWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
+        self.sequenceWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
+        self.sequenceWidget.setAutoFillBackground(False)
+
+        centralWidget = slicer.util.mainWindow().centralWidget()
+        self.sequenceWidget.setParent(centralWidget)
+        self.sequenceWidget.show()
 
         self.ui.conventionalViewButton.text = ""
         self.ui.conventionalViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutConventionalView.png"))
 
         self.ui.fourUpViewButton.text = ""
         self.ui.fourUpViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutFourUpView.png"))
+
+        self.ui.resetViewsButton.visible = False
+        self.ui.clippingButton.visible = self.clippingAvailable
+        self.ui.clippingPlaneVisibilityButton.visible = self.clippingAvailable
 
         # Connections
         self.ui.toggleFullInterfaceButton.connect('clicked(bool)', self.toggleFull3DSlicerInterfaceVisible)
@@ -121,11 +149,11 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.sequenceBrowserWidget.pushButton_VcrPlayPause.connect('clicked(bool)', self.updateSvgIcons)
 
         self.ui.checkableNodeComboBox.connect('checkedNodesChanged()', self.onSelectedNodesChanged)
+        self.ui.clippingNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onClippingNodeChanged)
         self.ui.sequenceBrowserSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onSequenceBrowserNodeChanged)
 
-        self.ui.redSliceClipCheckBox.connect('toggled(bool)', self.onClippingSliceChanged)
-        self.ui.greenSliceClipCheckBox.connect('toggled(bool)', self.onClippingSliceChanged)
-        self.ui.yellowSliceClipCheckBox.connect('toggled(bool)', self.onClippingSliceChanged)
+        self.ui.clippingButton.connect('clicked(bool)', self.onClippingButtonClicked)
+        self.ui.clippingPlaneVisibilityButton.connect('clicked(bool)', self.onClippingPlaneVisibilityButtonClicked)
 
         layoutManager = slicer.app.layoutManager()
         layoutManager.connect('layoutChanged(int)', self.onLayoutChanged)
@@ -178,28 +206,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.setParameterNode(self.logic.getParameterNode())
 
-        if self.clippingAvailable:
-            if self._parameterNode.clipNode is None:
-                self._parameterNode.clipNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipNode", "SimplifiedViewerClip")
-
-            sliceNodes = [
-                slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeRed"),
-                slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeGreen"),
-                slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeYellow")]
-            for sliceNode in sliceNodes:
-                if self._parameterNode.clipNode.HasClippingNodeID(sliceNode.GetID()):
-                    continue
-                self._parameterNode.clipNode.AddAndObserveClippingNodeID(sliceNode.GetID())
-                self._parameterNode.clipNode.SetClippingNodeState(sliceNode, slicer.vtkMRMLClipNode.ClipOff)                
-
-            if self._parameterNode.clipPlaneNode is None:
-                self._parameterNode.clipPlaneNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", "SimplifiedViewerClippingPlane")
-                self._parameterNode.clipPlaneNode.SetNormal(0, 1.0, 0)
-                self._parameterNode.clipPlaneNode.SetOrigin(0, 0, 0)
-                self._parameterNode.clipPlaneNode.CreateDefaultDisplayNodes()
-                self._parameterNode.clipPlaneNode.SetDisplayVisibility(False)
-                self._parameterNode.clipNode.AddAndObserveClippingNodeID(self._parameterNode.clipPlaneNode.GetID())
-
     def setParameterNode(self, inputParameterNode: Optional[SimplifiedViewerParameterNode]) -> None:
         """
         Set and observe parameter node.
@@ -234,13 +240,14 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.reloadCollapsibleButton.visible = visible
         self.ui.setupCollapsibleButton.visible = visible
 
-        self.ui.clippingControlWidget.visible = self.clippingAvailable
-
         # Update widgets with the new display properties
         self.updateViewerWidgets()
         self.updateApplicationPalette()
         self.updateSvgIcons()
         self.updateApplicationStylesheet()
+
+        self.sequenceWidget.adjustSize()
+        
 
     def updateSvgIcons(self):
         """
@@ -402,17 +409,25 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateInputWidgets()
         self.updateSelectedNodeWidget()
         self.updateSequenceBrowserWidgets()
+        self.updateClippingWidgets()
 
     def updateInputWidgets(self):
         """
         Update the input widgets
         """
+        if not self._parameterNode:
+            return
+
         wasBlocking = self.ui.checkableNodeComboBox.blockSignals(True)
         for node in self.ui.checkableNodeComboBox.uncheckedNodes():
             self.ui.checkableNodeComboBox.setCheckState(node, qt.Qt.Checked if node in self._parameterNode.selectedNodes else qt.Qt.Unchecked)
         for node in self.ui.checkableNodeComboBox.checkedNodes():
             self.ui.checkableNodeComboBox.setCheckState(node, qt.Qt.Checked if node in self._parameterNode.selectedNodes else qt.Qt.Unchecked)
         self.ui.checkableNodeComboBox.blockSignals(wasBlocking)
+
+        wasBlocking = self.ui.clippingNodeSelector.blockSignals(True)
+        self.ui.clippingNodeSelector.setCurrentNode(self._parameterNode.clipNode)
+        self.ui.clippingNodeSelector.blockSignals(wasBlocking)
 
         wasBlocking = self.ui.sequenceBrowserSelector.blockSignals(True)
         self.ui.sequenceBrowserSelector.setCurrentNode(self._parameterNode.sequenceBrowserNode)
@@ -445,56 +460,33 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             return
 
         # add new widgets to selectedNodeWidget grid layout
+        sceneViewNodes = slicer.util.getNodesByClass("vtkMRMLSceneViewNode")
         row = 0
-        for node in self._parameterNode.selectedNodes:
-            nodeID = node.GetID()
-            displayNode = node.GetDisplayNode()
-
+        for sceneViewNode in sceneViewNodes:
             column = 0
 
-            label = qt.QLabel(node.GetName())
-            self.ui.selectedNodeWidget.layout().addWidget(label, row, column)
+            pushButton = qt.QPushButton(sceneViewNode.GetName())
+            pushButton.connect('clicked()', lambda sceneViewNode=sceneViewNode: self.onSceneViewClicked(sceneViewNode))
+            self.ui.selectedNodeWidget.layout().addWidget(pushButton, row, column)
             column += 1
-
-            visibilityCheckBox = qt.QCheckBox("Visibility")            
-            visibilityCheckBox.connect('toggled(bool)', lambda checked, nodeID=nodeID: self.onVisibilityChanged(checked, nodeID))
-            visibilityCheckBox.checked = node.GetDisplayVisibility()
-            self.ui.selectedNodeWidget.layout().addWidget(visibilityCheckBox, row, column)
-            column += 1
-
-            if self.clippingAvailable:
-                clippingCheckBox = qt.QCheckBox("Clipping")
-                clippingCheckBox.checked = displayNode.GetClipping() if displayNode else False
-                clippingCheckBox.connect('toggled(bool)', lambda checked, nodeID=nodeID: self.onClippingChanged(checked, nodeID))
-
-                self.ui.selectedNodeWidget.layout().addWidget(clippingCheckBox, row, column)
-                column += 1
 
             row += 1
     
-    def onVisibilityChanged(self, checked: bool, nodeID: str):
-        """
-        Update the visibility of the node
-        """
-        node = slicer.mrmlScene.GetNodeByID(nodeID)
-        for i in range(node.GetNumberOfDisplayNodes()):
-            displayNode = node.GetNthDisplayNode(i)
-            displayNode.SetVisibility(checked)
+    def updateClippingWidgets(self):
+        if not self._parameterNode:
+            return
+        
+        wasBlocking = self.ui.clippingButton.blockSignals(True)
+        self.ui.clippingButton.checked = self.logic.getClipping()
+        self.ui.clippingButton.blockSignals(wasBlocking)
 
-    def onClippingChanged(self, checked: bool, nodeID: str):
-        """
-        Update the clipping of the node
-        """
-        node = slicer.mrmlScene.GetNodeByID(nodeID)
-        for i in range(node.GetNumberOfDisplayNodes()):
-            displayNode = node.GetNthDisplayNode(i)
-            displayNode.SetClipping(checked)
-            if checked and displayNode.GetClipNode() is None:
-                displayNode.SetAndObserveClipNodeID(self._parameterNode.clipNode.GetID())
-            if displayNode.IsA("vtkMRMLVolumeRenderingDisplayNode"):
-                displayNode.SetClippingSoftEdgeVoxels(2.0)
-            if displayNode.IsA("vtkMRMLModelDisplayNode") or displayNode.IsA("vtkMRMLSegmentationDisplayNode"):
-                displayNode.SetClippingCapSurface(checked)
+        wasBlocking = self.ui.clippingPlaneVisibilityButton.blockSignals(True)
+        self.ui.clippingPlaneVisibilityButton.checked = self.logic.getClippingPlaneVisibility()
+        self.ui.clippingPlaneVisibilityButton.blockSignals(wasBlocking)
+    
+    def onSceneViewClicked(self, sceneViewNode):
+        self.logic.restoreSceneView(sceneViewNode)
+        self.updateGUIFromMRML()
 
     def onSelectedNodesChanged(self):
         """
@@ -502,6 +494,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         selectedNodes = self.ui.checkableNodeComboBox.checkedNodes()
         self._parameterNode.selectedNodes = selectedNodes
+
+    def onClippingNodeChanged(self):
+        """
+        Update the clipping node in the parameter node
+        """
+        self._parameterNode.clipNode = self.ui.clippingNodeSelector.currentNode()
 
     def onSequenceBrowserNodeChanged(self):
         """
@@ -530,22 +528,23 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         layoutManager = slicer.app.layoutManager()
         layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
     
-    def onClippingSliceChanged(self):
+    def onClippingButtonClicked(self):
         """
         Update the clipping visibility
         """
-        clipNode = self._parameterNode.clipNode
-        redSlice = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeRed")
-        clipNode.SetClippingNodeState(redSlice, slicer.vtkMRMLClipNode.ClipNegativeSpace if self.ui.redSliceClipCheckBox.checked else slicer.vtkMRMLClipNode.ClipOff)
-        greenSlice = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeGreen")
-        clipNode.SetClippingNodeState(greenSlice, slicer.vtkMRMLClipNode.ClipNegativeSpace if self.ui.greenSliceClipCheckBox.checked else slicer.vtkMRMLClipNode.ClipOff)
-        yellowSlice = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceNodeYellow")
-        clipNode.SetClippingNodeState(yellowSlice, slicer.vtkMRMLClipNode.ClipNegativeSpace if self.ui.yellowSliceClipCheckBox.checked else slicer.vtkMRMLClipNode.ClipOff)
+        if self._parameterNode and self._parameterNode.clipNode:
+            self.logic.setClipping(self.ui.clippingButton.checked)
+    
+    def onClippingPlaneVisibilityButtonClicked(self):
+        """
+        Update the clipping plane visibility
+        """
+        if self._parameterNode and self._parameterNode.clipNode:
+            self.logic.setClippingPlaneVisibility(self.ui.clippingPlaneVisibilityButton.checked)
 
 #
 # SimplifiedViewerLogic
 #
-
 
 class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
     """This class should implement all the actual
@@ -563,9 +562,71 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
 
     def getParameterNode(self):
         return SimplifiedViewerParameterNode(super().getParameterNode())
+    
+    def getClipping(self):
+        clipNode = self.getParameterNode().clipNode
+        if not clipNode:
+            return False
+        
+        displayNodes = slicer.util.getNodesByClass("vtkMRMLDisplayNode")
+        for displayNode in displayNodes:
+            if displayNode.GetClipNode() == clipNode and displayNode.GetClipping():
+                return True
+        return False
 
-    def updateNodeVisibility(self):
-        pass
+
+    def setClipping(self, enabled: bool):
+        clipNode = self.getParameterNode().clipNode
+        if not clipNode:
+            return
+        
+        displayNodes = slicer.util.getNodesByClass("vtkMRMLDisplayNode")
+        for displayNode in displayNodes:
+            if displayNode.GetClipNode() != clipNode:
+                continue
+            displayNode.SetClipping(enabled)
+
+            if displayNode.IsA("vtkMRMLModelDisplayNode") or displayNode.IsA("vtkMRMLSegmentationDisplayNode"):
+                displayNode.ClippingCapSurfaceOn()
+                displayNode.ClippingOutlineOn()
+
+    def getClippingPlaneVisibility(self):
+        numberOfClippingNodes = self.getParameterNode().clipNode.GetNumberOfClippingNodes()
+        for index in range(numberOfClippingNodes):
+            clippingNode = self.getParameterNode().clipNode.GetNthClippingNode(index)
+            if clippingNode and clippingNode.IsA("vtkMRMLMarkupsNode"):
+                return clippingNode.GetDisplayVisibility()
+        return False
+    
+    def setClippingPlaneVisibility(self, visible: bool):
+        clipNode = self.getParameterNode().clipNode
+        if not clipNode:
+            return
+
+        for index in range(clipNode.GetNumberOfClippingNodes()):
+            clippingNode = clipNode.GetNthClippingNode(index)
+            if not clippingNode or not clippingNode.IsA("vtkMRMLMarkupsNode"):
+                continue
+            clippingNode.SetDisplayVisibility(visible)
+
+    def restoreSceneView(self, sceneViewNode):
+
+        # Preserve clip states
+        # TODO: In the future, we may be able to prevent scene views from modifying these nodes
+        clipping = self.getClipping()
+        planeVisibility = self.getClippingPlaneVisibility()
+
+        with slicer.util.RenderBlocker():
+            layoutManager = slicer.app.layoutManager()
+            currentLayout = layoutManager.layout
+            sceneViewNode.RestoreScene()
+            layoutManager.setLayout(currentLayout)
+
+            # Restore clip states
+            self.setClipping(clipping)
+            self.setClippingPlaneVisibility(planeVisibility)
+
+        slicer.util.forceRenderAllViews()
 
 #
 # SimplifiedViewerTest
