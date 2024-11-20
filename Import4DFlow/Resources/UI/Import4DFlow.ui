@@ -6,15 +6,15 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>378</width>
-    <height>755</height>
+    <width>510</width>
+    <height>661</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
      <property name="text">
-      <string>Convert image to flow field</string>
+      <string>Create flow field from component images</string>
      </property>
      <layout class="QFormLayout" name="formLayout_2">
       <item row="0" column="0">
@@ -38,7 +38,7 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="0" colspan="2">
+      <item row="3" column="0" colspan="2">
        <widget class="QPushButton" name="convertButton">
         <property name="enabled">
          <bool>false</bool>
@@ -47,14 +47,37 @@
          <string>Convert component images to 4D flow field</string>
         </property>
         <property name="text">
-         <string>Convert</string>
+         <string>Create flow field</string>
         </property>
        </widget>
       </item>
       <item row="1" column="0">
+       <widget class="QLabel" name="label_3">
+        <property name="text">
+         <string>Phase unwrapping:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkComboBox" name="unwrappingMethodSelector">
+        <property name="SlicerParameterName" stdset="0">
+         <string>unwrapMode</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton_2">
+     <property name="text">
+      <string>Flow field adjustment</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_3">
+      <item row="1" column="0">
        <widget class="QLabel" name="label_2">
         <property name="text">
-         <string>Output flow field:</string>
+         <string>Flow field:</string>
         </property>
        </widget>
       </item>
@@ -72,10 +95,10 @@
          <bool>false</bool>
         </property>
         <property name="noneEnabled">
-         <bool>true</bool>
+         <bool>false</bool>
         </property>
         <property name="addEnabled">
-         <bool>true</bool>
+         <bool>false</bool>
         </property>
         <property name="removeEnabled">
          <bool>true</bool>
@@ -86,11 +109,87 @@
         <property name="renameEnabled">
          <bool>true</bool>
         </property>
-        <property name="noneDisplay">
-         <string>(Create new)</string>
-        </property>
         <property name="SlicerParameterName" stdset="0">
          <string notr="true">outputFlowField</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_5">
+        <property name="text">
+         <string>Show:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <item>
+         <widget class="QPushButton" name="showFlowFieldButton">
+          <property name="text">
+           <string>Flow</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeType">
+           <enum>QSizePolicy::Fixed</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showMagnitudeVolumeButton">
+          <property name="text">
+           <string>Magnitude</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showComponentVolume1Button">
+          <property name="text">
+           <string>C1</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showComponentVolume2Button">
+          <property name="text">
+           <string>C2</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showComponentVolume3Button">
+          <property name="text">
+           <string>C3</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QPushButton" name="recomputeFlowFieldButton">
+        <property name="toolTip">
+         <string>Recompute flow field after adjusting segmentation</string>
+        </property>
+        <property name="text">
+         <string>Recompute flow field</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0" colspan="2">
+       <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget">
+        <property name="defaultTerminologyEntrySettingsKey">
+         <string notr="true"/>
         </property>
        </widget>
       </item>
@@ -197,6 +296,11 @@
    <header>qMRMLWidget.h</header>
    <container>1</container>
   </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentEditorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentEditorWidget.h</header>
+  </customwidget>
  </customwidgets>
  <resources/>
  <connections>
@@ -213,6 +317,22 @@
     <hint type="destinationlabel">
      <x>331</x>
      <y>89</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>segmentEditorWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>359</x>
+     <y>748</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>164</x>
+     <y>405</y>
     </hint>
    </hints>
   </connection>

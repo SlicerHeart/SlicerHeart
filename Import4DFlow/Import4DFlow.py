@@ -1,3 +1,4 @@
+import enum
 import logging
 import os
 from typing import Annotated, Optional
@@ -46,6 +47,21 @@ This file was originally developed by Andras Lasso (PerkLab, Queen's University)
 # Import4DFlowParameterNode
 #
 
+class UnwrapModeEnum(enum.Enum):
+    TemporalUnwrap = 1
+    LaplacianUnwrap = 2
+    NoUnwrap = 3
+
+    def label(self):
+        if self is UnwrapModeEnum.TemporalUnwrap:
+            return "temporal"
+        elif self is UnwrapModeEnum.LaplacianUnwrap:
+            return "laplacian"
+        elif self is UnwrapModeEnum.NoUnwrap:
+            return "none"
+        raise ValueError("Unknown enum value")
+
+
 @parameterNodeWrapper
 class Import4DFlowParameterNode:
     """
@@ -55,6 +71,7 @@ class Import4DFlowParameterNode:
     inputVolumeNodeSet: str
     exportDirectory: str
     exportFormat: str
+    unwrapMode: UnwrapModeEnum
 
 #
 # Import4DFlowWidget
@@ -79,7 +96,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # volumeNodeSet contains:
         #   - 'name': displayable name of the node set
         #   - 'componentVolumeNodes': list of 3 volume nodes (R, A, S component)
-        #   - 'componentVolumeNodesScaleToCmPerSec': list of 3 scaling factors to convert raw values to speed in cm/sec and RAS direction
+        #   - 'componentVolumeNodesInvertToRasDirection': list of 3 Booleans, which tell is the component has to be inverted to get velocity RAS direction
         #   - 'magnitudeVolumeNode' magnitude volume node
         self._volumeNodesSets = {}
 
@@ -103,6 +120,14 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.outputTransformSelector.setNodeTypeLabel ("Flow Field", "vtkMRMLTransformNode")
         self.ui.outputTransformSelector.addAttribute("vtkMRMLTransformNode", "SlicerHeart.Type", "FlowField")
 
+        segmentEditorSingletonTag = "Import3DFlow.SegmentEditor"
+        segmentEditorNode = slicer.mrmlScene.GetSingletonNode(segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
+        if segmentEditorNode is None:
+            segmentEditorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLSegmentEditorNode")
+            segmentEditorNode.UnRegister(None)
+            segmentEditorNode.SetSingletonTag(segmentEditorSingletonTag)
+            segmentEditorNode = slicer.mrmlScene.AddNode(segmentEditorNode)
+        self.ui.segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
 
         # Create logic class. Logic implements all computations that should be possible to run
         # in batch mode, without a graphical user interface.
@@ -122,6 +147,13 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inspectButton.connect('clicked(bool)', self.onInspectButton)
         self.ui.convertButton.connect('clicked(bool)', self.onConvertButton)
         self.ui.exportButton.connect('clicked(bool)', self.onExportButton)
+
+        self.ui.showFlowFieldButton.connect('clicked(bool)', self.onShowFlowFieldButton)
+        self.ui.showMagnitudeVolumeButton.connect('clicked(bool)', self.onShowMagnitudeVolumeButton)
+        self.ui.showComponentVolume1Button.connect('clicked(bool)', lambda: self.onShowComponentVolumeButton(0))
+        self.ui.showComponentVolume2Button.connect('clicked(bool)', lambda: self.onShowComponentVolumeButton(1))
+        self.ui.showComponentVolume3Button.connect('clicked(bool)', lambda: self.onShowComponentVolumeButton(2))
+        self.ui.recomputeFlowFieldButton.connect('clicked(bool)', self.onRecomputeFlowFieldButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -230,6 +262,18 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.exportPathLineEdit.setCurrentPath(self._parameterNode.exportDirectory)
         self.ui.exportFormatComboBox.setCurrentIndex(1 if self._parameterNode.exportFormat == self.logic.EXPORT_FORMAT_NRRD_STACK else 0)
 
+        for component in range(3):
+            directionCode = None
+            if self._parameterNode.outputFlowField:
+                componentVolume = self._parameterNode.outputFlowField.GetNthNodeReference("componentVolume", component)
+                if componentVolume:
+                    directionCode = self.logic._getSequenceAttribute(componentVolume, "SlicerHeart.directionCode")
+            showVolumeButton = getattr(self.ui, f"showComponentVolume{component+1}Button")
+            if directionCode:
+                showVolumeButton.text = directionCode
+            else:
+                showVolumeButton.text = f"C{component+1}"
+
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
 
@@ -267,18 +311,72 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onConvertButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to convert image to flow field.", waitCursor=True):
 
-            magnitudeVolumeNode = self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['magnitudeVolumeNode']
-            gridTransformNode = self.logic.convertImagesToDisplacementField(
+            outputFlowField = self.logic.createFlowFieldFromComponentVolumes(
                 self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]["componentVolumeNodes"],
-                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]["componentVolumeNodesScaleToCmPerSec"],
-                magnitudeVolumeNode,
-                self._parameterNode.outputFlowField)
+                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]["componentVolumeNodesInvertToRasDirection"],
+                self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]['magnitudeVolumeNode'])
 
-            self._parameterNode.outputFlowField = gridTransformNode
-            self._parameterNode.outputFlowField.SetNodeReferenceID("magnitudeVolume", magnitudeVolumeNode.GetID())
+            if not outputFlowField:
+                slicer.util.errorDisplay("Failed to create flow field")
+                return
+            if not self.logic._getSequenceFromProxyNode(outputFlowField):
+                raise RuntimeError("Flow field is not in a sequence")
+
+            # Compute phase unwrapping map
+            if self._parameterNode.unwrapMode == UnwrapModeEnum.TemporalUnwrap:
+                self.logic.temporalUnwrap(outputFlowField)
+            elif self._parameterNode.unwrapMode == UnwrapModeEnum.LaplacianUnwrap:
+                self.logic.laplacianUnwrap(outputFlowField)
+            else:
+                self.logic.resetUnwrap(outputFlowField)
+
+            # Compute flow from input component volumes and phase unwrapping map
+            self.logic.updateFlowFieldFromComponentVolumes(outputFlowField)
+            self.logic.setFlowFieldVisualizationToDefault(outputFlowField)
+
+            # Set active browser node to the transform sequence
+            transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowField)
+            slicer.modules.sequences.toolBar().setActiveBrowserNode(transformSequenceBrowserNode)
+
+            self._parameterNode.outputFlowField = outputFlowField
 
             self.onInspectButton()
+            self.updateGUIFromParameterNode()
 
+    def onShowFlowFieldButton(self) -> None:
+        wasVisible = self._parameterNode.outputFlowField.GetDisplayNode().GetVisibility()
+        self._parameterNode.outputFlowField.GetDisplayNode().SetVisibility(not wasVisible)
+
+    def onShowMagnitudeVolumeButton(self) -> None:
+        slicer.util.setSliceViewerLayers(background=self._parameterNode.outputFlowField.GetNodeReference("magnitudeVolume"))
+        self.setSegmentationVisibility(True)
+
+    def onShowComponentVolumeButton(self, component) -> None:
+        componentVolume = self._parameterNode.outputFlowField.GetNthNodeReference("componentVolume", component)
+        slicer.util.setSliceViewerLayers(background=componentVolume)
+        self.setSegmentationVisibility(False)
+        self.setSegmentationVisibility(True, component)
+        segmentation = self._parameterNode.outputFlowField.GetNthNodeReference("phaseWrapSegmentation", component)
+        if segmentation:
+            self.ui.segmentEditorWidget.setSegmentationNode(segmentation)
+            if componentVolume:
+                self.ui.segmentEditorWidget.setSourceVolumeNode(componentVolume)
+
+    def setSegmentationVisibility(self, visibility, component=-1):
+        for currentComponent in range(3):
+            if (component >= 0 and currentComponent != component):
+                continue
+            segmentation = self._parameterNode.outputFlowField.GetNthNodeReference("phaseWrapSegmentation", currentComponent)
+            if not segmentation:
+                continue
+            segmentation.GetDisplayNode().SetVisibility(visibility)
+
+    def onRecomputeFlowFieldButton(self) -> None:
+        if not self._parameterNode.outputFlowField:
+            slicer.util.errorDisplay("Flow field is not created yet")
+            return
+
+        self.logic.updateFlowFieldFromComponentVolumes(self._parameterNode.outputFlowField)
 
     def onExportButton(self) -> None:
         if not self._parameterNode.exportDirectory:
@@ -332,10 +430,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # raw magnitude image intensity threshold
         # (speed values below this threshold are set to zero in the flow field to reduce clutter during visualization)
-        self.magnitudeThreshold = 60
+        self.magnitudeThreshold = 15
+
+        self.maxWraps = 3
 
         self.dopplerLutRange = [-2, 2]
         self.dopplerLutThreshold = [-0.25, 0.25]
+
+        self.componentVolumeMaxValueSiemensCS4DFlow = 4096
+        # positive integers because these indices are also used for registration
 
     def log(self, text):
         logging.info(text)
@@ -352,6 +455,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             return 1
         volumeSequenceNode = volumeSequenceBrowserNode.GetSequenceNode(proxyVolumeNode)
         return volumeSequenceNode.GetNumberOfDataNodes()
+
+    def _getSequenceFromProxyNode(self, proxyNode):
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(proxyNode)
+        if not browserNode:
+            raise RuntimeError(f"Volume {proxyNode.GetName()} is expected to be proxy node of a volume sequence")
+        sequenceNode = browserNode.GetSequenceNode(proxyNode)
+        return sequenceNode
 
     def _findVolumeNodeSetCandidatesInScene(self):
         import pydicom
@@ -375,14 +485,20 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 ds = pydicom.read_file(filename)
                 if (0x0051,0x1014) in ds:
                     # flow vector component image
-                    speedAndDirectionCode = ds[0x0051,0x1014].value.decode().strip()
+                    try:
+                        speedAndDirectionCode = ds[0x0051,0x1014].value.decode().strip()
+                    except AttributeError:
+                        speedAndDirectionCode = ds[0x0051,0x1014].value.strip()
                     vencCmPerSecInput, directionCodeInput = speedAndDirectionCode.split('_', 1)
                     vencCmPerSec = float(vencCmPerSecInput[1:])
                     directionCode = directionCodeInput.strip()
                     logging.debug(f"Found a flow vector component image candidate [{directionCode}]: {volumeNode.GetName()}")
                     # The tag contains speed and direction, for example:
                     # 'v150_through', 'v150_inplane_ap', 'v150_inplane_fh'
-                    volumeNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
+                    volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
+                    volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
+                    volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
+
                 elif ("SequenceName" in ds) and ('fl3d' in ds["SequenceName"].value):  # 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
                     # magnitude image
                     logging.debug(f"Found a magnitude image candidate: {volumeNode.GetName()}")
@@ -399,7 +515,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
             studyInstanceUID = ds["StudyInstanceUID"].value.strip()
             acquisitionNumber = ds["AcquisitionNumber"].value
-            acquisitionID = str(studyInstanceUID) + "/" + str(acquisitionNumber)
+
+            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+            studyShItemId = shNode.GetItemParent(shNode.GetItemByDataNode(volumeNode))
+            # use studyShItemId to ensure unique acquisitionID even if the same study is loaded multiple times
+            acquisitionID = f"{studyShItemId}-{studyInstanceUID}/{acquisitionNumber}"
+
             if acquisitionID not in volumeNodesSets:
                 acquisitionNumberSuffix =  f" / {acquisitionNumber}" if acquisitionNumber > 1 else ""
                 volumeNodeSet = {
@@ -408,33 +529,33 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     }
                 volumeNodesSets[acquisitionID] = volumeNodeSet
 
-            volumeNode.SetAttribute("SlicerHeart.directionCode", directionCode)
+            volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
+            volumeSequenceNode.SetAttribute("SlicerHeart.directionCode", directionCode)
             volumeNodesSets[acquisitionID]['candidateVolumeNodes'].append(volumeNode)
 
         return volumeNodesSets
 
+    def _getSequenceAttribute(self, proxyNode, attributeName):
+        sequenceNode = self._getSequenceFromProxyNode(proxyNode)
+        return sequenceNode.GetAttribute(attributeName)
+
     def _findComponentVolumeNodes(self, volumeNodesSet):
         """
-        Returns a list of 3 volume nodes (x, y, z) and scale factors (sx, sy, sz).
+        Returns a list of 3 volume nodes (x, y, z) and for each if the component values need to be reversed (ix, iy, iz).
         If not found, then returns (None, None).
         """
         # Find if there is a axisForDirectionCode mapping which has a corresponding volume
         # for each component
         for axisForDirectionCode in self.axisForDirectionCodes:
             componentVolumeNodes = [None, None, None]
-            componentVolumeNodesScaleToCmPerSec = [0.0, 0.0, 0.0]
+            invertToRasDirections = [False, False, False]
             # axisForDirectionCode example: [("through", True), ("inplane_ap", True), ('inplane_fh', False)]
             for axis, (directionCode, invertToRasDirection) in enumerate(axisForDirectionCode):
                 for volumeNode in volumeNodesSet['candidateVolumeNodes']:
-                    if volumeNode.GetAttribute("SlicerHeart.directionCode") == directionCode:
+                    if self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") == directionCode:
                         # Found a volume for this direction
                         componentVolumeNodes[axis] = volumeNode
-                                        # Compute absolute speed from encoding speed
-                        vencCmPerSec = float(componentVolumeNodes[axis].GetAttribute("SlicerHeart.vencCmPerSec"))
-                        scaleToCmPerSec = 1 / 4096 * vencCmPerSec
-                        if invertToRasDirection:
-                            scaleToCmPerSec = -scaleToCmPerSec
-                        componentVolumeNodesScaleToCmPerSec[axis] = scaleToCmPerSec
+                        invertToRasDirections[axis] = invertToRasDirection
                         break
             if not all(componentVolumeNodes):
                 continue
@@ -455,13 +576,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 continue
 
             # Component volumes are found and have consistent number of frames
-            return componentVolumeNodes, componentVolumeNodesScaleToCmPerSec
+            return componentVolumeNodes, invertToRasDirections
 
         return None, None
 
     def _findMagnitudeVolumeNode(self, volumeNodesSet, componentVolumeNodes):
         numberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[0])
-        candidateMagnitudeVolumes = [volumeNode for volumeNode in volumeNodesSet['candidateVolumeNodes'] if volumeNode.GetAttribute("SlicerHeart.directionCode") == "magnitude"]
+        candidateMagnitudeVolumes = [volumeNode for volumeNode in volumeNodesSet['candidateVolumeNodes'] if self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") == "magnitude"]
         for volumeNode in candidateMagnitudeVolumes:
 
             # Check number of frames
@@ -482,7 +603,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         #   'candidateVolumeNodes': result of _findVolumeNodeSetCandidatesInScene, contain volume nodes
         #       with SlicerHeart.directionCode and SlicerHeart.vencCmPerSec (velocity encoding, in cm/sec) attributes
         #   'componentVolumeNodes': [volumeNodeX, volumeNodeY, volumeNodeZ]
-        #   'componentVolumeNodesScaleToCmPerSec': [scaleX, scaleY, scaleZ] for setting component volume scale to cm/sec and directions to RAS
+        #   'componentVolumeNodesInvertToRasDirection': [ix, iy, iz] if scalar value needs to be reversed to get directions in RAS
         #   'magnitudeVolumeNode': volumeNodeMagnitude
         # }
         candidateVolumeNodesSets = self._findVolumeNodeSetCandidatesInScene()
@@ -490,127 +611,211 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         for acquisitionID in candidateVolumeNodesSets:
             volumeNodeSet = candidateVolumeNodesSets[acquisitionID]
 
-            componentVolumeNodes, componentVolumeNodesScaleToCmPerSec = self._findComponentVolumeNodes(volumeNodeSet)
-            if componentVolumeNodes is None or componentVolumeNodesScaleToCmPerSec is None:
-                directionCodes = [volumeNode.GetAttribute("SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
+            componentVolumeNodes, componentVolumeNodesInvertToRasDirection = self._findComponentVolumeNodes(volumeNodeSet)
+            if componentVolumeNodes is None or componentVolumeNodesInvertToRasDirection is None:
+                directionCodes = [self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
                 logging.debug(f"Volume node set {volumeNodeSet['name']} is discarded: cannot find volume for all directions (found direction: {directionCodes})")
                 continue
 
             magnitudeVolumeNode = self._findMagnitudeVolumeNode(volumeNodeSet, componentVolumeNodes)
             if not magnitudeVolumeNode:
-                directionCodes = [volumeNode.GetAttribute("SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
+                directionCodes = [self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
                 logging.debug(f"Volume node set {volumeNodeSet['name']} is discarded: missing magnitude volume")
                 continue
 
             volumeNodesSets[acquisitionID] = {
                 "name": volumeNodeSet['name'],
                 "componentVolumeNodes": componentVolumeNodes,
-                "componentVolumeNodesScaleToCmPerSec": componentVolumeNodesScaleToCmPerSec,
+                "componentVolumeNodesInvertToRasDirection": componentVolumeNodesInvertToRasDirection,
                 "magnitudeVolumeNode": magnitudeVolumeNode,
             }
 
         return volumeNodesSets
 
-    def convertImagesToDisplacementField(self, componentVolumeNodes: list, componentVolumeNodesScaleToCmPerSec: list, magnitudeVolumeNode: vtkMRMLScalarVolumeNode, gridTransformNode: vtkMRMLTransformNode = None) -> [vtkMRMLTransformNode, vtkMRMLScalarVolumeNode]:
-        componentVolumeSequenceBrowserNodes = []
-        componentVolumeSequenceNodes = []
-        for axis, componentVolumeSequenceProxyNode in enumerate(componentVolumeNodes):
-            if not componentVolumeSequenceProxyNode:
-                raise RuntimeError(f"Volume ({axis}) is invalid")
-            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeSequenceProxyNode)
-            if not componentVolumeSequenceBrowserNode:
-                raise RuntimeError(f"Volume {componentVolumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
-            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeSequenceProxyNode)
-            componentVolumeSequenceBrowserNodes.append(componentVolumeSequenceBrowserNode)
-            componentVolumeSequenceNodes.append(componentVolumeSequenceNode)
+    def createFlowFieldFromComponentVolumes(self, componentVolumeNodes, componentVolumeNodesInvertToRasDirection, magnitudeVolumeNode):
 
-        if not magnitudeVolumeNode:
-            raise RuntimeError("Magnitude volume is invalid")
         magnitudeVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
         if not magnitudeVolumeSequenceBrowserNode:
-            raise RuntimeError(f"Magnitude volume {volumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
+            raise RuntimeError(f"Magnitude volume {magnitudeVolumeNode.GetName()} is expected to be proxy node of a volume sequence")
         magnitudeVolumeSequenceNode = magnitudeVolumeSequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
 
-        import numpy as np
-        numberOfFrames = componentVolumeSequenceNodes[0].GetNumberOfDataNodes()
+        gridTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "FlowField")
+        gridTransformNode.SetAttribute("SlicerHeart.Type", "FlowField")
 
-        volumeSequenceProxyNode = componentVolumeNodes[0]
-        dims = slicer.util.arrayFromVolume(volumeSequenceProxyNode).shape
-
-        displacementImage = vtk.vtkImageData()
-        displacementImage.SetDimensions(dims[2], dims[1], dims[0])
-        displacementImage.AllocateScalars(vtk.VTK_FLOAT, 3)
-
-        gridTransform = slicer.vtkOrientedGridTransform()
-        directionMatrix = vtk.vtkMatrix4x4()
-        volumeSequenceProxyNode.GetIJKToRASDirectionMatrix(directionMatrix)
-        gridTransform.SetGridDirectionMatrix(directionMatrix)
-        displacementImage.SetSpacing(volumeSequenceProxyNode.GetSpacing())
-        displacementImage.SetOrigin(volumeSequenceProxyNode.GetOrigin())
-        gridTransform.SetDisplacementGridData(displacementImage)
-
-        if not gridTransformNode:
-            gridTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
-            gridTransformNode.SetAttribute("SlicerHeart.Type", "FlowField")
-        gridTransformNode.SetAndObserveTransformFromParent(gridTransform)
-
-        displacementArray = slicer.util.arrayFromGridTransform(gridTransformNode)  # shape: (96, 160, 64, 3) = (i, j, k, c)
-
+        # Create sequence node to store the time-varying flow field
         transformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "4D flow")
-
         transformSequenceNode.SetIndexType(magnitudeVolumeSequenceNode.GetIndexType())
         transformSequenceNode.SetIndexName(magnitudeVolumeSequenceNode.GetIndexName())
         transformSequenceNode.SetIndexUnit(magnitudeVolumeSequenceNode.GetIndexUnit())
 
-        for volumeIndex in range(numberOfFrames):
-            magnitudeVoxelArray = slicer.util.arrayFromVolume(magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)).copy()
-            for axis in range(3):
-                volumeSequenceNode = componentVolumeSequenceNodes[axis]
-                # Use m/sec as vector value in the transform (divide cm/sec by 100) because a typical 50 cm/sec speed
-                # = 0.5 m/sec speed value can be visualized nicely as displacement field with typical image spacing
-                scaleToMeterPerSec = componentVolumeNodesScaleToCmPerSec[axis] / 100
-                voxelArray = slicer.util.arrayFromVolume(volumeSequenceNode.GetNthDataNode(volumeIndex)).copy() * scaleToMeterPerSec
-                voxelArray[abs(magnitudeVoxelArray) < self.magnitudeThreshold] = 0
-                displacementArray[:, :, :, axis] = voxelArray
-            slicer.util.arrayFromGridTransformModified(gridTransformNode)
-            indexValue = magnitudeVolumeSequenceNode.GetNthIndexValue(volumeIndex)
-            # The transform stores "transform from parent", but visualization displays "transform to parent".
-            # (We could not set transform to parent directly because arrayFromGridTransformModified
-            # only works with "transform from parent"). Invert the field now to display "transform to parent".
-            # This also greatly speeds up the display.
-            gridTransformNode.Inverse()
-            transformSequenceNode.SetDataNodeAtValue(gridTransformNode, indexValue)
-            # Revert to "transform from parent"
-            gridTransformNode.Inverse()
-
         # Create a sequence browser node for the new merged sequence
-        transformSequenceBrowserNode = magnitudeVolumeSequenceBrowserNode
-        transformSequenceBrowserNode.AddSynchronizedSequenceNode(transformSequenceNode)
-        slicer.modules.sequences.toolBar().setActiveBrowserNode(transformSequenceBrowserNode)
-
-        slicer.mrmlScene.RemoveNode(gridTransformNode)
-        del gridTransformNode
-
-        slicer.modules.sequences.logic().UpdateAllProxyNodes()
-        gridTransformNode = transformSequenceBrowserNode.GetProxyNode(transformSequenceNode)
+        magnitudeVolumeSequenceBrowserNode.AddProxyNode(gridTransformNode, transformSequenceNode, False)
+        magnitudeVolumeSequenceBrowserNode.SetSaveChanges(transformSequenceNode, True)  # Allow updating the transform
+        magnitudeVolumeSequenceBrowserNode.SetOverwriteProxyName(transformSequenceNode, True)  # show index in node name
 
         # Place transform in the same subject hierarchy folder as the volume node
         shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
         volumeParentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(magnitudeVolumeNode))
         shNode.SetItemParent(shNode.GetItemByDataNode(gridTransformNode), volumeParentItemId)
 
-        if not gridTransformNode.GetDisplayNode():
+        # Set input nodes of the flow field based on current selection
+        gridTransformNode.SetNodeReferenceID("magnitudeVolume", magnitudeVolumeNode.GetID())
+        for component in range(3):
+            componentVolumeNode = componentVolumeNodes[component]
+
+            if gridTransformNode.GetNthNodeReferenceID("componentVolume", component) == componentVolumeNode.GetID():
+                continue
+
+            gridTransformNode.SetNthNodeReferenceID("componentVolume", component, componentVolumeNode.GetID())
+
+            # Turn off interpolation to see wrapped voxels better
+            componentVolumeNode.GetScalarVolumeDisplayNode().InterpolateOff()
+
+            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeNode)
+            if not componentVolumeSequenceBrowserNode:
+                raise RuntimeError(f"Volume {componentVolumeNode.GetName()} is expected to be proxy node of a volume sequence")
+            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeNode)
+
+            # Add direction code to the name to make it easier to identify the component images
+            directionCode = self._getSequenceAttribute(componentVolumeNode, 'SlicerHeart.directionCode')
+            sequenceName = componentVolumeSequenceNode.GetName()
+            componentVolumeSequenceNode.SetName(f"{sequenceName} - {directionCode}")
+
+            invertToRasDirection = componentVolumeNodesInvertToRasDirection[component]
+            # It could make sense to store this information as node reference attribute, but the feature is not yet available in Slicer Stable Release
+            componentVolumeSequenceNode.SetAttribute("SlicerHeart.invertToRasDirection", "true" if invertToRasDirection else "false")
+
+            # Move component images to the same sequence browser node
+            if componentVolumeSequenceBrowserNode != magnitudeVolumeSequenceBrowserNode:
+                # Remove old sequence browser node
+                slicer.mrmlScene.RemoveNode(componentVolumeSequenceBrowserNode)
+                # Add to common sequence browser node
+                magnitudeVolumeSequenceBrowserNode.AddProxyNode(componentVolumeNode, componentVolumeSequenceNode, False)
+                magnitudeVolumeSequenceBrowserNode.SetSaveChanges(componentVolumeSequenceNode, True)  # faster browsing
+                magnitudeVolumeSequenceBrowserNode.SetRecording(componentVolumeSequenceNode, False)  # no need for live recording
+                magnitudeVolumeSequenceBrowserNode.SetOverwriteProxyName(componentVolumeSequenceNode, True)  # show index in node name
+
+        return gridTransformNode
+
+    def updateFlowFieldFromComponentVolumes(self, gridTransformNode):
+
+        # Compute physical speed from encoding speed
+        componentVolumeNodesScaleToCmPerSec = []
+        componentVolumeMaxValues = []
+        componentVolumeNodes = []
+        componentVolumeSequenceNodes = []
+        vencCmPerSecList = []
+        for axis in range(3):
+            componentVolumeNode = gridTransformNode.GetNthNodeReference("componentVolume", axis)
+            componentVolumeSequenceNode = self._getSequenceFromProxyNode(componentVolumeNode)
+            vencCmPerSec = float(componentVolumeSequenceNode.GetAttribute("SlicerHeart.vencCmPerSec"))
+            componentVolumeMaxValue = float(componentVolumeSequenceNode.GetAttribute("SlicerHeart.maxValue"))
+            invertToRasDirection = (componentVolumeSequenceNode.GetAttribute("SlicerHeart.invertToRasDirection") == "true")
+            scaleToCmPerSec = 1 / componentVolumeMaxValue * vencCmPerSec
+            if invertToRasDirection:
+                scaleToCmPerSec = -scaleToCmPerSec
+            componentVolumeMaxValues.append(componentVolumeMaxValue)
+            componentVolumeNodesScaleToCmPerSec.append(scaleToCmPerSec)
+            componentVolumeNodes.append(componentVolumeNode)
+            componentVolumeSequenceNodes.append(componentVolumeSequenceNode)
+            vencCmPerSecList.append(componentVolumeSequenceNode.GetAttribute("SlicerHeart.vencCmPerSec"))
+
+        transformSequenceNode = self._getSequenceFromProxyNode(gridTransformNode)
+
+        magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+        magnitudeVolumeSequenceNode = self._getSequenceFromProxyNode(magnitudeVolumeNode)
+        labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "___temp___")
+        for volumeIndex in range(magnitudeVolumeSequenceNode.GetNumberOfDataNodes()):
+            magnitudeVolumeNodeInSequence = magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)
+            magnitudeVoxelArray = slicer.util.arrayFromVolume(magnitudeVolumeNodeInSequence)
+
+            gridTransformNodeInSequence = slicer.mrmlScene.CreateNodeByClass("vtkMRMLTransformNode")
+            gridTransformNodeInSequence.UnRegister(None)  # Prevent memory leak
+
+            gridTransformNodeInSequence.SetAttribute("SlicerHeart.Type", "FlowField")
+
+            # Set up transform to store the flow field
+            dims = magnitudeVolumeNodeInSequence.GetImageData().GetDimensions()
+            displacementImage = vtk.vtkImageData()
+            displacementImage.SetDimensions(dims[0], dims[1], dims[2])
+            displacementImage.AllocateScalars(vtk.VTK_FLOAT, 3)
+            gridTransform = slicer.vtkOrientedGridTransform()
+            directionMatrix = vtk.vtkMatrix4x4()
+            magnitudeVolumeNodeInSequence.GetIJKToRASDirectionMatrix(directionMatrix)
+            gridTransform.SetGridDirectionMatrix(directionMatrix)
+            displacementImage.SetSpacing(magnitudeVolumeNodeInSequence.GetSpacing())
+            displacementImage.SetOrigin(magnitudeVolumeNodeInSequence.GetOrigin())
+            gridTransform.SetDisplacementGridData(displacementImage)
+            gridTransformNodeInSequence.SetAndObserveTransformFromParent(gridTransform)
+
+            displacementArray = slicer.util.arrayFromGridTransform(gridTransformNodeInSequence)  # shape: (96, 160, 64, 3) = (i, j, k, c)
+            for axis in range(3):
+                volumeSequenceNode = componentVolumeSequenceNodes[axis]
+
+                # Use m/sec as vector value in the transform (divide cm/sec by 100) because a typical 50 cm/sec speed
+                # = 0.5 m/sec speed value can be visualized nicely as displacement field with typical image spacing
+                scaleToMeterPerSec = componentVolumeNodesScaleToCmPerSec[axis] / 100
+                componentVolumeNodeInSequence = volumeSequenceNode.GetNthDataNode(volumeIndex)
+
+                componentVoxelArray = slicer.util.arrayFromVolume(componentVolumeNodeInSequence).copy()
+
+                # Discard low values
+                componentVoxelArray[magnitudeVoxelArray < self.magnitudeThreshold] = 0
+
+                # Apply phase unwrapping
+                segmentationNode = gridTransformNode.GetNthNodeReference("phaseWrapSegmentation", axis)
+                if segmentationNode:
+                    segmentationSequenceNode = self._getSequenceFromProxyNode(segmentationNode)
+                    segmentationNodeInSequence = segmentationSequenceNode.GetNthDataNode(volumeIndex)
+                    segmentIds = self._getSegmentIds()
+                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(segmentationNodeInSequence, segmentIds, labelmapNode, magnitudeVolumeNode)
+                    segmentationArray = slicer.util.arrayFromVolume(labelmapNode)
+
+                    for wrapIndex in range(1, self.maxWraps):
+                        componentVolumeMaxValue = componentVoxelArray.dtype.type(componentVolumeMaxValues[axis])
+                        # Find voxels with phase wraps
+                        # High wrap (segment indices: 1 = 1x, 2 = 2x, 3 = 3x)
+                        componentVoxelArray[segmentationArray == wrapIndex] += wrapIndex * 2 * componentVolumeMaxValue
+                        # Low wrap (segment indices: 6 = 1x, 5 = 2x, 4 = 3x)
+                        componentVoxelArray[segmentationArray == 2 * self.maxWraps + 1 - wrapIndex] -= wrapIndex * 2 * componentVolumeMaxValue
+
+                displacementArray[:, :, :, axis] = componentVoxelArray * scaleToMeterPerSec
+
+            slicer.util.arrayFromGridTransformModified(gridTransformNodeInSequence)
+            indexValue = magnitudeVolumeSequenceNode.GetNthIndexValue(volumeIndex)
+            # The transform stores "transform from parent", but visualization displays "transform to parent".
+            # (We could not set transform to parent directly because arrayFromGridTransformModified
+            # only works with "transform from parent"). Invert the field now to display "transform to parent".
+            # This also greatly speeds up the display.
+            gridTransformNodeInSequence.Inverse()
+            transformSequenceNode.SetDataNodeAtValue(gridTransformNodeInSequence, indexValue)
+            # Revert to "transform from parent"
+            gridTransformNodeInSequence.Inverse()
+
+        transformSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", ','.join(vencCmPerSecList))  # velocity encoding, in cm/sec
+
+        slicer.mrmlScene.RemoveNode(labelmapNode)
+
+
+    def setFlowFieldVisualizationToDefault(self, gridTransformNode: vtkMRMLTransformNode) -> None:
+        transformDisplayNode = gridTransformNode.GetDisplayNode()
+        if not transformDisplayNode:
             transformDisplayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformDisplayNode")
             gridTransformNode.AddAndObserveDisplayNodeID(transformDisplayNode.GetID())
-            transformDisplayNode.SetVisibility(True)
-            transformDisplayNode.SetVisibility2D(True)
-            transformDisplayNode.SetVisibility3D(False)  # with small glyph spacing, updating of the glyphs in 3D can be slow
-            transformDisplayNode.SetGlyphDisplayRangeMinMm(0.05) # meter/sec
-            transformDisplayNode.SetGlyphSpacingMm(2.0)
-            transformDisplayNode.SetGlyphDiameterMm(0.8)
-            transformDisplayNode.SetGlyphScalePercent(500)
-            transformDisplayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
+            transformDisplayNode = gridTransformNode.GetDisplayNode()
 
+        transformDisplayNode.SetVisibility(True)
+        transformDisplayNode.SetVisibility2D(True)
+        transformDisplayNode.SetVisibility3D(False)  # with small glyph spacing, updating of the glyphs in 3D can be slow
+        transformDisplayNode.SetGlyphDisplayRangeMinMm(0.05) # meter/sec
+        transformDisplayNode.SetGlyphSpacingMm(2.0)
+        transformDisplayNode.SetGlyphDiameterMm(0.8)
+        transformDisplayNode.SetGlyphScalePercent(500)
+        magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+        transformDisplayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
+
+        colorNode = transformDisplayNode.GetColorNode()
+        if not colorNode or colorNode.GetAttribute("Category") != "Flow":
             # Create color node
             colorNode = self._createSpeedColorNode()
             transformDisplayNode.SetAndObserveColorNodeID(colorNode.GetID())
@@ -621,30 +826,37 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             #colorLegendDisplayNode.SetScalarRange(0, 1.5)
 
         # Update colormap colors
-        colorMap = gridTransformNode.GetDisplayNode().GetColorNode().GetColorTransferFunction()
-        wasModified = gridTransformNode.GetDisplayNode().GetColorNode().StartModify()
+        colorMap = colorNode.GetColorTransferFunction()
+        wasModified = colorNode.StartModify()
         colorMap.RemoveAllPoints()
-
         # Determine color map range based on velocity encoding, so that the color map is consistent across different acquisitions
         # that use the same velocity encoding (venc) setting.
-        maxVencCmPerSec = max([float(componentVolumeNode.GetAttribute("SlicerHeart.vencCmPerSec")) for componentVolumeNode in componentVolumeNodes])
+        maxVencCmPerSec = 0
+        for component in range(3):
+            vencCmPerSec = float(self._getSequenceAttribute(gridTransformNode.GetNthNodeReference("componentVolume", component), "SlicerHeart.vencCmPerSec"))
+            maxVencCmPerSec = max(maxVencCmPerSec, vencCmPerSec)
         colorTableRangeMeterPerSec = maxVencCmPerSec / 100  # m/sec
         colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.0, 0.0, 0.0, 1.0)
         colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.2, 0.0, 1.0, 1.0)
         colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.5, 1.0, 1.0, 0.0)
         colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 1.0, 1.0, 0.0, 0.0)
-        gridTransformNode.GetDisplayNode().GetColorNode().EndModify(wasModified)
+        colorNode.EndModify(wasModified)
 
+    def _deleteComponentVolumeNodes(self, componentVolumeNodes):
         # Delete imported component image series from the scene
-        for axisIndex in range(3):
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNodes[axisIndex].GetStorageNode())
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNodes[axisIndex])
-            slicer.mrmlScene.RemoveNode(componentVolumeNodes[axisIndex].GetDisplayNode())
-            slicer.mrmlScene.RemoveNode(componentVolumeNodes[axisIndex].GetStorageNode())
-            slicer.mrmlScene.RemoveNode(componentVolumeNodes[axisIndex])
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceBrowserNodes[axisIndex])
-
-        return gridTransformNode
+        for axis, componentVolumeSequenceProxyNode in enumerate(componentVolumeNodes):
+            if not componentVolumeSequenceProxyNode:
+                raise RuntimeError(f"Volume ({axis}) is invalid")
+            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeSequenceProxyNode)
+            if not componentVolumeSequenceBrowserNode:
+                raise RuntimeError(f"Volume {componentVolumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
+            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeSequenceProxyNode)
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNode.GetStorageNode())
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNode)
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceProxyNode.GetDisplayNode())
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceProxyNode.GetStorageNode())
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceProxyNode)
+            slicer.mrmlScene.RemoveNode(componentVolumeSequenceBrowserNode)
 
     def exportDisplacementFieldToFiles(self,
                                        gridTransformNode: vtkMRMLTransformNode,
@@ -835,6 +1047,127 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         opacityMap.AddPoint(lutRange[1], 1.0)
 
         return colorMap, opacityMap
+
+    def _getSegmentationNode(self, outputFlowField, component):
+        segmentationNode = outputFlowField.GetNthNodeReference("phaseWrapSegmentation", component)
+        if segmentationNode:
+            return segmentationNode
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowField)
+        # Create new segmentation node and add it to the sequence
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", f"Phase wrap C{component+1}")
+        outputFlowField.SetNthNodeReferenceID("phaseWrapSegmentation", component, segmentationNode.GetID())
+        segmentationNode.CreateDefaultDisplayNodes()
+        segmentationNode.GetDisplayNode().SetOpacity2DFill(0)
+        segmentationNode.GetDisplayNode().SetSliceIntersectionThickness(5)
+        segmentationSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationNode.GetName())
+        sequenceBrowserNode.AddProxyNode(segmentationNode, segmentationSequenceNode, False)
+        sequenceBrowserNode.PlaybackActiveOff()
+        sequenceBrowserNode.SetRecording(segmentationSequenceNode, False)
+        sequenceBrowserNode.SetSaveChanges(segmentationSequenceNode, True)
+        sequenceBrowserNode.SetOverwriteProxyName(segmentationSequenceNode, True)  # show index in node name
+        return segmentationNode
+
+    def _getSegmentIds(self):
+        """In phase wrap segmentation, order of segments: no wrap = 0, high wraps 1x = 1, 2x = 2, 3x = 3, ..., low wraps 3x = 4, 2x = 5, 1x = 6, ..."""
+        segmentIds = vtk.vtkStringArray()
+        for wrap in range(self.maxWraps):
+            segmentIds.InsertNextValue(f"Wrap-High-{wrap+1}x")
+        for wrap in range(self.maxWraps):
+            segmentIds.InsertNextValue(f"Wrap-Low-{self.maxWraps-wrap}x")
+        return segmentIds
+
+    def laplacianUnwrap(self, outputFlowField):
+        raise NotImplementedError("Laplacian unwrapping is not implemented yet")
+
+    def resetUnwrap(self, outputFlowField):
+        """Remove phase wrap segmentation nodes and sequences."""
+        for component in range(3):
+            segmentationNode = self._getSegmentationNode(outputFlowField, component)
+            if not segmentationNode:
+                continue
+            browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(segmentationNode)
+            segmentationSequenceNode = browserNode.GetSequenceNode(segmentationNode)
+            browserNode.RemoveSynchronizedSequenceNode(segmentationSequenceNode.GetID())
+            slicer.mrmlScene.RemoveNode(segmentationNode)
+            slicer.mrmlScene.RemoveNode(segmentationSequenceNode)
+
+    def temporalUnwrap(self, outputFlowField, indexWithoutWrapping=0):
+        """
+        indexWithoutWrapping: index of the frame that is assumet to not have any wraparounds
+        """
+        import numpy as np
+        # Get magnitude volume sequence node
+        magnitudeVolumeNode = outputFlowField.GetNodeReference("magnitudeVolume")
+        magnitudeVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
+        magnitudeVolumeSequenceNode = magnitudeVolumeSequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
+        # Temporary labelmap node for storing the phase wrap map
+        labelmapNode = None
+        segmentIds = self._getSegmentIds()
+        originalItemNumber = magnitudeVolumeSequenceBrowserNode.GetSelectedItemNumber()
+        # Compute phase wrap map
+        for component in range(3):
+            componentVolume = outputFlowField.GetNthNodeReference("componentVolume", component)
+            componentVolumeMaxValue = float(self._getSequenceAttribute(componentVolume, "SlicerHeart.maxValue"))
+            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolume)
+            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolume)
+            if labelmapNode is None:
+                labelmapNode = slicer.modules.volumes.logic().CreateAndAddLabelVolume(slicer.mrmlScene, componentVolume, "___temp___")
+            voxelArray = None
+            phaseWrapMap = None
+            segmentationNode = self._getSegmentationNode(outputFlowField, component)
+            for index in range(indexWithoutWrapping, componentVolumeSequenceNode.GetNumberOfDataNodes()):
+                # TODO: probably we could do it without browsing. ImportLabelmapToSegmentationNode would not be able to handle different
+                # parent transforms, but we are not supposed to have parent transforms
+                componentVolumeSequenceBrowserNode.SetSelectedItemNumber(index)
+                segmentationNode.GetSegmentation().RemoveAllSegments()
+                previousVoxelArray = voxelArray
+                previousPhaseWrapMap = phaseWrapMap
+                voxelArray = slicer.util.arrayFromVolume(componentVolumeSequenceNode.GetNthDataNode(index)).copy()
+
+                magnitudeVolumeArray = slicer.util.arrayFromVolume(magnitudeVolumeSequenceNode.GetNthDataNode(index))
+                voxelArray[magnitudeVolumeArray < self.magnitudeThreshold] = 0
+
+                if previousVoxelArray is None:
+                    # First frame is never wrapped around
+                    phaseWrapMap = np.zeros(voxelArray.shape, dtype=np.int8)
+                    slicer.util.updateVolumeFromArray(labelmapNode, phaseWrapMap)
+                    slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode, segmentIds)
+                    continue
+                phaseWrapMap = np.copy(previousPhaseWrapMap)
+                # Unwrap by comparing with the previous frame
+                diff = voxelArray - previousVoxelArray
+
+                # Wrap low (step down)
+                # For example, sequence of values (for max value of 1000): -880 -960 [980]
+                phaseWrapMap[diff > componentVolumeMaxValue] -= 1
+                # Wrap high (step up)
+                # For example, sequence of values (for max value of 1000): 900 980 [-960]
+                phaseWrapMap[diff < -componentVolumeMaxValue] += 1
+
+                # Phase wrap map has no wrap 0, low wraps -1, -2, ..., high wraps 1, 2, ...
+                # Segment indices are all positive, low wraps are moved up after high wraps (see self._getSegmentIds)
+                phaseWrapSegmentation = phaseWrapMap.copy()
+
+                tooManyLowWrapsCount = np.count_nonzero(phaseWrapSegmentation < -self.maxWraps)
+                if tooManyLowWrapsCount > 0:
+                    print(f"More than {self.maxWraps} wraps (low) found in component {component+1} in frame {index}: {tooManyLowWrapsCount} voxels")
+                    phaseWrapSegmentation[phaseWrapSegmentation < -self.maxWraps] = -self.maxWraps
+
+                tooManyHighWrapsCount = np.count_nonzero(phaseWrapSegmentation > self.maxWraps)
+                if tooManyHighWrapsCount > 0:
+                    print(f"More than {self.maxWraps} wraps (high) found in component {component+1} in frame {index}: {tooManyHighWrapsCount} voxels")
+                    phaseWrapSegmentation[phaseWrapSegmentation > self.maxWraps] = self.maxWraps
+
+                # Move up negative values to positive range, as segment indices should be all positive
+                phaseWrapSegmentation[phaseWrapSegmentation < 0] += self.maxWraps * 2 + 1
+
+                slicer.util.updateVolumeFromArray(labelmapNode, phaseWrapSegmentation)
+                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode, segmentIds)
+                slicer.app.processEvents()
+        if labelmapNode:
+            slicer.mrmlScene.RemoveNode(labelmapNode)
+
+        magnitudeVolumeSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
 
 
 #
