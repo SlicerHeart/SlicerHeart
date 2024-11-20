@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>398</width>
-    <height>587</height>
+    <height>362</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -25,34 +25,21 @@
        </widget>
       </item>
       <item row="1" column="0">
-       <widget class="QLabel" name="label">
+       <widget class="QLabel" name="label_3">
         <property name="text">
-         <string>Selected nodes:</string>
+         <string>Clip node:</string>
         </property>
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="qMRMLCheckableNodeComboBox" name="checkableNodeComboBox">
-        <property name="nodeTypes">
-         <stringlist>
-          <string>vtkMRMLDisplayableNode</string>
-         </stringlist>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QLabel" name="label_2">
-        <property name="text">
-         <string>Sequence browser:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="qMRMLNodeComboBox" name="sequenceBrowserSelector">
+       <widget class="qMRMLNodeComboBox" name="clippingNodeSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
-          <string>vtkMRMLSequenceBrowserNode</string>
+          <string>vtkMRMLClipNode</string>
          </stringlist>
+        </property>
+        <property name="showHidden">
+         <bool>true</bool>
         </property>
         <property name="hideChildNodeTypes">
          <stringlist notr="true"/>
@@ -72,21 +59,18 @@
        </widget>
       </item>
       <item row="2" column="0">
-       <widget class="QLabel" name="label_3">
+       <widget class="QLabel" name="label_2">
         <property name="text">
-         <string>Clip node:</string>
+         <string>Sequence browser:</string>
         </property>
        </widget>
       </item>
       <item row="2" column="1">
-       <widget class="qMRMLNodeComboBox" name="clippingNodeSelector">
+       <widget class="qMRMLNodeComboBox" name="sequenceBrowserSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
-          <string>vtkMRMLClipNode</string>
+          <string>vtkMRMLSequenceBrowserNode</string>
          </stringlist>
-        </property>
-        <property name="showHidden">
-         <bool>true</bool>
         </property>
         <property name="hideChildNodeTypes">
          <stringlist notr="true"/>
@@ -223,11 +207,6 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>qMRMLCheckableNodeComboBox</class>
-   <extends>qMRMLNodeComboBox</extends>
-   <header>qMRMLCheckableNodeComboBox.h</header>
-  </customwidget>
-  <customwidget>
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
@@ -297,22 +276,6 @@
     <hint type="destinationlabel">
      <x>248</x>
      <y>105</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>SimplifiedViewer</sender>
-   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>checkableNodeComboBox</receiver>
-   <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>198</x>
-     <y>187</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>248</x>
-     <y>79</y>
     </hint>
    </hints>
   </connection>
