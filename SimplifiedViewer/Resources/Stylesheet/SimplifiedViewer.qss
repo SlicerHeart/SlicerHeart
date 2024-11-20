@@ -88,6 +88,7 @@ QSlider
     margin-left: 10px;
     margin-right: 10px;
     selection-background-color: palette(Light);
+    background: None
 }
 
 QSlider:handle
