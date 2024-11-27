@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<febio_spec version="4.0">
+	<Module type="solid">
+		<units>SI</units>
+	</Module>
+	<Globals>
+		<Constants>
+			<T>0</T>
+			<P>0</P>
+			<R>8.31446</R>
+			<Fc>96485.3</Fc>
+		</Constants>
+	</Globals>
+	<Material>
+		<material id="1" name="Material1" type="linear-beam">
+			<density>1</density>
+			<E>1000</E>
+			<G>1000</G>
+			<A>1</A>
+			<A1>1</A1>
+			<A2>1</A2>
+			<I1>1</I1>
+			<I2>1</I2>
+		</material>
+	</Material>
+	<Mesh>
+		<Nodes name="Test_Beam">
+            <node id="1">-12.37792530047,12.572691366874,-14.71219257483</node>
+            <node id="2">-12.13625750041,12.674913527996,-13.75336198326</node>
+            <node id="3">-11.78545096711,12.775031231456,-12.82813247282</node>
+            <node id="4">-11.34227228829,12.857439169946,-11.94146339695</node>
+            <node id="5">-10.81745467619,12.909291120507,-11.09862246154</node>
+            <node id="6">-10.21832100994,12.918930110379,-10.30586709035</node>
+            <node id="7">-9.554393064662,12.876263661552,-9.567662280553</node>
+            <node id="8">-8.855461992024,12.777350039248,-8.867516782737</node>
+            <node id="9">-8.155950005286,12.616629012964,-8.179308517568</node>
+            <node id="10">-7.495815044687,12.381739187267,-7.474242223</node>
+            <node id="11">-6.613192445269,11.085194300813,-5.062496916778</node>
+            <node id="12">-6.894606851722,10.558314710273,-4.268979488987</node>
+            <node id="13">-7.303531573782,10.067071551139,-3.507600481405</node>
+            <node id="14">-7.764359179355,9.6228099031569,-2.74621206866</node>
+            <node id="15">-8.225053598464,9.2403645318476,-1.951984858536</node>
+            <node id="16">-8.621683853938,8.9533377133819,-1.088279281707</node>
+            <node id="17">-8.717903371309,8.9792688857435,0.8413341665377</node>
+            <node id="18">-8.383955245132,9.3028821451122,1.7183228080752</node>
+            <node id="19">-7.96833184081,9.7234072059389,2.5175373261587</node>
+            <node id="20">-7.541360089516,10.204876580612,3.276262928022</node>
+		</Nodes>
+		<Elements type="line2" name="Part32">
+            <elem id="1">107,106</elem>
+            <elem id="2">1,107</elem>
+            <elem id="3">2,1</elem>
+            <elem id="4">3,2</elem>
+            <elem id="5">4,3</elem>
+            <elem id="6">5,4</elem>
+            <elem id="7">6,5</elem>
+            <elem id="8">7,6</elem>
+            <elem id="9">8,7</elem>
+            <elem id="10">9,8</elem>
+            <elem id="11">10,9</elem>
+            <elem id="15">12,11</elem>
+            <elem id="16">13,12</elem>
+            <elem id="17">14,13</elem>
+            <elem id="18">15,14</elem>
+            <elem id="19">16,15</elem>
+            <elem id="22">18,17</elem>
+            <elem id="23">19,18</elem>
+            <elem id="24">20,19</elem>
+		</Elements>
+		<Edge name="Beam">
+            <line2 id="3">2,1</line2>
+            <line2 id="4">3,2</line2>
+            <line2 id="5">4,3</line2>
+            <line2 id="6">5,4</line2>
+            <line2 id="7">6,5</line2>
+            <line2 id="8">7,6</line2>
+            <line2 id="9">8,7</line2>
+            <line2 id="10">9,8</line2>
+            <line2 id="11">10,9</line2>
+            <line2 id="15">12,11</line2>
+            <line2 id="16">13,12</line2>
+            <line2 id="17">14,13</line2>
+            <line2 id="18">15,14</line2>
+            <line2 id="19">16,15</line2>
+            <line2 id="22">18,17</line2>
+            <line2 id="23">19,18</line2>
+            <line2 id="24">20,19</line2>
+		</Edge>
+	</Mesh>
+	<MeshDomains>
+		<BeamDomain name="Part32" mat="Material1" type="linear-beam"/>
+	</MeshDomains>
+	<Step>
+	</Step>
+	<Output>
+		<plotfile type="febio">
+			<var type="displacement"/>
+			<var type="stress"/>
+			<var type="relative volume"/>
+		</plotfile>
+	</Output>
+</febio_spec>
