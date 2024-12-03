@@ -314,12 +314,19 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     super(MeasurementPresetPapillaryAngle, self).computeMetrics(inputValveModels, outputTableNode)
 
     self._quantifyMuscleDistances(self._getListOfPapillaryMuscleDistancePairs())
+    import numpy as np
 
-    # mitral plane
-    mitralValveModel = inputValveModels["MitralValve"]
-    planePositionMV, planeNormalMV = mitralValveModel.getAnnulusContourPlane()
-    mitralAnnulusPoints = mitralValveModel.annulusContourCurve.getInterpolatedPointsAsArray()
-    self.createAnnulusPlaneModel(mitralValveModel, mitralAnnulusPoints, planePositionMV, planeNormalMV, name="MV Annulus plane")
+    # main valve (e.g. mitral, lavv)
+    mainValveModel = inputValveModels[self._requiredValveType]
+    planePositionMV, planeNormalMV = mainValveModel.getAnnulusContourPlane()
+    mainAnnulusPoints = mainValveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    self.createAnnulusPlaneModel(mainValveModel, mainAnnulusPoints, planePositionMV, planeNormalMV,
+                                 name=f"{self.inputValveNames[self._requiredValveType]} Annulus plane")
+
+    if not mainValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel):
+      mainValveModel.setAnnulusMarkupLabel(
+        self._valveCenterLabel, np.mean(mainValveModel.annulusContourCurve.getInterpolatedPointsAsArray(), axis=1)
+      )
 
     # tricuspid plane
     try:
@@ -331,15 +338,20 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
       self.metricsMessages.append("No Tricuspid Valve found. Skipping parts of the calculation.")
       return self.metricsMessages
 
+    if not tricuspidValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel):
+      tricuspidValveModel.setAnnulusMarkupLabel(
+        self._valveCenterLabel, np.mean(tricuspidValveModel.annulusContourCurve.getInterpolatedPointsAsArray(), axis=1)
+      )
+
+
     # common plane
-    import numpy as np
-    interpolatedPoints = np.append(mitralAnnulusPoints, tricuspidAnnulusPoints, axis=1)
+    interpolatedPoints = np.append(mainAnnulusPoints, tricuspidAnnulusPoints, axis=1)
     from HeartValveLib.ValveModel import planeFit
     planePositionCP, planeNormalCP = planeFit(interpolatedPoints)
     self.createAnnulusPlaneModel(tricuspidValveModel, interpolatedPoints, planePositionCP, planeNormalCP, name="Common Annulus plane")
 
-    self.addSeptalBasedRotationalAngle(mitralValveModel, tricuspidValveModel, planePositionCP, planeNormalCP)
-    self.addMitralCenterBasedRotationAngle(mitralValveModel, tricuspidValveModel, planePositionMV, planeNormalMV)
+    self.addSeptalBasedRotationalAngle(mainValveModel, tricuspidValveModel, planePositionCP, planeNormalCP)
+    self.addMainValveCenterBasedRotationAngle(mainValveModel, tricuspidValveModel, planePositionMV, planeNormalMV)
 
     return self.metricsMessages
 
@@ -405,7 +417,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     mv_tv_center = np.array([mv_center, tv_center]).mean(axis=0)
     return mv_center, mv_tv_center, tv_center
 
-  def addMitralCenterBasedRotationAngle(self, mitralValveModel, tricuspidValveModel, planePosition, planeNormal):
+  def addMainValveCenterBasedRotationAngle(self, mitralValveModel, tricuspidValveModel, planePosition, planeNormal):
 
     # calc center between mv and tv (after plane projection)
     mv_center, mv_tv_center, tv_center = self.getProjectedValveCenters(mitralValveModel, tricuspidValveModel,
@@ -447,6 +459,18 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     angleOrientationAxis = np.array(planeNormalRas)[:-1]
     angleOrientationAxis *= -1
     return angleOrientationAxis
+
+
+class MeasurementPresetPapillaryLAVValve(MeasurementPresetPapillaryMitralValve):
+
+  def __init__(self):
+    super(MeasurementPresetPapillaryLAVValve, self).__init__()
+    self.id = "LAVValvePM"
+    self.name = "LAVV (papillary muscles)"
+    self._requiredValveType = "Lavv"
+    self.inputValveIds = ["Lavv", "TricuspidValve"]
+    self.inputValveNames = { "Lavv": "Lav Valve", "TricuspidValve": "Tricuspid valve" }
+    self._valveCenterLabel = "X"
 
 
 class MeasurementPresetPapillaryTricuspidValve(MeasurementPresetPapillary):

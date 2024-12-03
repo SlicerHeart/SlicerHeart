@@ -802,6 +802,7 @@ class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
                         ValveQuantificationLib.MeasurementPresetPapillaryMitralValve(),
                         ValveQuantificationLib.MeasurementPresetPapillaryTricuspidValve(),
                         ValveQuantificationLib.MeasurementPresetPapillaryCavc(),
+                        ValveQuantificationLib.MeasurementPresetPapillaryLAVValve(),
                         ValveQuantificationLib.MeasurementPresetLavv(),
                         ValveQuantificationLib.MeasurementPresetPhaseCompare()]
 

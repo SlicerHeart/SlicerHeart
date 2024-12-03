@@ -11,5 +11,6 @@ from MeasurementPresetPhaseCompare import *
 from MeasurementPresetsPapillary import (
     MeasurementPresetPapillaryMitralValve,
     MeasurementPresetPapillaryTricuspidValve,
-    MeasurementPresetPapillaryCavc
+    MeasurementPresetPapillaryCavc,
+    MeasurementPresetPapillaryLAVValve
 )
