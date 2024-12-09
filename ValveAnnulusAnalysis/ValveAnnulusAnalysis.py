@@ -94,6 +94,17 @@ class ValveAnnulusAnalysis(ScriptedLoadableModule):
         nodeNames=['PDA_CT', 'PDA_vasculature']
     )
 
+    SampleData.SampleDataLogic.registerCustomSampleDataSource(
+        category='SlicerHeart',
+        sampleName='Truncal Valve',
+        thumbnailFileName=os.path.join(iconsPath, 'TruncalValve.png'),
+        uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/TruncalValve_4DCT.seq.nrrd'],
+        checksums=['SHA256:7573f1bc7ca92d7d1012eecf98211cfd9939c1d22d87aee1db91c8ab72031cfb'],
+        fileNames=['TruncalValve_4DCT.seq.nrrd'],
+        loadFileType=['SequenceFile'],
+        nodeNames=['TruncalValve_4DCT']
+    )
+
   def initializeHeartValveLib(self):
     """Perform initializations that can only be performed when Slicer has started up"""
     self.registerSampleData()
