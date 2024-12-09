@@ -97,6 +97,8 @@ class ValveAnnulusAnalysis(ScriptedLoadableModule):
     SampleData.SampleDataLogic.registerCustomSampleDataSource(
         category='SlicerHeart',
         sampleName='Truncal Valve',
+        # sampleDescription property cannot be defined yet in registerCustomSampleDataSource, therefore keeping it as a comment here:
+        # sampleDescription='4D gated CT of adolescent with truncus arteriosus s/p repair',
         thumbnailFileName=os.path.join(iconsPath, 'TruncalValve.png'),
         uris=['https://github.com/SlicerHeart/SlicerHeart/releases/download/TestingData/TruncalValve_4DCT.seq.nrrd'],
         checksums=['SHA256:7573f1bc7ca92d7d1012eecf98211cfd9939c1d22d87aee1db91c8ab72031cfb'],
