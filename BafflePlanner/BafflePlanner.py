@@ -554,6 +554,11 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     self.surfaceTransformSourcePoints.Modified()
     self.surfaceTransformTargetPoints.Modified()
 
+    # We will copy the computation result into the model node (instead of setting the filter output directly in the model node)
+    # to allow having multiple baffles in the same scene.
+    if not self.getOutputBaffleModelNode().GetPolyData():
+        self.getOutputBaffleModelNode().SetAndObservePolyData(vtk.vtkPolyData())
+
     thicknessPos = self.getSurfaceThicknessPositive()
     thicknessNeg = self.getSurfaceThicknessNegative()
     if thicknessPos > 0 or thicknessNeg > 0:
@@ -569,11 +574,11 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
       self.surfaceExtrude.SetScaleFactor(thicknessNeg+thicknessPos)
 
       self.surfacePolyDataNormalsThick.Update()
-      self.getOutputBaffleModelNode().SetAndObservePolyData(self.surfacePolyDataNormalsThick.GetOutput())
+      self.getOutputBaffleModelNode().GetPolyData().DeepCopy(self.surfacePolyDataNormalsThick.GetOutput())
 
     else:
       self.surfacePolyDataNormalsThin.Update()
-      self.getOutputBaffleModelNode().SetAndObservePolyData(self.surfacePolyDataNormalsThin.GetOutput())
+      self.getOutputBaffleModelNode().GetPolyData().DeepCopy(self.surfacePolyDataNormalsThin.GetOutput())
 
   def getInputFixedPointsNode(self):
     if not self.inputCurveNode:
