@@ -135,6 +135,7 @@ def remeshPolyData(poly, nVertices, subdivide):
   try:
     import pyacvd
   except ImportError:
+    import slicer
     slicer.util.pip_install('pyacvd')
   import pyacvd
   import pyvista as pv
