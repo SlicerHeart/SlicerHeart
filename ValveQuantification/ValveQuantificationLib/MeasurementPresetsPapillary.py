@@ -323,7 +323,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     self.createAnnulusPlaneModel(mainValveModel, mainAnnulusPoints, planePositionMV, planeNormalMV,
                                  name=f"{self.inputValveNames[self._requiredValveType]} Annulus plane")
 
-    if not mainValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel):
+    if mainValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel) is None:
       mainValveModel.setAnnulusMarkupLabel(
         self._valveCenterLabel, np.mean(mainValveModel.annulusContourCurve.getInterpolatedPointsAsArray(), axis=1)
       )
