@@ -545,7 +545,7 @@ class ValveClipBase(CardiacDeviceBase):
 
 
 #
-# GenericValceClip device
+# GenericValveClip device
 #
 class GenericValveClip(ValveClipBase):
 
