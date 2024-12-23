@@ -61,7 +61,6 @@ class UnwrapModeEnum(enum.Enum):
             return "none"
         raise ValueError("Unknown enum value")
 
-
 @parameterNodeWrapper
 class Import4DFlowParameterNode:
     """
@@ -99,6 +98,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         #   - 'componentVolumeNodesInvertToRasDirection': list of 3 Booleans, which tell is the component has to be inverted to get velocity RAS direction
         #   - 'magnitudeVolumeNode' magnitude volume node
         self._volumeNodesSets = {}
+        self.segmentEditorSingletonTag = "Import3DFlow.SegmentEditor"
 
     def setup(self) -> None:
         """
@@ -120,14 +120,39 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.outputTransformSelector.setNodeTypeLabel ("Flow Field", "vtkMRMLTransformNode")
         self.ui.outputTransformSelector.addAttribute("vtkMRMLTransformNode", "SlicerHeart.Type", "FlowField")
 
-        segmentEditorSingletonTag = "Import3DFlow.SegmentEditor"
-        segmentEditorNode = slicer.mrmlScene.GetSingletonNode(segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
+        segmentEditorNode = slicer.mrmlScene.GetSingletonNode(self.segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
         if segmentEditorNode is None:
             segmentEditorNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLSegmentEditorNode")
+            segmentEditorNode.SetName("Import4DFlowSegmentEditor")
             segmentEditorNode.UnRegister(None)
-            segmentEditorNode.SetSingletonTag(segmentEditorSingletonTag)
+            segmentEditorNode.SetSingletonTag(self.segmentEditorSingletonTag)
             segmentEditorNode = slicer.mrmlScene.AddNode(segmentEditorNode)
         self.ui.segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+        self.initializeSegmentEditorNode()
+
+        # Hide unnecessary segment editor features to simplify GUI
+        if hasattr(self.ui.segmentEditorWidget, "maskingSectionVisible"):
+            self.ui.segmentEditorWidget.maskingSectionVisible = False
+        if hasattr(self.ui.segmentEditorWidget, "specifyGeometryButtonVisible"):
+            self.ui.segmentEditorWidget.specifyGeometryButtonVisible = False
+        if hasattr(self.ui.segmentEditorWidget, "show3DButtonVisible"):
+            self.ui.segmentEditorWidget.show3DButtonVisible = False
+        if hasattr(self.ui.segmentEditorWidget, "addRemoveSegmentButtonsVisible"):
+            self.ui.segmentEditorWidget.addRemoveSegmentButtonsVisible = False
+
+        # There should be no need to edit display settings, so hide "Switch to Segmentation" button
+        self.ui.segmentEditorWidget.setSwitchToSegmentationsButtonVisible(False)
+
+        # Only show relevant segment editor effects
+        self.ui.segmentEditorWidget.setEffectNameOrder(['Flood filling', 'Paint', 'Draw', 'Erase', 'Threshold'])
+        self.ui.segmentEditorWidget.unorderedEffectsVisible = False
+
+        floodFillingEffect = self.ui.segmentEditorWidget.effectByName("Flood filling")
+        if floodFillingEffect:
+            if hasattr(floodFillingEffect.self(), "autoUpdateParametersFromSourceVolume"):
+                floodFillingEffect.self().autoUpdateParametersFromSourceVolume = False
+        else:
+            logging.warning("Flood filling effect not found. Please install SegmentEditorExtraEffects extension to make 'Flood filling' effect available.")
 
         # Create logic class. Logic implements all computations that should be possible to run
         # in batch mode, without a graphical user interface.
@@ -187,6 +212,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
             self._parameterNodeGuiTag = None
             self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+        self.ui.segmentEditorWidget.setActiveEffect(None)
 
     def addLog(self, text):
         """Display log message
@@ -208,6 +234,20 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # If this module is shown while the scene is closed then recreate a new parameter node immediately
         if self.parent.isEntered:
             self.initializeParameterNode()
+        self.initializeSegmentEditorNode()
+
+    def initializeSegmentEditorNode(self):
+        segmentEditorNode = slicer.mrmlScene.GetSingletonNode(self.segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
+        if segmentEditorNode:
+            print("Initialize segment editor node")
+            # Set up flood filling effect
+            # wraparound is typically causes a large intensity difference, so we can set a large tolerance
+            segmentEditorNode.SetAttribute("Flood filling.IntensityTolerance", "1000")
+            # intensity difference is large enough so we don't need to prevent leaking
+            # (and we want to mark very small regions), therefore there is no minimum neighborhood size
+            segmentEditorNode.SetAttribute("Flood filling.NeighborhoodSizeMm", "0")
+            # User may be surprised that erasing requires setting a specific segment, so erase everything by default
+            segmentEditorNode.SetAttribute("Erase.EraseAllSegments", "1")
 
     def initializeParameterNode(self) -> None:
         """
@@ -372,11 +412,11 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             segmentation.GetDisplayNode().SetVisibility(visibility)
 
     def onRecomputeFlowFieldButton(self) -> None:
-        if not self._parameterNode.outputFlowField:
-            slicer.util.errorDisplay("Flow field is not created yet")
-            return
+        with slicer.util.tryWithErrorDisplay("Failed to recompute flow field.", waitCursor=True):
+            if not self._parameterNode.outputFlowField:
+                raise RuntimeError("Flow field is not created yet")
 
-        self.logic.updateFlowFieldFromComponentVolumes(self._parameterNode.outputFlowField)
+            self.logic.updateFlowFieldFromComponentVolumes(self._parameterNode.outputFlowField)
 
     def onExportButton(self) -> None:
         if not self._parameterNode.exportDirectory:
@@ -679,7 +719,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             # Add direction code to the name to make it easier to identify the component images
             directionCode = self._getSequenceAttribute(componentVolumeNode, 'SlicerHeart.directionCode')
             sequenceName = componentVolumeSequenceNode.GetName()
-            componentVolumeSequenceNode.SetName(f"{sequenceName} - {directionCode}")
+            componentVolumeSequenceNode.SetName(f"{sequenceName} - C{component+1} {directionCode}")
 
             invertToRasDirection = componentVolumeNodesInvertToRasDirection[component]
             # It could make sense to store this information as node reference attribute, but the feature is not yet available in Slicer Stable Release
@@ -724,7 +764,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
         magnitudeVolumeSequenceNode = self._getSequenceFromProxyNode(magnitudeVolumeNode)
-        labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "___temp___")
+        labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "___temp1___")
         for volumeIndex in range(magnitudeVolumeSequenceNode.GetNumberOfDataNodes()):
             magnitudeVolumeNodeInSequence = magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)
             magnitudeVoxelArray = slicer.util.arrayFromVolume(magnitudeVolumeNodeInSequence)
@@ -774,10 +814,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     for wrapIndex in range(1, self.maxWraps):
                         componentVolumeMaxValue = componentVoxelArray.dtype.type(componentVolumeMaxValues[axis])
                         # Find voxels with phase wraps
-                        # High wrap (segment indices: 1 = 1x, 2 = 2x, 3 = 3x)
-                        componentVoxelArray[segmentationArray == wrapIndex] += wrapIndex * 2 * componentVolumeMaxValue
-                        # Low wrap (segment indices: 6 = 1x, 5 = 2x, 4 = 3x)
-                        componentVoxelArray[segmentationArray == 2 * self.maxWraps + 1 - wrapIndex] -= wrapIndex * 2 * componentVolumeMaxValue
+                        # Low wrap (segment indices: 1, 3, 5)
+                        componentVoxelArray[segmentationArray == wrapIndex * 2 - 1] -= wrapIndex * 2 * componentVolumeMaxValue
+                        # High wrap (segment indices: 2, 4, 6)
+                        componentVoxelArray[segmentationArray == wrapIndex * 2] += wrapIndex * 2 * componentVolumeMaxValue
 
                 displacementArray[:, :, :, axis] = componentVoxelArray * scaleToMeterPerSec
 
@@ -794,6 +834,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         transformSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", ','.join(vencCmPerSecList))  # velocity encoding, in cm/sec
 
+        slicer.mrmlScene.RemoveNode(labelmapNode.GetDisplayNode().GetColorNode())
         slicer.mrmlScene.RemoveNode(labelmapNode)
 
 
@@ -1052,12 +1093,17 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         segmentationNode = outputFlowField.GetNthNodeReference("phaseWrapSegmentation", component)
         if segmentationNode:
             return segmentationNode
+
+        componentVolumeNode = outputFlowField.GetNthNodeReference("componentVolume", component)
+
         sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowField)
         # Create new segmentation node and add it to the sequence
-        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", f"Phase wrap C{component+1}")
+        directionCode = self._getSequenceAttribute(componentVolumeNode, "SlicerHeart.directionCode")
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", f"Phase wrap C{component+1} {directionCode}")
         outputFlowField.SetNthNodeReferenceID("phaseWrapSegmentation", component, segmentationNode.GetID())
+        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(componentVolumeNode)
         segmentationNode.CreateDefaultDisplayNodes()
-        segmentationNode.GetDisplayNode().SetOpacity2DFill(0)
+        segmentationNode.GetDisplayNode().SetOpacity2DFill(0.1)
         segmentationNode.GetDisplayNode().SetSliceIntersectionThickness(5)
         segmentationSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationNode.GetName())
         sequenceBrowserNode.AddProxyNode(segmentationNode, segmentationSequenceNode, False)
@@ -1065,15 +1111,20 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         sequenceBrowserNode.SetRecording(segmentationSequenceNode, False)
         sequenceBrowserNode.SetSaveChanges(segmentationSequenceNode, True)
         sequenceBrowserNode.SetOverwriteProxyName(segmentationSequenceNode, True)  # show index in node name
+
+        # Place segmentation in the same subject hierarchy folder as the flow field node
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        parentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(outputFlowField))
+        shNode.SetItemParent(shNode.GetItemByDataNode(segmentationNode), parentItemId)
+
         return segmentationNode
 
     def _getSegmentIds(self):
         """In phase wrap segmentation, order of segments: no wrap = 0, high wraps 1x = 1, 2x = 2, 3x = 3, ..., low wraps 3x = 4, 2x = 5, 1x = 6, ..."""
         segmentIds = vtk.vtkStringArray()
         for wrap in range(self.maxWraps):
+            segmentIds.InsertNextValue(f"Wrap-Low-{wrap+1}x")
             segmentIds.InsertNextValue(f"Wrap-High-{wrap+1}x")
-        for wrap in range(self.maxWraps):
-            segmentIds.InsertNextValue(f"Wrap-Low-{self.maxWraps-wrap}x")
         return segmentIds
 
     def laplacianUnwrap(self, outputFlowField):
@@ -1111,7 +1162,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolume)
             componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolume)
             if labelmapNode is None:
-                labelmapNode = slicer.modules.volumes.logic().CreateAndAddLabelVolume(slicer.mrmlScene, componentVolume, "___temp___")
+                labelmapNode = slicer.modules.volumes.logic().CreateAndAddLabelVolume(slicer.mrmlScene, componentVolume, "___temp2___")
             voxelArray = None
             phaseWrapMap = None
             segmentationNode = self._getSegmentationNode(outputFlowField, component)
@@ -1145,7 +1196,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 phaseWrapMap[diff < -componentVolumeMaxValue] += 1
 
                 # Phase wrap map has no wrap 0, low wraps -1, -2, ..., high wraps 1, 2, ...
-                # Segment indices are all positive, low wraps are moved up after high wraps (see self._getSegmentIds)
+                # Segment indices are all positive: 1x low wrap, 1x high wrap, 2x low wrap, 2x high wrap, etc. (see self._getSegmentIds)
                 phaseWrapSegmentation = phaseWrapMap.copy()
 
                 tooManyLowWrapsCount = np.count_nonzero(phaseWrapSegmentation < -self.maxWraps)
@@ -1159,7 +1210,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     phaseWrapSegmentation[phaseWrapSegmentation > self.maxWraps] = self.maxWraps
 
                 # Move up negative values to positive range, as segment indices should be all positive
-                phaseWrapSegmentation[phaseWrapSegmentation < 0] += self.maxWraps * 2 + 1
+                phaseWrapSegmentation *= 2  # label values: -6 -4 -2 0 2 4 6
+                phaseWrapSegmentation[phaseWrapSegmentation < 0] += 1  # label values: -5 -3 -1 0 2 4 6
+                phaseWrapSegmentation[phaseWrapSegmentation < 0] *= -1  # label values: 0 1 2 3 4 5 6
 
                 slicer.util.updateVolumeFromArray(labelmapNode, phaseWrapSegmentation)
                 slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode, segmentIds)
