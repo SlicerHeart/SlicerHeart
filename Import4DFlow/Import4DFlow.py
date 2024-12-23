@@ -1103,7 +1103,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         outputFlowField.SetNthNodeReferenceID("phaseWrapSegmentation", component, segmentationNode.GetID())
         segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(componentVolumeNode)
         segmentationNode.CreateDefaultDisplayNodes()
-        segmentationNode.GetDisplayNode().SetOpacity2DFill(0.1)
+        segmentationNode.GetDisplayNode().SetOpacity2DFill(0.2)
         segmentationNode.GetDisplayNode().SetSliceIntersectionThickness(5)
         segmentationSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationNode.GetName())
         sequenceBrowserNode.AddProxyNode(segmentationNode, segmentationSequenceNode, False)
