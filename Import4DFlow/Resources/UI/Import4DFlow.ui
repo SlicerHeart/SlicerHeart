@@ -71,7 +71,7 @@
    <item>
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton_2">
      <property name="text">
-      <string>Flow field adjustment</string>
+      <string>Inspect flow field</string>
      </property>
      <layout class="QFormLayout" name="formLayout_3">
       <item row="1" column="0">
@@ -125,6 +125,9 @@
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
          <widget class="QPushButton" name="showFlowFieldButton">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
           <property name="text">
            <string>Flow</string>
           </property>
@@ -148,6 +151,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="showMagnitudeVolumeButton">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
           <property name="text">
            <string>Magnitude</string>
           </property>
@@ -155,6 +161,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="showComponentVolume1Button">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
           <property name="text">
            <string>C1</string>
           </property>
@@ -162,6 +171,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="showComponentVolume2Button">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
           <property name="text">
            <string>C2</string>
           </property>
@@ -169,6 +181,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="showComponentVolume3Button">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
           <property name="text">
            <string>C3</string>
           </property>
@@ -188,6 +203,12 @@
       </item>
       <item row="4" column="0" colspan="2">
        <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget">
+        <property name="segmentationNodeSelectorVisible">
+         <bool>false</bool>
+        </property>
+        <property name="sourceVolumeNodeSelectorVisible">
+         <bool>false</bool>
+        </property>
         <property name="defaultTerminologyEntrySettingsKey">
          <string notr="true"/>
         </property>
@@ -315,8 +336,8 @@
      <y>135</y>
     </hint>
     <hint type="destinationlabel">
-     <x>331</x>
-     <y>89</y>
+     <x>295</x>
+     <y>199</y>
     </hint>
    </hints>
   </connection>
@@ -328,11 +349,91 @@
    <hints>
     <hint type="sourcelabel">
      <x>359</x>
-     <y>748</y>
+     <y>660</y>
     </hint>
     <hint type="destinationlabel">
      <x>164</x>
      <y>405</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputTransformSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>showFlowFieldButton</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>137</x>
+     <y>189</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>138</x>
+     <y>216</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputTransformSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>showMagnitudeVolumeButton</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>219</x>
+     <y>190</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>223</x>
+     <y>213</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputTransformSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>showComponentVolume1Button</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>313</x>
+     <y>187</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>318</x>
+     <y>222</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputTransformSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>showComponentVolume2Button</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>381</x>
+     <y>192</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>382</x>
+     <y>216</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputTransformSelector</sender>
+   <signal>currentNodeChanged(bool)</signal>
+   <receiver>showComponentVolume3Button</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>458</x>
+     <y>192</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>463</x>
+     <y>213</y>
     </hint>
    </hints>
   </connection>
