@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>510</width>
-    <height>661</height>
+    <height>712</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -38,7 +38,7 @@
         </item>
        </layout>
       </item>
-      <item row="3" column="0" colspan="2">
+      <item row="1" column="0" colspan="2">
        <widget class="QPushButton" name="convertButton">
         <property name="enabled">
          <bool>false</bool>
@@ -51,37 +51,23 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_3">
-        <property name="text">
-         <string>Phase unwrapping:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="ctkComboBox" name="unwrappingMethodSelector">
-        <property name="SlicerParameterName" stdset="0">
-         <string>unwrapMode</string>
-        </property>
-       </widget>
-      </item>
      </layout>
     </widget>
    </item>
    <item>
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton_2">
      <property name="text">
-      <string>Inspect flow field</string>
+      <string>Corrections</string>
      </property>
      <layout class="QFormLayout" name="formLayout_3">
-      <item row="1" column="0">
+      <item row="0" column="0">
        <widget class="QLabel" name="label_2">
         <property name="text">
          <string>Flow field:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="0" column="1">
        <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
         <property name="toolTip">
          <string>Pick the output to the algorithm.</string>
@@ -114,14 +100,14 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="1" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
          <string>Show:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="1" column="1">
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
          <widget class="QPushButton" name="showFlowFieldButton">
@@ -129,7 +115,7 @@
            <bool>false</bool>
           </property>
           <property name="text">
-           <string>Flow</string>
+           <string>Flow vectors</string>
           </property>
          </widget>
         </item>
@@ -191,26 +177,152 @@
         </item>
        </layout>
       </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
+        <property name="title">
+         <string>Background correction</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="formLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_4">
+           <property name="text">
+            <string>Noise magnitude threshold:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkSliderWidget" name="noiseMagnitudeThresholdSlider">
+           <property name="toolTip">
+            <string>Regions where the magnitude image value is below this threshold will be considered noise and velocity will be set to 0.</string>
+           </property>
+           <property name="decimals">
+            <number>1</number>
+           </property>
+           <property name="suffix">
+            <string>%</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>noiseMagnitudeThresholdPercent</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_6">
+           <property name="text">
+            <string>Stationary tissue speed threshold:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="ctkSliderWidget" name="stationaryTissueSpeedThresholdSlider">
+           <property name="toolTip">
+            <string>Regions where the speed is below this threshold (as percentage of venc) will be considered stationary tissue.</string>
+           </property>
+           <property name="decimals">
+            <number>1</number>
+           </property>
+           <property name="singleStep">
+            <double>1.000000000000000</double>
+           </property>
+           <property name="pageStep">
+            <double>5.000000000000000</double>
+           </property>
+           <property name="suffix">
+            <string>%</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>stationaryTissueSpeedThresholdVencPercent</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_7">
+           <property name="text">
+            <string>Background subtraction:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkComboBox" name="backgroundSubtractionMethodSelector">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>backgroundSubtractionMethod</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
       <item row="3" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
+        <property name="title">
+         <string>Velocity anti-aliasing</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QGridLayout" name="gridLayout">
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="unwrappingMethodSelector">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>unwrapMode</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_3">
+           <property name="text">
+            <string>Automatic:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QToolButton" name="computePhaseUnwrappingButton">
+           <property name="text">
+            <string>Compute</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0" colspan="3">
+          <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget">
+           <property name="segmentationNodeSelectorVisible">
+            <bool>false</bool>
+           </property>
+           <property name="sourceVolumeNodeSelectorVisible">
+            <bool>false</bool>
+           </property>
+           <property name="defaultTerminologyEntrySettingsKey">
+            <string notr="true"/>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="4" column="0" colspan="2">
        <widget class="QPushButton" name="recomputeFlowFieldButton">
         <property name="toolTip">
          <string>Recompute flow field after adjusting segmentation</string>
         </property>
         <property name="text">
          <string>Recompute flow field</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0" colspan="2">
-       <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget">
-        <property name="segmentationNodeSelectorVisible">
-         <bool>false</bool>
-        </property>
-        <property name="sourceVolumeNodeSelectorVisible">
-         <bool>false</bool>
-        </property>
-        <property name="defaultTerminologyEntrySettingsKey">
-         <string notr="true"/>
         </property>
        </widget>
       </item>
@@ -297,6 +409,12 @@
    <container>1</container>
   </customwidget>
   <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
    <class>ctkComboBox</class>
    <extends>QComboBox</extends>
    <header>ctkComboBox.h</header>
@@ -305,6 +423,11 @@
    <class>ctkPathLineEdit</class>
    <extends>QWidget</extends>
    <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>
@@ -336,8 +459,8 @@
      <y>135</y>
     </hint>
     <hint type="destinationlabel">
-     <x>295</x>
-     <y>199</y>
+     <x>370</x>
+     <y>161</y>
     </hint>
    </hints>
   </connection>
@@ -349,7 +472,7 @@
    <hints>
     <hint type="sourcelabel">
      <x>359</x>
-     <y>660</y>
+     <y>566</y>
     </hint>
     <hint type="destinationlabel">
      <x>164</x>
@@ -364,12 +487,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>137</x>
-     <y>189</y>
+     <x>212</x>
+     <y>161</y>
     </hint>
     <hint type="destinationlabel">
-     <x>138</x>
-     <y>216</y>
+     <x>150</x>
+     <y>192</y>
     </hint>
    </hints>
   </connection>
@@ -380,12 +503,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>219</x>
-     <y>190</y>
+     <x>294</x>
+     <y>161</y>
     </hint>
     <hint type="destinationlabel">
-     <x>223</x>
-     <y>213</y>
+     <x>247</x>
+     <y>192</y>
     </hint>
    </hints>
   </connection>
@@ -396,12 +519,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>313</x>
-     <y>187</y>
+     <x>388</x>
+     <y>161</y>
     </hint>
     <hint type="destinationlabel">
-     <x>318</x>
-     <y>222</y>
+     <x>328</x>
+     <y>192</y>
     </hint>
    </hints>
   </connection>
@@ -412,12 +535,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>381</x>
-     <y>192</y>
+     <x>456</x>
+     <y>161</y>
     </hint>
     <hint type="destinationlabel">
-     <x>382</x>
-     <y>216</y>
+     <x>409</x>
+     <y>192</y>
     </hint>
    </hints>
   </connection>
@@ -428,12 +551,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>458</x>
-     <y>192</y>
+     <x>491</x>
+     <y>161</y>
     </hint>
     <hint type="destinationlabel">
-     <x>463</x>
-     <y>213</y>
+     <x>490</x>
+     <y>192</y>
     </hint>
    </hints>
   </connection>

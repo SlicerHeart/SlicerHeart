@@ -61,6 +61,20 @@ class UnwrapModeEnum(enum.Enum):
             return "none"
         raise ValueError("Unknown enum value")
 
+class BackgroundSubtractionMethodEnum(enum.Enum):
+    NoSubtraction = 1
+    LinearFit = 2
+    QuadraticFit = 3
+
+    def label(self):
+        if self is BackgroundSubtractionMethodEnum.NoSubtraction:
+            return "no subtraction"
+        elif self is BackgroundSubtractionMethodEnum.LinearFit:
+            return "linear fit"
+        elif self is BackgroundSubtractionMethodEnum.QuadraticFit:
+            return "quadratic fit"
+        raise ValueError("Unknown enum value")
+
 @parameterNodeWrapper
 class Import4DFlowParameterNode:
     """
@@ -71,6 +85,10 @@ class Import4DFlowParameterNode:
     exportDirectory: str
     exportFormat: str
     unwrapMode: UnwrapModeEnum
+    backgroundSubtractionMethod: BackgroundSubtractionMethodEnum
+    noiseMagnitudeThresholdPercent: Annotated[float, WithinRange(0.0, 50.0)] = 5.0  # magnitude image threshold to filter out background noise (speed values below this threshold are set to zero in the flow field)
+    stationaryTissueSpeedThresholdVencPercent: Annotated[float, WithinRange(0.0, 50.0)] = 10.0  # speed threshold to filter out stationary tissue as percentage of venc (speed values below this threshold are set to zero in the flow field)
+    temporalUnwrapReferenceFrame: int = 0  # frame number to use as reference for temporal unwrapping
 
 #
 # Import4DFlowWidget
@@ -171,6 +189,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.exportFormatComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
         self.ui.inspectButton.connect('clicked(bool)', self.onInspectButton)
         self.ui.convertButton.connect('clicked(bool)', self.onConvertButton)
+        self.ui.computePhaseUnwrappingButton.connect('clicked(bool)', self.onComputePhaseUnwrappingButton)
         self.ui.exportButton.connect('clicked(bool)', self.onExportButton)
 
         self.ui.showFlowFieldButton.connect('clicked(bool)', self.onShowFlowFieldButton)
@@ -362,16 +381,11 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             if not self.logic._getSequenceFromProxyNode(outputFlowField):
                 raise RuntimeError("Flow field is not in a sequence")
 
-            # Compute phase unwrapping map
-            if self._parameterNode.unwrapMode == UnwrapModeEnum.TemporalUnwrap:
-                self.logic.temporalUnwrap(outputFlowField)
-            elif self._parameterNode.unwrapMode == UnwrapModeEnum.LaplacianUnwrap:
-                self.logic.laplacianUnwrap(outputFlowField)
-            else:
-                self.logic.resetUnwrap(outputFlowField)
+            # Compute default result using temporal unwrapping
+            self.logic.temporalUnwrap(outputFlowField, self._parameterNode.temporalUnwrapReferenceFrame, self._parameterNode.noiseMagnitudeThresholdPercent)
 
             # Compute flow from input component volumes and phase unwrapping map
-            self.logic.updateFlowFieldFromComponentVolumes(outputFlowField)
+            self.logic.updateFlowFieldFromComponentVolumes(outputFlowField, self._parameterNode.noiseMagnitudeThresholdPercent, self._parameterNode.backgroundSubtractionMethod, self._parameterNode.stationaryTissueSpeedThresholdVencPercent)
             self.logic.setFlowFieldVisualizationToDefault(outputFlowField)
 
             # Set active browser node to the transform sequence
@@ -382,6 +396,17 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
             self.onInspectButton()
             self.updateGUIFromParameterNode()
+
+    def onComputePhaseUnwrappingButton(self) -> None:
+        with slicer.util.tryWithErrorDisplay("Failed to convert image to flow field.", waitCursor=True):
+            # Compute phase unwrapping map
+            if self._parameterNode.unwrapMode == UnwrapModeEnum.TemporalUnwrap:
+                self.logic.temporalUnwrap(self._parameterNode.outputFlowField, self._parameterNode.temporalUnwrapReferenceFrame, self._parameterNode.noiseMagnitudeThresholdPercent)
+            elif self._parameterNode.unwrapMode == UnwrapModeEnum.LaplacianUnwrap:
+                self.logic.laplacianUnwrap(self._parameterNode.outputFlowField)
+            else:
+                self.logic.resetUnwrap(self._parameterNode.outputFlowField)
+
 
     def onShowFlowFieldButton(self) -> None:
         wasVisible = self._parameterNode.outputFlowField.GetDisplayNode().GetVisibility()
@@ -416,7 +441,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             if not self._parameterNode.outputFlowField:
                 raise RuntimeError("Flow field is not created yet")
 
-            self.logic.updateFlowFieldFromComponentVolumes(self._parameterNode.outputFlowField)
+            self.logic.updateFlowFieldFromComponentVolumes(self._parameterNode.outputFlowField, self._parameterNode.noiseMagnitudeThresholdPercent, self._parameterNode.backgroundSubtractionMethod, self._parameterNode.stationaryTissueSpeedThresholdVencPercent)
 
     def onExportButton(self) -> None:
         if not self._parameterNode.exportDirectory:
@@ -468,17 +493,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             [("inplane_rl", True), ("inplane_ap", True), ('through', False)],
         ]
 
-        # raw magnitude image intensity threshold
-        # (speed values below this threshold are set to zero in the flow field to reduce clutter during visualization)
-        self.magnitudeThreshold = 15
+        # for current Siemens CS4D flow images this can be hardcoded
+        self.magnitudeVolumeRange = 255
+        self.componentVolumeMaxValueSiemensCS4DFlow = 4096
 
         self.maxWraps = 3
 
         self.dopplerLutRange = [-2, 2]
         self.dopplerLutThreshold = [-0.25, 0.25]
 
-        self.componentVolumeMaxValueSiemensCS4DFlow = 4096
-        # positive integers because these indices are also used for registration
 
     def log(self, text):
         logging.info(text)
@@ -541,7 +564,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 elif ("SequenceName" in ds) and ('fl3d' in ds["SequenceName"].value):  # 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
                     # magnitude image
-                    logging.debug(f"Found a magnitude image candidate: {volumeNode.GetName()}")
+                    logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
                     directionCode = 'magnitude'
                 else:
                     # something else
@@ -737,7 +760,53 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         return gridTransformNode
 
-    def updateFlowFieldFromComponentVolumes(self, gridTransformNode):
+    def _getComponentBackground(self, magnitudeVoxelArray, componentVoxelArray, noiseMagnitudeThreshold, backgroundSubtractionMethod, componentThreshold):
+        import numpy as np
+
+        background_3d = np.zeros_like(componentVoxelArray)
+        if backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.NoSubtraction:
+            return background_3d
+
+        from scipy.optimize import curve_fit
+
+        data = componentVoxelArray
+
+        # Mask array (True for values to be used in fitting)
+        mask = np.logical_and(magnitudeVoxelArray > noiseMagnitudeThreshold, np.abs(componentVoxelArray) < componentThreshold)
+
+        # Get the indices and values of the masked elements
+        indices = np.array(np.nonzero(mask))
+        values = data[mask]
+
+        # Define a linear function for fitting
+        def linear(x, a, b, c, d):
+            return a * x[0] + b * x[1] + c * x[2] + d
+        
+        # Define a second-order polynomial function for fitting
+        def quadratic(x, a, b, c, d, e, f, g, h, i, j):
+            return (a * x[0]**2 + b * x[1]**2 + c * x[2]**2 +
+                    d * x[0] * x[1] + e * x[0] * x[2] + f * x[1] * x[2] +
+                    g * x[0] + h * x[1] + i * x[2] + j)
+
+        if backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.LinearFit:
+            fitFunction = linear
+        elif backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.QuadraticFit:
+            fitFunction = quadratic
+        else:
+            raise ValueError(f"Unsupported background subtraction method: {backgroundSubtractionMethod}")
+
+        # Fit the second-order polynomial model to the masked values
+        params, _ = curve_fit(fitFunction, indices, values)
+        print(f"Fit parameters: {params}")
+        # Compute the background using the fitted parameters
+        backgroundIndices = np.array(np.nonzero(magnitudeVoxelArray >= noiseMagnitudeThreshold))  # Compute background for non-noise regions
+        background = fitFunction(backgroundIndices, *params)
+
+        background_3d[magnitudeVoxelArray >= noiseMagnitudeThreshold] = background
+
+        return background_3d
+
+    def updateFlowFieldFromComponentVolumes(self, gridTransformNode, noiseMagnitudeThresholdPercent, backgroundSubtractionMethod, stationaryTissueSpeedThresholdVencPercent):
 
         # Compute physical speed from encoding speed
         componentVolumeNodesScaleToCmPerSec = []
@@ -800,7 +869,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 componentVoxelArray = slicer.util.arrayFromVolume(componentVolumeNodeInSequence).copy()
 
                 # Discard low values
-                componentVoxelArray[magnitudeVoxelArray < self.magnitudeThreshold] = 0
+                noiseMagnitudeThreshold = noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange
+                componentVoxelArray[magnitudeVoxelArray < noiseMagnitudeThreshold] = 0
 
                 # Apply phase unwrapping
                 segmentationNode = gridTransformNode.GetNthNodeReference("phaseWrapSegmentation", axis)
@@ -814,12 +884,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     for wrapIndex in range(1, self.maxWraps):
                         componentVolumeMaxValue = componentVoxelArray.dtype.type(componentVolumeMaxValues[axis])
                         # Find voxels with phase wraps
-                        # Low wrap (segment indices: 1, 3, 5)
+                        # Negative wrap (segment indices: 1, 3, 5)
                         componentVoxelArray[segmentationArray == wrapIndex * 2 - 1] -= wrapIndex * 2 * componentVolumeMaxValue
-                        # High wrap (segment indices: 2, 4, 6)
+                        # Positive wrap (segment indices: 2, 4, 6)
                         componentVoxelArray[segmentationArray == wrapIndex * 2] += wrapIndex * 2 * componentVolumeMaxValue
 
-                displacementArray[:, :, :, axis] = componentVoxelArray * scaleToMeterPerSec
+                stationaryTissueSpeedThreshold = stationaryTissueSpeedThresholdVencPercent / 100 * self.componentVolumeMaxValueSiemensCS4DFlow
+                componentVoxelBackgroundArray = self._getComponentBackground(magnitudeVoxelArray, slicer.util.arrayFromVolume(componentVolumeNodeInSequence), noiseMagnitudeThreshold, backgroundSubtractionMethod, stationaryTissueSpeedThreshold)
+
+                displacementArray[:, :, :, axis] = (componentVoxelArray - componentVoxelBackgroundArray) * scaleToMeterPerSec
 
             slicer.util.arrayFromGridTransformModified(gridTransformNodeInSequence)
             indexValue = magnitudeVolumeSequenceNode.GetNthIndexValue(volumeIndex)
@@ -834,7 +907,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         transformSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", ','.join(vencCmPerSecList))  # velocity encoding, in cm/sec
 
-        slicer.mrmlScene.RemoveNode(labelmapNode.GetDisplayNode().GetColorNode())
+        if labelmapNode.GetDisplayNode():
+            slicer.mrmlScene.RemoveNode(labelmapNode.GetDisplayNode().GetColorNode())
         slicer.mrmlScene.RemoveNode(labelmapNode)
 
 
@@ -1089,7 +1163,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         return colorMap, opacityMap
 
-    def _getSegmentationNode(self, outputFlowField, component):
+    def _getComponentSegmentationNode(self, outputFlowField, component):
         segmentationNode = outputFlowField.GetNthNodeReference("phaseWrapSegmentation", component)
         if segmentationNode:
             return segmentationNode
@@ -1119,13 +1193,52 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         return segmentationNode
 
+    # def _getBackgroundCorrectionSegmentationNode(self, outputFlowField):
+    #     segmentationNode = outputFlowField.GetNodeReference("backgroundCorrectionSegmentation")
+    #     if segmentationNode:
+    #         return segmentationNode
+
+    #     magnitudeVolumeNode = outputFlowField.GetNthNodeReference("magnitudeVolume")
+
+    #     sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowField)
+    #     # Create new segmentation node and add it to the sequence
+    #     segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", f"Background subtraction")
+    #     outputFlowField.SetNodeReferenceID("backgroundCorrectionSegmentation", segmentationNode.GetID())
+    #     segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(magnitudeVolumeNode)
+    #     segmentationNode.CreateDefaultDisplayNodes()
+    #     segmentationNode.GetDisplayNode().SetOpacity2DFill(0.8)
+    #     segmentationSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationNode.GetName())
+    #     sequenceBrowserNode.AddProxyNode(segmentationNode, segmentationSequenceNode, False)
+    #     sequenceBrowserNode.PlaybackActiveOff()
+    #     sequenceBrowserNode.SetRecording(segmentationSequenceNode, False)
+    #     sequenceBrowserNode.SetSaveChanges(segmentationSequenceNode, True)
+    #     sequenceBrowserNode.SetOverwriteProxyName(segmentationSequenceNode, True)  # show index in node name
+
+    #     # Place segmentation in the same subject hierarchy folder as the flow field node
+    #     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    #     parentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(outputFlowField))
+    #     shNode.SetItemParent(shNode.GetItemByDataNode(segmentationNode), parentItemId)
+
+    #     return segmentationNode
+
     def _getSegmentIds(self):
-        """In phase wrap segmentation, order of segments: no wrap = 0, high wraps 1x = 1, 2x = 2, 3x = 3, ..., low wraps 3x = 4, 2x = 5, 1x = 6, ..."""
+        """In phase wrap segmentation, order of segments: no wrap = 0, positive wraps 1x = 1, 2x = 2, 3x = 3, ..., negative wraps 3x = 4, 2x = 5, 1x = 6, ..."""
         segmentIds = vtk.vtkStringArray()
         for wrap in range(self.maxWraps):
-            segmentIds.InsertNextValue(f"Wrap-Low-{wrap+1}x")
-            segmentIds.InsertNextValue(f"Wrap-High-{wrap+1}x")
+            segmentIds.InsertNextValue(f"Wrap-Neg-{wrap+1}x")
+            segmentIds.InsertNextValue(f"Wrap-Pos-{wrap+1}x")
         return segmentIds
+
+    def backgroundCorrection(self, outputFlowField):
+        """Remove background phase offset from the flow field."""
+        for component in range(3):
+            componentVolumeNode = outputFlowField.GetNthNodeReference("componentVolume", component)
+            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeNode)
+            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeNode)
+            componentVolumeArray = slicer.util.arrayFromVolume(componentVolumeSequenceNode.GetNthDataNode(0))
+            backgroundPhase = np.median(componentVolumeArray[componentVolumeArray > 0])
+            componentVolumeArray -= backgroundPhase
+            slicer.util.updateVolumeFromArray(componentVolumeSequenceNode.GetNthDataNode(0), componentVolumeArray)
 
     def laplacianUnwrap(self, outputFlowField):
         raise NotImplementedError("Laplacian unwrapping is not implemented yet")
@@ -1133,7 +1246,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     def resetUnwrap(self, outputFlowField):
         """Remove phase wrap segmentation nodes and sequences."""
         for component in range(3):
-            segmentationNode = self._getSegmentationNode(outputFlowField, component)
+            segmentationNode = self._getComponentSegmentationNode(outputFlowField, component)
             if not segmentationNode:
                 continue
             browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(segmentationNode)
@@ -1142,10 +1255,14 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             slicer.mrmlScene.RemoveNode(segmentationNode)
             slicer.mrmlScene.RemoveNode(segmentationSequenceNode)
 
-    def temporalUnwrap(self, outputFlowField, indexWithoutWrapping=0):
+    def temporalUnwrap(self, outputFlowField, indexWithoutWrapping, noiseMagnitudeThresholdPercent):
         """
         indexWithoutWrapping: index of the frame that is assumet to not have any wraparounds
+        noiseMagnitudeThresholdPercent: voxels with magnitude below this threshold are considered noise and are not used for phase unwrapping
         """
+        if indexWithoutWrapping != 0:
+            raise RuntimeError("Temporal unwrapping is only implemented for the first frame")
+
         import numpy as np
         # Get magnitude volume sequence node
         magnitudeVolumeNode = outputFlowField.GetNodeReference("magnitudeVolume")
@@ -1165,7 +1282,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 labelmapNode = slicer.modules.volumes.logic().CreateAndAddLabelVolume(slicer.mrmlScene, componentVolume, "___temp2___")
             voxelArray = None
             phaseWrapMap = None
-            segmentationNode = self._getSegmentationNode(outputFlowField, component)
+            segmentationNode = self._getComponentSegmentationNode(outputFlowField, component)
             for index in range(indexWithoutWrapping, componentVolumeSequenceNode.GetNumberOfDataNodes()):
                 # TODO: probably we could do it without browsing. ImportLabelmapToSegmentationNode would not be able to handle different
                 # parent transforms, but we are not supposed to have parent transforms
@@ -1176,7 +1293,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 voxelArray = slicer.util.arrayFromVolume(componentVolumeSequenceNode.GetNthDataNode(index)).copy()
 
                 magnitudeVolumeArray = slicer.util.arrayFromVolume(magnitudeVolumeSequenceNode.GetNthDataNode(index))
-                voxelArray[magnitudeVolumeArray < self.magnitudeThreshold] = 0
+                voxelArray[magnitudeVolumeArray < noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange] = 0
 
                 if previousVoxelArray is None:
                     # First frame is never wrapped around
@@ -1188,25 +1305,25 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Unwrap by comparing with the previous frame
                 diff = voxelArray - previousVoxelArray
 
-                # Wrap low (step down)
+                # Wrap negative (step down)
                 # For example, sequence of values (for max value of 1000): -880 -960 [980]
                 phaseWrapMap[diff > componentVolumeMaxValue] -= 1
-                # Wrap high (step up)
+                # Wrap positive (step up)
                 # For example, sequence of values (for max value of 1000): 900 980 [-960]
                 phaseWrapMap[diff < -componentVolumeMaxValue] += 1
 
-                # Phase wrap map has no wrap 0, low wraps -1, -2, ..., high wraps 1, 2, ...
-                # Segment indices are all positive: 1x low wrap, 1x high wrap, 2x low wrap, 2x high wrap, etc. (see self._getSegmentIds)
+                # Phase wrap map has no wrap 0, ngeative wraps -1, -2, ..., positive wraps 1, 2, ...
+                # Segment indices are all positive: 1x negative wrap, 1x positive wrap, 2x negative wrap, 2x positive wrap, etc. (see self._getSegmentIds)
                 phaseWrapSegmentation = phaseWrapMap.copy()
 
-                tooManyLowWrapsCount = np.count_nonzero(phaseWrapSegmentation < -self.maxWraps)
-                if tooManyLowWrapsCount > 0:
-                    print(f"More than {self.maxWraps} wraps (low) found in component {component+1} in frame {index}: {tooManyLowWrapsCount} voxels")
+                tooManyNegativeWrapsCount = np.count_nonzero(phaseWrapSegmentation < -self.maxWraps)
+                if tooManyNegativeWrapsCount > 0:
+                    print(f"More than {self.maxWraps} negative wraparounds were found in component {component+1} in frame {index}: {tooManyNegativeWrapsCount} voxels")
                     phaseWrapSegmentation[phaseWrapSegmentation < -self.maxWraps] = -self.maxWraps
 
-                tooManyHighWrapsCount = np.count_nonzero(phaseWrapSegmentation > self.maxWraps)
-                if tooManyHighWrapsCount > 0:
-                    print(f"More than {self.maxWraps} wraps (high) found in component {component+1} in frame {index}: {tooManyHighWrapsCount} voxels")
+                tooManyPositiveWrapsCount = np.count_nonzero(phaseWrapSegmentation > self.maxWraps)
+                if tooManyPositiveWrapsCount > 0:
+                    print(f"More than {self.maxWraps} positive wraparounds found in component {component+1} in frame {index}: {tooManyPositiveWrapsCount} voxels")
                     phaseWrapSegmentation[phaseWrapSegmentation > self.maxWraps] = self.maxWraps
 
                 # Move up negative values to positive range, as segment indices should be all positive
