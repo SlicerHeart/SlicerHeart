@@ -1245,7 +1245,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
     def resetUnwrap(self, outputFlowField):
         """Remove phase wrap segmentation nodes and sequences."""
-        for component in range(3):
+        for component in [2, 1, 0]:  # delete the last component first to avoid index shift
             segmentationNode = self._getComponentSegmentationNode(outputFlowField, component)
             if not segmentationNode:
                 continue
