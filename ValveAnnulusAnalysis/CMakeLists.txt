@@ -24,6 +24,7 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/Mitral.png
   Resources/Icons/PDA.png
   Resources/Icons/Tricuspid.png
+  Resources/TruncalValve.png
   Resources/UI/${MODULE_NAME}.ui
   Resources/VrPresets/CT-EndoVascular.png
   Resources/VrPresets/US-Green.png
