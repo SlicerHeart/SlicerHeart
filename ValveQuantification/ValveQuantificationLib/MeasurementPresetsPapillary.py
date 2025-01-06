@@ -338,7 +338,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
       self.metricsMessages.append("No Tricuspid Valve found. Skipping parts of the calculation.")
       return self.metricsMessages
 
-    if not tricuspidValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel):
+    if tricuspidValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel) is None:
       tricuspidValveModel.setAnnulusMarkupLabel(
         self._valveCenterLabel, np.mean(tricuspidValveModel.annulusContourCurve.getInterpolatedPointsAsArray(), axis=1)
       )
