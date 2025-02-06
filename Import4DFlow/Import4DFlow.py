@@ -546,12 +546,21 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     logging.debug(f"{volumeNode.GetName()} is not found in the DICOM database - skip")
                     continue
                 ds = pydicom.read_file(filename)
-                if (0x0051,0x1014) in ds:
+                
+                # Find DICOM tag that stores speedAndDirectionCode.
+                # On Siemens Avanto, it is (0x0051,0x1014), on newer Siemens Avanto Fit, it is (0x0021,0x1129).
+                speedAndDirectionCodeTag = None
+                for tag in [(0x0051,0x1014), (0x0021,0x1129)]:
+                    if tag in ds:
+                        speedAndDirectionCodeTag = tag
+                        break
+
+                if speedAndDirectionCodeTag:
                     # flow vector component image
                     try:
-                        speedAndDirectionCode = ds[0x0051,0x1014].value.decode().strip()
+                        speedAndDirectionCode = ds[speedAndDirectionCodeTag].value.decode().strip()
                     except AttributeError:
-                        speedAndDirectionCode = ds[0x0051,0x1014].value.strip()
+                        speedAndDirectionCode = ds[speedAndDirectionCodeTag].value.strip()
                     vencCmPerSecInput, directionCodeInput = speedAndDirectionCode.split('_', 1)
                     vencCmPerSec = float(vencCmPerSecInput[1:])
                     directionCode = directionCodeInput.strip()
@@ -561,7 +570,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
                     volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
                     volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
-
                 elif ("SequenceName" in ds) and ('fl3d' in ds["SequenceName"].value):  # 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
                     # magnitude image
                     logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
