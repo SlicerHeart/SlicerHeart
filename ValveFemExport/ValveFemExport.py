@@ -323,7 +323,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.leafletRegionBoundaryTreeView.visible = bool(leafletRegionsFolderId)
     self.ui.branchesFrame.visible = bool(leafletRegionsFolderId)
 
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
       wasBlocked = self.ui.leafletNURBSSurfaceNodeSelector.blockSignals(True)
@@ -357,7 +357,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     wasModified = self._parameterNode.StartModify()  # Modify all properties in a single batch
 
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
 
     for nodeSelector, nodeReferenceRole in self.nodeSelectors:
@@ -376,7 +376,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter("ChordName2", self.ui.chordBundleNameEdit2.text)
     self._parameterNode.SetParameter("ChordName3", self.ui.chordBundleNameEdit3.text)
 
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     if leafletRegionBoundaryNode:
       # leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletNURBSSurfaceNodeSelector.currentNode())
@@ -400,7 +400,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID("AnnulusCurve", valveModel.getAnnulusContourMarkupNode().GetID())
     self._parameterNode.SetNodeReferenceID("AnnulusModel", valveModel.getAnnulusContourModelNode().GetID())
 
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
 
     # Is not set for now:
@@ -470,7 +470,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     displayNode.SetGlyphTypeFromString("Sphere3D")
     displayNode.SetSelectedColor(1, 0.2, 0.7)
     displayNode.SetLineThickness(0.3)
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     newLeafletRegionBoundaryItem = shNode.GetItemByDataNode(leafletRegionBoundaryNode)
     leafletRegionsFolderItem = self.logic.getSubjectHierarchyLeafletRegionBoundariesSubfolder(self._parameterNode, createIfNeeded=True)
     shNode.SetItemParent(newLeafletRegionBoundaryItem, leafletRegionsFolderItem)
@@ -479,12 +479,12 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.updateGUIFromParameterNode()
 
   def onDeleteLeafletRegionBoundary(self):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
     slicer.mrmlScene.RemoveNode(leafletRegionBoundaryNode)
 
   def onLeafletRegionBoundarySelected(self, shItemId):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     selectedLeafletRegionBoundaryNode = shNode.GetItemDataNode(shItemId)
     if not selectedLeafletRegionBoundaryNode:
       return
@@ -601,7 +601,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter("EnableBodyBranchCalculation"):
         parameterNode.SetParameter("EnableBodyBranchCalculation", "true")
 
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     if parameterNode.GetHideFromEditors():
       parameterNode.SetHideFromEditors(False)
       shNode.RequestOwnerPluginSearch(parameterNode)
@@ -666,20 +666,20 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       chordNameArray.SetValue(rowIndex, chordName)
 
   def removeSubjectHierarchyOutputFolder(self, parameterNode):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
     outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
     if outputFolderItemId:
       shNode.RemoveItemChildren(outputFolderItemId)
 
   def getSubjectHierarchyOutputFolder(self, parameterNode):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
     outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
     return outputFolderItemId
 
   def getSubjectHierarchyLeafletRegionBoundariesSubfolder(self, parameterNode, createIfNeeded=False):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     # Get/create output folder
     parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
     leafletRegionsFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, "Leaflet region boundaries")
@@ -688,7 +688,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     return leafletRegionsFolderItemId
 
   def createSubjectHierarchyOutputSubfolder(self, parameterNode, subfolderName):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     # Get/create output folder
     parameterNodeItemId = shNode.GetItemByDataNode(parameterNode)
     outputFolderItemId = shNode.GetItemChildWithName(parameterNodeItemId, self.outputSubjectHierarchyFolderName)
@@ -737,7 +737,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     try:
       leafletRegionBoundariesFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
       leafletRegionNodes = vtk.vtkCollection()
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
       shNode.GetDataNodesInBranch(leafletRegionBoundariesFolderItem, leafletRegionNodes, "vtkMRMLMarkupsLineNode")
 
       # Collect NURBS grid (u,v) coordinates for top line points
@@ -1623,7 +1623,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     controlPoints = int(float(parameterNode.GetParameter("LeafletSurfaceNurbsResolution")))
     triangulationResolution = 1.0/float(parameterNode.GetParameter("LeafletSurfaceMeshResolution")) # 0.5 * 1.0/controlPoints
 
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
 
     leafletSurfaceModels = []
     for leafletIndex in range(3):
@@ -1659,7 +1659,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     return leafletSurfaceModels
 
   def copyNode(self, node, folderItemId):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     dataNodeClone = slicer.mrmlScene.AddNewNodeByClass(node.GetClassName())
     dataNodeClone.CopyContent(node)
     dataNodeClone.SetName(node.GetName())
@@ -1767,7 +1767,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     try:
       os.makedirs(outputFolder, exist_ok=True)
 
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+      shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
       if shFolderItemId is None:
         shFolderItemId = shNode.GetItemByDataNode(parameterNode)
       if logCallback:
