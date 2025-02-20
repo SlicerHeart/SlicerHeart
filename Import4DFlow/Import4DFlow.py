@@ -42,6 +42,13 @@ See more information in <a href="https://github.com/JolleyLab/SlicerHeartPrivate
 This file was originally developed by Andras Lasso (PerkLab, Queen's University).
 """
 
+        slicer.app.connect("startupCompleted()", self.onStartupCompleted)
+
+    def onStartupCompleted(self):
+
+        # Add required color table to the scene
+        Import4DFlowLogic.dopplerColdToHotColorTableNode()
+
 
 #
 # Import4DFlowParameterNode
@@ -472,6 +479,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
     EXPORT_FORMAT_ANONYMIZED_SCENE = "ANONYMIZED_SCENE"
     EXPORT_FORMAT_NRRD_STACK = "NRRD_STACK"
+    DOPPLER_COLD_TO_HOT_SINGLETON_TAG = "SlicerHeart.DopplerColdToHot"
 
     def __init__(self) -> None:
         """
@@ -501,6 +509,46 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         self.dopplerLutRange = [-2, 2]
         self.dopplerLutThreshold = [-0.25, 0.25]
+
+        # Use positive side of the Doppler color table for absolute speed
+        # Set to false, because the multicolor colormap can better distinguish speed differences.
+        self.useDopplerColorTableForAbsoluteSpeed = False
+
+    @staticmethod
+    def dopplerColdToHotColorTableNode():
+
+        dopplerColdToHotColorTableNode = slicer.mrmlScene.GetSingletonNode(Import4DFlowLogic.DOPPLER_COLD_TO_HOT_SINGLETON_TAG, "vtkMRMLColorTableNode")
+        if dopplerColdToHotColorTableNode:
+            # already registered
+            return dopplerColdToHotColorTableNode
+
+        node = slicer.vtkMRMLColorTableNode()
+        node.SetTypeToFile()
+        node.SaveWithSceneOn()
+        node.HideFromEditorsOff()
+        node.SetAttribute("Category", "Flow")
+        node.SetAttribute("SlicerHeart.ColorMappingType", "SpeedComponent")
+        node.SetSingletonTag(Import4DFlowLogic.DOPPLER_COLD_TO_HOT_SINGLETON_TAG)
+        node.SetName("DopplerColdToHot")
+        node = slicer.mrmlScene.AddNode(node)
+
+        colorStorageNode = slicer.vtkMRMLColorTableStorageNode()
+        colorStorageNode.SaveWithSceneOn()
+        slicer.mrmlScene.AddNode(colorStorageNode)
+        node.SetAndObserveStorageNodeID(colorStorageNode.GetID())
+
+        resourcesPath = os.path.join(os.path.dirname(__file__), "Resources")
+        colorTableFilePath = os.path.join(resourcesPath, "DopplerColdToHot.ctbl")
+        colorStorageNode.SetFileName(colorTableFilePath)
+
+        if colorStorageNode.ReadData(node) == 0:
+            raise ValueError(f"Failed to read DopplerColdToHot color table from file {colorTableFilePath}")
+
+        # Force creation of a new default storage node (do not overwrite the file in the extension)
+        node.SetAndObserveStorageNodeID(None)
+        slicer.mrmlScene.RemoveNode(colorStorageNode)
+
+        return node
 
 
     def log(self, text):
@@ -546,7 +594,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     logging.debug(f"{volumeNode.GetName()} is not found in the DICOM database - skip")
                     continue
                 ds = pydicom.read_file(filename)
-                
+
                 # Find DICOM tag that stores speedAndDirectionCode.
                 # On Siemens Avanto, it is (0x0051,0x1014), on newer Siemens Avanto Fit, it is (0x0021,0x1129).
                 speedAndDirectionCodeTag = None
@@ -789,7 +837,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         # Define a linear function for fitting
         def linear(x, a, b, c, d):
             return a * x[0] + b * x[1] + c * x[2] + d
-        
+
         # Define a second-order polynomial function for fitting
         def quadratic(x, a, b, c, d, e, f, g, h, i, j):
             return (a * x[0]**2 + b * x[1]**2 + c * x[2]**2 +
@@ -959,10 +1007,24 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             vencCmPerSec = float(self._getSequenceAttribute(gridTransformNode.GetNthNodeReference("componentVolume", component), "SlicerHeart.vencCmPerSec"))
             maxVencCmPerSec = max(maxVencCmPerSec, vencCmPerSec)
         colorTableRangeMeterPerSec = maxVencCmPerSec / 100  # m/sec
-        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.0, 0.0, 0.0, 1.0)
-        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.2, 0.0, 1.0, 1.0)
-        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.5, 1.0, 1.0, 0.0)
-        colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 1.0, 1.0, 0.0, 0.0)
+
+        if self.useDopplerColorTableForAbsoluteSpeed:
+            dopplerColorNode = Import4DFlowLogic.dopplerColdToHotColorTableNode()
+            speed0Index = (dopplerColorNode.GetNumberOfColors() - 1) / 2
+            speedMaxIndex = dopplerColorNode.GetNumberOfColors() - 1
+            colorMapResolution = 25
+            rgba = [0, 0, 0, 0]
+            for i in range(colorMapResolution):
+                colorIndex = int(speed0Index + i / (colorMapResolution - 1) * (speedMaxIndex - speed0Index))
+                dopplerColorNode.GetColor(colorIndex, rgba)
+                colorMap.AddRGBPoint(colorTableRangeMeterPerSec * i / colorMapResolution, rgba[0], rgba[1], rgba[2])
+        else:
+            # Use jet color (blue, green, red)
+            colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.0, 0.0, 0.0, 1.0)
+            colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.2, 0.0, 1.0, 1.0)
+            colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 0.5, 1.0, 1.0, 0.0)
+            colorMap.AddRGBPoint(colorTableRangeMeterPerSec * 1.0, 1.0, 0.0, 0.0)
+
         colorNode.EndModify(wasModified)
 
     def _deleteComponentVolumeNodes(self, componentVolumeNodes):

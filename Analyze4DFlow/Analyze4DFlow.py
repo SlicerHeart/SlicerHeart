@@ -312,8 +312,11 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         # (speed values below this threshold are set to zero in the flow field to reduce clutter during visualization)
         self.magnitudeThreshold = 60
 
-        self.dopplerLutRange = [-2, 2]
-        self.dopplerLutThreshold = [-0.25, 0.25]
+        self.dopplerLutRange = [-0.6, 0.6]  # m/s
+        self.dopplerLutThreshold = [-0.15, 0.15]  # m/s
+
+        # For testing, it forces resetting color map on each run
+        self.forceColorMappingReset = True
 
     def log(self, text):
         logging.info(text)
@@ -636,7 +639,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     # colorMappingType is Speed (for absolute speed) or SpeedComponent (for Doppler-like signed speed)
                     currentColorMappingType = colorNode.GetAttribute("SlicerHeart.ColorMappingType") if colorNode else None
                     requiredColorMappingType = "SpeedComponent" if speedVolumeProjectedToPlane else "Speed"
-                    if currentColorMappingType != requiredColorMappingType:
+                    if currentColorMappingType != requiredColorMappingType or self.forceColorMappingReset:
                         # Update color table
                         if currentColorMappingType:
                             # We need to switch to a different color mapping type, but keep reference to this color node
@@ -703,11 +706,15 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         lutThreshold = self.dopplerLutThreshold
 
         colorMap = vtk.vtkColorTransferFunction()
-        colorMap.AddRGBPoint(lutRange[0],        0/255, 255/255, 255/255)  # cyan
-        colorMap.AddRGBPoint(lutRange[0]*0.05,   0/255,   0/255, 255/255)  # blue
-        colorMap.AddRGBPoint(                       0,   0/255,   0/255,   0/255)
-        colorMap.AddRGBPoint(lutRange[1]*0.05, 255/255,   0/255,   0/255)  # red
-        colorMap.AddRGBPoint(lutRange[1],      255/255, 255/255,   0/255)  # yellow
+
+        import Import4DFlow
+        dopplerColorNode = Import4DFlow.Import4DFlowLogic.dopplerColdToHotColorTableNode()
+        colorMapResolution = 25
+        rgba = [0, 0, 0, 0]
+        for i in range(colorMapResolution):
+            colorIndex = int(i / (colorMapResolution - 1) * (dopplerColorNode.GetNumberOfColors() - 1))
+            dopplerColorNode.GetColor(colorIndex, rgba)
+            colorMap.AddRGBPoint(lutRange[0] + i / (colorMapResolution - 1) * (lutRange[1] - lutRange[0]), rgba[0], rgba[1], rgba[2])
 
         opacityMap = vtk.vtkPiecewiseFunction()
         transitionWidth = (lutThreshold[1] - lutThreshold[0]) * 0.1
