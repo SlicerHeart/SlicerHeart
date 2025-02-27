@@ -581,25 +581,27 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter("CreateChords"):
       parameterNode.SetParameter("CreateChords", "true")
     if not parameterNode.GetParameter("ChordsPerCm2"):
-        parameterNode.SetParameter("ChordsPerCm2", "8")
+      parameterNode.SetParameter("ChordsPerCm2", "8")
     if not parameterNode.GetParameter("EdgeBranchLengthMm"):
-        parameterNode.SetParameter("EdgeBranchLengthMm", "3.5")
+      parameterNode.SetParameter("EdgeBranchLengthMm", "3.5")
     if not parameterNode.GetParameter("NumberOfEdgeFanBranches"):
-        parameterNode.SetParameter("NumberOfEdgeFanBranches", "3")
+      parameterNode.SetParameter("NumberOfEdgeFanBranches", "3")
     if not parameterNode.GetParameter("EdgeBranchRadiusMm"):
-        parameterNode.SetParameter("EdgeBranchRadiusMm", "1")
+      parameterNode.SetParameter("EdgeBranchRadiusMm", "1")
     if not parameterNode.GetParameter("EnableEdgeBranchCalculation"):
-        parameterNode.SetParameter("EnableEdgeBranchCalculation", "true")
+      parameterNode.SetParameter("EnableEdgeBranchCalculation", "true")
     if not parameterNode.GetParameter("EdgeChordsPerCm"):
-        parameterNode.SetParameter("EdgeChordsPerCm", "3")
+      parameterNode.SetParameter("EdgeChordsPerCm", "3")
     if not parameterNode.GetParameter("BodyBranchLengthMm"):
-        parameterNode.SetParameter("BodyBranchLengthMm", "3.5")
+      parameterNode.SetParameter("BodyBranchLengthMm", "3.5")
     if not parameterNode.GetParameter("NumberOfBodyRadialBranches"):
-        parameterNode.SetParameter("NumberOfBodyRadialBranches", "4")
+      parameterNode.SetParameter("NumberOfBodyRadialBranches", "4")
     if not parameterNode.GetParameter("BodyBranchRadiusMm"):
-        parameterNode.SetParameter("BodyBranchRadiusMm", "1")
+      parameterNode.SetParameter("BodyBranchRadiusMm", "1")
     if not parameterNode.GetParameter("EnableBodyBranchCalculation"):
-        parameterNode.SetParameter("EnableBodyBranchCalculation", "true")
+      parameterNode.SetParameter("EnableBodyBranchCalculation", "true")
+    if not parameterNode.GetParameter("SnapToSurfacePoints"):
+      parameterNode.SetParameter("SnapToSurfacePoints", "true")
 
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     if parameterNode.GetHideFromEditors():
@@ -627,7 +629,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     pointLocator.BuildLocator()
 
     # Create table node for spring import into FEBio
-    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = self.createChordTable(baseName, chordsFolderItemId)
+    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = \
+      self.createChordTable(baseName, chordsFolderItemId)
 
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
       endPoint_World = np.zeros(3)
@@ -725,6 +728,12 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       slicer.app.resumeRender()
 
   def createChordBundlesFromRegions(self, parameterNode, chordsFolderItemId, logCallback=None):
+    """
+    Create edge and body chords for each region, which are defined by lines dividing the leaflet into
+    regions, which translate to parametric rectangles in the NURBS surface.
+    The body and edge chord creation functions also create the fan and radial chord branches as well,
+    respectively.
+    """
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
     if not papillaryMuscleTips or papillaryMuscleTips.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid papillary muscle tips node")
@@ -799,7 +808,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
           logCallback(f"Creating chord bundles for region {regionIndex + 1} / {leafletRegionNodes.GetNumberOfItems()}...")
         regionFolderItem = None
         if enableEdgeBranchCalculation:
-          (regionFolderItem, numOfEdgePointsWithMultipleChordBranches) = self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId)
+          (regionFolderItem, numOfEdgePointsWithMultipleChordBranches) = self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, chordsFolderItemId)
           if numOfEdgePointsWithMultipleChordBranches > 0:
             numOfEdgePointsWithMultipleChordBranchesMap[regionIndex] = numOfEdgePointsWithMultipleChordBranches
         if enableBodyBranchCalculation:
@@ -835,13 +844,29 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """Utility function to manage wrapped around grid surface. Get control point index by grid point coordinate."""
     return v * gridResolution[0] + u
 
-  def createEdgeChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
+  def getSurfaceResolution(self, parameterNode):
+    """Utility function get the resolution of the surface model generated from the NURBS grid."""
+    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid leaflet NURBS grid surface node")
+    leafletModelNode = leafletNurbsSurfaceNode.GetOutputSurfaceModelNode()
+    if not leafletModelNode:
+      raise ValueError("Model node is not set for the leaflet NURBS grid surface node")
+    linSpaceXArray = slicer.util.arrayFromModelPointData(leafletModelNode, 'LinSpaceX')
+    # Number of surface mesh points in the U direction based on the linear space values
+    xRes = len(np.unique(linSpaceXArray))
+    # Number of surface mesh points in the V direction
+    yRes = (leafletNurbsSurfaceNode.GetGridResolution()[1] - 1) * int(leafletNurbsSurfaceNode.GetSamplingResolution()) + 1
+    return [xRes, yRes]
+
+  def createEdgeChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, chordsFolderItemId):
     """
+    Create edge chord bundle for the region defined by the parametric rectangle on the NURBS grid.
+    If SnapToSurfacePoints is enabled, the edge chord endpoints are snapped to the surface points instead of the NURBS grid points.
+
     :param parameterNode:
     :param leftUGridIndex: "Left" U grid index (defined on NURBS grid) for the region parametric rectangle
     :param rightUGridIndex: "Right" U grid index (defined on NURBS grid) for the region parametric rectangle
-    :param minVGridIndex: Minimum V grid index (defined on NURBS grid) for the region parametric rectangle
-    :param maxVGridIndex: Maximum V grid index (defined on NURBS grid) for the region parametric rectangle
     :param chordsFolderItemId:
     :return int: SH folder item that contains the chords for the region
     """
@@ -1058,6 +1083,9 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
 
   def createBodyChordBundleFromRegion(self, parameterNode, leftUGridIndex, rightUGridIndex, minVGridIndex, maxVGridIndex, chordsFolderItemId):
     """
+    Create body chords for the region defined by the parametric rectangle on the NURBS grid.
+    If SnapToSurfacePoints is enabled, the chords will be placed on the surface points instead of the NURBS grid points.
+
     :param parameterNode:
     :param leftUGridIndex: "Left" U grid index (defined on NURBS grid) for the region parametric rectangle
     :param rightUGridIndex: "Right" U grid index (defined on NURBS grid) for the region parametric rectangle
@@ -1076,8 +1104,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     res = leafletNurbsSurfaceNode.GetGridResolution()  # Increase readability by shortening lines in later function calls
 
     # Create temporary grid surface markup containing only the defined region
-    regionGridResolution = (self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1, maxVGridIndex - minVGridIndex + 1)
     regionGridPoints = vtk.vtkPoints()
+    regionGridResolution = (self.subtractWrappingGridIndices(rightUGridIndex, leftUGridIndex, res) + 1, maxVGridIndex - minVGridIndex + 1)
     regionGridPoints.SetNumberOfPoints(regionGridResolution[0] * regionGridResolution[1])
     currentPos = np.zeros(3)
     for v in range(regionGridResolution[1]):
