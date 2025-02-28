@@ -740,10 +740,18 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     leafletNURBSSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNURBSSurfaceNode or leafletNURBSSurfaceNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS grid surface node")
-    nurbsGridResolution = leafletNURBSSurfaceNode.GetGridResolution()
 
-    slicer.app.pauseRender()
+    snapToSurface = parameterNode.GetParameter("SnapToSurfacePoints") == 'true'
+    if snapToSurface:
+      # Create temporary grid surface markup node with a control point at each surface vertex to allow snapping on the dense surface
+      leafletNURBSSurfaceNode = self.createDenseNURBSSurface(parameterNode)
+    else:
+      # Use the input NURBS surface for chord endpoint snapping
+      parameterNode.SetNodeReferenceID("LeafletNURBSSurfaceForChordSnapping", leafletNURBSSurfaceNode.GetID())
+
     try:
+      slicer.app.pauseRender()
+      nurbsGridResolution = leafletNURBSSurfaceNode.GetGridResolution()
       leafletRegionBoundariesFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
       leafletRegionNodes = vtk.vtkCollection()
       shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
@@ -808,7 +816,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
           logCallback(f"Creating chord bundles for region {regionIndex + 1} / {leafletRegionNodes.GetNumberOfItems()}...")
         regionFolderItem = None
         if enableEdgeBranchCalculation:
-          (regionFolderItem, numOfEdgePointsWithMultipleChordBranches) = self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, chordsFolderItemId)
+          (regionFolderItem, numOfEdgePointsWithMultipleChordBranches) = \
+            self.createEdgeChordBundleFromRegion(parameterNode, leftUGridIndex, rightUGridIndex, chordsFolderItemId)
           if numOfEdgePointsWithMultipleChordBranches > 0:
             numOfEdgePointsWithMultipleChordBranchesMap[regionIndex] = numOfEdgePointsWithMultipleChordBranches
         if enableBodyBranchCalculation:
@@ -824,6 +833,10 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         slicer.util.warningDisplay(message)
 
     finally:
+      if snapToSurface:
+        # Delete temporary dense grid surface markup node
+        slicer.mrmlScene.RemoveNode(leafletNURBSSurfaceNode.GetOutputSurfaceModelNode())
+        slicer.mrmlScene.RemoveNode(leafletNURBSSurfaceNode)
       slicer.app.resumeRender()
 
   def subtractWrappingGridIndices(self, leftIndex, rightIndex, gridResolution):
@@ -845,7 +858,13 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     return v * gridResolution[0] + u
 
   def getSurfaceResolution(self, parameterNode):
-    """Utility function get the resolution of the surface model generated from the NURBS grid."""
+    """
+    Utility function get the resolution of the interpolated surface model generated from the NURBS grid.
+    :return: [xRes, yRes] where xRes is the number of surface mesh points in the U direction and yRes
+      is the number of surface mesh points in the V direction. Note that the vertex indices on the surface
+      model increase in the V direction first, then in the U direction (which is the opposite of the NURBS
+      grid control points).
+    """
     leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS grid surface node")
@@ -870,7 +889,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     :param chordsFolderItemId:
     :return int: SH folder item that contains the chords for the region
     """
-    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurfaceForChordSnapping")
     if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS grid surface node")
     papillaryMuscleTipsNode = parameterNode.GetNodeReference("PapillaryMuscleTips")
@@ -995,7 +1014,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     if not chordLineNode or chordLineNode.GetNumberOfControlPoints() != 2:
       raise ValueError("Invalid chord line node")
-    leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurfaceForChordSnapping")
     if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS node")
     if not tempEdgeCurveNode or tempEdgeCurveNode.GetNumberOfControlPoints() == 0:
@@ -1094,7 +1113,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     :param chordsFolderItemId:
     :return int: SH folder item that contains the chords for the region
     """
-    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurfaceForChordSnapping")
     if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS grid surface node")
 
@@ -1226,7 +1245,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     """
     if not chordLineNode or chordLineNode.GetNumberOfControlPoints() != 2:
       raise ValueError("Invalid chord line node")
-    leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    leafletNurbsNode = parameterNode.GetNodeReference("LeafletNURBSSurfaceForChordSnapping")
     if not leafletNurbsNode or leafletNurbsNode.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid leaflet NURBS node")
     if not regionFolderItem:
@@ -1821,6 +1840,44 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     finally:
       slicer.app.resumeRender()
 
+  def createDenseNURBSSurface(self, parameterNode):
+    """
+    Generate dense NURBS surface from the interpolated vertices of the input NURBS surface.
+    This is a workaround so that the logic does not need to be reimplemented from scratch, but
+    the chords can snap onto the dense surface.
+    """
+    leafletNurbsSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
+    if not leafletNurbsSurfaceNode or leafletNurbsSurfaceNode.GetNumberOfControlPoints() == 0:
+      raise ValueError("Invalid leaflet NURBS grid surface node")
+    leafletModelNode = leafletNurbsSurfaceNode.GetOutputSurfaceModelNode()
+    if not leafletModelNode:
+      raise ValueError("Model node is not set for the leaflet NURBS grid surface node")
+
+    # Get interpolated surface model resolution.
+    # The vertex indices on the surface model increase in the V direction first, then in the U direction
+    # (which is the opposite of the NURBS grid control points).
+    surfaceRes = self.getSurfaceResolution(parameterNode)
+
+    # Generate dense grid points
+    denseGridPoints = vtk.vtkPoints()
+    for v in range(surfaceRes[1]):
+      for u in range(surfaceRes[0]):  # Along wrapped direction
+        currentPoint = leafletModelNode.GetPolyData().GetPoint(u * surfaceRes[1] + v)
+        denseGridPoints.InsertNextPoint(currentPoint)
+
+    # Create dense grid surface node
+    denseGridSurfaceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsGridSurfaceNode', f'{leafletNurbsSurfaceNode.GetName()} Dense Temp')
+    denseGridSurfaceNode.SetGridResolution(surfaceRes)
+    denseGridSurfaceNode.SetSamplingResolution(2)  #TODO: Crashes with 1 (empty evaluated surface when finding wrapping lin space)
+    denseGridSurfaceNode.SetWrapAround(slicer.vtkMRMLMarkupsGridSurfaceNode.AlongU)
+    # denseGridSurfaceNode.SetDisplayVisibility(False)
+    denseGridSurfaceNode.SetControlPointPositionsWorld(denseGridPoints)
+    parameterNode.SetNodeReferenceID("LeafletNURBSSurfaceForChordSnapping", denseGridSurfaceNode.GetID())
+    # Create dense grid model node to be able to get the surface normals
+    denseModelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', f'{denseGridSurfaceNode.GetName()} Model')
+    denseGridSurfaceNode.SetOutputSurfaceModelNodeID(denseModelNode.GetID())
+
+    return denseGridSurfaceNode
 
 #
 # ValveFemExportTest
