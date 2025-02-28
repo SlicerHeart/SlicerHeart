@@ -524,8 +524,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         node = slicer.vtkMRMLColorTableNode()
         node.SetTypeToFile()
-        node.SaveWithSceneOn()
-        node.HideFromEditorsOff()
+        # Do not save the color table to the scene file, assume that the Import4DFlow module provides it
+        node.SaveWithSceneOff()
+        node.HideFromEditorsOn()
         node.SetAttribute("Category", "Flow")
         node.SetAttribute("SlicerHeart.ColorMappingType", "SpeedComponent")
         node.SetSingletonTag(Import4DFlowLogic.DOPPLER_COLD_TO_HOT_SINGLETON_TAG)
