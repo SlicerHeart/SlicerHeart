@@ -71,7 +71,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     # Quick check of SOP class UID without parsing the file...
     try:
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
-      if sopClassUID != supportedSOPClassUID:
+      if sopClassUID and (sopClassUID != supportedSOPClassUID):
         # Unsupported class
         return []
     except Exception as e:
@@ -133,7 +133,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     # Quick check of SOP class UID without parsing the file...
     try:
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
-      if sopClassUID != supportedSOPClassUID:
+      if sopClassUID and (sopClassUID != supportedSOPClassUID):
         # Unsupported class
         if self.detailedLogging:
           logging.debug("Not PhilipsAffinity3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
@@ -203,7 +203,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     # Quick check of SOP class UID without parsing the file...
     try:
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
-      if sopClassUID != supportedSOPClassUID:
+      if sopClassUID and (sopClassUID != supportedSOPClassUID):
         # Unsupported class
         return []
     except Exception as e:
@@ -444,7 +444,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     # Quick check of SOP class UID without parsing the file...
     try:
       sopClassUID = slicer.dicomDatabase.fileValue(filePath, self.tags['sopClassUID'])
-      if sopClassUID != supportedSOPClassUID:
+      if sopClassUID and (sopClassUID != supportedSOPClassUID):
         # Unsupported class
         if self.detailedLogging:
           logging.debug("Not EigenArtemis3DUS: sopClassUID "+sopClassUID+" != supportedSOPClassUID "+supportedSOPClassUID)
