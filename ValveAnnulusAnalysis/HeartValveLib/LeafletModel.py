@@ -90,6 +90,7 @@ class LeafletModel:
   def setSelectLargestRegion(self, selectLargestRegion):
     self.surfaceBoundary.controlPointsMarkupNode.SetAttribute(
       "SelectLargestRegion", 'true' if selectLargestRegion else 'false')
+    self.updateSurface()
 
   def getNumberOfControlPoints(self, markupsNode):
     if not markupsNode:
