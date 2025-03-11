@@ -759,34 +759,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             raise RuntimeError(f"Magnitude volume {magnitudeVolumeNode.GetName()} is expected to be proxy node of a volume sequence")
         magnitudeVolumeSequenceNode = magnitudeVolumeSequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
 
-        gridTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "FlowField")
-        gridTransformNode.SetAttribute("SlicerHeart.Type", "FlowField")
-
-        # Create sequence node to store the time-varying flow field
-        transformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "4D flow")
-        transformSequenceNode.SetIndexType(magnitudeVolumeSequenceNode.GetIndexType())
-        transformSequenceNode.SetIndexName(magnitudeVolumeSequenceNode.GetIndexName())
-        transformSequenceNode.SetIndexUnit(magnitudeVolumeSequenceNode.GetIndexUnit())
-
-        # Create a sequence browser node for the new merged sequence
-        magnitudeVolumeSequenceBrowserNode.AddProxyNode(gridTransformNode, transformSequenceNode, False)
-        magnitudeVolumeSequenceBrowserNode.SetSaveChanges(transformSequenceNode, True)  # Allow updating the transform
-        magnitudeVolumeSequenceBrowserNode.SetOverwriteProxyName(transformSequenceNode, True)  # show index in node name
-
-        # Place transform in the same subject hierarchy folder as the volume node
-        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-        volumeParentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(magnitudeVolumeNode))
-        shNode.SetItemParent(shNode.GetItemByDataNode(gridTransformNode), volumeParentItemId)
-
         # Set input nodes of the flow field based on current selection
-        gridTransformNode.SetNodeReferenceID("magnitudeVolume", magnitudeVolumeNode.GetID())
         for component in range(3):
             componentVolumeNode = componentVolumeNodes[component]
-
-            if gridTransformNode.GetNthNodeReferenceID("componentVolume", component) == componentVolumeNode.GetID():
-                continue
-
-            gridTransformNode.SetNthNodeReferenceID("componentVolume", component, componentVolumeNode.GetID())
 
             # Turn off interpolation to see wrapped voxels better
             componentVolumeNode.GetScalarVolumeDisplayNode().InterpolateOff()
@@ -814,6 +789,79 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 magnitudeVolumeSequenceBrowserNode.SetSaveChanges(componentVolumeSequenceNode, True)  # faster browsing
                 magnitudeVolumeSequenceBrowserNode.SetRecording(componentVolumeSequenceNode, False)  # no need for live recording
                 magnitudeVolumeSequenceBrowserNode.SetOverwriteProxyName(componentVolumeSequenceNode, True)  # show index in node name
+
+
+        # Replace frame indices by frame times
+
+        try:
+            frameIdentifyingDICOMTagName = self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.FrameIdentifyingDICOMTagName")
+            frameIdentifyingDICOMTagUnits = self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.FrameIdentifyingDICOMTagUnits")
+            frameLabelsStrList = self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.FrameLabels").split(',')
+            frameLabels = [float(frameLabel) for frameLabel in frameLabelsStrList]
+            numberOfFrames = int(self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.NumberOfFrames"))
+            if frameIdentifyingDICOMTagName != "TriggerTime":
+                raise RuntimeWarning(f"frameIdentifyingDICOMTagName={frameIdentifyingDICOMTagName}, expected 'TriggerTime'")
+            if frameIdentifyingDICOMTagUnits != "ms":
+                raise RuntimeWarning(f"frameIdentifyingDICOMTagUnits={frameIdentifyingDICOMTagUnits}, expected 'ms'")
+            if len(frameLabels) != numberOfFrames:
+                raise RuntimeWarning(f"len(frameLabels)={len(frameLabels)}, expected {numberOfFrames}")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            logging.warning(f"Failed to get frame times from sequence node: {e}")
+            frameLabels = None
+
+        if frameLabels:
+            # Replace frame indices by frame times
+            proxyNodes = [magnitudeVolumeNode] + componentVolumeNodes
+            sequenceNodes = [self._getSequenceFromProxyNode(proxyNode) for proxyNode in proxyNodes]
+
+            # Temporary disable playback to avoid updating the index values
+            for sequenceNode in sequenceNodes:
+                magnitudeVolumeSequenceBrowserNode.SetPlayback(sequenceNode, False)
+            
+            for sequenceNode in sequenceNodes:
+                sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.TextIndex)
+                sequenceNode.SetIndexName("time")
+                sequenceNode.SetIndexUnit("ms")
+                # We cannot rename from the old value to the new value because in theory some of the new values
+                # could be the same as some of the new values
+                for frameIndex in range(numberOfFrames):
+                    oldIndexValue = sequenceNode.GetNthIndexValue(frameIndex)
+                    temporaryIndexValue = f"___frame{frameIndex}"
+                    sequenceNode.UpdateIndexValue(oldIndexValue, temporaryIndexValue)
+                for frameIndex in range(numberOfFrames):
+                    temporaryIndexValue = f"___frame{frameIndex}"
+                    newIndexValue = frameLabelsStrList[frameIndex]
+                    sequenceNode.UpdateIndexValue(temporaryIndexValue, newIndexValue)
+                sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+
+            # Restore playback state
+            for sequenceNode in sequenceNodes:
+                magnitudeVolumeSequenceBrowserNode.SetPlayback(sequenceNode, True)
+
+        gridTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "FlowField")
+        gridTransformNode.SetAttribute("SlicerHeart.Type", "FlowField")
+        gridTransformNode.SetNodeReferenceID("magnitudeVolume", magnitudeVolumeNode.GetID())
+        for component in range(3):
+            componentVolumeNode = componentVolumeNodes[component]
+            gridTransformNode.SetNthNodeReferenceID("componentVolume", component, componentVolumeNode.GetID())
+
+        # Create sequence node to store the time-varying flow field
+        transformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "4D flow")
+        transformSequenceNode.SetIndexType(magnitudeVolumeSequenceNode.GetIndexType())
+        transformSequenceNode.SetIndexName(magnitudeVolumeSequenceNode.GetIndexName())
+        transformSequenceNode.SetIndexUnit(magnitudeVolumeSequenceNode.GetIndexUnit())
+
+        # Create a sequence browser node for the new merged sequence
+        magnitudeVolumeSequenceBrowserNode.AddProxyNode(gridTransformNode, transformSequenceNode, False)
+        magnitudeVolumeSequenceBrowserNode.SetSaveChanges(transformSequenceNode, True)  # Allow updating the transform
+        magnitudeVolumeSequenceBrowserNode.SetOverwriteProxyName(transformSequenceNode, True)  # show index in node name
+
+        # Place transform in the same subject hierarchy folder as the volume node
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        volumeParentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(magnitudeVolumeNode))
+        shNode.SetItemParent(shNode.GetItemByDataNode(gridTransformNode), volumeParentItemId)
 
         return gridTransformNode
 
@@ -1251,6 +1299,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         segmentationNode.GetDisplayNode().SetOpacity2DFill(0.2)
         segmentationNode.GetDisplayNode().SetSliceIntersectionThickness(5)
         segmentationSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationNode.GetName())
+        componentVolumeSequenceNode = self._getSequenceFromProxyNode(componentVolumeNode)
+        segmentationSequenceNode.SetIndexType(componentVolumeSequenceNode.GetIndexType())
+        segmentationSequenceNode.SetIndexName(componentVolumeSequenceNode.GetIndexName())
+        segmentationSequenceNode.SetIndexUnit(componentVolumeSequenceNode.GetIndexUnit())
         sequenceBrowserNode.AddProxyNode(segmentationNode, segmentationSequenceNode, False)
         sequenceBrowserNode.PlaybackActiveOff()
         sequenceBrowserNode.SetRecording(segmentationSequenceNode, False)
