@@ -60,8 +60,8 @@ class Analyze4DFlowParameterNode:
     inputMaskSegmentation: vtkMRMLSegmentationNode
     inputMaskSegmentID: str
     outputStreamlinesModel: vtkMRMLModelNode
-    outputSpeedProfileModel: vtkMRMLModelNode
-    outputSpeedProfileTable: vtkMRMLTableNode
+    outputFlowMetricsModel: vtkMRMLModelNode
+    outputFlowMetricsTable: vtkMRMLTableNode
     outputSpeedVolume: vtkMRMLScalarVolumeNode
     samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2  # distance unit
     speedThreshold: Annotated[float, WithinRange(0.0, 3), SingleStep(0.01), Default(0.1)]  # m/sec
@@ -152,9 +152,8 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node exists and observed
         self.initializeParameterNode()
 
-        #ttt
         #if self._parameterNode and not self._parameterNode.inputFlowField:
-        #    ttt slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLTransformNode")
+        #    slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLTransformNode")
 
 
     def exit(self) -> None:
@@ -265,7 +264,7 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.inputFlowField.GetNodeReference("magnitudeVolume"),
                 self._parameterNode.samplingDistance,
                 self._parameterNode.outputStreamlinesModel,
-                self._parameterNode.outputSpeedProfileModel,
+                self._parameterNode.outputFlowMetricsModel,
                 self._parameterNode.inputMaskSegmentation,
                 self._parameterNode.inputMaskSegmentID,
                 self._parameterNode.streamlinesMaximumLength,
@@ -275,16 +274,17 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.outputSpeedVolume,
                 self._parameterNode.speedVolumeProjectedToPlane)
 
-            if self._parameterNode.outputSpeedProfileTable:
-                self.addLog("Compute speed profile table...")
-                self.logic.computeSpeedProfileTable(
-                    self._parameterNode.outputSpeedProfileModel,
+            if self._parameterNode.outputFlowMetricsTable:
+                self.addLog("Compute flow metrics table...")
+                self.logic.computeFlowMetricsTable(
+                    self._parameterNode.outputFlowMetricsModel,
+                    self._parameterNode.inputPlane,
                     self._parameterNode.speedThreshold,
-                    self._parameterNode.outputSpeedProfileTable)
+                    self._parameterNode.outputFlowMetricsTable)
 
     def onShowPlotButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to create plot."):
-            self.logic.createPlotFromTable(self._parameterNode.outputSpeedProfileTable)
+            self.logic.createPlotFromTable(self._parameterNode.outputFlowMetricsTable)
 
 #
 # Analyze4DFlowLogic
@@ -445,7 +445,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             magnitudeVolumeNode: vtkMRMLScalarVolumeNode,
             samplingDistanceMm: float = 2.0,
             outputStreamlinesModel: vtkMRMLModelNode = None,
-            outputSpeedProfileModel: vtkMRMLModelNode = None,
+            outputFlowMetricsModel: vtkMRMLModelNode = None,
             maskSegmentationNode: vtkMRMLSegmentationNode = None,
             maskSegmentID: str = None,
             streamlinesMaximumLengthMm: int = 100,
@@ -480,7 +480,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
             originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
             numberOfItems = transformSequenceBrowserNode.GetNumberOfItems()
-            deleteOutputSpeedProfileModel = False
+            deleteOutputFlowMetricsModel = False
             for itemNumber in range(numberOfItems):
                 self.log("Sampling flow field with plane... ({item}/{count})".format(item=itemNumber+1, count=numberOfItems))
 
@@ -510,14 +510,14 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 # Save model to plane
                 modelsLogic = slicer.modules.models.logic()
-                if not outputSpeedProfileModel:
-                    # Create model node for the output speed profile, if not provided then we create a temporary one
-                    outputSpeedProfileModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Speed Profile")
-                    deleteOutputSpeedProfileModel = True
-                if not outputSpeedProfileModel.GetDisplayNode():
+                if not outputFlowMetricsModel:
+                    # Create model node for the output flow metrics, if not provided then we create a temporary one
+                    outputFlowMetricsModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Flow metrics")
+                    deleteOutputFlowMetricsModel = True
+                if not outputFlowMetricsModel.GetDisplayNode():
                     # Initialize model display node
-                    outputSpeedProfileModel.CreateDefaultDisplayNodes()
-                    displayNode = outputSpeedProfileModel.GetDisplayNode()
+                    outputFlowMetricsModel.CreateDefaultDisplayNodes()
+                    displayNode = outputFlowMetricsModel.GetDisplayNode()
                     displayNode.SetColor(1, 1, 0)
                     displayNode.SetEdgeVisibility(True)
                     displayNode.BackfaceCullingOff()
@@ -525,16 +525,16 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 # Add the output nodes to the same sequence browser as the input 4D flow field
                 resultProxyNodes = [outputStreamlinesModel, outputSpeedVolume]
-                if not deleteOutputSpeedProfileModel:
-                    # only create sequence and proxy node if the speed profile model is not temporary
-                    resultProxyNodes.append(outputSpeedProfileModel)
+                if not deleteOutputFlowMetricsModel:
+                    # only create sequence and proxy node if the flow metrics model is not temporary
+                    resultProxyNodes.append(outputFlowMetricsModel)
                 for node in resultProxyNodes:
                     if not node:
                         continue
                     self._addNodeToSequenceBrowser(node, transformSequenceBrowserNode)
 
                 objectToWorldTransformFilter.Update()
-                outputSpeedProfileModel.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
+                outputFlowMetricsModel.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
 
                 # Sample displacement field with the model
                 displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(
@@ -550,8 +550,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
                     # Probe mask image with model
                     parameters["InputVolume"] = maskLabelmapNode
-                    parameters["InputModel"] = outputSpeedProfileModel
-                    parameters["OutputModel"] = outputSpeedProfileModel
+                    parameters["InputModel"] = outputFlowMetricsModel
+                    parameters["OutputModel"] = outputFlowMetricsModel
                     parameters["OutputArrayName"] = "insideMask"
                     probeVolumeWithModel = slicer.modules.probevolumewithmodel
                     probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
@@ -573,13 +573,13 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                         maskLabelmapNode = None
 
                     # Save mask array
-                    insideMaskArray = slicer.util.arrayFromModelPointData(outputSpeedProfileModel, 'insideMask').copy()
+                    insideMaskArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'insideMask').copy()
                 else:
                     insideMaskArray = None
 
                 parameters["InputVolume"] = displacementImageNode
-                parameters["InputModel"] = outputSpeedProfileModel
-                parameters["OutputModel"] = outputSpeedProfileModel
+                parameters["InputModel"] = outputFlowMetricsModel
+                parameters["OutputModel"] = outputFlowMetricsModel
                 parameters["OutputArrayName"] = "Speed"
                 probeVolumeWithModel = slicer.modules.probevolumewithmodel
                 probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
@@ -590,13 +590,13 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 if insideMaskArray is not None:
                     # Set all displacements outside the mask to zero
-                    displacementArray = slicer.util.arrayFromModelPointData(outputSpeedProfileModel, 'Speed')
+                    displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
                     displacementArray[insideMaskArray==0] = (0,0,0)
 
                 # Update streamlines
                 if outputStreamlinesModel:
                     speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
-                    streamlinesSeedModel = outputSpeedProfileModel  # the plane profile is also used for generating seed points
+                    streamlinesSeedModel = outputFlowMetricsModel  # the plane profile is also used for generating seed points
                     self._createStreamlines(outputStreamlinesModel, speedImageNodeMPerSec, streamlinesSeedModel,
                         streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesComputeAllMetrics, streamlinesSpeedThresholdMPerSec)
                     if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
@@ -690,9 +690,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
             if originalTransformVisibility and gridTransformNode.GetDisplayNode():
                 gridTransformNode.GetDisplayNode().SetVisibility(True)
-            if deleteOutputSpeedProfileModel and outputSpeedProfileModel:
-                slicer.mrmlScene.RemoveNode(outputSpeedProfileModel.GetDisplayNode())
-                slicer.mrmlScene.RemoveNode(outputSpeedProfileModel)
+            if deleteOutputFlowMetricsModel and outputFlowMetricsModel:
+                slicer.mrmlScene.RemoveNode(outputFlowMetricsModel.GetDisplayNode())
+                slicer.mrmlScene.RemoveNode(outputFlowMetricsModel)
             if outputStreamlinesModel:
                 # Hack, it is not clear why this is needed, but without this, streamlines are not always displayed
                 displayNode = outputStreamlinesModel.GetDisplayNode()
@@ -806,6 +806,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         vtkAddon.vtkAddonMathUtilities.GetOrientationMatrix(rasToCanonical, rasToCanonicalDirection)
         vtk.vtkImageTransform.TransformVectors(rasToCanonicalDirection, [1,1,1], speedImageData.GetPointData().GetScalars())
 
+        # Note: various streamlines, pathlines, etc. are described here: http://www.vmtk.org/tutorials/ParticleTracing.html
+        # vtkParticleTracerBase is available for particle tracing in unsteady vector fields        # 
         streamLine = vtk.vtkStreamTracer()
         streamLine.SetInputData(speedImageData)
         streamLine.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, vtk.vtkDataSetAttributes.SCALARS)
@@ -869,11 +871,12 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
         outputStreamlinesModel.SetAndObservePolyData(polydata)
 
-    def computeSpeedProfileTable(
+    def computeFlowMetricsTable(
             self,
-            crossSectionModelNode: vtkMRMLMarkupsPlaneNode,
-            speedThreshold: float = 0.1,
-            outputSpeedProfileTableNode: vtkMRMLTableNode = None) -> vtkMRMLTableNode:
+            crossSectionModelNode: vtkMRMLModelNode,
+            crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
+            speedThresholdMPerSec: float = 0.1,
+            outputFlowMetricsTableNode: vtkMRMLTableNode = None) -> vtkMRMLTableNode:
 
         import numpy as np
 
@@ -882,8 +885,18 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
         timeArray = vtk.vtkDoubleArray()
         timeArray.SetName("time")
-        speedArray = vtk.vtkDoubleArray()
-        speedArray.SetName("Speed")
+
+        speedMeanMPerSecArray = vtk.vtkDoubleArray()
+        speedMeanMPerSecArray.SetName("SpeedMean")
+        speedMinMPerSecArray = vtk.vtkDoubleArray()
+        speedMinMPerSecArray.SetName("SpeedMin")
+        speedMaxMPerSecArray = vtk.vtkDoubleArray()
+        speedMaxMPerSecArray.SetName("SpeedMax")
+
+        forwardVolumeMlArray = vtk.vtkDoubleArray()
+        forwardVolumeMlArray.SetName("ForwardVolume")
+        backwardVolumeMlArray = vtk.vtkDoubleArray()
+        backwardVolumeMlArray.SetName("BackwardVolume")
 
         # Turn off transform visibility to speed up browsing
         gridTransformNode = None
@@ -900,52 +913,124 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         else:
             originalTransformVisibility = False
 
+        triangulate = vtk.vtkTriangleFilter()
+        triangulate.SetInputData(crossSectionModelNode.GetPolyData())
+
+        modelProperties = vtk.vtkMassProperties()
+        modelProperties.SetInputConnection(triangulate.GetOutputPort())
+        modelProperties.Update()
+        totalAreaMm2 = modelProperties.GetSurfaceArea()
+        numberOfPoints = crossSectionModelNode.GetPolyData().GetNumberOfCells()
+        areaPerPointMm2 = totalAreaMm2 / numberOfPoints
+
+        # Get plane normal
+        planeNormal = crossSectionPlaneNode.GetNormal()
+
         originalItemNumber = sequenceBrowserNode.GetSelectedItemNumber()
         for itemNumber in range(sequenceBrowserNode.GetNumberOfItems()):
-            self.log("Computing speed profile... ({item}/{count})".format(item=itemNumber+1, count=sequenceBrowserNode.GetNumberOfItems()))
+            self.log("Computing flow metrics... ({item}/{count})".format(item=itemNumber+1, count=sequenceBrowserNode.GetNumberOfItems()))
 
             sequenceBrowserNode.SetSelectedItemNumber(itemNumber)
-            speed = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'Speed')
-            valuesAboveThreshold = speed[speed>speedThreshold]
-            if len(valuesAboveThreshold) > 0:
-                averageSpeed = valuesAboveThreshold.mean()
-            else:
-                averageSpeed = np.NaN  # no values above threshold
+            allSpeedMPerSec = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'Speed')
+
             # TODO: check unit of threshold and make sure consistent with GUI
+            speedMagnitudeMPerSec = np.linalg.norm(allSpeedMPerSec, axis=1)
+            speedMPerSec = allSpeedMPerSec[speedMagnitudeMPerSec>speedThresholdMPerSec]
+
+            if itemNumber == 0:
+                elapsedTimeMSec = float(sequenceNode.GetNthIndexValue(itemNumber + 1)) - float(sequenceNode.GetNthIndexValue(itemNumber))
+            elif itemNumber == sequenceBrowserNode.GetNumberOfItems() - 1:
+                elapsedTimeMSec = float(sequenceNode.GetNthIndexValue(itemNumber)) - float(sequenceNode.GetNthIndexValue(itemNumber - 1))
+            else:
+                elapsedTimeMSec = (float(sequenceNode.GetNthIndexValue(itemNumber + 1)) - float(sequenceNode.GetNthIndexValue(itemNumber - 1))) / 2
+
+            if len(speedMPerSec) > 0:
+                # Project speed vector to the plane
+                # Compute dot product of each element of displacementImageArray by planeNormal.
+                # Do not iterate through points one by one because it would be too slow
+                # (use numpy operations instead).
+                projectedSpeedMPerSec = np.sum(speedMPerSec * planeNormal, axis=1)
+                
+                averageSpeedMPerSec = projectedSpeedMPerSec.mean()
+                maxSpeedMPerSec = projectedSpeedMPerSec.max()
+                minSpeedMPerSec = projectedSpeedMPerSec.min()
+                #flowMlPerSec = averageSpeedMPerSec * len(projectedSpeedMPerSec) * areaPerPointMm2 # m/s * mm^2 = (100 * cm/s) * (0.1 cm)^2 = 100 * 0.1 * 0.1 * cm/s * cm^2 = cm3/sec = ml/sec
+
+                # Forward/backward flow
+                forwardFlowMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec>0]) * areaPerPointMm2 * 0.001
+                backwardFlowMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec<0]) * areaPerPointMm2 * 0.001
+
+            else:
+                # no values above threshold
+                averageSpeedMPerSec = 0
+                maxSpeedMPerSec = 0
+                minSpeedMPerSec = 0
+                forwardFlowMlPerSec = 0
+                backwardFlowMlPerSec = 0
+
             timeArray.InsertNextValue(float(sequenceNode.GetNthIndexValue(itemNumber)))
-            speedArray.InsertNextValue(averageSpeed)
+
+            speedMeanMPerSecArray.InsertNextValue(averageSpeedMPerSec)
+            speedMaxMPerSecArray.InsertNextValue(maxSpeedMPerSec)
+            speedMinMPerSecArray.InsertNextValue(minSpeedMPerSec)
+
+            forwardVolumeMlArray.InsertNextValue(forwardFlowMlPerSec * elapsedTimeMSec)
+            backwardVolumeMlArray.InsertNextValue(backwardFlowMlPerSec * elapsedTimeMSec)
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
         if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
             gridTransformNode.GetDisplayNode().SetVisibility(True)
 
+        if not outputFlowMetricsTableNode:
+            outputFlowMetricsTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
 
-        if not outputSpeedProfileTableNode:
-            outputSpeedProfileTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
+        outputFlowMetricsTableNode.RemoveAllColumns()
+        outputFlowMetricsTable = outputFlowMetricsTableNode.GetTable()
 
-        outputSpeedProfileTableNode.RemoveAllColumns()
-        outputSpeedProfileTable = outputSpeedProfileTableNode.GetTable()
+        outputFlowMetricsTable.AddColumn(timeArray)
+        outputFlowMetricsTableNode.SetColumnUnitLabel(timeArray.GetName(), "ms")
 
-        outputSpeedProfileTable.AddColumn(timeArray)
-        outputSpeedProfileTableNode.SetColumnUnitLabel(timeArray.GetName(), "sec")  # TODO: verify if the unit is in sec
+        outputFlowMetricsTable.AddColumn(speedMeanMPerSecArray)
+        outputFlowMetricsTableNode.SetColumnDescription(
+            speedMeanMPerSecArray.GetName(),
+            f"Average speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s")
+        outputFlowMetricsTableNode.SetColumnUnitLabel(speedMeanMPerSecArray.GetName(), "m/s")
 
-        outputSpeedProfileTable.AddColumn(speedArray)
-        outputSpeedProfileTableNode.SetColumnDescription(
-            speedArray.GetName(),
-            f"Average speed in the plane cross-section above threshold {speedThreshold}")
-        outputSpeedProfileTableNode.SetColumnUnitLabel(speedArray.GetName(), "m/sec")  # TODO: verify the unit
+        outputFlowMetricsTable.AddColumn(speedMinMPerSecArray)
+        outputFlowMetricsTableNode.SetColumnDescription(
+            speedMinMPerSecArray.GetName(),
+            f"Minimum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s")
+        outputFlowMetricsTableNode.SetColumnUnitLabel(speedMinMPerSecArray.GetName(), "m/s")
 
-        return outputSpeedProfileTableNode
+        outputFlowMetricsTable.AddColumn(speedMaxMPerSecArray)
+        outputFlowMetricsTableNode.SetColumnDescription(
+            speedMaxMPerSecArray.GetName(),
+            f"Maximum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s")
+        outputFlowMetricsTableNode.SetColumnUnitLabel(speedMaxMPerSecArray.GetName(), "m/s")
+
+        outputFlowMetricsTable.AddColumn(forwardVolumeMlArray)
+        outputFlowMetricsTableNode.SetColumnDescription(
+            forwardVolumeMlArray.GetName(),
+            f"Forward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s")
+        outputFlowMetricsTableNode.SetColumnUnitLabel(forwardVolumeMlArray.GetName(), "ml")
+
+        outputFlowMetricsTable.AddColumn(backwardVolumeMlArray)
+        outputFlowMetricsTableNode.SetColumnDescription(
+            backwardVolumeMlArray.GetName(),
+            f"Backward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s")
+        outputFlowMetricsTableNode.SetColumnUnitLabel(backwardVolumeMlArray.GetName(), "ml")
+
+        return outputFlowMetricsTableNode
 
 
     @staticmethod
-    def createPlotFromTable(speedProfileTableNode: vtkMRMLTableNode) -> None:
+    def createPlotFromTable(flowMetricsTableNode: vtkMRMLTableNode) -> None:
 
         # Create plot
-        plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode", speedProfileTableNode.GetName() + " plot")
-        plotSeriesNode.SetAndObserveTableNodeID(speedProfileTableNode.GetID())
-        plotSeriesNode.SetXColumnName(speedProfileTableNode.GetTable().GetColumnName(0))  # time
-        plotSeriesNode.SetYColumnName(speedProfileTableNode.GetTable().GetColumnName(1))  # speed
+        plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode", flowMetricsTableNode.GetName() + " plot")
+        plotSeriesNode.SetAndObserveTableNodeID(flowMetricsTableNode.GetID())
+        plotSeriesNode.SetXColumnName(flowMetricsTableNode.GetTable().GetColumnName(0))  # time
+        plotSeriesNode.SetYColumnName(flowMetricsTableNode.GetTable().GetColumnName(1))  # speed
         plotSeriesNode.SetPlotType(plotSeriesNode.PlotTypeScatter)
         plotSeriesNode.SetColor(0, 0.6, 1.0)
 

@@ -131,7 +131,7 @@
       <item row="2" column="1">
        <widget class="ctkSliderWidget" name="samplingDistanceSliderWidget">
         <property name="toolTip">
-         <string>Distance between sampling points in the plane. Used for Speed profile and Streamlines.</string>
+         <string>Distance between sampling points in the plane. Used for Flow metrics and Streamlines.</string>
         </property>
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -176,18 +176,18 @@
       <item row="4" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_3">
         <property name="title">
-         <string>Speed profile</string>
+         <string>Flow metrics</string>
         </property>
         <layout class="QFormLayout" name="formLayout_7">
          <item row="0" column="0">
           <widget class="QLabel" name="label_7">
            <property name="text">
-            <string>Output speed profile model:</string>
+            <string>Output flow metrics model:</string>
            </property>
           </widget>
          </item>
          <item row="0" column="1">
-          <widget class="qMRMLNodeComboBox" name="outputSpeedProfileModelSelector">
+          <widget class="qMRMLNodeComboBox" name="outputFlowMetricsModelSelector">
            <property name="toolTip">
             <string>Model node that contains speed vectors as point data</string>
            </property>
@@ -200,7 +200,7 @@
             <bool>false</bool>
            </property>
            <property name="baseName">
-            <string>Speed profile model</string>
+            <string>Flow metrics model</string>
            </property>
            <property name="noneEnabled">
             <bool>true</bool>
@@ -218,21 +218,21 @@
             <bool>true</bool>
            </property>
            <property name="SlicerParameterName" stdset="0">
-            <string notr="true">outputSpeedProfileModel</string>
+            <string notr="true">outputFlowMetricsModel</string>
            </property>
           </widget>
          </item>
          <item row="1" column="0">
           <widget class="QLabel" name="label_9">
            <property name="text">
-            <string>Output speed profile table:</string>
+            <string>Output flow metrics table:</string>
            </property>
           </widget>
          </item>
          <item row="1" column="1">
           <layout class="QHBoxLayout" name="horizontalLayout">
            <item>
-            <widget class="qMRMLNodeComboBox" name="outputSpeedProfileTableSelector">
+            <widget class="qMRMLNodeComboBox" name="outputFlowMetricsTableSelector">
              <property name="toolTip">
               <string>Plot series that contain average speed value vs time.</string>
              </property>
@@ -245,7 +245,7 @@
               <bool>false</bool>
              </property>
              <property name="baseName">
-              <string>Speed profile table</string>
+              <string>Flow metrics table</string>
              </property>
              <property name="noneEnabled">
               <bool>true</bool>
@@ -266,7 +266,7 @@
               <bool>true</bool>
              </property>
              <property name="SlicerParameterName" stdset="0">
-              <string notr="true">outputSpeedProfileTable</string>
+              <string notr="true">outputFlowMetricsTable</string>
              </property>
             </widget>
            </item>
@@ -478,7 +478,7 @@
          <bool>true</bool>
         </property>
         <property name="toolTip">
-         <string>Compute streamlines and flow field profile</string>
+         <string>Compute streamlines and flow field metrics</string>
         </property>
         <property name="text">
          <string>Analyze</string>
@@ -578,7 +578,7 @@
   <connection>
    <sender>Analyze4DFlow</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>outputSpeedProfileModelSelector</receiver>
+   <receiver>outputFlowMetricsModelSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
@@ -594,7 +594,7 @@
   <connection>
    <sender>Analyze4DFlow</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>outputSpeedProfileTableSelector</receiver>
+   <receiver>outputFlowMetricsTableSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
@@ -608,7 +608,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>outputSpeedProfileTableSelector</sender>
+   <sender>outputFlowMetricsTableSelector</sender>
    <signal>currentNodeChanged(bool)</signal>
    <receiver>showPlotButton</receiver>
    <slot>setEnabled(bool)</slot>
