@@ -49,6 +49,8 @@ class SimplifiedViewerParameterNode:
     sequenceBrowserNode: slicer.vtkMRMLSequenceBrowserNode # Sequence browser node
     clipNode: slicer.vtkMRMLNode # Clip node
 
+    measurementNodes: list[slicer.vtkMRMLNode] # Measurement nodes
+
 #
 # SimplifiedViewerWidget
 #
@@ -153,6 +155,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.ui.clippingButton.connect('clicked(bool)', self.onClippingButtonClicked)
         self.ui.clippingPlaneVisibilityButton.connect('clicked(bool)', self.onClippingPlaneVisibilityButtonClicked)
+
+        self.ui.newLengthButton.connect('clicked()', self.onNewLengthButtonClicked)
+        self.ui.newAreaButton.connect('clicked()', self.onNewAreaButtonClicked)
+        self.ui.newCurveButton.connect('clicked()', self.onNewCurveButtonClicked)
+
+        self.ui.measurementsTreeView.connect('currentItemChanged(vtkIdType)', self.updateMeasurementsWidgets)
 
         layoutManager = slicer.app.layoutManager()
         layoutManager.connect('layoutChanged(int)', self.onLayoutChanged)
@@ -409,6 +417,59 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateSelectedNodeWidget()
         self.updateSequenceBrowserWidgets()
         self.updateClippingWidgets()
+        self.updateMeasurementsWidgets()
+    
+    def onNewLengthButtonClicked(self):
+        """
+        Create a new length measurement
+        """
+        name = slicer.mrmlScene.GenerateUniqueName("Length")
+        measurementNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", name)
+        measurementNode.SetAttribute("SimplifiedViewer", "")
+        area = measurementNode.GetMeasurement("length")
+        area.SetName("Length")
+        area.EnabledOn()
+        self._parameterNode.measurementNodes.append(measurementNode)
+
+    def onNewAreaButtonClicked(self):
+        """
+        Create a new area measurement
+        """
+        name = slicer.mrmlScene.GenerateUniqueName("Area")
+        measurementNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsClosedCurveNode", name)
+        measurementNode.SetAttribute("SimplifiedViewer", "")
+        area = measurementNode.GetMeasurement("area")
+        area.SetName("Area")
+        area.EnabledOn()
+        self._parameterNode.measurementNodes.append(measurementNode)
+
+    def onNewCurveButtonClicked(self):
+        """
+        Create a new curve measurement
+        """
+        name = slicer.mrmlScene.GenerateUniqueName("Curve length")
+        measurementNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode", name)
+        measurementNode.SetAttribute("SimplifiedViewer", "")
+        area = measurementNode.GetMeasurement("length")
+        area.SetName("Length")
+        area.EnabledOn()
+        self._parameterNode.measurementNodes.append(measurementNode)
+
+    def updateMeasurementsWidgets(self):
+        shNode = self.ui.measurementsTreeView.subjectHierarchyNode()
+        currentItemID = self.ui.measurementsTreeView.currentItem()
+        selectedNode = None
+        if currentItemID != slicer.vtkMRMLSubjectHierarchyNode.GetInvalidItemID():
+            selectedNode = shNode.GetItemDataNode(currentItemID)
+        self.ui.markupsPlaceWidget.setCurrentNode(selectedNode)
+        self.ui.markupsPlaceWidget.findChild("ctkColorPickerButton", "ColorButton").visible = False
+        self.ui.markupsPlaceWidget.findChild("QToolButton", "MoreButton").visible = False
+
+        self.ui.measurementsTreeView.header().setSectionResizeMode(0, qt.QHeaderView.Stretch)
+        self.ui.measurementsTreeView.header().setSectionResizeMode(1, qt.QHeaderView.Stretch)
+        self.ui.measurementsTreeView.header().setSectionResizeMode(2, qt.QHeaderView.Fixed)
+        self.ui.measurementsTreeView.header().setSectionResizeMode(3, qt.QHeaderView.Fixed)
+        
 
     def updateInputWidgets(self):
         """
