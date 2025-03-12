@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>398</width>
-    <height>362</height>
+    <height>732</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -126,17 +126,86 @@
     <widget class="QWidget" name="selectedNodeWidget" native="true"/>
    </item>
    <item>
-    <spacer name="verticalSpacer">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
+    <widget class="QWidget" name="measurementWidget" native="true">
+     <layout class="QGridLayout" name="gridLayout_2">
+      <item row="1" column="0">
+       <widget class="QWidget" name="widget" native="true">
+        <layout class="QGridLayout" name="gridLayout_3">
+         <item row="0" column="0">
+          <widget class="QPushButton" name="newLengthButton">
+           <property name="text">
+            <string>New length</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QPushButton" name="newAreaButton">
+           <property name="text">
+            <string>New area</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QPushButton" name="newCurveButton">
+           <property name="text">
+            <string>New curve length</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0" colspan="3">
+          <widget class="qSlicerMarkupsPlaceWidget" name="markupsPlaceWidget"/>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Measurements:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="qMRMLSubjectHierarchyTreeView" name="measurementsTreeView">
+        <property name="levelFilter">
+         <stringlist notr="true"/>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLMarkupsLineNode</string>
+          <string>vtkMRMLMarkupsCurveNode</string>
+         </stringlist>
+        </property>
+        <property name="hideChildNodeTypes">
+         <stringlist notr="true"/>
+        </property>
+        <property name="idColumnVisible">
+         <bool>false</bool>
+        </property>
+        <property name="transformColumnVisible">
+         <bool>false</bool>
+        </property>
+        <property name="descriptionColumnVisible">
+         <bool>true</bool>
+        </property>
+        <property name="includeItemAttributeNamesFilter">
+         <stringlist notr="true"/>
+        </property>
+        <property name="includeNodeAttributeNamesFilter">
+         <stringlist notr="true">
+          <string>SimplifiedViewer</string>
+         </stringlist>
+        </property>
+        <property name="excludeItemAttributeNamesFilter">
+         <stringlist notr="true"/>
+        </property>
+        <property name="excludeNodeAttributeNamesFilter">
+         <stringlist notr="true"/>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
    </item>
    <item>
     <widget class="QWidget" name="viewControlWidget" native="true">
@@ -219,6 +288,17 @@
    <container>1</container>
   </customwidget>
   <customwidget>
+   <class>qSlicerWidget</class>
+   <extends>QWidget</extends>
+   <header>qSlicerWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qSlicerMarkupsPlaceWidget</class>
+   <extends>qSlicerWidget</extends>
+   <header>qSlicerMarkupsPlaceWidget.h</header>
+  </customwidget>
+  <customwidget>
    <class>qMRMLSequenceBrowserPlayWidget</class>
    <extends>qMRMLWidget</extends>
    <header>qMRMLSequenceBrowserPlayWidget.h</header>
@@ -227,6 +307,11 @@
    <class>qMRMLSequenceBrowserSeekWidget</class>
    <extends>qMRMLWidget</extends>
    <header>qMRMLSequenceBrowserSeekWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSubjectHierarchyTreeView</class>
+   <extends>QTreeView</extends>
+   <header>qMRMLSubjectHierarchyTreeView.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
@@ -292,6 +377,38 @@
     <hint type="destinationlabel">
      <x>248</x>
      <y>120</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>SimplifiedViewer</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>markupsPlaceWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>198</x>
+     <y>365</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>198</x>
+     <y>408</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>SimplifiedViewer</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>measurementsTreeView</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>198</x>
+     <y>365</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>198</x>
+     <y>530</y>
     </hint>
    </hints>
   </connection>
