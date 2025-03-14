@@ -116,14 +116,73 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.sequenceWidget.setParent(None)
             self.sequenceWidget.deleteLater()
 
+        self.svToggleButton = qt.QToolButton()
+        self.svToggleButton.checkable = True
+        self.svToggleButton.connect('clicked(bool)', self.toggleSceneViewPanel)
+        self.measurementsToggleButton = qt.QToolButton()
+        self.measurementsToggleButton.checkable = True
+        self.measurementsToggleButton.connect('clicked(bool)', self.toggleMeasurementPanel)
+
+
+        self.clippingEnabledAction = qt.QAction("Enable Clipping")
+        self.clippingEnabledAction.setCheckable(True)
+        self.clippingEnabledAction.connect('toggled(bool)', self.onClippingButtonClicked)
+        self.clippingPlaneVisibilityAction = qt.QAction("Show Clipping Plane")
+        self.clippingPlaneVisibilityAction.setCheckable(True)
+        self.clippingPlaneVisibilityAction.connect('toggled(bool)', self.onClippingPlaneVisibilityButtonClicked)
+        self.visibilityMenu = qt.QMenu()
+        self.visibilityMenu.addAction(self.clippingEnabledAction)
+        self.visibilityMenu.addAction(self.clippingPlaneVisibilityAction)
+        self.visibilityButton = qt.QToolButton()
+        self.visibilityButton.setMenu(self.visibilityMenu)
+        self.visibilityButton.setPopupMode(qt.QToolButton.InstantPopup)
+
+        self.fourUpViewAction = qt.QAction("Four Up View")
+        self.fourUpViewAction.connect('triggered()', self.onFourUpViewButtonClicked)
+        self.conventionalViewAction = qt.QAction("Conventional View")
+        self.conventionalViewAction.connect('triggered()', self.onConventionalViewButtonClicked)
+        self.layoutsMenu = qt.QMenu()
+        self.layoutsMenu.addAction(self.fourUpViewAction)
+        self.layoutsMenu.addAction(self.conventionalViewAction)
+        self.layoutsButton = qt.QToolButton()
+        self.layoutsButton.setMenu(self.layoutsMenu)
+        self.layoutsButton.setPopupMode(qt.QToolButton.InstantPopup)
+
+        self.fullSlicerInterfaceAction = qt.QAction("Show full 3D Slicer Interface")
+        self.fullSlicerInterfaceAction.setCheckable(True)
+        self.fullSlicerInterfaceAction.connect('toggled(bool)', self.setFull3DSlicerInterfaceVisible)
+        self.settingsMenu = qt.QMenu()
+        self.settingsMenu.addAction(self.fullSlicerInterfaceAction)
+        self.settingsButton = qt.QToolButton()
+        self.settingsButton.setMenu(self.settingsMenu)
+        self.settingsButton.setPopupMode(qt.QToolButton.InstantPopup)
+
+        self.buttonWidget = qt.QWidget()
+        self.buttonWidget.setObjectName("buttonWidget")
+        self.buttonWidget.setLayout(qt.QHBoxLayout())
+        self.buttonWidget.layout().setMargin(0)
+        self.buttonWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
+        self.buttonWidget.layout().setSpacing(3)
+        self.buttonWidget.layout().addWidget(self.svToggleButton)
+        self.buttonWidget.layout().addWidget(self.measurementsToggleButton)
+        self.buttonWidget.layout().addWidget(self.visibilityButton)
+        self.buttonWidget.layout().addWidget(self.layoutsButton)
+        self.buttonWidget.layout().addWidget(self.settingsButton)
+        self.buttonWidget.layout().addStretch()
+        self.buttonWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
+        self.buttonWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
+        self.buttonWidget.setAutoFillBackground(False)
+
+
         self.sequenceWidget = qt.QWidget()
         self.sequenceWidget.setObjectName("sequenceWidget")
         self.sequenceWidget.setLayout(qt.QVBoxLayout())
         self.sequenceWidget.layout().setMargin(0)
         self.sequenceWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
-        self.sequenceWidget.layout().setSpacing(0)
+        self.sequenceWidget.layout().setSpacing(2)
         self.sequenceWidget.layout().addWidget(self.ui.sequenceBrowserWidget)
         self.sequenceWidget.layout().addWidget(self.ui.sequenceBrowserSeekWidget)
+        self.sequenceWidget.layout().addWidget(self.buttonWidget)
         self.sequenceWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
         self.sequenceWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
         self.sequenceWidget.setAutoFillBackground(False)
@@ -252,9 +311,18 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateApplicationPalette()
         self.updateSvgIcons()
         self.updateApplicationStylesheet()
+        self.updateGUIFromMRML()
 
         self.sequenceWidget.adjustSize()
 
+    def toggleSceneViewPanel(self, visible):
+        self.measurementsToggleButton.checked = False # BUTTON GROUP
+        self.updateSidePanelVisibility()
+
+
+    def toggleMeasurementPanel(self, visible):
+        self.svToggleButton.checked = False # BUTTON GROUP
+        self.updateSidePanelVisibility()
 
     def updateSvgIcons(self):
         """
@@ -277,6 +345,11 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.sequenceBrowserWidget.pushButton_VcrNext:      "Icons/SeekNext.svg",
             self.ui.sequenceBrowserWidget.pushButton_VcrLast:      "Icons/SeekLast.svg",
             self.ui.sequenceBrowserWidget.pushButton_VcrLoop:      "Icons/SeekLoop.svg",
+            self.svToggleButton:                                   "Icons/SceneViews.svg",
+            self.measurementsToggleButton:                         "Icons/Measurements.svg",
+            self.visibilityButton:                                 "Icons/Visibility.svg",
+            self.layoutsButton:                                    "Icons/Layouts.svg",
+            self.settingsButton:                                   "Icons/Settings.svg",
         }
         for widget, iconPath in widgetPathMap.items():
             icon = self.loadSvg(self.resourcePath(iconPath), sizePx, color)
@@ -418,7 +491,20 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateSequenceBrowserWidgets()
         self.updateClippingWidgets()
         self.updateMeasurementsWidgets()
-    
+        self.updateSidePanelVisibility()
+
+        self.fullSlicerInterfaceAction.setChecked(self.getFull3DSlicerInterfaceVisible())
+
+    def updateSidePanelVisibility(self):
+        full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
+        sidePanelVisible = self.svToggleButton.checked or self.measurementsToggleButton.checked or full3DSlicerInterfaceVisible
+        modulePanel = slicer.util.mainWindow().findChildren("QDockWidget", "PanelDockWidget")[0]
+        modulePanel.visible = sidePanelVisible
+        self.ui.measurementWidget.visible = self.measurementsToggleButton.checked
+        self.ui.sceneViewsWidget.visible = self.svToggleButton.checked
+        self.ui.toggleFullInterfaceButton.visible = full3DSlicerInterfaceVisible
+        self.ui.viewControlWidget.visible = full3DSlicerInterfaceVisible
+
     def onNewLengthButtonClicked(self):
         """
         Create a new length measurement
@@ -469,7 +555,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.measurementsTreeView.header().setSectionResizeMode(1, qt.QHeaderView.Stretch)
         self.ui.measurementsTreeView.header().setSectionResizeMode(2, qt.QHeaderView.Fixed)
         self.ui.measurementsTreeView.header().setSectionResizeMode(3, qt.QHeaderView.Fixed)
-        
+
 
     def updateInputWidgets(self):
         """
@@ -537,6 +623,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.clippingPlaneVisibilityButton.checked = self.logic.getClippingPlaneVisibility()
         self.ui.clippingPlaneVisibilityButton.blockSignals(wasBlocking)
 
+        self.clippingEnabledAction.setChecked(self.logic.getClipping())
+        self.clippingPlaneVisibilityAction.setChecked(self.logic.getClippingPlaneVisibility())
+
     def onSceneViewClicked(self, sceneViewNode):
         self.logic.restoreSceneView(sceneViewNode)
         self.updateGUIFromMRML()
@@ -574,19 +663,19 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         layoutManager = slicer.app.layoutManager()
         layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
 
-    def onClippingButtonClicked(self):
+    def onClippingButtonClicked(self, visible):
         """
         Update the clipping visibility
         """
         if self._parameterNode and self._parameterNode.clipNode:
-            self.logic.setClipping(self.ui.clippingButton.checked)
+            self.logic.setClipping(visible)
 
-    def onClippingPlaneVisibilityButtonClicked(self):
+    def onClippingPlaneVisibilityButtonClicked(self, visible):
         """
         Update the clipping plane visibility
         """
         if self._parameterNode and self._parameterNode.clipNode:
-            self.logic.setClippingPlaneVisibility(self.ui.clippingPlaneVisibilityButton.checked)
+            self.logic.setClippingPlaneVisibility(visible)
 
 #
 # SimplifiedViewerLogic
