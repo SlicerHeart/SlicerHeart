@@ -34,6 +34,43 @@ class SimplifiedViewer(ScriptedLoadableModule):
         # TODO: replace with organization, grant and thanks
         self.parent.acknowledgementText = _("This file was originally developed by Kyle Sunderland (PerkLab), Andras Lasso (PerkLab).")
 
+class OverlayWidget(qt.QWidget):
+
+    # Corner enums
+    TopLeft = 0
+    TopRight = 1
+    BottomLeft = 2
+    BottomRight = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(qt.Qt.WA_TranslucentBackground)
+        self.setAutoFillBackground(False)
+        if parent:
+            parent.installEventFilter(self)
+        self.corner = OverlayWidget.TopLeft
+
+    def eventFilter(self, obj, event):
+        if event.type() == qt.QEvent.Resize:
+            self.resizeEvent(event)
+        return False
+
+    def resizeEvent(self, event):
+        if self.parent() is None:
+            return
+
+        # Superclass resize
+        qt.QWidget.resizeEvent(self, event)
+
+        parentRect = self.parent().rect
+        if self.corner == OverlayWidget.TopLeft:
+            self.move(0, 0)
+        elif self.corner == OverlayWidget.TopRight:
+            self.move(parentRect.topRight() - self.rect.topRight())
+        elif self.corner == OverlayWidget.BottomLeft:
+            self.move(parentRect.bottomLeft() - self.rect.bottomLeft())
+        elif self.corner == OverlayWidget.BottomRight:
+            self.move(parentRect.bottomRight() - self.rect.bottomRight())
 
 #
 # SimplifiedViewerParameterNode
@@ -59,7 +96,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     """Uses ScriptedLoadableModuleWidget base class, available at:
     https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py
     """
-    sequenceWidget = None
+    topLeftWidget = None
+    bottomLeftWidget = None
 
     def __init__(self, parent=None) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -111,18 +149,27 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.sequenceBrowserWidget.pushButton_VcrRecord.hide()
         self.ui.sequenceBrowserWidget.pushButton_Snapshot.hide()
 
-        if self.sequenceWidget:
-            self.sequenceWidget.hide()
-            self.sequenceWidget.setParent(None)
-            self.sequenceWidget.deleteLater()
+        if self.topLeftWidget:
+            self.topLeftWidget.hide()
+            self.topLeftWidget.setParent(None)
+            self.topLeftWidget.deleteLater()
+
+        if self.bottomLeftWidget:
+            self.bottomLeftWidget.hide()
+            self.bottomLeftWidget.setParent(None)
+            self.bottomLeftWidget.deleteLater()
+
+        topLeftButtons = []
 
         self.svToggleButton = qt.QToolButton()
         self.svToggleButton.checkable = True
         self.svToggleButton.connect('clicked(bool)', self.toggleSceneViewPanel)
+        topLeftButtons.append(self.svToggleButton)
+
         self.measurementsToggleButton = qt.QToolButton()
         self.measurementsToggleButton.checkable = True
         self.measurementsToggleButton.connect('clicked(bool)', self.toggleMeasurementPanel)
-
+        topLeftButtons.append(self.measurementsToggleButton)
 
         self.clippingEnabledAction = qt.QAction("Enable Clipping")
         self.clippingEnabledAction.setCheckable(True)
@@ -136,6 +183,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.visibilityButton = qt.QToolButton()
         self.visibilityButton.setMenu(self.visibilityMenu)
         self.visibilityButton.setPopupMode(qt.QToolButton.InstantPopup)
+        topLeftButtons.append(self.visibilityButton)
 
         self.fourUpViewAction = qt.QAction("Four Up View")
         self.fourUpViewAction.connect('triggered()', self.onFourUpViewButtonClicked)
@@ -147,6 +195,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.layoutsButton = qt.QToolButton()
         self.layoutsButton.setMenu(self.layoutsMenu)
         self.layoutsButton.setPopupMode(qt.QToolButton.InstantPopup)
+        topLeftButtons.append(self.layoutsButton)
 
         self.fullSlicerInterfaceAction = qt.QAction("Show full 3D Slicer Interface")
         self.fullSlicerInterfaceAction.setCheckable(True)
@@ -156,40 +205,60 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.settingsButton = qt.QToolButton()
         self.settingsButton.setMenu(self.settingsMenu)
         self.settingsButton.setPopupMode(qt.QToolButton.InstantPopup)
+        topLeftButtons.append(self.settingsButton)
 
-        self.buttonWidget = qt.QWidget()
-        self.buttonWidget.setObjectName("buttonWidget")
-        self.buttonWidget.setLayout(qt.QHBoxLayout())
-        self.buttonWidget.layout().setMargin(0)
-        self.buttonWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
-        self.buttonWidget.layout().setSpacing(3)
-        self.buttonWidget.layout().addWidget(self.svToggleButton)
-        self.buttonWidget.layout().addWidget(self.measurementsToggleButton)
-        self.buttonWidget.layout().addWidget(self.visibilityButton)
-        self.buttonWidget.layout().addWidget(self.layoutsButton)
-        self.buttonWidget.layout().addWidget(self.settingsButton)
-        self.buttonWidget.layout().addStretch()
-        self.buttonWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
-        self.buttonWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
-        self.buttonWidget.setAutoFillBackground(False)
-
-
-        self.sequenceWidget = qt.QWidget()
-        self.sequenceWidget.setObjectName("sequenceWidget")
-        self.sequenceWidget.setLayout(qt.QVBoxLayout())
-        self.sequenceWidget.layout().setMargin(0)
-        self.sequenceWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
-        self.sequenceWidget.layout().setSpacing(2)
-        self.sequenceWidget.layout().addWidget(self.ui.sequenceBrowserWidget)
-        self.sequenceWidget.layout().addWidget(self.ui.sequenceBrowserSeekWidget)
-        self.sequenceWidget.layout().addWidget(self.buttonWidget)
-        self.sequenceWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
-        self.sequenceWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
-        self.sequenceWidget.setAutoFillBackground(False)
+        buttonSize = 64
+        for button in topLeftButtons:
+            button.setFixedSize(buttonSize, buttonSize)
 
         centralWidget = slicer.util.mainWindow().centralWidget()
-        self.sequenceWidget.setParent(centralWidget)
-        self.sequenceWidget.show()
+
+        spacing = 3
+
+        self.topLeftWidget = OverlayWidget(centralWidget)
+        self.topLeftWidget.setObjectName("buttonWidget")
+        self.topLeftWidget.corner = OverlayWidget.TopLeft
+        self.topLeftWidget.setLayout(qt.QHBoxLayout())
+        self.topLeftWidget.layout().setMargin(0)
+        self.topLeftWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
+        self.topLeftWidget.layout().setSpacing(spacing)
+        self.topLeftWidget.layout().addWidget(self.svToggleButton)
+        self.topLeftWidget.layout().addWidget(self.measurementsToggleButton)
+        self.topLeftWidget.layout().addWidget(self.visibilityButton)
+        self.topLeftWidget.layout().addWidget(self.layoutsButton)
+        self.topLeftWidget.layout().addWidget(self.settingsButton)
+        self.topLeftWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
+        self.topLeftWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
+        self.topLeftWidget.setAutoFillBackground(False)
+        self.topLeftWidget.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
+        self.topLeftWidget.setFixedHeight(buttonSize)
+        self.topLeftWidget.setFixedWidth(len(topLeftButtons)*buttonSize + (len(topLeftButtons)-1)*spacing)
+        self.topLeftWidget.show()
+
+        self.bottomLeftWidget = OverlayWidget(centralWidget)
+        self.bottomLeftWidget.setObjectName("bottomLeftWidget")
+        self.bottomLeftWidget.corner = OverlayWidget.BottomLeft
+        self.bottomLeftWidget.setLayout(qt.QVBoxLayout())
+        self.bottomLeftWidget.layout().setMargin(0)
+        self.bottomLeftWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
+        self.bottomLeftWidget.layout().setSpacing(spacing)
+        self.bottomLeftWidget.layout().addWidget(self.ui.sequenceBrowserWidget)
+
+        bottomRightButtons = []
+        for button in self.ui.sequenceBrowserWidget.findChildren(qt.QAbstractButton):
+            if button.isVisibleTo(self.ui.sequenceBrowserWidget):
+                bottomRightButtons.append(button)
+                button.setFixedSize(buttonSize, buttonSize)
+
+        self.ui.sequenceBrowserSeekWidget.setFixedHeight(buttonSize/2.0)
+        self.bottomLeftWidget.layout().addWidget(self.ui.sequenceBrowserSeekWidget)
+        self.bottomLeftWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
+        self.bottomLeftWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
+        self.bottomLeftWidget.setAutoFillBackground(False)
+        self.bottomLeftWidget.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
+        self.bottomLeftWidget.setFixedHeight(buttonSize*1.5 + spacing)
+        self.bottomLeftWidget.setFixedWidth(len(bottomRightButtons)*buttonSize + (len(bottomRightButtons)-1)*spacing)
+        self.bottomLeftWidget.show()
 
         self.ui.conventionalViewButton.text = ""
         self.ui.conventionalViewButton.icon = qt.QIcon(self.resourcePath("Icons/LayoutConventionalView.png"))
@@ -301,7 +370,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setModulePanelTitleVisible(visible)
         slicer.util.setDataProbeVisible(visible)
         slicer.util.setStatusBarVisible(visible)
-        slicer.util.setPythonConsoleVisible(visible)
+        #slicer.util.setPythonConsoleVisible(visible)
 
         self.reloadCollapsibleButton.visible = visible
         self.ui.setupCollapsibleButton.visible = visible
@@ -312,8 +381,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateSvgIcons()
         self.updateApplicationStylesheet()
         self.updateGUIFromMRML()
-
-        self.sequenceWidget.adjustSize()
 
     def toggleSceneViewPanel(self, visible):
         self.measurementsToggleButton.checked = False # BUTTON GROUP
@@ -500,6 +567,10 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         sidePanelVisible = self.svToggleButton.checked or self.measurementsToggleButton.checked or full3DSlicerInterfaceVisible
         modulePanel = slicer.util.mainWindow().findChildren("QDockWidget", "PanelDockWidget")[0]
         modulePanel.visible = sidePanelVisible
+        if not full3DSlicerInterfaceVisible:
+            slicer.util.mainWindow().addDockWidget(qt.Qt.RightDockWidgetArea, modulePanel)
+        else:
+            slicer.util.mainWindow().addDockWidget(qt.Qt.LeftDockWidgetArea, modulePanel)
         self.ui.measurementWidget.visible = self.measurementsToggleButton.checked
         self.ui.sceneViewsWidget.visible = self.svToggleButton.checked
         self.ui.toggleFullInterfaceButton.visible = full3DSlicerInterfaceVisible
