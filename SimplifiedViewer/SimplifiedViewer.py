@@ -375,6 +375,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.reloadCollapsibleButton.visible = visible
         self.ui.setupCollapsibleButton.visible = visible
 
+        self.topLeftWidget.visible = not visible
+        self.bottomLeftWidget.visible = not visible
+
         # Update widgets with the new display properties
         self.updateViewerWidgets()
         self.updateApplicationPalette()
