@@ -670,13 +670,14 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             return
 
         # add new widgets to selectedNodeWidget grid layout
-        sceneViewNodes = slicer.util.getNodesByClass("vtkMRMLSceneViewNode")
+        sceneViewsLogic = slicer.modules.sceneviews.logic()
         row = 0
-        for sceneViewNode in sceneViewNodes:
+        for index in range(sceneViewsLogic.GetNumberOfSceneViews()):
             column = 0
 
-            pushButton = qt.QPushButton(sceneViewNode.GetName())
-            pushButton.connect('clicked()', lambda sceneViewNode=sceneViewNode: self.onSceneViewClicked(sceneViewNode))
+            sceneViewName = sceneViewsLogic.GetNthSceneViewName(index)
+            pushButton = qt.QPushButton(sceneViewName)
+            pushButton.connect('clicked()', lambda sceneViewName=sceneViewName: self.onSceneViewClicked(sceneViewName))
             self.ui.selectedNodeWidget.layout().addWidget(pushButton, row, column)
             column += 1
 
@@ -697,8 +698,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.clippingEnabledAction.setChecked(self.logic.getClipping())
         self.clippingPlaneVisibilityAction.setChecked(self.logic.getClippingPlaneVisibility())
 
-    def onSceneViewClicked(self, sceneViewNode):
-        self.logic.restoreSceneView(sceneViewNode)
+    def onSceneViewClicked(self, sceneViewName):
+        self.logic.restoreSceneView(sceneViewName)
         self.updateGUIFromMRML()
 
     def onClippingNodeChanged(self):
@@ -819,7 +820,7 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
                 continue
             clippingNode.SetDisplayVisibility(visible)
 
-    def restoreSceneView(self, sceneViewNode):
+    def restoreSceneView(self, sceneViewName):
 
         # Preserve clip states
         # TODO: In the future, we may be able to prevent scene views from modifying these nodes
@@ -829,12 +830,21 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
         with slicer.util.RenderBlocker():
             layoutManager = slicer.app.layoutManager()
             currentLayout = layoutManager.layout
-            sceneViewNode.RestoreScene()
+
+            sceneViewLogic = slicer.modules.sceneviews.logic()
+            sceneViewLogic.RestoreSceneView(sceneViewName)
+
             layoutManager.setLayout(currentLayout)
 
             # Restore clip states
             self.setClipping(clipping)
             self.setClippingPlaneVisibility(planeVisibility)
+
+            # Restore view background color
+            for viewNode in slicer.util.getNodesByClass("vtkMRMLViewNode"):
+                viewNode.SetBackgroundColor(0,0,0)
+                viewNode.SetBackgroundColor2(0,0,0)
+                viewNode.SetBoxVisible(False)
 
         slicer.util.forceRenderAllViews()
 
