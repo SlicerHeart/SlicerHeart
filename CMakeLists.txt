@@ -86,6 +86,7 @@ add_subdirectory(AnnulusShapeAnalyzer)
 add_subdirectory(FluoroFlowCalculator)
 add_subdirectory(EAMapReader)
 add_subdirectory(FEBioMeshIO)
+add_subdirectory(PDAQuantification)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
