@@ -619,10 +619,23 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
                     volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
                     volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
-                elif ("SequenceName" in ds) and ('fl3d' in ds["SequenceName"].value):  # 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
-                    # magnitude image
-                    logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
-                    directionCode = 'magnitude'
+                elif ("SequenceName" in ds) and (('fl3d1r2' in ds["SequenceName"].value) or ('fl3d1r3' in ds["SequenceName"].value)):
+                    if '_v' in ds["SequenceName"].value:
+                        # component image (contain speed specification)
+                        # Examples: 'fl3d1_v150in', 'fl3d1_v150ap', 'fl3d1_v150fh'
+                        # In freerunning flow sequence, all the directions may be under the same series
+                        logging.debug(f"Found a flow vector component image candidate: {volumeNode.GetName()}")
+                        speedAndDirectionCode = ds["SequenceName"].value.split('_v')[-1]  # 150in
+                        # directionCodeInput: last two characters
+                        # vencCmPerSecInput: all characters except the last two
+                        vencCmPerSecInput = float(speedAndDirectionCode[:-2])
+                        directionCodeInput = speedAndDirectionCode[-2:]
+                    else:
+                        # magnitude image
+                        # Examples: '*fl3d1r2' or 'fl3d1r2' or 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
+                        logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
+                        directionCode = 'magnitude'
+                    
                 else:
                     # something else
                     logging.debug(f"Unknown image: {volumeNode.GetName()} - skip")
