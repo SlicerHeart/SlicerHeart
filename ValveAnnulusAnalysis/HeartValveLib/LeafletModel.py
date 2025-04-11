@@ -311,7 +311,7 @@ class LeafletModel:
     leafletSegment = segmentation.GetSegment(self.segmentId)
     return leafletSegment
 
-  def autoDetectSurfaceBoundary(self, valvePlanePosition, valvePlaneNormal):
+  def autoDetectSurfaceBoundary(self, valvePlanePosition, valvePlaneNormal, numberOfBoundaryMarkups=30):
 
     self.setValvePlanePosition(valvePlanePosition)
     self.setValvePlaneNormal(valvePlaneNormal)
@@ -343,8 +343,6 @@ class LeafletModel:
     except:
       # Legacy API
       boundaryMarkups.RemoveAllMarkups()
-
-    numberOfBoundaryMarkups = 30
 
     # Put together the 3 transforms and get the tilted plane normal
     for boundaryMarkupIndex in range(numberOfBoundaryMarkups):

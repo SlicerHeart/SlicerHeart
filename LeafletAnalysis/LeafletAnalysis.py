@@ -112,6 +112,19 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     self.leafletSurfaceBoundaryMarkupAutoAllButton = qt.QPushButton("Auto-extract all leaflet surfaces")
     self.leafletSurfaceBoundaryMarkupAutoAllButton.clicked.connect(self.leafletSurfaceBoundaryMarkupAutoAll)
     surfaceExtractionFormLayout.addRow(self.leafletSurfaceBoundaryMarkupAutoAllButton)
+
+    widget = qt.QWidget()
+    widget.setLayout(qt.QHBoxLayout())
+    widget.layout().addWidget(qt.QLabel("Number of boundary points:"))
+
+    self.numBoundaryPointsSpinBox = qt.QSpinBox()
+    self.numBoundaryPointsSpinBox.setMinimum(30)
+    self.numBoundaryPointsSpinBox.setMaximum(100)
+
+    widget.layout().addWidget(self.numBoundaryPointsSpinBox)
+
+    surfaceExtractionFormLayout.addRow(widget)
+
     self.showAllLeafletsButton = qt.QPushButton("Show all leaflets")
     self.showAllLeafletsButton.clicked.connect(self.showAllLeaflets)
     surfaceExtractionFormLayout.addRow(self.showAllLeafletsButton)
@@ -373,7 +386,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     [planePosition, planeNormal] = self.valveModel.getAnnulusContourPlane()
 
     for leafletModel in self.valveModel.leafletModels:
-      leafletModel.autoDetectSurfaceBoundary(planePosition, planeNormal)
+      leafletModel.autoDetectSurfaceBoundary(planePosition, planeNormal, self.numBoundaryPointsSpinBox.value)
       leafletModel.extractSurfaceByBoundary()
       leafletModel.updateSurface()
 
@@ -391,7 +404,7 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
       return
 
     [planePosition, planeNormal] = self.valveModel.getAnnulusContourPlane()
-    leafletModel.autoDetectSurfaceBoundary(planePosition, planeNormal)
+    leafletModel.autoDetectSurfaceBoundary(planePosition, planeNormal, self.numBoundaryPointsSpinBox.value)
 
     # Only show surface
     self.fadeCompleteLeafletCheckbox.setChecked(True)
