@@ -185,6 +185,11 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.visibilityButton.setPopupMode(qt.QToolButton.InstantPopup)
         topLeftButtons.append(self.visibilityButton)
 
+        self.crosshairVisibilityButton = qt.QToolButton()
+        self.crosshairVisibilityButton.checkable = True
+        self.crosshairVisibilityButton.connect('toggled(bool)', self.onCrosshairVisibilityButtonClicked)
+        topLeftButtons.append(self.crosshairVisibilityButton)
+
         self.fourUpViewAction = qt.QAction("Four Up View")
         self.fourUpViewAction.connect('triggered()', self.onFourUpViewButtonClicked)
         self.conventionalViewAction = qt.QAction("Conventional View")
@@ -225,6 +230,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.topLeftWidget.layout().addWidget(self.svToggleButton)
         self.topLeftWidget.layout().addWidget(self.measurementsToggleButton)
         self.topLeftWidget.layout().addWidget(self.visibilityButton)
+        self.topLeftWidget.layout().addWidget(self.crosshairVisibilityButton)
         self.topLeftWidget.layout().addWidget(self.layoutsButton)
         self.topLeftWidget.layout().addWidget(self.settingsButton)
         self.topLeftWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
@@ -408,6 +414,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Vectors and icons by Css.gg: https://github.com/astrit/css.gg?ref=svgrepo.com
         # MIT License via https://www.svgrepo.com
+        # Also https://fonts.google.com/icons
+        # Apache license 2.0 https://github.com/google/material-design-icons/blob/master/LICENSE
         widgetPathMap = {
             self.ui.sequenceBrowserWidget.pushButton_VcrFirst:     "Icons/SeekFirst.svg",
             self.ui.sequenceBrowserWidget.pushButton_VcrPrevious:  "Icons/SeekPrevious.svg",
@@ -418,6 +426,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.svToggleButton:                                   "Icons/SceneViews.svg",
             self.measurementsToggleButton:                         "Icons/Measurements.svg",
             self.visibilityButton:                                 "Icons/Visibility.svg",
+            self.crosshairVisibilityButton:                        "Icons/Crosshair.svg",
             self.layoutsButton:                                    "Icons/Layouts.svg",
             self.settingsButton:                                   "Icons/Settings.svg",
         }
@@ -701,6 +710,10 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.clippingEnabledAction.setChecked(self.logic.getClipping())
         self.clippingPlaneVisibilityAction.setChecked(self.logic.getClippingPlaneVisibility())
 
+        wasBlocking = self.crosshairVisibilityButton.blockSignals(True)
+        self.crosshairVisibilityButton.checked = self.logic.getCrosshairVisibility()
+        self.crosshairVisibilityButton.blockSignals(wasBlocking)
+
     def onSceneViewClicked(self, sceneViewName):
         self.logic.restoreSceneView(sceneViewName)
         self.updateGUIFromMRML()
@@ -751,6 +764,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         if self._parameterNode and self._parameterNode.clipNode:
             self.logic.setClippingPlaneVisibility(visible)
+
+    def onCrosshairVisibilityButtonClicked(self, visible):
+        """
+        Update the crosshair visibility
+        """
+        self.logic.setCrosshairVisibility(visible)
 
 #
 # SimplifiedViewerLogic
@@ -823,12 +842,29 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
                 continue
             clippingNode.SetDisplayVisibility(visible)
 
+    def setCrosshairVisibility(self, visible: bool):
+        crosshairNode = slicer.util.getNode("Crosshair")
+        if not crosshairNode:
+            return
+
+        crosshairMode = slicer.vtkMRMLCrosshairNode.NoCrosshair
+        if visible:
+            crosshairMode = slicer.vtkMRMLCrosshairNode.ShowBasic
+        crosshairNode.SetCrosshairMode(crosshairMode)
+
+    def getCrosshairVisibility(self):
+        crosshairNode = slicer.util.getNode("Crosshair")
+        if not crosshairNode:
+            return False
+        return crosshairNode.GetCrosshairMode() == slicer.vtkMRMLCrosshairNode.ShowBasic
+
     def restoreSceneView(self, sceneViewName):
 
         # Preserve clip states
         # TODO: In the future, we may be able to prevent scene views from modifying these nodes
         clipping = self.getClipping()
         planeVisibility = self.getClippingPlaneVisibility()
+        crosshairVisibility = self.getCrosshairVisibility()
 
         with slicer.util.RenderBlocker():
             layoutManager = slicer.app.layoutManager()
@@ -842,6 +878,7 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
             # Restore clip states
             self.setClipping(clipping)
             self.setClippingPlaneVisibility(planeVisibility)
+            self.setCrosshairVisibility(crosshairVisibility)
 
             # Restore view background color
             for viewNode in slicer.util.getNodesByClass("vtkMRMLViewNode"):
