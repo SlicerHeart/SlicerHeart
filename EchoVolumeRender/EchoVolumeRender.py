@@ -229,36 +229,48 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     return [None, None]
 
   @staticmethod
-  def combineVolumes(volumeNode1, volumeNode2):
+  def combineVolumes(echoVolumeNode, velocityVolumeNode):
       """
       Combine two volume nodes into a new volume node with two components.
-      The first component will contain the data from volumeNode1 and the second
-      component will contain the data from volumeNode2.
-      :param volumeNode1: First input volume node
-      :param volumeNode2: Second input volume node
+      The first component will contain the data from echoVolumeNode and the second
+      component will contain the data from velocityVolumeNode.
+      :param echoVolumeNode: First input volume node
+      :param velocityVolumeNode: Second input volume node
       :return: New volume node with combined data
+      Example use:
+
+          EchoVolumeRender.EchoVolumeRenderLogic.combineVolumes(getNode('*echo*'), getNode('*velocity*'))
+
+      TODO: call this when a velocity volume is specified
       """
-      # Get image data from the input volumes
-      imageData1 = volumeNode1.GetImageData()
-      imageData2 = volumeNode2.GetImageData()
+    # Get image data from the input volumes
+    imageData1 = echoVolumeNode.GetImageData()
+    imageData2 = velocityVolumeNode.GetImageData()
 
-      # Ensure the dimensions of the input volumes are the same
-      if imageData1.GetDimensions() != imageData2.GetDimensions():
-          raise ValueError("Input volumes must have the same dimensions.")
+    # Ensure the dimensions of the input volumes are the same
+    if imageData1.GetDimensions() != imageData2.GetDimensions():
+      raise ValueError("Input volumes must have the same dimensions.")
 
-      appendComponents = vtk.vtkImageAppendComponents()
-      appendComponents.AddInputData(imageData1)
-      appendComponents.AddInputData(imageData2)
-      appendComponents.Update()
+    # Shift zero speed to 128 to make velocity field continuous (needed to avoid interpolation artifacts)
+    mathFilter = vtk.vtkImageMathematics()
+    mathFilter.SetInputData(imageData2)
+    mathFilter.SetConstantK(128)
+    mathFilter.SetOperationToAdd()
+    mathFilter.Update()
 
-      # Create a new volume node to store the combined volume
-      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-      combinedVolumeNode.SetAndObserveImageData(appendComponents.GetOutput())
-      ijkToRAS = vtk.vtkMatrix4x4()
-      volumeNode1.GetIJKToRASMatrix(ijkToRAS)
-      combinedVolumeNode.SetIJKToRASMatrix(ijkToRAS)
+    appendComponents = vtk.vtkImageAppendComponents()
+    appendComponents.AddInputData(imageData1)
+    appendComponents.AddInputData(mathFilter.GetOutput())
+    appendComponents.Update()
 
-      return combinedVolumeNode
+    # Create a new volume node to store the combined volume
+    combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    combinedVolumeNode.SetAndObserveImageData(appendComponents.GetOutput())
+    ijkToRAS = vtk.vtkMatrix4x4()
+    echoVolumeNode.GetIJKToRASMatrix(ijkToRAS)
+    combinedVolumeNode.SetIJKToRASMatrix(ijkToRAS)
+
+    return combinedVolumeNode
 
   def smoothVolume(self, inputVolume, outputVolume, allowSequenceSmoothing, smoothingStandardDeviation):
     """
