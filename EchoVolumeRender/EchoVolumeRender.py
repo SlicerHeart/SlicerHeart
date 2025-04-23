@@ -113,7 +113,7 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     slicer.modules.volumerendering.logic().FitROIToVolume(vrDisplayNode)
 
   def updateGui(self):
-    
+
     processingInputVolume = self.ui.processingInputVolumeSelector.currentNode()
     [browserNode, sequenceNode] = self.logic.sequenceFromVolume(processingInputVolume)
     self.ui.applyToSequenceCheckBox.enabled = (sequenceNode is not None)
@@ -184,15 +184,15 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
 #
 
 class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
-  """Implements the functionality to apply echo-specific volume 
-  rendering effects to the volume selected in the interface and 
+  """Implements the functionality to apply echo-specific volume
+  rendering effects to the volume selected in the interface and
   modify the parameters of the effects.
   """
 
   def __init__(self):
     ScriptedLoadableModuleLogic.__init__(self)
     self._inputVolumeNode = None
-    
+
     # Cached for faster access
     self.volumeRenderingDisplayNode = None
     self.shaderPropertyNode = None
@@ -227,7 +227,39 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       if sequenceNode:
         return [browserNode, sequenceNode]
     return [None, None]
-    
+
+  @staticmethod
+  def combineVolumes(volumeNode1, volumeNode2):
+      """
+      Combine two volume nodes into a new volume node with two components.
+      The first component will contain the data from volumeNode1 and the second
+      component will contain the data from volumeNode2.
+      :param volumeNode1: First input volume node
+      :param volumeNode2: Second input volume node
+      :return: New volume node with combined data
+      """
+      # Get image data from the input volumes
+      imageData1 = volumeNode1.GetImageData()
+      imageData2 = volumeNode2.GetImageData()
+
+      # Ensure the dimensions of the input volumes are the same
+      if imageData1.GetDimensions() != imageData2.GetDimensions():
+          raise ValueError("Input volumes must have the same dimensions.")
+
+      appendComponents = vtk.vtkImageAppendComponents()
+      appendComponents.AddInputData(imageData1)
+      appendComponents.AddInputData(imageData2)
+      appendComponents.Update()
+
+      # Create a new volume node to store the combined volume
+      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+      combinedVolumeNode.SetAndObserveImageData(appendComponents.GetOutput())
+      ijkToRAS = vtk.vtkMatrix4x4()
+      volumeNode1.GetIJKToRASMatrix(ijkToRAS)
+      combinedVolumeNode.SetIJKToRASMatrix(ijkToRAS)
+
+      return combinedVolumeNode
+
   def smoothVolume(self, inputVolume, outputVolume, allowSequenceSmoothing, smoothingStandardDeviation):
     """
     Run the actual algorithm
@@ -387,7 +419,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     :param volumeNode: input volume node
     :return: volume rendering display node
     """
-    
+
     # Make sure the volume node has image data
     if self.hasImageData(volumeNode) == False:
       return None
@@ -556,7 +588,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     self._setRenderingParameterValue("saturationScale", value)
 
   def updateVolumeProperty(self):
-    
+
     if not self.volumeRenderingDisplayNode:
       return
 
@@ -609,15 +641,38 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     colorTransferFunction.AddRGBPoint(rampCenter, *green)
     colorTransferFunction.AddRGBPoint(rampEnd, *green)
     colorTransferFunction.AddRGBPoint(max(volRange[1],rampEnd), *green)
-    
+
     volPropNode.GetVolumeProperty().GetScalarOpacity().DeepCopy(scalarOpacity)
-    volPropNode.GetVolumeProperty().GetRGBTransferFunction().DeepCopy(colorTransferFunction) 
+    volPropNode.GetVolumeProperty().GetRGBTransferFunction().DeepCopy(colorTransferFunction)
+
+    # Transfer functions for the second channel
+    # TODO: expose parameters on the GUI
+
+    # build opacity function
+    scalarOpacity = vtk.vtkPiecewiseFunction()
+    scalarOpacity.AddPoint(0,0.0)
+    scalarOpacity.AddPoint(40, 0.0)
+    scalarOpacity.AddPoint(127, 0.2)
+    scalarOpacity.AddPoint(210, 0.0)
+    scalarOpacity.AddPoint(255, 0.0)
+
+    # build color transfer function
+    colorTransferFunction = vtk.vtkColorTransferFunction()
+    colorTransferFunction.AddRGBPoint(0, 1.0, 0.0, 0.0)
+    colorTransferFunction.AddRGBPoint(127, 1.0, 0.0, 0.0)
+    colorTransferFunction.AddRGBPoint(128, 0.0, 0.0, 1.0)
+    colorTransferFunction.AddRGBPoint(255, 0.0, 0.0, 1.0)
+
+    volPropNode.GetVolumeProperty().GetScalarOpacity(1).DeepCopy(scalarOpacity)
+    volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).DeepCopy(colorTransferFunction)
 
     volPropNode.EndModify(disableModify)
     volPropNode.Modified()
 
-  
+
   # Code for color shader replacement
+  # TODO: Update the shader code depending on the scalar components in the volume node
+  # (component is only available if the volume has multiple channels)
   ComputeColorReplacementCommon = """
 
 vec3 rgb2hsv(vec3 c)
@@ -638,9 +693,14 @@ vec3 hsv2rgb(vec3 c)
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
-vec4 computeColor(vec4 scalar, float opacity)
+vec4 computeColor(vec4 scalar, float opacity, int component)
 {
     // Get base color from color transfer function (defines darkening of transparent voxels and neutral color)
+
+    if (component > 0)
+    {
+        return clamp(computeLighting(vec4(texture2D(in_colorTransferFunc_0[1], vec2(scalar[1],0.0)).xyz, opacity), 1, 0.0), 0.0, 1.0);
+    }
 
     vec3 baseColorRgb = texture2D(in_colorTransferFunc_0[0], vec2(scalar.w, 0.0)).xyz;
     vec3 baseColorHsv = rgb2hsv(baseColorRgb);
