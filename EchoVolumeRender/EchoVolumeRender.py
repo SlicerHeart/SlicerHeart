@@ -47,6 +47,7 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     self.ui = slicer.util.childWidgetVariables(uiWidget)
 
     self.ui.processingInputVolumeSelector.setMRMLScene(slicer.mrmlScene)
+    self.ui.processingVelocityVolumeSelector.setMRMLScene(slicer.mrmlScene)
     self.ui.processingOutputVolumeSelector.setMRMLScene(slicer.mrmlScene)
     self.ui.renderingInputVolumeSelector.setMRMLScene(slicer.mrmlScene)
 
@@ -94,11 +95,19 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
       self.onProcessVolume()
 
   def onProcessVolume(self):
-    outputVolumeNode = self.logic.smoothVolume(self.ui.processingInputVolumeSelector.currentNode(), self.ui.processingOutputVolumeSelector.currentNode(),
+    slicer.app.pauseRender()
+    inputVolumeNode = self.ui.processingInputVolumeSelector.currentNode()
+    if not self.ui.processingVelocityVolumeSelector.currentNode() is None:
+      inputVolumeNode = self.logic.combineVolumes(inputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode())
+    outputVolumeNode = self.logic.smoothVolume(inputVolumeNode, self.ui.processingOutputVolumeSelector.currentNode(),
       self.ui.applyToSequenceCheckBox.checked, self.ui.smoothingFactorSlider.value)
     self.ui.processingOutputVolumeSelector.setCurrentNode(outputVolumeNode)
     self.ui.renderingInputVolumeSelector.setCurrentNode(outputVolumeNode)
     self.smoothingAutoUpdate = True
+
+    self.logic.updateShaderReplacement(outputVolumeNode)
+    self.logic.updateVolumeProperty()
+    slicer.app.resumeRender()
 
   def onCroppingToggle(self, toggled):
     vrDisplayNode = self.logic.volumeRenderingDisplayNode
@@ -213,11 +222,14 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     # Shader replacement is slightly differs between VTK8/VTK9
     vtkVersion = vtk.VTK_MAJOR_VERSION * 100 + vtk.VTK_MINOR_VERSION
     if vtkVersion < 900: # VTK 8.x
-      self.computeColorReplacement = self.ComputeColorReplacementVTK8
+      self.computeColorReplacementSingleComponent = self.ComputeColorReplacementVTK8SingleComponent
+      self.computeColorReplacementMultiComponent = self.ComputeColorReplacementVTK8MultiComponent
     elif vtkVersion < 902:  # VTK 9.0-9.1
-      self.computeColorReplacement = self.ComputeColorReplacementVTK900
+      self.computeColorReplacementSingleComponent = self.ComputeColorReplacementVTK900SingleComponent
+      self.computeColorReplacementMultiComponent = self.ComputeColorReplacementVTK900MultiComponent
     else:  # VTK >= 9.2
-      self.computeColorReplacement = self.ComputeColorReplacementVTK902
+      self.computeColorReplacementSingleComponent = self.ComputeColorReplacementVTK902SingleComponent
+      self.computeColorReplacementMultiComponent = self.ComputeColorReplacementVTK902MultiComponent
 
   def sequenceFromVolume(self, proxyNode):
     if not proxyNode:
@@ -230,19 +242,19 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def combineVolumes(echoVolumeNode, velocityVolumeNode):
-      """
-      Combine two volume nodes into a new volume node with two components.
-      The first component will contain the data from echoVolumeNode and the second
-      component will contain the data from velocityVolumeNode.
-      :param echoVolumeNode: First input volume node
-      :param velocityVolumeNode: Second input volume node
-      :return: New volume node with combined data
-      Example use:
+    """
+    Combine two volume nodes into a new volume node with two components.
+    The first component will contain the data from echoVolumeNode and the second
+    component will contain the data from velocityVolumeNode.
+    :param echoVolumeNode: First input volume node
+    :param velocityVolumeNode: Second input volume node
+    :return: New volume node with combined data
+    Example use:
 
-          EchoVolumeRender.EchoVolumeRenderLogic.combineVolumes(getNode('*echo*'), getNode('*velocity*'))
+        EchoVolumeRender.EchoVolumeRenderLogic.combineVolumes(getNode('*echo*'), getNode('*velocity*'))
 
-      TODO: call this when a velocity volume is specified
-      """
+    TODO: call this when a velocity volume is specified
+    """
     # Get image data from the input volumes
     imageData1 = echoVolumeNode.GetImageData()
     imageData2 = velocityVolumeNode.GetImageData()
@@ -420,6 +432,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
 
     self._inputVolumeNode = volumeNode
     self.volumeRenderingDisplayNode = self._setupVolumeRenderingDisplayNode(volumeNode)
+    self.updateShaderReplacement(volumeNode)
     self.shaderPropertyNode = self.volumeRenderingDisplayNode.GetOrCreateShaderPropertyNode(slicer.mrmlScene) if self.volumeRenderingDisplayNode else None
 
     # Update volume rendering
@@ -496,13 +509,23 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
           slicer.modules.volumerendering.logic().FitROIToVolume(volumeRenderingDisplayNode)
 
     self.resetRenderingParametersToDefault(volumeRenderingDisplayNode, force=False)
+    return volumeRenderingDisplayNode
+
+  def updateShaderReplacement(self, volumeNode):
+    volRenLogic = slicer.modules.volumerendering.logic()
+    volumeRenderingDisplayNode = volRenLogic.GetFirstVolumeRenderingDisplayNode(volumeNode)
+    if not volumeRenderingDisplayNode:
+      return
 
     shaderPropertyNode = volumeRenderingDisplayNode.GetOrCreateShaderPropertyNode(slicer.mrmlScene)
     sp = shaderPropertyNode.GetShaderProperty()
     sp.ClearAllShaderReplacements()
-    sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::ComputeColor::Dec", True, self.computeColorReplacement, True)
 
-    return volumeRenderingDisplayNode
+    if volumeNode.GetImageData() is None or volumeNode.GetImageData().GetNumberOfScalarComponents() == 1:
+      computeColorReplacement = self.computeColorReplacementSingleComponent
+    else:
+      computeColorReplacement = self.computeColorReplacementMultiComponent
+    sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::ComputeColor::Dec", True, computeColorReplacement, True)
 
   def resetRenderingParametersToDefault(self, volumeRenderingDisplayNode, force=True):
     shaderPropertyNode = volumeRenderingDisplayNode.GetOrCreateShaderPropertyNode(slicer.mrmlScene)
@@ -682,29 +705,12 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     volPropNode.Modified()
 
 
-  # Code for color shader replacement
-  # TODO: Update the shader code depending on the scalar components in the volume node
-  # (component is only available if the volume has multiple channels)
-  ComputeColorReplacementCommon = """
-
-vec3 rgb2hsv(vec3 c)
+  ComputeColorReplacementSingleComponentFunction = """
+vec4 computeColor(vec4 scalar, float opacity)
 {
-    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+"""
 
-    float d = q.x - min(q.w, q.y);
-    float e = 1.0e-10;
-    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-}
-
-vec3 hsv2rgb(vec3 c)
-{
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
-
+  ComputeColorReplacementMultiComponentFunction = """
 vec4 computeColor(vec4 scalar, float opacity, int component)
 {
     // Get base color from color transfer function (defines darkening of transparent voxels and neutral color)
@@ -713,7 +719,9 @@ vec4 computeColor(vec4 scalar, float opacity, int component)
     {
         return clamp(computeLighting(vec4(texture2D(in_colorTransferFunc_0[1], vec2(scalar[1],0.0)).xyz, opacity), 1, 0.0), 0.0, 1.0);
     }
+"""
 
+  ComputeColorReplacement = """
     vec3 baseColorRgb = texture2D(in_colorTransferFunc_0[0], vec2(scalar.w, 0.0)).xyz;
     vec3 baseColorHsv = rgb2hsv(baseColorRgb);
 
@@ -745,21 +753,60 @@ vec4 computeColor(vec4 scalar, float opacity, int component)
     vec4 color = vec4(rgbDepthModulated, opacity);
 """
 
-  ComputeColorReplacementVTK8 = "uniform sampler2D in_colorTransferFunc_0[1];\n" + ComputeColorReplacementCommon + """
+  # Code for color shader replacement
+  # Separate functions are required for single and multi-component volumes
+  # (component is only available if the volume has multiple channels)
+  ComputeColorReplacementCommon = """
+vec3 rgb2hsv(vec3 c)
+{
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c)
+{
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+"""
+  ComputeColorReplacementCommonSingleComponent = ComputeColorReplacementCommon + ComputeColorReplacementSingleComponentFunction + ComputeColorReplacement
+  ComputeColorReplacementCommonMultiComponent  = ComputeColorReplacementCommon + ComputeColorReplacementMultiComponentFunction  + ComputeColorReplacement
+
+  ################################################################
+  # Shader replacement code for VTK 8.x
+  ComputeColorReplacementVTK8Uniform = "uniform sampler2D in_colorTransferFunc_0[1];\n"
+  ComputeColorReplacementVTK8Return = """
     return computeLighting(color, 0);
 }
 """
+  ComputeColorReplacementVTK8SingleComponent = ComputeColorReplacementVTK8Uniform + ComputeColorReplacementCommonSingleComponent + ComputeColorReplacementVTK8Return
+  ComputeColorReplacementVTK8MultiComponent = ComputeColorReplacementVTK8Uniform + ComputeColorReplacementCommonMultiComponent + ComputeColorReplacementVTK8Return
 
-  ComputeColorReplacementVTK900 = "uniform sampler2D in_colorTransferFunc_0[1];\n" + ComputeColorReplacementCommon + """
+  ##################################################################
+  # Shader replacement code for VTK 9.0-9.1
+  ComputeColorReplacementVTK900Uniform = "uniform sampler2D in_colorTransferFunc_0[1];\n"
+  ComputeColorReplacementVTK900Return = """
     return computeLighting(color, 0, 0.0);
 }
 """
+  ComputeColorReplacementVTK900SingleComponent = ComputeColorReplacementVTK900Uniform + ComputeColorReplacementCommonSingleComponent + ComputeColorReplacementVTK900Return
+  ComputeColorReplacementVTK900MultiComponent = ComputeColorReplacementVTK900Uniform + ComputeColorReplacementCommonMultiComponent + ComputeColorReplacementVTK900Return
 
+  ###################################################################
+  # Shader replacement code for VTK 9.2 and later
   # in_colorTransferFunc_0 is already included in VTK>=9.2
-  ComputeColorReplacementVTK902 = ComputeColorReplacementCommon + """
+  ComputeColorReplacementVTK902Return = """
     return computeLighting(color, 0, 0.0);
 }
 """
+  ComputeColorReplacementVTK902SingleComponent = ComputeColorReplacementCommonSingleComponent + ComputeColorReplacementVTK902Return
+  ComputeColorReplacementVTK902MultiComponent = ComputeColorReplacementCommonMultiComponent + ComputeColorReplacementVTK902Return
 
 #
 # EchoVolumeRenderTest
