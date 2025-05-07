@@ -97,10 +97,14 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
   def onProcessVolume(self):
     slicer.app.pauseRender()
     inputVolumeNode = self.ui.processingInputVolumeSelector.currentNode()
+    combinedVolumeNode = None
+    volumeToSmooth = inputVolumeNode
     if not self.ui.processingVelocityVolumeSelector.currentNode() is None:
-      inputVolumeNode = EchoVolumeRenderLogic.combineVolumesSequence(inputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode(),
+      combinedVolumeNode = EchoVolumeRenderLogic.combineVolumesSequence(inputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode(),
         self.ui.applyToSequenceCheckBox.checked)
-    outputVolumeNode = self.logic.smoothVolume(inputVolumeNode, self.ui.processingOutputVolumeSelector.currentNode(),
+      volumeToSmooth = combinedVolumeNode
+
+    outputVolumeNode = self.logic.smoothVolume(volumeToSmooth, self.ui.processingOutputVolumeSelector.currentNode(),
       self.ui.applyToSequenceCheckBox.checked, self.ui.smoothingFactorSlider.value)
     self.ui.processingOutputVolumeSelector.setCurrentNode(outputVolumeNode)
     self.ui.renderingInputVolumeSelector.setCurrentNode(outputVolumeNode)
@@ -108,6 +112,14 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
 
     self.logic.updateShaderReplacement(outputVolumeNode)
     self.logic.updateVolumeProperty()
+
+    if combinedVolumeNode:
+      # Erase the intermediate volume and sequence nodes
+      [_, combinedSequenceNode] = self.logic.sequenceFromVolume(combinedVolumeNode)
+      if combinedSequenceNode:
+        slicer.mrmlScene.RemoveNode(combinedSequenceNode)
+      slicer.mrmlScene.RemoveNode(combinedVolumeNode)
+
     slicer.app.resumeRender()
 
   def onCroppingToggle(self, toggled):
@@ -266,18 +278,18 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     else:
       sequencesModule = slicer.modules.sequences
 
-    # Create a new volume node to store the combined volume
-    combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-    combinedVolumeNode.SetName(echoVolumeNode.GetName() + " + " + velocityVolumeNode.GetName())
-    combinedVolumeNode.SetAndObserveTransformNodeID(echoVolumeNode.GetTransformNodeID())
-
-    combinedVolumeSequenceNode = sequencesModule.logic().AddSynchronizedNode(None, combinedVolumeNode, seqBrowser)
-
-    tempCombinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-    tempCombinedVolumeNode.Copy(combinedVolumeNode)
-
     try:
       qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+      # Create a new volume node to store the combined volume
+      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+      combinedVolumeNode.SetName(echoVolumeNode.GetName() + " + " + velocityVolumeNode.GetName())
+      combinedVolumeNode.SetAndObserveTransformNodeID(echoVolumeNode.GetTransformNodeID())
+
+      combinedVolumeSequenceNode = sequencesModule.logic().AddSynchronizedNode(None, combinedVolumeNode, seqBrowser)
+
+      tempCombinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+      tempCombinedVolumeNode.Copy(combinedVolumeNode)
 
       numberOfDataNodes = echoVolumeSequence.GetNumberOfDataNodes()
       for seqItemNumber in range(numberOfDataNodes):
