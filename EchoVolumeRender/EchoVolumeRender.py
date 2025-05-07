@@ -98,7 +98,8 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     slicer.app.pauseRender()
     inputVolumeNode = self.ui.processingInputVolumeSelector.currentNode()
     if not self.ui.processingVelocityVolumeSelector.currentNode() is None:
-      inputVolumeNode = self.logic.combineVolumes(inputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode())
+      inputVolumeNode = EchoVolumeRenderLogic.combineVolumesSequence(inputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode(),
+        self.ui.applyToSequenceCheckBox.checked)
     outputVolumeNode = self.logic.smoothVolume(inputVolumeNode, self.ui.processingOutputVolumeSelector.currentNode(),
       self.ui.applyToSequenceCheckBox.checked, self.ui.smoothingFactorSlider.value)
     self.ui.processingOutputVolumeSelector.setCurrentNode(outputVolumeNode)
@@ -231,7 +232,8 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       self.computeColorReplacementSingleComponent = self.ComputeColorReplacementVTK902SingleComponent
       self.computeColorReplacementMultiComponent = self.ComputeColorReplacementVTK902MultiComponent
 
-  def sequenceFromVolume(self, proxyNode):
+  @staticmethod
+  def sequenceFromVolume(proxyNode):
     if not proxyNode:
       return [None, None]
     for browserNode in slicer.util.getNodesByClass('vtkMRMLSequenceBrowserNode'):
@@ -241,7 +243,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     return [None, None]
 
   @staticmethod
-  def combineVolumes(echoVolumeNode, velocityVolumeNode):
+  def combineVolumesSequence(echoVolumeNode, velocityVolumeNode, allowSequenceSmoothing):
     """
     Combine two volume nodes into a new volume node with two components.
     The first component will contain the data from echoVolumeNode and the second
@@ -252,9 +254,61 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     Example use:
 
         EchoVolumeRender.EchoVolumeRenderLogic.combineVolumes(getNode('*echo*'), getNode('*velocity*'))
-
-    TODO: call this when a velocity volume is specified
     """
+    if not allowSequenceSmoothing:
+      return EchoVolumeRenderLogic.combineVolumes(echoVolumeNode, velocityVolumeNode)
+
+    [seqBrowser, echoVolumeSequence] = EchoVolumeRenderLogic.sequenceFromVolume(echoVolumeNode)
+    [_, velocityVolumeSequence] = EchoVolumeRenderLogic.sequenceFromVolume(velocityVolumeNode)
+
+    if slicer.app.majorVersion*100+slicer.app.minorVersion < 411:
+      sequencesModule = slicer.modules.sequencebrowser
+    else:
+      sequencesModule = slicer.modules.sequences
+
+    # Create a new volume node to store the combined volume
+    combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    combinedVolumeNode.SetName(echoVolumeNode.GetName() + " + " + velocityVolumeNode.GetName())
+    combinedVolumeNode.SetAndObserveTransformNodeID(echoVolumeNode.GetTransformNodeID())
+
+    combinedVolumeSequenceNode = sequencesModule.logic().AddSynchronizedNode(None, combinedVolumeNode, seqBrowser)
+
+    tempCombinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    tempCombinedVolumeNode.Copy(combinedVolumeNode)
+
+    try:
+      qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+      numberOfDataNodes = echoVolumeSequence.GetNumberOfDataNodes()
+      for seqItemNumber in range(numberOfDataNodes):
+        slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
+
+        echoVolumeDataNode = echoVolumeSequence.GetDataNodeAtValue(echoVolumeSequence.GetNthIndexValue(seqItemNumber))
+        velocityVolumeDataNode = velocityVolumeSequence.GetDataNodeAtValue(velocityVolumeSequence.GetNthIndexValue(seqItemNumber))
+        EchoVolumeRenderLogic.combineVolumes(echoVolumeDataNode, velocityVolumeDataNode, tempCombinedVolumeNode)
+        combinedVolumeSequenceNode.SetDataNodeAtValue(tempCombinedVolumeNode, echoVolumeSequence.GetNthIndexValue(seqItemNumber))
+
+      slicer.mrmlScene.RemoveNode(tempCombinedVolumeNode)
+
+    finally:
+      qt.QApplication.restoreOverrideCursor()
+
+    return combinedVolumeNode
+
+  @staticmethod
+  def combineVolumes(echoVolumeNode, velocityVolumeNode, outputVolumeNode=None):
+    """
+    Combine two volume nodes into a new volume node with two components.
+    The first component will contain the data from echoVolumeNode and the second
+    component will contain the data from velocityVolumeNode.
+    :param echoVolumeNode: First input volume node
+    :param velocityVolumeNode: Second input volume node
+    :return: New volume node with combined data
+    Example use:
+
+        EchoVolumeRender.EchoVolumeRenderLogic.combineVolumes(getNode('*echo*'), getNode('*velocity*'))
+    """
+
     # Get image data from the input volumes
     imageData1 = echoVolumeNode.GetImageData()
     imageData2 = velocityVolumeNode.GetImageData()
@@ -276,7 +330,10 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     appendComponents.Update()
 
     # Create a new volume node to store the combined volume
-    combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+    if outputVolumeNode:
+      combinedVolumeNode = outputVolumeNode
+    else:
+      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
     combinedVolumeNode.SetAndObserveImageData(appendComponents.GetOutput())
     ijkToRAS = vtk.vtkMatrix4x4()
     echoVolumeNode.GetIJKToRASMatrix(ijkToRAS)
