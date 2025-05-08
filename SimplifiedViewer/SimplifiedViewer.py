@@ -320,6 +320,10 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.setFull3DSlicerInterfaceVisible(self.getFull3DSlicerInterfaceVisible())
         self.updateSequenceBrowserWidgets()
 
+        sceneViewsLogic = slicer.modules.sceneviews.logic()
+        if sceneViewsLogic.GetNumberOfSceneViews() > 0:
+            self.logic.restoreSceneView(0)
+
     def exit(self) -> None:
         """Called each time the user opens a different module."""
         # Do not react to parameter node changes (GUI will be updated when the user enters into the module)
@@ -689,7 +693,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
             sceneViewName = sceneViewsLogic.GetNthSceneViewName(index)
             pushButton = qt.QPushButton(sceneViewName)
-            pushButton.connect('clicked()', lambda sceneViewName=sceneViewName: self.onSceneViewClicked(sceneViewName))
+            pushButton.connect('clicked()', lambda sceneViewIndex=index: self.onSceneViewClicked(sceneViewIndex))
             self.ui.selectedNodeWidget.layout().addWidget(pushButton, row, column)
             column += 1
 
@@ -714,8 +718,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.crosshairVisibilityButton.checked = self.logic.getCrosshairVisibility()
         self.crosshairVisibilityButton.blockSignals(wasBlocking)
 
-    def onSceneViewClicked(self, sceneViewName):
-        self.logic.restoreSceneView(sceneViewName)
+    def onSceneViewClicked(self, sceneViewIndex):
+        self.logic.restoreSceneView(sceneViewIndex)
         self.updateGUIFromMRML()
 
     def onClippingNodeChanged(self):
@@ -788,6 +792,7 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
     def __init__(self) -> None:
         """Called when the logic class is instantiated. Can be used for initializing member variables."""
         ScriptedLoadableModuleLogic.__init__(self)
+        self._restoreSceneViewIndex = -1
 
     def getParameterNode(self):
         return SimplifiedViewerParameterNode(super().getParameterNode())
@@ -836,11 +841,23 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
         if not clipNode:
             return
 
-        for index in range(clipNode.GetNumberOfClippingNodes()):
-            clippingNode = clipNode.GetNthClippingNode(index)
+        clippingNodes = self.getClippingNodes()
+        for clippingNode in clippingNodes:
             if not clippingNode or not clippingNode.IsA("vtkMRMLMarkupsNode"):
                 continue
             clippingNode.SetDisplayVisibility(visible)
+
+    def getClippingNodes(self):
+        clipNode = self.getParameterNode().clipNode
+        if not clipNode:
+            return []
+
+        clippingNodes = []
+        for index in range(clipNode.GetNumberOfClippingNodes()):
+            clippingNode = clipNode.GetNthClippingNode(index)
+            if clippingNode and clippingNode.IsA("vtkMRMLMarkupsNode"):
+                clippingNodes.append(clippingNode)
+        return clippingNodes
 
     def setCrosshairVisibility(self, visible: bool):
         crosshairNode = slicer.util.getNode("Crosshair")
@@ -858,7 +875,27 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
             return False
         return crosshairNode.GetCrosshairMode() == slicer.vtkMRMLCrosshairNode.ShowBasic
 
-    def restoreSceneView(self, sceneViewName):
+    def updateSceneView(self, sceneViewIndex: int):
+        """
+        Update the scene view with the current view settings
+        """
+        sceneViewLogic = slicer.modules.sceneviews.logic()
+        clippingNodes = self.getClippingNodes()
+        collection = vtk.vtkCollection()
+        for clippingNode in clippingNodes:
+            collection.AddItem(clippingNode)
+            print(clippingNode)
+        sceneViewLogic.UpdateNthSceneView(collection, sceneViewIndex)
+
+    def restoreSceneView(self, sceneViewIndex: int):
+        """
+        Restore the scene view with the given index
+        """
+
+        if self._restoreSceneViewIndex >= 0:
+          # Update the current scene view with the current view settings
+          self.updateSceneView(self._restoreSceneViewIndex)
+        self._restoreSceneViewIndex = sceneViewIndex
 
         # Preserve clip states
         # TODO: In the future, we may be able to prevent scene views from modifying these nodes
@@ -871,8 +908,11 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
             currentLayout = layoutManager.layout
 
             sceneViewLogic = slicer.modules.sceneviews.logic()
-            sceneViewLogic.RestoreSceneView(sceneViewName)
+            sceneViewLogic.RestoreSceneView(sceneViewIndex)
 
+            # TODO: Temporary fix issues with invalid layouts when switching scene views
+            layoutManager.setLayout(0)
+            layoutManager.setLayout(1)
             layoutManager.setLayout(currentLayout)
 
             # Restore clip states
