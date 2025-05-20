@@ -382,7 +382,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setStatusBarVisible(visible)
         #slicer.util.setPythonConsoleVisible(visible)
 
-        self.reloadCollapsibleButton.visible = visible
+        if self.developerMode:
+            self.reloadCollapsibleButton.visible = visible
         self.ui.setupCollapsibleButton.visible = visible
 
         self.topLeftWidget.visible = not visible
