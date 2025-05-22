@@ -205,12 +205,25 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.fullSlicerInterfaceAction = qt.QAction("Show full 3D Slicer Interface")
         self.fullSlicerInterfaceAction.setCheckable(True)
         self.fullSlicerInterfaceAction.connect('toggled(bool)', self.setFull3DSlicerInterfaceVisible)
+        self.fullSlicerInterfaceAction.setVisible(self.developerMode)
         self.settingsMenu = qt.QMenu()
         self.settingsMenu.addAction(self.fullSlicerInterfaceAction)
+
         self.settingsButton = qt.QToolButton()
         self.settingsButton.setMenu(self.settingsMenu)
         self.settingsButton.setPopupMode(qt.QToolButton.InstantPopup)
-        topLeftButtons.append(self.settingsButton)
+
+        settingActionVisible = False
+        for action in self.settingsMenu.actions():
+            if action.isVisible():
+                settingActionVisible = True
+                break
+        # Only show the settings button if there is at least one visible action
+        self.settingsButton.setVisible(settingActionVisible)
+
+        if settingActionVisible:
+          # Only show the settings button if there is at least one visible action
+          topLeftButtons.append(self.settingsButton)
 
         buttonSize = 64
         for button in topLeftButtons:
