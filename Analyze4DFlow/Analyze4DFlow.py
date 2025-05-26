@@ -62,6 +62,7 @@ class Analyze4DFlowParameterNode:
     outputStreamlinesModel: vtkMRMLModelNode
     outputFlowMetricsModel: vtkMRMLModelNode
     outputFlowMetricsTable: vtkMRMLTableNode
+    outputFlowMetricsSummaryTable: vtkMRMLTableNode
     outputSpeedVolume: vtkMRMLScalarVolumeNode
     samplingDistance: Annotated[float, WithinRange(0.01, 10)] = 2  # distance unit
     speedThreshold: Annotated[float, WithinRange(0.0, 3), SingleStep(0.01), Default(0.1)]  # m/sec
@@ -134,7 +135,7 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputMaskSegmentSelectorWidget.connect('currentNodeChanged(bool)', self.updateParameterNodeFromGUI)
         self.ui.inputMaskSegmentSelectorWidget.connect('currentSegmentChanged(QString)', self.updateParameterNodeFromGUI)
         self.ui.analyzeButton.connect('clicked(bool)', self.onAnalyzeButton)
-        self.ui.showPlotButton.connect('clicked(bool)', self.onShowPlotButton)
+        self.ui.showFlowMetricsPlotButton.connect('clicked(bool)', self.onShowFlowMetricsPlotButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -228,6 +229,14 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputMaskSegmentSelectorWidget.setCurrentNode(self._parameterNode.inputMaskSegmentation)
         self.ui.inputMaskSegmentSelectorWidget.setCurrentSegmentID(self._parameterNode.inputMaskSegmentID)
 
+        if self._parameterNode.outputFlowMetricsSummaryTable:
+            self.ui.FlowMetricsSummaryTableView.setMRMLTableNode(self._parameterNode.outputFlowMetricsSummaryTable)
+            self.ui.FlowMetricsSummaryTableView.transposed = True
+
+        if self._parameterNode.outputFlowMetricsSummaryTable:
+            self.ui.FlowMetricsTableView.setMRMLTableNode(self._parameterNode.outputFlowMetricsSummaryTable)
+            self.ui.FlowMetricsTableView.firstRowLocked = True
+
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
 
@@ -274,15 +283,16 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.outputSpeedVolume,
                 self._parameterNode.speedVolumeProjectedToPlane)
 
-            if self._parameterNode.outputFlowMetricsTable:
+            if self._parameterNode.outputFlowMetricsTable or self._parameterNode.outputFlowMetricsSummaryTable:
                 self.addLog("Compute flow metrics table...")
                 self.logic.computeFlowMetricsTable(
                     self._parameterNode.outputFlowMetricsModel,
                     self._parameterNode.inputPlane,
                     self._parameterNode.speedThreshold,
-                    self._parameterNode.outputFlowMetricsTable)
+                    self._parameterNode.outputFlowMetricsTable,
+                    self._parameterNode.outputFlowMetricsSummaryTable)
 
-    def onShowPlotButton(self) -> None:
+    def onShowFlowMetricsPlotButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to create plot."):
             self.logic.createPlotFromTable(self._parameterNode.outputFlowMetricsTable)
 
@@ -876,27 +886,18 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             crossSectionModelNode: vtkMRMLModelNode,
             crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
             speedThresholdMPerSec: float = 0.1,
-            outputFlowMetricsTableNode: vtkMRMLTableNode = None) -> vtkMRMLTableNode:
+            outputFlowMetricsTableNode: vtkMRMLTableNode = None,
+            outputFlowMetricsSummaryTableNode: vtkMRMLTableNode = None):
+
+        if (outputFlowMetricsTableNode is None) and (outputFlowMetricsSummaryTableNode is None):
+            # nothing to do
+            return
 
         import numpy as np
+        import vtk
 
         sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(crossSectionModelNode)
         sequenceNode = sequenceBrowserNode.GetSequenceNode(crossSectionModelNode)
-
-        timeArray = vtk.vtkDoubleArray()
-        timeArray.SetName("time")
-
-        speedMeanMPerSecArray = vtk.vtkDoubleArray()
-        speedMeanMPerSecArray.SetName("SpeedMean")
-        speedMinMPerSecArray = vtk.vtkDoubleArray()
-        speedMinMPerSecArray.SetName("SpeedMin")
-        speedMaxMPerSecArray = vtk.vtkDoubleArray()
-        speedMaxMPerSecArray.SetName("SpeedMax")
-
-        forwardVolumeMlArray = vtk.vtkDoubleArray()
-        forwardVolumeMlArray.SetName("ForwardVolume")
-        backwardVolumeMlArray = vtk.vtkDoubleArray()
-        backwardVolumeMlArray.SetName("BackwardVolume")
 
         # Turn off transform visibility to speed up browsing
         gridTransformNode = None
@@ -925,6 +926,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # Get plane normal
         planeNormal = crossSectionPlaneNode.GetNormal()
+
+        metricNames = ["Time", "SpeedMean", "SpeedMin", "SpeedMax", "FlowMin", "FlowMax", "ProjectedSpeed", "ForwardVolume", "BackwardVolume"]
+        metrics = np.zeros([sequenceBrowserNode.GetNumberOfItems(), len(metricNames)])
 
         originalItemNumber = sequenceBrowserNode.GetSelectedItemNumber()
         for itemNumber in range(sequenceBrowserNode.GetNumberOfItems()):
@@ -960,6 +964,11 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 forwardFlowMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec>0]) * areaPerPointMm2 * 0.001
                 backwardFlowMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec<0]) * areaPerPointMm2 * 0.001
 
+                # TODO: max acceleration (cm/s/s) / min acceleration (cm/s/s) - to be worked on later
+
+                maxFlowMlPerSec = maxSpeedMPerSec * areaPerPointMm2 * 0.001
+                minFlowMlPerSec = minSpeedMPerSec * areaPerPointMm2 * 0.001
+
             else:
                 # no values above threshold
                 averageSpeedMPerSec = 0
@@ -967,61 +976,88 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 minSpeedMPerSec = 0
                 forwardFlowMlPerSec = 0
                 backwardFlowMlPerSec = 0
+                maxFlowMlPerSec = 0
+                minFlowMlPerSec = 0
 
-            timeArray.InsertNextValue(float(sequenceNode.GetNthIndexValue(itemNumber)))
-
-            speedMeanMPerSecArray.InsertNextValue(averageSpeedMPerSec)
-            speedMaxMPerSecArray.InsertNextValue(maxSpeedMPerSec)
-            speedMinMPerSecArray.InsertNextValue(minSpeedMPerSec)
-
-            forwardVolumeMlArray.InsertNextValue(forwardFlowMlPerSec * elapsedTimeMSec)
-            backwardVolumeMlArray.InsertNextValue(backwardFlowMlPerSec * elapsedTimeMSec)
+            metrics[itemNumber, metricNames.index("Time")] = float(sequenceNode.GetNthIndexValue(itemNumber))
+            metrics[itemNumber, metricNames.index("SpeedMean")] = averageSpeedMPerSec
+            metrics[itemNumber, metricNames.index("SpeedMin")] = minSpeedMPerSec
+            metrics[itemNumber, metricNames.index("SpeedMax")] = maxSpeedMPerSec
+            metrics[itemNumber, metricNames.index("FlowMin")] = minFlowMlPerSec
+            metrics[itemNumber, metricNames.index("FlowMax")] = maxFlowMlPerSec
+            metrics[itemNumber, metricNames.index("ForwardVolume")] = forwardFlowMlPerSec * elapsedTimeMSec
+            metrics[itemNumber, metricNames.index("BackwardVolume")] = backwardFlowMlPerSec * elapsedTimeMSec
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
         if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
             gridTransformNode.GetDisplayNode().SetVisibility(True)
 
-        if not outputFlowMetricsTableNode:
-            outputFlowMetricsTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
+        if outputFlowMetricsTableNode:
+            savedMetrics = [
+                ["Time", 1, "ms", ""],
+                ["SpeedMean", 100, "cm/s", f"Average speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["SpeedMin", 100, "cm/s", f"Minimum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["SpeedMax", 100, "cm/s", f"Maximum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["FlowMin", 1, "ml/s", f"Minimum flow in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["FlowMax", 1, "ml/s", f"Maximum flow in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["ForwardVolume", 1, "ml", f"Forward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["BackwardVolume", 1, "ml", f"Backward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+            ]
 
-        outputFlowMetricsTableNode.RemoveAllColumns()
-        outputFlowMetricsTable = outputFlowMetricsTableNode.GetTable()
+            outputFlowMetricsTableNode.RemoveAllColumns()
+            outputFlowMetricsTable = outputFlowMetricsTableNode.GetTable()
 
-        outputFlowMetricsTable.AddColumn(timeArray)
-        outputFlowMetricsTableNode.SetColumnUnitLabel(timeArray.GetName(), "ms")
+            for name, scale, unit, description in savedMetrics:
+                dataArray = vtk.vtkDoubleArray()
+                dataArray.SetName(name)
 
-        outputFlowMetricsTable.AddColumn(speedMeanMPerSecArray)
-        outputFlowMetricsTableNode.SetColumnDescription(
-            speedMeanMPerSecArray.GetName(),
-            f"Average speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s")
-        outputFlowMetricsTableNode.SetColumnUnitLabel(speedMeanMPerSecArray.GetName(), "m/s")
+                # Bulk copy metric values to the table
+                arrayValues = metrics[:, metricNames.index(name)]
+                dataArray.SetNumberOfTuples(len(arrayValues))
+                import vtk.util.numpy_support
+                narray = vtk.util.numpy_support.vtk_to_numpy(dataArray)
+                narray[:] = scale * arrayValues  # deep copy
 
-        outputFlowMetricsTable.AddColumn(speedMinMPerSecArray)
-        outputFlowMetricsTableNode.SetColumnDescription(
-            speedMinMPerSecArray.GetName(),
-            f"Minimum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s")
-        outputFlowMetricsTableNode.SetColumnUnitLabel(speedMinMPerSecArray.GetName(), "m/s")
+                # Add the array to the table and set metadata
+                outputFlowMetricsTable.AddColumn(dataArray)
+                outputFlowMetricsTableNode.SetColumnUnitLabel(name, unit)
+                outputFlowMetricsTableNode.SetColumnDescription(name, description)                
 
-        outputFlowMetricsTable.AddColumn(speedMaxMPerSecArray)
-        outputFlowMetricsTableNode.SetColumnDescription(
-            speedMaxMPerSecArray.GetName(),
-            f"Maximum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s")
-        outputFlowMetricsTableNode.SetColumnUnitLabel(speedMaxMPerSecArray.GetName(), "m/s")
+        if outputFlowMetricsSummaryTableNode:
 
-        outputFlowMetricsTable.AddColumn(forwardVolumeMlArray)
-        outputFlowMetricsTableNode.SetColumnDescription(
-            forwardVolumeMlArray.GetName(),
-            f"Forward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s")
-        outputFlowMetricsTableNode.SetColumnUnitLabel(forwardVolumeMlArray.GetName(), "ml")
+            outputFlowMetricsSummaryTableNode.RemoveAllColumns()
+            outputFlowMetricsSummaryTable = outputFlowMetricsSummaryTableNode.GetTable()
 
-        outputFlowMetricsTable.AddColumn(backwardVolumeMlArray)
-        outputFlowMetricsTableNode.SetColumnDescription(
-            backwardVolumeMlArray.GetName(),
-            f"Backward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s")
-        outputFlowMetricsTableNode.SetColumnUnitLabel(backwardVolumeMlArray.GetName(), "ml")
+            totalForwardVolume = metrics[:, metricNames.index("ForwardVolume")].sum()
+            totalBackwardVolume = metrics[:, metricNames.index("BackwardVolume")].sum()
+            totalVolume = totalForwardVolume + totalBackwardVolume
+            netVolume = totalForwardVolume - totalBackwardVolume
+            regurgitationFractionPercent = totalBackwardVolume / totalVolume * 100 if totalVolume > 0 else 0
+            # Simplified Bernoulli equation (https://www.e-echocardiography.com/calculators/miscellaneous/simplified-bernoulli-equation)
+            maxSpeedMPerSec = metrics[:, metricNames.index("SpeedMax")].max()
+            minSpeedMPerSec = metrics[:, metricNames.index("SpeedMin")].min()
+            maxPressureGradient = (4 * maxSpeedMPerSec**2)  # mmHg
+            minPressureGradient = (4 * minSpeedMPerSec**2)  # mmHg
 
-        return outputFlowMetricsTableNode
+            savedSummaryMetrics = [
+                ["TotalForwardVolume", "ml", f"Sum of forward flow volume values at each time point", totalForwardVolume],
+                ["TotalBackwardVolume", "ml", f"Sum of forward flow volume values at each time point", totalBackwardVolume],
+                ["TotalVolume", "ml", f"Sum of forward and backward flow volume values at each time point", totalVolume],
+                ["NetVolume", "ml", f"Net flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s", netVolume],
+                ["RegurgitationFraction", "%", f"backflowing blood volume divided by the forward flow volume and is expressed in percent", regurgitationFractionPercent],
+                ["MaxSpeed", "cm/s", f"Maximum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s", maxSpeedMPerSec * 100],
+                ["MinSpeed", "cm/s", f"Minimum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s", minSpeedMPerSec * 100],
+                ["MaxPressureGradient", "mmHg", f"Maximum pressure gradient in the plane cross-section", maxPressureGradient],
+                ["MinPressureGradient", "mmHg", f"Minimum pressure gradient in the plane cross-section", minPressureGradient],
+            ]
 
+            for name, unit, description, value in savedSummaryMetrics:
+                dataArray = vtk.vtkDoubleArray()
+                dataArray.SetName(name)
+                dataArray.InsertNextValue(value)
+                outputFlowMetricsSummaryTable.AddColumn(dataArray)
+                outputFlowMetricsTableNode.SetColumnUnitLabel(name, unit)
+                outputFlowMetricsTableNode.SetColumnDescription(name, description)
 
     @staticmethod
     def createPlotFromTable(flowMetricsTableNode: vtkMRMLTableNode) -> None:

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>398</width>
-    <height>767</height>
+    <width>448</width>
+    <height>869</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -182,7 +182,7 @@
          <item row="0" column="0">
           <widget class="QLabel" name="label_7">
            <property name="text">
-            <string>Output flow metrics model:</string>
+            <string>Output model:</string>
            </property>
           </widget>
          </item>
@@ -223,13 +223,63 @@
           </widget>
          </item>
          <item row="1" column="0">
-          <widget class="QLabel" name="label_9">
+          <widget class="QLabel" name="label_10">
            <property name="text">
-            <string>Output flow metrics table:</string>
+            <string>Output summary table:</string>
            </property>
           </widget>
          </item>
          <item row="1" column="1">
+          <layout class="QHBoxLayout" name="horizontalLayout_2">
+           <item>
+            <widget class="qMRMLNodeComboBox" name="outputFlowMetricsSummaryTableSelector">
+             <property name="toolTip">
+              <string>Plot series that contain average speed value vs time.</string>
+             </property>
+             <property name="nodeTypes">
+              <stringlist notr="true">
+               <string>vtkMRMLTableNode</string>
+              </stringlist>
+             </property>
+             <property name="showChildNodeTypes">
+              <bool>false</bool>
+             </property>
+             <property name="baseName">
+              <string>Flow metrics summary table</string>
+             </property>
+             <property name="noneEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="addEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="removeEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="editEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="renameEnabled">
+              <bool>true</bool>
+             </property>
+             <property name="selectNodeUponCreation">
+              <bool>true</bool>
+             </property>
+             <property name="SlicerParameterName" stdset="0">
+              <string notr="true">outputFlowMetricsSummaryTable</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="label_9">
+           <property name="text">
+            <string>Output table:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
           <layout class="QHBoxLayout" name="horizontalLayout">
            <item>
             <widget class="qMRMLNodeComboBox" name="outputFlowMetricsTableSelector">
@@ -271,13 +321,55 @@
             </widget>
            </item>
            <item>
-            <widget class="QPushButton" name="showPlotButton">
+            <widget class="QPushButton" name="showFlowMetricsPlotButton">
              <property name="text">
               <string>Show plot</string>
              </property>
             </widget>
            </item>
           </layout>
+         </item>
+         <item row="2" column="1">
+          <widget class="ctkCollapsibleGroupBox" name="SummaryTableViewGroupBox">
+           <property name="title">
+            <string>View</string>
+           </property>
+           <property name="collapsed">
+            <bool>true</bool>
+           </property>
+           <property name="collapsedHeight">
+            <number>9</number>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_2">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="qMRMLTableView" name="FlowMetricsSummaryTableView"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="ctkCollapsibleGroupBox" name="FlowMetricsTableViewGroupBox">
+           <property name="title">
+            <string>View</string>
+           </property>
+           <property name="collapsed">
+            <bool>true</bool>
+           </property>
+           <property name="collapsedHeight">
+            <number>9</number>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_3">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="qMRMLTableView" name="FlowMetricsTableView"/>
+            </item>
+           </layout>
+          </widget>
          </item>
         </layout>
        </widget>
@@ -508,6 +600,27 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLTableView</class>
+   <extends>QTableView</extends>
+   <header>qMRMLTableView.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentSelectorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentSelectorWidget.h</header>
+  </customwidget>
+  <customwidget>
    <class>ctkCollapsibleButton</class>
    <extends>QWidget</extends>
    <header>ctkCollapsibleButton.h</header>
@@ -523,22 +636,6 @@
    <class>ctkSliderWidget</class>
    <extends>QWidget</extends>
    <header>ctkSliderWidget.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLNodeComboBox</class>
-   <extends>QWidget</extends>
-   <header>qMRMLNodeComboBox.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLWidget</class>
-   <extends>QWidget</extends>
-   <header>qMRMLWidget.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSegmentSelectorWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSegmentSelectorWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
@@ -570,8 +667,8 @@
      <y>452</y>
     </hint>
     <hint type="destinationlabel">
-     <x>359</x>
-     <y>233</y>
+     <x>379</x>
+     <y>88</y>
     </hint>
    </hints>
   </connection>
@@ -586,8 +683,8 @@
      <y>450</y>
     </hint>
     <hint type="destinationlabel">
-     <x>348</x>
-     <y>461</y>
+     <x>368</x>
+     <y>231</y>
     </hint>
    </hints>
   </connection>
@@ -602,24 +699,24 @@
      <y>454</y>
     </hint>
     <hint type="destinationlabel">
-     <x>266</x>
-     <y>490</y>
+     <x>216</x>
+     <y>318</y>
     </hint>
    </hints>
   </connection>
   <connection>
    <sender>outputFlowMetricsTableSelector</sender>
    <signal>currentNodeChanged(bool)</signal>
-   <receiver>showPlotButton</receiver>
+   <receiver>showFlowMetricsPlotButton</receiver>
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>266</x>
-     <y>490</y>
+     <x>216</x>
+     <y>318</y>
     </hint>
     <hint type="destinationlabel">
-     <x>347</x>
-     <y>492</y>
+     <x>367</x>
+     <y>320</y>
     </hint>
    </hints>
   </connection>
@@ -634,8 +731,8 @@
      <y>5</y>
     </hint>
     <hint type="destinationlabel">
-     <x>186</x>
-     <y>330</y>
+     <x>308</x>
+     <y>129</y>
     </hint>
    </hints>
   </connection>
@@ -650,8 +747,8 @@
      <y>276</y>
     </hint>
     <hint type="destinationlabel">
-     <x>348</x>
-     <y>608</y>
+     <x>368</x>
+     <y>616</y>
     </hint>
    </hints>
   </connection>
@@ -666,8 +763,56 @@
      <y>728</y>
     </hint>
     <hint type="destinationlabel">
-     <x>212</x>
-     <y>677</y>
+     <x>368</x>
+     <y>696</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputFlowMetricsSummaryTableSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>337</x>
+     <y>633</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>232</x>
+     <y>253</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputFlowMetricsSummaryTableSelector</sender>
+   <signal>currentNodeChanged(vtkMRMLNode*)</signal>
+   <receiver>FlowMetricsSummaryTableView</receiver>
+   <slot>setMRMLTableNode(vtkMRMLNode*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>195</x>
+     <y>252</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>245</x>
+     <y>359</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>outputFlowMetricsTableSelector</sender>
+   <signal>currentNodeChanged(vtkMRMLNode*)</signal>
+   <receiver>FlowMetricsTableView</receiver>
+   <slot>setMRMLTableNode(vtkMRMLNode*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>170</x>
+     <y>310</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>208</x>
+     <y>399</y>
     </hint>
    </hints>
   </connection>
