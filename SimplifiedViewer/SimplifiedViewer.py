@@ -538,7 +538,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Update the viewer widgets to match the current full 3D Slicer interface visibility.
         Customizes the appearance of the viewers.
         """
-        import HeartValveLib
         full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
         layoutManager = slicer.app.layoutManager()
         layoutNode = layoutManager.layoutLogic().GetLayoutNode()
@@ -617,14 +616,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 viewWidget.sliceController().setVisible(full3DSlicerInterfaceVisible)
                 sliceLogic = viewWidget.sliceLogic()
                 sliceViewNode = sliceLogic.GetSliceNode()
-                HeartValveLib.HeartValves.setHeartOrientationmarker(sliceViewNode.GetID())
             elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
                 viewWidget.threeDController().setVisible(full3DSlicerInterfaceVisible)
                 if not full3DSlicerInterfaceVisible:
                     viewNode.SetBackgroundColor(0,0,0)
                     viewNode.SetBackgroundColor2(0,0,0)
                     viewNode.SetBoxVisible(False)
-                    HeartValveLib.HeartValves.setHeartOrientationmarker(viewNode.GetID())
 
         # Disable slice annotations
         if not full3DSlicerInterfaceVisible:
