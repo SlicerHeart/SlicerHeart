@@ -162,47 +162,57 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         topLeftButtons = []
 
         self.svToggleButton = qt.QToolButton()
+        self.svToggleButton.setToolTip("Toggle scene views panel")
         self.svToggleButton.checkable = True
         self.svToggleButton.connect('clicked(bool)', self.toggleSceneViewPanel)
         topLeftButtons.append(self.svToggleButton)
 
         self.measurementsToggleButton = qt.QToolButton()
+        self.measurementsToggleButton.setToolTip("Toggle measurements panel")
         self.measurementsToggleButton.checkable = True
         self.measurementsToggleButton.connect('clicked(bool)', self.toggleMeasurementPanel)
         topLeftButtons.append(self.measurementsToggleButton)
 
-        self.clippingEnabledAction = qt.QAction("Enable Clipping")
+        self.clippingEnabledAction = qt.QAction("Clipping")
+        self.clippingEnabledAction.setToolTip("Enable/disable clipping")
         self.clippingEnabledAction.setCheckable(True)
         self.clippingEnabledAction.connect('toggled(bool)', self.onClippingButtonClicked)
-        self.clippingPlaneVisibilityAction = qt.QAction("Show Clipping Plane")
+        self.clippingPlaneVisibilityAction = qt.QAction("Clipping Plane")
+        self.clippingPlaneVisibilityAction.setToolTip("Show/hide clipping plane")
         self.clippingPlaneVisibilityAction.setCheckable(True)
         self.clippingPlaneVisibilityAction.connect('toggled(bool)', self.onClippingPlaneVisibilityButtonClicked)
         self.visibilityMenu = qt.QMenu()
         self.visibilityMenu.addAction(self.clippingEnabledAction)
         self.visibilityMenu.addAction(self.clippingPlaneVisibilityAction)
         self.visibilityButton = qt.QToolButton()
+        self.visibilityButton.setToolTip("Change visibility settings")
         self.visibilityButton.setMenu(self.visibilityMenu)
         self.visibilityButton.setPopupMode(qt.QToolButton.InstantPopup)
         topLeftButtons.append(self.visibilityButton)
 
         self.crosshairVisibilityButton = qt.QToolButton()
+        self.crosshairVisibilityButton.setToolTip("Toggle crosshair visibility")
         self.crosshairVisibilityButton.checkable = True
         self.crosshairVisibilityButton.connect('toggled(bool)', self.onCrosshairVisibilityButtonClicked)
         topLeftButtons.append(self.crosshairVisibilityButton)
 
         self.fourUpViewAction = qt.QAction("Four Up View")
+        self.fourUpViewAction.setToolTip("Switch to four up view")
         self.fourUpViewAction.connect('triggered()', self.onFourUpViewButtonClicked)
         self.conventionalViewAction = qt.QAction("Conventional View")
+        self.conventionalViewAction.setToolTip("Switch to conventional view")
         self.conventionalViewAction.connect('triggered()', self.onConventionalViewButtonClicked)
         self.layoutsMenu = qt.QMenu()
         self.layoutsMenu.addAction(self.fourUpViewAction)
         self.layoutsMenu.addAction(self.conventionalViewAction)
         self.layoutsButton = qt.QToolButton()
+        self.layoutsButton.setToolTip("Change view layouts")
         self.layoutsButton.setMenu(self.layoutsMenu)
         self.layoutsButton.setPopupMode(qt.QToolButton.InstantPopup)
         topLeftButtons.append(self.layoutsButton)
 
         self.fullSlicerInterfaceAction = qt.QAction("Show full 3D Slicer Interface")
+        self.fullSlicerInterfaceAction.setToolTip("Show/hide full 3D Slicer interface")
         self.fullSlicerInterfaceAction.setCheckable(True)
         self.fullSlicerInterfaceAction.connect('toggled(bool)', self.setFull3DSlicerInterfaceVisible)
         self.fullSlicerInterfaceAction.setVisible(self.developerMode)
@@ -210,6 +220,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.settingsMenu.addAction(self.fullSlicerInterfaceAction)
 
         self.settingsButton = qt.QToolButton()
+        self.settingsButton.setToolTip("Settings")
         self.settingsButton.setMenu(self.settingsMenu)
         self.settingsButton.setPopupMode(qt.QToolButton.InstantPopup)
 
@@ -530,7 +541,77 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         import HeartValveLib
         full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
         layoutManager = slicer.app.layoutManager()
+        layoutNode = layoutManager.layoutLogic().GetLayoutNode()
         for viewWidget in layoutManager.viewWidgets():
+
+            centerViewButton = viewWidget.findChild(qt.QToolButton, "centerViewButton")
+            maximizeViewButton = viewWidget.findChild(qt.QToolButton, "maximizeViewButton")
+            if not centerViewButton:
+                buttonSize = 64
+                spacing = 3
+
+                centerViewButton = qt.QToolButton()
+                centerViewButton.setObjectName("centerViewButton")
+                centerViewButton.setToolTip(_("Reset view"))
+                centerViewButton.setCheckable(False)                
+                centerViewButton.setFixedSize(buttonSize, buttonSize)
+                centerViewButton.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
+                if isinstance(viewWidget, slicer.qMRMLSliceWidget):
+                    centerViewButton.connect('clicked()', lambda viewWidget=viewWidget: viewWidget.sliceLogic().FitSliceToAll())
+                elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
+                    centerViewButton.connect('clicked()', lambda viewWidget=viewWidget: viewWidget.threeDView().resetFocalPoint())
+
+                maximizeViewButton = qt.QToolButton()
+                maximizeViewButton.setObjectName("maximizeViewButton")
+                maximizeViewButton.setToolTip(_("Toggle full screen mode"))
+                maximizeViewButton.setCheckable(False)
+                maximizeViewButton.setFixedSize(buttonSize, buttonSize)
+                maximizeViewButton.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
+                maximizeViewButton.connect('clicked()', lambda viewWidget=viewWidget: self.toggleMaximizedView(viewWidget))
+
+                view = None
+                if isinstance(viewWidget, slicer.qMRMLSliceWidget):
+                    view = viewWidget.sliceView()
+                elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
+                    view = viewWidget.threeDView()
+                overlayWidget = OverlayWidget(view)
+                overlayWidget.setObjectName("resetViewOverlayWidget")
+                overlayWidget.corner = OverlayWidget.TopRight
+                overlayWidget.setLayout(qt.QHBoxLayout())
+                overlayWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
+                overlayWidget.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
+                overlayWidget.setFixedHeight(64)
+                overlayWidget.setFixedWidth(2*buttonSize + spacing)
+                overlayWidget.layout().setSpacing(spacing)
+                overlayWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
+                overlayWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
+                overlayWidget.setAutoFillBackground(False)
+                overlayWidget.layout().addWidget(centerViewButton)
+                overlayWidget.layout().addWidget(maximizeViewButton)
+                overlayWidget.show()
+
+            palette = slicer.app.palette()
+            sizePx = 32
+            color = palette.color(qt.QPalette.Text)
+
+            centerIcon = self.loadSvg(self.resourcePath("Icons/Center.svg"), sizePx, color)
+            centerViewButton.setIcon(centerIcon)
+            centerViewButton.setIconSize(qt.QSize(sizePx, sizePx))
+            centerViewButton.setVisible(not full3DSlicerInterfaceVisible)
+
+            viewNode = None
+            if isinstance(viewWidget, slicer.qMRMLSliceWidget):
+                viewNode = viewWidget.mrmlSliceNode()
+            elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
+                viewNode = viewWidget.mrmlViewNode()
+
+            maximizeIcon = self.loadSvg(self.resourcePath("Icons/Fullscreen.svg"), sizePx, color)
+            if layoutNode.IsMaximizedViewNode(viewNode):
+                maximizeIcon = self.loadSvg(self.resourcePath("Icons/FullscreenExit.svg"), sizePx, color)
+            maximizeViewButton.setIcon(maximizeIcon)
+            maximizeViewButton.setIconSize(qt.QSize(sizePx, sizePx))
+            maximizeViewButton.setVisible(not full3DSlicerInterfaceVisible)
+
             if isinstance(viewWidget, slicer.qMRMLSliceWidget):
                 viewWidget.setSliceOffsetSliderOrientation(qt.Qt.Vertical if not full3DSlicerInterfaceVisible else qt.Qt.Horizontal)
                 viewWidget.sliceController().setVisible(full3DSlicerInterfaceVisible)
@@ -540,7 +621,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
                 viewWidget.threeDController().setVisible(full3DSlicerInterfaceVisible)
                 if not full3DSlicerInterfaceVisible:
-                    viewNode = viewWidget.mrmlViewNode()
                     viewNode.SetBackgroundColor(0,0,0)
                     viewNode.SetBackgroundColor2(0,0,0)
                     viewNode.SetBoxVisible(False)
@@ -558,6 +638,24 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Called when the layout is changed. This is used to update the viewer widgets
         """
         self.updateViewerWidgets()
+
+    def toggleMaximizedView(self, viewWidget):
+        """
+        Toggle the maximized view for the given view widget.
+        """
+        viewNode = None
+        if isinstance(viewWidget, slicer.qMRMLSliceWidget):
+            viewNode = viewWidget.mrmlSliceNode()
+        elif isinstance(viewWidget, slicer.qMRMLThreeDWidget):
+            viewNode = viewWidget.mrmlViewNode()
+
+        layoutNode = slicer.app.layoutManager().layoutLogic().GetLayoutNode()
+        viewMaximized = layoutNode.IsMaximizedViewNode(viewNode)
+        if viewMaximized:
+            layoutNode.RemoveMaximizedViewNode(viewNode)
+        else:
+            layoutNode.AddMaximizedViewNode(viewNode)
+        self.updateViewerWidgets
 
     def onLoadSampleDataButtonClicked(self):
         """
@@ -760,7 +858,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Set the layout to the conventional view
         """
         layoutManager = slicer.app.layoutManager()
-        layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView)
+        layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalWidescreenView)
 
     def onFourUpViewButtonClicked(self):
         """
