@@ -409,6 +409,15 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.setStatusBarVisible(visible)
         #slicer.util.setPythonConsoleVisible(visible)
 
+        pluginHandler = slicer.qSlicerSubjectHierarchyPluginHandler.instance()
+        pluginLogic = pluginHandler.pluginLogic()    
+        if visible:
+            # Show all context menu actions in views
+            pluginLogic.allowedViewContextMenuActionNames = []
+        else:
+          # Hide all context menu actions in views
+          pluginLogic.allowedViewContextMenuActionNames = ["DummyAction"]
+
         if self.developerMode:
             self.reloadCollapsibleButton.visible = visible
         self.ui.setupCollapsibleButton.visible = visible
