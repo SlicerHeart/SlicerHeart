@@ -72,6 +72,25 @@ class OverlayWidget(qt.QWidget):
         elif self.corner == OverlayWidget.BottomRight:
             self.move(parentRect.bottomRight() - self.rect.bottomRight())
 
+class ResizeFilter(qt.QObject):
+    """
+    A filter that detects resize events.
+    """
+    def __init__(self, parent=None, moduleWidget=None):
+        super().__init__(parent)
+        if parent:
+            parent.installEventFilter(self)
+        self.moduleWidget = moduleWidget
+
+    def eventFilter(self, obj, event):
+        if event.type() != qt.QEvent.Resize:
+            return False
+
+        if self.moduleWidget is None and self.moduleWidget.parent.isEntered:
+            return False
+        self.moduleWidget.onResizeEvent()
+        return False
+
 #
 # SimplifiedViewerParameterNode
 #
@@ -111,6 +130,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
         ScriptedLoadableModuleWidget.setup(self)
+
+        self.resizeFilter = ResizeFilter(slicer.util.mainWindow(), self)
 
         try:
             slicer.vtkMRMLClipNode
@@ -661,7 +682,31 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         Called when the layout is changed. This is used to update the viewer widgets
         """
+        currentLayout = slicer.app.layoutManager().layout
+        if currentLayout == slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView \
+            or currentLayout == slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalWidescreenView:
+            self.updateConventionalLayout()
         self.updateViewerWidgets()
+
+    def onResizeEvent(self):
+        """
+        Called when the main window is resized.
+        """
+        currentLayout = slicer.app.layoutManager().layout
+        if currentLayout == slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView \
+            or currentLayout == slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalWidescreenView:
+            self.updateConventionalLayout()
+
+    def updateConventionalLayout(self):
+        currentLayout = slicer.app.layoutManager().layout
+        expectedLayout = slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalView
+
+        # detect landscape or portrait mode from main window size
+        mainWindow = slicer.util.mainWindow()
+        if mainWindow.size.width() > mainWindow.size.height():
+            expectedLayout = slicer.vtkMRMLLayoutNode.SlicerLayoutConventionalWidescreenView
+        if currentLayout != expectedLayout:
+            slicer.app.layoutManager().setLayout(expectedLayout)
 
     def toggleMaximizedView(self, viewWidget):
         """
