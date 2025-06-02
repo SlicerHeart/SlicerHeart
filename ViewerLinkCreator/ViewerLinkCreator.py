@@ -127,8 +127,15 @@ class ViewerLinkCreatorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin)
         if self.ui.userLineEdit.text:
             args['userName'] = self.ui.userLineEdit.text
         args["applicationId"] = self.ui.appComboBox.currentText
-        if self.ui.pathLineEdit.currentPath and os.path.exists(self.ui.pathLineEdit.currentPath):
-            args["args"] = self.ui.pathLineEdit.currentPath
+
+        selectedPath = self.ui.pathLineEdit.currentPath
+        if selectedPath:
+            if os.path.exists(selectedPath):
+                args["args"] = selectedPath
+            else:
+                slicer.util.warningDisplay(f"Filepath doesn't exist:\n\n'"
+                                           f"{selectedPath}'\n\nLink generated without specified filepath.")
+                self.ui.pathLineEdit.currentPath = ''
 
         import urllib
         encodedArgs = urllib.parse.urlencode(args, encoding='utf8')
@@ -136,6 +143,7 @@ class ViewerLinkCreatorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin)
         self.ui.plainTextEdit.setPlainText(f"{self.ui.baseUrlLineEdit.text}?{encodedArgs}")
 
     def onCopyButtonClicked(self):
+        self.onUpdateLink()
         import sys
         import subprocess
         if sys.platform in ['win32', 'cygwin']:
