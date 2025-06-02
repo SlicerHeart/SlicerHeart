@@ -39,6 +39,11 @@
     <widget class="QComboBox" name="appComboBox">
      <item>
       <property name="text">
+       <string>Clinical Viewer</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
        <string>Slicer 3D</string>
       </property>
      </item>
