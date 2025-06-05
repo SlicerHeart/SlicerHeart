@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>325</width>
+    <width>342</width>
     <height>311</height>
    </rect>
   </property>
@@ -44,7 +44,7 @@
      </item>
      <item>
       <property name="text">
-       <string>Slicer 3D</string>
+       <string>Clinical Viewer Test</string>
       </property>
      </item>
     </widget>
@@ -122,7 +122,7 @@
    <item row="4" column="1">
     <widget class="QPlainTextEdit" name="plainTextEdit">
      <property name="enabled">
-      <bool>false</bool>
+      <bool>true</bool>
      </property>
      <property name="maximumSize">
       <size>
