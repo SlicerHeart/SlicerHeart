@@ -113,7 +113,7 @@ class ViewerLinkCreatorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin)
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
 
         self.ui.userLineEdit.textChanged.connect(self.onUpdateLink)
-        self.ui.appComboBox.currentIndexChanged(self.onUpdateLink)
+        self.ui.appComboBox.currentIndexChanged.connect(self.onUpdateLink)
         self.ui.pathLineEdit.currentPathChanged.connect(self.onUpdateLink)
 
         self.ui.updateButton.clicked.connect(self.onUpdateLink)
