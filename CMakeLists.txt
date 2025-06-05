@@ -11,7 +11,7 @@ set(EXTENSION_DESCRIPTION "Modules for cardiac analysis and intervention plannin
 set(EXTENSION_ICONURL "https://github.com/SlicerHeart/SlicerHeart/raw/master/SlicerHeart.png")
 set(EXTENSION_SCREENSHOTURLS "https://github.com/SlicerHeart/SlicerHeart/raw/master/Docs/Image3dApiExample.png https://img.youtube.com/vi/hIxr9OKBvQ8/0.jpg https://raw.githubusercontent.com/SlicerHeart/SlicerHeart/master/ValveQuantification/Resources/MeasurementPreset/MitralValve.png")
 set(EXTENSION_STATUS Beta)
-set(EXTENSION_DEPENDS SlicerIGT)
+set(EXTENSION_DEPENDS SlicerIGT MarkupsToModel)
 set(EXTENSION_BUILD_SUBDIRECTORY inner-build)
 
 set(SUPERBUILD_TOPLEVEL_PROJECT inner)

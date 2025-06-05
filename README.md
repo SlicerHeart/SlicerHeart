@@ -15,7 +15,7 @@ The extension currently includes the following features (new features are added 
 - Quantification:
   - Valve annulus analysis: specify basic heart valve properties and annulus contour.
   - Valve segmentation: module for volumetric segmentation of heart valves.
-  - Leaflet analysis: create valve leaflet surface models from volmetric valve segmentation.
+  - Leaflet analysis: create valve leaflet surface models from volumetric valve segmentation.
   - Valve papillary analysis: allow specify papillary muscles and chords to compute angles and lengths.
   - [Valve quantification](Docs/ValveQuantification.md): automatic computation heart valve annulus, leaflet, and papillary metrics
   - Valve batch export: run valve quantification and export results for a large cohort of data.
