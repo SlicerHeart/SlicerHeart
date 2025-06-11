@@ -345,11 +345,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node exists and observed
         self.initializeParameterNode()
         self.setFull3DSlicerInterfaceVisible(self.getFull3DSlicerInterfaceVisible())
-        self.updateSequenceBrowserWidgets()
-
         sceneViewsLogic = slicer.modules.sceneviews.logic()
         if sceneViewsLogic.GetNumberOfSceneViews() > 0:
             self.logic.restoreSceneView(0)
+
+        self.updateGUIFromMRML()
+        qt.QTimer.singleShot(0, self.updateGUIFromMRML) # Update GUI again after the module is fully initialized
 
     def exit(self) -> None:
         """Called each time the user opens a different module."""
@@ -410,7 +411,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         #slicer.util.setPythonConsoleVisible(visible)
 
         pluginHandler = slicer.qSlicerSubjectHierarchyPluginHandler.instance()
-        pluginLogic = pluginHandler.pluginLogic()    
+        pluginLogic = pluginHandler.pluginLogic()
         if visible:
             # Show all context menu actions in views
             pluginLogic.allowedViewContextMenuActionNames = []
@@ -759,6 +760,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         Update the GUI from the parameter node
         """
+        self.fullSlicerInterfaceAction.setChecked(self.getFull3DSlicerInterfaceVisible())
         self.updateInputWidgets()
         self.updateSelectedNodeWidget()
         self.updateSequenceBrowserWidgets()
@@ -766,17 +768,15 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateMeasurementsWidgets()
         self.updateSidePanelVisibility()
 
-        self.fullSlicerInterfaceAction.setChecked(self.getFull3DSlicerInterfaceVisible())
-
     def updateSidePanelVisibility(self):
         full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
-        sidePanelVisible = self.svToggleButton.checked or self.measurementsToggleButton.checked or full3DSlicerInterfaceVisible
         modulePanel = slicer.util.mainWindow().findChildren("QDockWidget", "PanelDockWidget")[0]
-        modulePanel.visible = sidePanelVisible
         if not full3DSlicerInterfaceVisible:
             slicer.util.mainWindow().addDockWidget(qt.Qt.RightDockWidgetArea, modulePanel)
         else:
             slicer.util.mainWindow().addDockWidget(qt.Qt.LeftDockWidgetArea, modulePanel)
+        sidePanelVisible = self.svToggleButton.checked or self.measurementsToggleButton.checked or full3DSlicerInterfaceVisible
+        modulePanel.visible = sidePanelVisible
         self.ui.measurementWidget.visible = self.measurementsToggleButton.checked
         self.ui.sceneViewsWidget.visible = self.svToggleButton.checked
         self.ui.toggleFullInterfaceButton.visible = full3DSlicerInterfaceVisible
@@ -1071,7 +1071,6 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
         collection = vtk.vtkCollection()
         for clippingNode in clippingNodes:
             collection.AddItem(clippingNode)
-            print(clippingNode)
         sceneViewLogic.UpdateNthSceneView(collection, sceneViewIndex)
 
     def restoreSceneView(self, sceneViewIndex: int):
