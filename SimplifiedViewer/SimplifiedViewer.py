@@ -12,11 +12,11 @@ from slicer.parameterNodeWrapper import (
     parameterNodeWrapper,
     WithinRange,
 )
+from UserStatistics import IdleDetectionEventFilter
 
 #
 # SimplifiedViewer
 #
-
 
 class SimplifiedViewer(ScriptedLoadableModule):
     """Uses ScriptedLoadableModule base class, available at:
@@ -91,10 +91,48 @@ class ResizeFilter(qt.QObject):
         self.moduleWidget.onResizeEvent()
         return False
 
+class IdleCloseWarningDialog(qt.QDialog):
+
+  def __init__(self, parent):
+    qt.QDialog.__init__(self, parent)
+
+    flags = self.windowFlags() | qt.Qt.FramelessWindowHint | qt.Qt.WindowStaysOnTopHint
+    self.setWindowFlags(flags)
+
+    layout = qt.QVBoxLayout()
+    self.setLayout(layout)
+
+    self.setWindowTitle("Idle Close Warning")
+    self.setAttribute(qt.Qt.WA_DeleteOnClose)
+
+    self.updateTimer = qt.QTimer(self)
+    self.updateTimer.setInterval(1000) # Update every second
+    self.updateTimer.setSingleShot(False)
+    self.updateTimer.timeout.connect(self.updateLabel)
+    self.updateTimer.start()
+    self.startTime = qt.QTime.currentTime()
+
+    self.warningLabel = qt.QLabel("")
+    layout.addWidget(self.warningLabel)
+    self.updateLabel()
+
+  def updateLabel(self):
+    """
+    Update the warning label with the remaining time.
+    """
+    elapsedTime = self.startTime.secsTo(qt.QTime.currentTime())
+    remainingTime = SimplifiedViewerWidget.getIdleCloseSeconds() - elapsedTime
+    if remainingTime <= 0.0:
+        # Close slicer
+        slicer.util.quit()
+        return
+    labelText = f"You have been idle for a while. The application will be closed in {remainingTime:.0f} seconds."
+    print(f"Shutdown in {remainingTime} seconds")
+    self.warningLabel.setText(labelText)
+
 #
 # SimplifiedViewerParameterNode
 #
-
 
 @parameterNodeWrapper
 class SimplifiedViewerParameterNode:
@@ -132,6 +170,15 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         ScriptedLoadableModuleWidget.setup(self)
 
         self.resizeFilter = ResizeFilter(slicer.util.mainWindow(), self)
+        self.idleCloseWarningDialog = None
+        
+        if self.getIdleCloseEnabled():
+            self.idleDetectionEventFilter = IdleDetectionEventFilter()
+            self.idleDetectionEventFilter.setInterval(1000 * self.getIdleTimeoutSeconds())
+            self.idleDetectionEventFilter.idleStarted.connect(self.onIdleStarted)
+            self.idleDetectionEventFilter.idleEnded.connect(self.onIdleEnded)
+            self.idleDetectionEventFilter.start()
+            slicer.app.installEventFilter(self.idleDetectionEventFilter)
 
         try:
             slicer.vtkMRMLClipNode
@@ -356,6 +403,55 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """Called each time the user opens a different module."""
         # Do not react to parameter node changes (GUI will be updated when the user enters into the module)
         self.removeObservers(self.onParameterNodeModified)
+
+    @staticmethod
+    def getIdleCloseEnabled():
+        return slicer.util.settingsValue('SimplifiedViewer/IdleCloseEnabled', True, converter=slicer.util.toBool)
+
+    @staticmethod
+    def getIdleTimeoutSeconds():
+        """
+        Get the idle timeout in seconds.
+        This is the time after which the user is considered idle.
+        """
+        return slicer.util.settingsValue('SimplifiedViewer/IdleTimeoutSeconds', 300, converter=float)
+    
+    @staticmethod
+    def getIdleCloseSeconds():
+        """
+        Get the idle close timeout in seconds.
+        This is the time after which the application will be closed if the user is idle.
+        """
+        return slicer.util.settingsValue('SimplifiedViewer/IdleCloseSeconds', 30, converter=float)
+
+    def onIdleStarted(self):
+        """
+        Called when the user is idle for a certain amount of time.
+        This can be used to hide the full 3D Slicer interface.
+        """
+        if self.getFull3DSlicerInterfaceVisible():
+            # Don't show idle warning dialog if the full 3D Slicer interface is visible
+            return
+    
+        if self.idleCloseWarningDialog:
+            # If the dialog is already open then do not show it again
+            return
+
+        # Modal dialog to warn the user that the full 3D Slicer interface will be closed
+        self.idleCloseWarningDialog = IdleCloseWarningDialog(self.parent)
+        self.idleCloseWarningDialog.setWindowTitle(_("Idle Close Warning"))
+        self.idleCloseWarningDialog.show()
+    
+    def onIdleEnded(self):
+        """
+        Called when the user is no longer idle.
+        This can be used to show the full 3D Slicer interface.
+        """
+        if self.idleCloseWarningDialog:
+            # If the dialog is open then close it
+            self.idleCloseWarningDialog.deleteLater()
+            self.idleCloseWarningDialog.close()
+            self.idleCloseWarningDialog = None
 
     def onParameterNodeModified(self, caller, event) -> None:
         """Called when the parameter node is modified."""
