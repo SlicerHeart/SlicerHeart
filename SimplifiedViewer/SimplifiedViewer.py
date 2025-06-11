@@ -171,7 +171,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.resizeFilter = ResizeFilter(slicer.util.mainWindow(), self)
         self.idleCloseWarningDialog = None
-        
+
         if self.getIdleCloseEnabled():
             self.idleDetectionEventFilter = IdleDetectionEventFilter()
             self.idleDetectionEventFilter.setInterval(1000 * self.getIdleTimeoutSeconds())
@@ -414,15 +414,15 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Get the idle timeout in seconds.
         This is the time after which the user is considered idle.
         """
-        return slicer.util.settingsValue('SimplifiedViewer/IdleTimeoutSeconds', 300, converter=float)
-    
+        return slicer.util.settingsValue('SimplifiedViewer/IdleTimeoutSeconds', 1800, converter=float)
+
     @staticmethod
     def getIdleCloseSeconds():
         """
         Get the idle close timeout in seconds.
         This is the time after which the application will be closed if the user is idle.
         """
-        return slicer.util.settingsValue('SimplifiedViewer/IdleCloseSeconds', 30, converter=float)
+        return slicer.util.settingsValue('SimplifiedViewer/IdleCloseSeconds', 300, converter=float)
 
     def onIdleStarted(self):
         """
@@ -432,7 +432,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.getFull3DSlicerInterfaceVisible():
             # Don't show idle warning dialog if the full 3D Slicer interface is visible
             return
-    
+
         if self.idleCloseWarningDialog:
             # If the dialog is already open then do not show it again
             return
@@ -441,7 +441,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.idleCloseWarningDialog = IdleCloseWarningDialog(self.parent)
         self.idleCloseWarningDialog.setWindowTitle(_("Idle Close Warning"))
         self.idleCloseWarningDialog.show()
-    
+
     def onIdleEnded(self):
         """
         Called when the user is no longer idle.
