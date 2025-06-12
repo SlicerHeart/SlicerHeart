@@ -12,7 +12,6 @@ from slicer.parameterNodeWrapper import (
     parameterNodeWrapper,
     WithinRange,
 )
-from UserStatistics import IdleDetectionEventFilter
 
 #
 # SimplifiedViewer
@@ -28,7 +27,7 @@ class SimplifiedViewer(ScriptedLoadableModule):
         self.parent.title = _("Simplified Viewer")
         # TODO: set categories (folders where the module shows up in the module selector)
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
-        self.parent.dependencies = []
+        self.parent.dependencies = ["UserStatistics"]
         self.parent.contributors = ["Kyle Sunderland (PerkLab)", "Andras Lasso (PerkLab)"]
         self.parent.helpText = _("Simplified viewer module for SlicerHeart.")
         # TODO: replace with organization, grant and thanks
@@ -181,7 +180,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNode = None
         self._parameterNodeGuiTag = None
         self.clippingAvailable = False
-        self.visibilityCache = {}
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -191,13 +189,14 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.idleCloseWarningDialog = None
 
         if self.getIdleCloseEnabled():
+            from UserStatistics import IdleDetectionEventFilter
             self.idleDetectionEventFilter = IdleDetectionEventFilter()
             self.idleDetectionEventFilter.setInterval(1000 * self.getIdleTimeoutSeconds())
             self.idleDetectionEventFilter.idleStarted.connect(self.onIdleStarted)
             self.idleDetectionEventFilter.idleEnded.connect(self.onIdleEnded)
             self.idleDetectionEventFilter.start()
             slicer.app.installEventFilter(self.idleDetectionEventFilter)
-        
+
         self.blockGUIStateSaver = BlockGUIStateSaver()
         slicer.app.installEventFilter(self.blockGUIStateSaver)
 
@@ -415,7 +414,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.idleCloseWarningDialog.deleteLater()
             self.idleCloseWarningDialog.close()
             self.idleCloseWarningDialog = None
-        
+
         if self.blockGUIStateSaver:
           self.blockGUIStateSaver.deleteLater()
           slicer.app.removeEventFilter(self.blockGUIStateSaver)
