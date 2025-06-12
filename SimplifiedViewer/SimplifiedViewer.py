@@ -127,7 +127,7 @@ class IdleCloseWarningDialog(qt.QDialog):
         slicer.util.quit()
         return
     labelText = f"You have been idle for a while. The application will be closed in {remainingTime:.0f} seconds."
-    print(f"Shutdown in {remainingTime} seconds")
+    logging.info(f"Shutdown in {remainingTime} seconds")
     self.warningLabel.setText(labelText)
 
 class BlockGUIStateSaver(qt.QObject):
@@ -135,7 +135,7 @@ class BlockGUIStateSaver(qt.QObject):
         if event.type() != qt.QEvent.Close:
             # Only handle close events
             return False
-    
+
         if obj is not slicer.util.mainWindow():
             # Only act if the main window is being closed
             return False
@@ -406,7 +406,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
-        print("cleanup")
         self.removeObservers()
         self.idleDetectionEventFilter.deleteLater()
         slicer.app.removeEventFilter(self.idleDetectionEventFilter)
