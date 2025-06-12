@@ -231,11 +231,12 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         if self._parameterNode.outputFlowMetricsSummaryTable:
             self.ui.FlowMetricsSummaryTableView.setMRMLTableNode(self._parameterNode.outputFlowMetricsSummaryTable)
-            self.ui.FlowMetricsSummaryTableView.transposed = True
+            #self.ui.FlowMetricsSummaryTableView.transposed = True
 
-        if self._parameterNode.outputFlowMetricsSummaryTable:
-            self.ui.FlowMetricsTableView.setMRMLTableNode(self._parameterNode.outputFlowMetricsSummaryTable)
-            self.ui.FlowMetricsTableView.firstRowLocked = True
+        if self._parameterNode.outputFlowMetricsTable:
+            self.ui.FlowMetricsTableView.setMRMLTableNode(self._parameterNode.outputFlowMetricsTable)
+            #self.ui.FlowMetricsTableView.firstRowLocked = True
+            self.ui.FlowMetricsTableView.firstRowLocked = False
 
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
@@ -448,6 +449,22 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             if originalTransformVisibility and gridTransformNode.GetDisplayNode():
                 gridTransformNode.GetDisplayNode().SetVisibility(True)
 
+    @staticmethod
+    def _addPointDataArray(modelNode, arrayName, arrayValues, arrayType):
+        import vtk.util.numpy_support
+
+        # Create a new data array of type arrayType
+        dataArray = vtk.vtkDataArray.CreateDataArray(arrayType)
+        dataArray.SetName(arrayName)
+        dataArray.SetNumberOfComponents(arrayValues.shape[1] if len(arrayValues.shape) > 1 else 1)
+        dataArray.SetNumberOfTuples(len(arrayValues))
+
+        narray = vtk.util.numpy_support.vtk_to_numpy(dataArray)
+        narray[:] = arrayValues  # deep copy
+
+        modelData = modelNode.GetMesh().GetPointData()
+        modelData.AddArray(dataArray)
+
     def sampleFlowFieldWithPlane(
             self,
             crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
@@ -552,41 +569,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
                 parameters = {}
 
-                if maskSegmentationNode and maskSegmentID:
-                    # Export mask segment to labelmap node
-                    maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
-                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
-                    slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
-
-                    # Probe mask image with model
-                    parameters["InputVolume"] = maskLabelmapNode
-                    parameters["InputModel"] = outputFlowMetricsModel
-                    parameters["OutputModel"] = outputFlowMetricsModel
-                    parameters["OutputArrayName"] = "insideMask"
-                    probeVolumeWithModel = slicer.modules.probevolumewithmodel
-                    probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
-                    if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
-                        # error
-                        errorText = probeVolumeCliNode.GetErrorText()
-                        raise ValueError("Probe 4D field execution failed: " + errorText)
-
-                    # slicer.displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode).copy()
-                    # slicer.maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode).copy()
-
-                    displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
-                    maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
-                    displacementImageArray[maskImageArray==0, :] = 0
-
-                    # Clean up
-                    if maskLabelmapNode:
-                        slicer.mrmlScene.RemoveNode(maskLabelmapNode)
-                        maskLabelmapNode = None
-
-                    # Save mask array
-                    insideMaskArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'insideMask').copy()
-                else:
-                    insideMaskArray = None
-
                 parameters["InputVolume"] = displacementImageNode
                 parameters["InputModel"] = outputFlowMetricsModel
                 parameters["OutputModel"] = outputFlowMetricsModel
@@ -598,10 +580,59 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     errorText = probeVolumeCliNode.GetErrorText()
                     raise ValueError("Probe 4D field execution failed: " + errorText)
 
-                if insideMaskArray is not None:
-                    # Set all displacements outside the mask to zero
+                if maskSegmentationNode and maskSegmentID:
+                    # Vessel mask is set by segmentation
+
+                    # Export mask segment to labelmap node
+                    maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
+                    slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
+
+                    # Probe mask image with model
+                    parameters["InputVolume"] = maskLabelmapNode
+                    parameters["InputModel"] = outputFlowMetricsModel
+                    tempOutputFlowMetricsMaskModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Mask model")
+                    parameters["OutputModel"] = tempOutputFlowMetricsMaskModel
+                    parameters["OutputArrayName"] = "insideVessel"
+                    probeVolumeWithModel = slicer.modules.probevolumewithmodel
+                    probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
+                    if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
+                        # error
+                        errorText = probeVolumeCliNode.GetErrorText()
+                        slicer.mrmlScene.RemoveNode(tempOutputFlowMetricsMaskModel)
+                        raise ValueError("Probe 4D field execution failed: " + errorText)
+
+                    # Save mask array
+                    insideVesselArray = slicer.util.arrayFromModelPointData(tempOutputFlowMetricsMaskModel, 'insideVessel').copy()
+                    slicer.mrmlScene.RemoveNode(tempOutputFlowMetricsMaskModel)
+
+                else:
+                    # Generate mask based on speed magnitude
+                    maskLabelmapNode = None
+
+                    # Get displacement magnitude array
                     displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
-                    displacementArray[insideMaskArray==0] = (0,0,0)
+                    displacementMagnitudeArray = np.linalg.norm(displacementArray, axis=1) # TODO: check if this is correct axis
+                    insideVesselArray = displacementMagnitudeArray > self.magnitudeThreshold
+
+                # Save mask array into the flow metrics model
+                Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
+
+                # TODO: check if it is better to blank out the low velocities here or later
+                # Set all displacements outside the mask to zero
+                displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
+                maskedDisplacementArray = displacementArray.copy()
+                maskedDisplacementArray[insideVesselArray==0, :] = 0
+                Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
+
+                # Apply mask to displacement image if further processing is requested
+                if maskLabelmapNode and outputStreamlinesModel or outputSpeedVolume:
+                    displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                    maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
+                    displacementImageArray[maskImageArray==0, :] = 0
+                    # Clean up
+                    slicer.mrmlScene.RemoveNode(maskLabelmapNode)
+                    maskLabelmapNode = None
 
                 # Update streamlines
                 if outputStreamlinesModel:
@@ -617,7 +648,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                         displayNode.SetEdgeVisibility(True)
                         displayNode.BackfaceCullingOff()
                         displayNode.LightingOff()  # don't make the lines darker depending on orientation
-                        displayNode.SetActiveScalarName('Speed')
+                        displayNode.SetActiveScalarName('SpeedMasked')
                         if gridTransformNode.GetDisplayNode():
                             # Use the same color table and scaling as the transform node
                             displayNode.SetAndObserveColorNodeID(gridTransformNode.GetDisplayNode().GetColorNodeID())
@@ -626,6 +657,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                             displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
                         displayNode.ScalarVisibilityOn()
 
+                # Create speed volume for Doppler-like visualization
                 if outputSpeedVolume:
                     ijkToRAS = vtk.vtkMatrix4x4()
                     displacementImageNode.GetIJKToRASMatrix(ijkToRAS)
@@ -777,7 +809,15 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         import vtkAddon
         import numpy as np
 
-        seedPoints = seedPointsModel.GetPolyData()
+        seedPointsAll = seedPointsModel.GetPolyData()
+
+        # Only keep seed points that are inside the vessel
+        threshold = vtk.vtkThresholdPoints()
+        threshold.SetInputData(seedPointsAll)
+        threshold.ThresholdByUpper(0.5)  # Keep values > 0
+        threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, "insideVessel")
+        threshold.Update()
+        seedPoints = threshold.GetOutput()
 
         ijkToRAS = vtk.vtkMatrix4x4()
         speedImageNodeMPerSec.GetIJKToRASMatrix(ijkToRAS)
@@ -817,7 +857,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         vtk.vtkImageTransform.TransformVectors(rasToCanonicalDirection, [1,1,1], speedImageData.GetPointData().GetScalars())
 
         # Note: various streamlines, pathlines, etc. are described here: http://www.vmtk.org/tutorials/ParticleTracing.html
-        # vtkParticleTracerBase is available for particle tracing in unsteady vector fields        # 
+        # vtkParticleTracerBase is available for particle tracing in unsteady vector fields        #
         streamLine = vtk.vtkStreamTracer()
         streamLine.SetInputData(speedImageData)
         streamLine.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, vtk.vtkDataSetAttributes.SCALARS)
@@ -927,7 +967,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         # Get plane normal
         planeNormal = crossSectionPlaneNode.GetNormal()
 
-        metricNames = ["Time", "SpeedMean", "SpeedMin", "SpeedMax", "FlowMin", "FlowMax", "ProjectedSpeed", "ForwardVolume", "BackwardVolume"]
+        metricNames = ["Time", "Area", "PositiveArea", "NegativeArea",
+                       "FlowRate", "PositiveFlowRate", "NegativeFlowRate",
+                       "MeanVelocity", "MaxVelocity", "MinVelocity", "StdDevVelocity", "ProjectedSpeed",
+                       "PositiveVolume", "NegativeVolume"]
         metrics = np.zeros([sequenceBrowserNode.GetNumberOfItems(), len(metricNames)])
 
         originalItemNumber = sequenceBrowserNode.GetSelectedItemNumber()
@@ -936,10 +979,13 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
             sequenceBrowserNode.SetSelectedItemNumber(itemNumber)
             allSpeedMPerSec = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'Speed')
+            insideVessel = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'insideVessel')
 
             # TODO: check unit of threshold and make sure consistent with GUI
-            speedMagnitudeMPerSec = np.linalg.norm(allSpeedMPerSec, axis=1)
-            speedMPerSec = allSpeedMPerSec[speedMagnitudeMPerSec>speedThresholdMPerSec]
+            #speedMagnitudeMPerSec = np.linalg.norm(allSpeedMPerSec, axis=1)  # TODO: check which axis
+            #speedMPerSec = allSpeedMPerSec[speedMagnitudeMPerSec>speedThresholdMPerSec]
+
+            speedMPerSec = allSpeedMPerSec[insideVessel != 0]
 
             if itemNumber == 0:
                 elapsedTimeMSec = float(sequenceNode.GetNthIndexValue(itemNumber + 1)) - float(sequenceNode.GetNthIndexValue(itemNumber))
@@ -954,39 +1000,53 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Do not iterate through points one by one because it would be too slow
                 # (use numpy operations instead).
                 projectedSpeedMPerSec = np.sum(speedMPerSec * planeNormal, axis=1)
-                
+
                 averageSpeedMPerSec = projectedSpeedMPerSec.mean()
-                maxSpeedMPerSec = projectedSpeedMPerSec.max()
                 minSpeedMPerSec = projectedSpeedMPerSec.min()
-                #flowMlPerSec = averageSpeedMPerSec * len(projectedSpeedMPerSec) * areaPerPointMm2 # m/s * mm^2 = (100 * cm/s) * (0.1 cm)^2 = 100 * 0.1 * 0.1 * cm/s * cm^2 = cm3/sec = ml/sec
+
+                # Alternative computation (probably not what we need): Only computes minimum within positive values
+                # averageSpeedMPerSec = projectedSpeedMPerSec[projectedSpeedMPerSec>0].mean()
+                # minSpeedMPerSec = projectedSpeedMPerSec[projectedSpeedMPerSec>0].min()
+
+                maxSpeedMPerSec = projectedSpeedMPerSec.max()
+                stdDevSpeedMPerSec = projectedSpeedMPerSec.std()
+
+                areaMm2 = len(speedMPerSec) * areaPerPointMm2
+                areaPositiveMm2 = np.sum(projectedSpeedMPerSec >= 0) * areaPerPointMm2
+                areaNegativeMm2 = areaMm2 - areaPositiveMm2
 
                 # Forward/backward flow
-                forwardFlowMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec>0]) * areaPerPointMm2 * 0.001
-                backwardFlowMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec<0]) * areaPerPointMm2 * 0.001
+                #flowMlPerSec = averageSpeedMPerSec * len(projectedSpeedMPerSec) * areaPerPointMm2 # m/s * mm^2 = (100 * cm/s) * (0.1 cm)^2 = 100 * 0.1 * 0.1 * cm/s * cm^2 = cm3/sec = ml/sec
+                positiveFlowRateMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec>0]) * areaPerPointMm2
+                negativeFlowRateMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec<0]) * areaPerPointMm2
 
                 # TODO: max acceleration (cm/s/s) / min acceleration (cm/s/s) - to be worked on later
 
-                maxFlowMlPerSec = maxSpeedMPerSec * areaPerPointMm2 * 0.001
-                minFlowMlPerSec = minSpeedMPerSec * areaPerPointMm2 * 0.001
-
             else:
                 # no values above threshold
+                areaMm2 = 0
+                areaPositiveMm2 = 0
+                areaNegativeMm2 = 0
+                positiveFlowRateMlPerSec = 0
+                negativeFlowRateMlPerSec = 0
                 averageSpeedMPerSec = 0
                 maxSpeedMPerSec = 0
                 minSpeedMPerSec = 0
-                forwardFlowMlPerSec = 0
-                backwardFlowMlPerSec = 0
-                maxFlowMlPerSec = 0
-                minFlowMlPerSec = 0
+                stdDevSpeedMPerSec = 0
 
             metrics[itemNumber, metricNames.index("Time")] = float(sequenceNode.GetNthIndexValue(itemNumber))
-            metrics[itemNumber, metricNames.index("SpeedMean")] = averageSpeedMPerSec
-            metrics[itemNumber, metricNames.index("SpeedMin")] = minSpeedMPerSec
-            metrics[itemNumber, metricNames.index("SpeedMax")] = maxSpeedMPerSec
-            metrics[itemNumber, metricNames.index("FlowMin")] = minFlowMlPerSec
-            metrics[itemNumber, metricNames.index("FlowMax")] = maxFlowMlPerSec
-            metrics[itemNumber, metricNames.index("ForwardVolume")] = forwardFlowMlPerSec * elapsedTimeMSec
-            metrics[itemNumber, metricNames.index("BackwardVolume")] = backwardFlowMlPerSec * elapsedTimeMSec
+            metrics[itemNumber, metricNames.index("Area")] = areaMm2
+            metrics[itemNumber, metricNames.index("PositiveArea")] = areaPositiveMm2
+            metrics[itemNumber, metricNames.index("NegativeArea")] = areaNegativeMm2
+            metrics[itemNumber, metricNames.index("FlowRate")] = positiveFlowRateMlPerSec + negativeFlowRateMlPerSec
+            metrics[itemNumber, metricNames.index("PositiveFlowRate")] = positiveFlowRateMlPerSec
+            metrics[itemNumber, metricNames.index("NegativeFlowRate")] = negativeFlowRateMlPerSec  # can be negative
+            metrics[itemNumber, metricNames.index("MeanVelocity")] = averageSpeedMPerSec
+            metrics[itemNumber, metricNames.index("MinVelocity")] = minSpeedMPerSec
+            metrics[itemNumber, metricNames.index("MaxVelocity")] = maxSpeedMPerSec
+            metrics[itemNumber, metricNames.index("StdDevVelocity")] = stdDevSpeedMPerSec
+            metrics[itemNumber, metricNames.index("PositiveVolume")] = positiveFlowRateMlPerSec * (elapsedTimeMSec / 1000.0)
+            metrics[itemNumber, metricNames.index("NegativeVolume")] = negativeFlowRateMlPerSec * (elapsedTimeMSec / 1000.0)
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
         if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
@@ -995,13 +1055,18 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         if outputFlowMetricsTableNode:
             savedMetrics = [
                 ["Time", 1, "ms", ""],
-                ["SpeedMean", 100, "cm/s", f"Average speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
-                ["SpeedMin", 100, "cm/s", f"Minimum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
-                ["SpeedMax", 100, "cm/s", f"Maximum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
-                ["FlowMin", 1, "ml/s", f"Minimum flow in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
-                ["FlowMax", 1, "ml/s", f"Maximum flow in the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
-                ["ForwardVolume", 1, "ml", f"Forward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
-                ["BackwardVolume", 1, "ml", f"Backward flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s"],
+                ["Area", 1, "mm2", ""],
+                ["PositiveArea", 1, "mm2", ""],
+                ["NegativeArea", 1, "mm2", ""],
+                ["FlowRate", 1, "ml/s", f"Sum of positive and negative flow in the plane cross-section"],
+                ["PositiveFlowRate", 1, "ml/s", f"Flow in the plane cross-section in forward flow direction"],
+                ["NegativeFlowRate", 1, "ml/s", f"Flow in the plane cross-section in backward flow direction"],
+                ["MeanVelocity", 100, "cm/s", f"Average speed in the plane cross-section"],
+                ["MaxVelocity", 100, "cm/s", f"Maximum speed in the plane cross-section"],
+                ["MinVelocity", 100, "cm/s", f"Minimum speed in the plane cross-section"],
+                ["StdDevVelocity", 100, "cm/s", f"Standard deviation of flow speed in the plane cross-section"],
+                ["PositiveVolume", 1, "ml", f"Forward flow volume through the plane cross-section"],
+                ["NegativeVolume", 1, "ml", f"Backward flow volume through the plane cross-section"],
             ]
 
             outputFlowMetricsTableNode.RemoveAllColumns()
@@ -1021,34 +1086,48 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Add the array to the table and set metadata
                 outputFlowMetricsTable.AddColumn(dataArray)
                 outputFlowMetricsTableNode.SetColumnUnitLabel(name, unit)
-                outputFlowMetricsTableNode.SetColumnDescription(name, description)                
+                outputFlowMetricsTableNode.SetColumnDescription(name, description)
 
         if outputFlowMetricsSummaryTableNode:
 
             outputFlowMetricsSummaryTableNode.RemoveAllColumns()
             outputFlowMetricsSummaryTable = outputFlowMetricsSummaryTableNode.GetTable()
 
-            totalForwardVolume = metrics[:, metricNames.index("ForwardVolume")].sum()
-            totalBackwardVolume = metrics[:, metricNames.index("BackwardVolume")].sum()
-            totalVolume = totalForwardVolume + totalBackwardVolume
-            netVolume = totalForwardVolume - totalBackwardVolume
-            regurgitationFractionPercent = totalBackwardVolume / totalVolume * 100 if totalVolume > 0 else 0
+            # for frameIndex in range(metrics.shape[0]):
+            #     # Add time column
+            #     timeArray = vtk.vtkDoubleArray()
+            #     timeArray.SetName("Time")
+            #     timeArray.InsertNextValue(metrics[frameIndex, metricNames.index("Time")])
+            #     outputFlowMetricsSummaryTable.AddColumn(timeArray)
+
+            # TODO: how forward/backward volume is different from positive and negative volume?
+            positiveVolumeMl = np.sum(metrics[:, metricNames.index("PositiveVolume")])
+            negativeVolumeMl = np.sum(metrics[:, metricNames.index("NegativeVolume")])
+            totalVolumeMl = positiveVolumeMl + negativeVolumeMl
+            regurgitationFractionPercent = -negativeVolumeMl / positiveVolumeMl * 100 if positiveVolumeMl > 0 else 0
+
+            flowRateMlPerSec = np.mean(metrics[:, metricNames.index("FlowRate")])  # ml/s
+            volumeLiterPerMin = flowRateMlPerSec * 60 / 1000  # convert ml/s to l/min
+
+            effectiveFlowRateMlPerSec = np.mean(metrics[:, metricNames.index("PositiveFlowRate")]) - np.mean(metrics[:, metricNames.index("NegativeFlowRate")])  # ml/s
+            volumeEffectiveLiterPerMin = effectiveFlowRateMlPerSec * 60 / 1000  # convert ml/s to l/min
+
             # Simplified Bernoulli equation (https://www.e-echocardiography.com/calculators/miscellaneous/simplified-bernoulli-equation)
-            maxSpeedMPerSec = metrics[:, metricNames.index("SpeedMax")].max()
-            minSpeedMPerSec = metrics[:, metricNames.index("SpeedMin")].min()
+            maxSpeedMPerSec = metrics[:, metricNames.index("MaxVelocity")].max()
             maxPressureGradient = (4 * maxSpeedMPerSec**2)  # mmHg
-            minPressureGradient = (4 * minSpeedMPerSec**2)  # mmHg
+
+            maxFlowRateMlPerSec = np.max(metrics[:, metricNames.index("FlowRate")])  # ml/s
 
             savedSummaryMetrics = [
-                ["TotalForwardVolume", "ml", f"Sum of forward flow volume values at each time point", totalForwardVolume],
-                ["TotalBackwardVolume", "ml", f"Sum of forward flow volume values at each time point", totalBackwardVolume],
-                ["TotalVolume", "ml", f"Sum of forward and backward flow volume values at each time point", totalVolume],
-                ["NetVolume", "ml", f"Net flow volume through the plane cross-section above threshold {speedThresholdMPerSec} m/s", netVolume],
-                ["RegurgitationFraction", "%", f"backflowing blood volume divided by the forward flow volume and is expressed in percent", regurgitationFractionPercent],
-                ["MaxSpeed", "cm/s", f"Maximum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s", maxSpeedMPerSec * 100],
-                ["MinSpeed", "cm/s", f"Minimum speed in the plane cross-section above threshold {speedThresholdMPerSec} m/s", minSpeedMPerSec * 100],
+                ["TotalVolume", "ml", f"Sum of forward and backward flow volume values at each time point", totalVolumeMl],
+                ["PositiveVolume", "ml", f"Sum of volume flowing in forward direction through the plane cross-section", positiveVolumeMl],
+                ["NegativeVolume", "ml", f"Sum of volume flowing in backward direction through the plane cross-section", negativeVolumeMl],
+                ["RegurgitationFraction", "%", f"Backflowing blood volume divided by the forward flow volume and is expressed in percent (0-100)", regurgitationFractionPercent],
+                ["VolPerMinute", "l/min", f"Sum of forward and backward flow rate", volumeLiterPerMin],
+                ["EffectiveVolPerMinute", "l/min", f"Effective flow rate (forward flow minus backward flow)", volumeEffectiveLiterPerMin],
+                ["PeakVelocity", "cm/s", f"Maximum speed in the plane cross-section", maxSpeedMPerSec * 100],
                 ["MaxPressureGradient", "mmHg", f"Maximum pressure gradient in the plane cross-section", maxPressureGradient],
-                ["MinPressureGradient", "mmHg", f"Minimum pressure gradient in the plane cross-section", minPressureGradient],
+                ["MaxFlow", "ml/s", f"Maximum flow in the plane cross-section", maxFlowRateMlPerSec],
             ]
 
             for name, unit, description, value in savedSummaryMetrics:
@@ -1059,14 +1138,16 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 outputFlowMetricsTableNode.SetColumnUnitLabel(name, unit)
                 outputFlowMetricsTableNode.SetColumnDescription(name, description)
 
+            outputFlowMetricsSummaryTableNode.Modified()
+
     @staticmethod
     def createPlotFromTable(flowMetricsTableNode: vtkMRMLTableNode) -> None:
 
         # Create plot
         plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode", flowMetricsTableNode.GetName() + " plot")
         plotSeriesNode.SetAndObserveTableNodeID(flowMetricsTableNode.GetID())
-        plotSeriesNode.SetXColumnName(flowMetricsTableNode.GetTable().GetColumnName(0))  # time
-        plotSeriesNode.SetYColumnName(flowMetricsTableNode.GetTable().GetColumnName(1))  # speed
+        plotSeriesNode.SetXColumnName("Time")
+        plotSeriesNode.SetYColumnName("MeanVelocity")
         plotSeriesNode.SetPlotType(plotSeriesNode.PlotTypeScatter)
         plotSeriesNode.SetColor(0, 0.6, 1.0)
 
