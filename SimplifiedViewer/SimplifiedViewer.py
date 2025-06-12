@@ -130,6 +130,23 @@ class IdleCloseWarningDialog(qt.QDialog):
     print(f"Shutdown in {remainingTime} seconds")
     self.warningLabel.setText(labelText)
 
+class BlockGUIStateSaver(qt.QObject):
+    def eventFilter(self, obj, event):
+        if event.type() != qt.QEvent.Close:
+            # Only handle close events
+            return False
+    
+        if obj is not slicer.util.mainWindow():
+            # Only act if the main window is being closed
+            return False
+
+        if slicer.modules.simplifiedviewer.widgetRepresentation().self().getFull3DSlicerInterfaceVisible():
+            # Do not block GUI state saver if the full 3D Slicer interface is visible
+            return False
+
+        slicer.util.quit()
+        return True  # Block the close event
+
 #
 # SimplifiedViewerParameterNode
 #
@@ -164,6 +181,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNode = None
         self._parameterNodeGuiTag = None
         self.clippingAvailable = False
+        self.visibilityCache = {}
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -179,6 +197,9 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.idleDetectionEventFilter.idleEnded.connect(self.onIdleEnded)
             self.idleDetectionEventFilter.start()
             slicer.app.installEventFilter(self.idleDetectionEventFilter)
+        
+        self.blockGUIStateSaver = BlockGUIStateSaver()
+        slicer.app.installEventFilter(self.blockGUIStateSaver)
 
         try:
             slicer.vtkMRMLClipNode
@@ -385,6 +406,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
+        print("cleanup")
         self.removeObservers()
         self.idleDetectionEventFilter.deleteLater()
         slicer.app.removeEventFilter(self.idleDetectionEventFilter)
@@ -394,6 +416,11 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.idleCloseWarningDialog.deleteLater()
             self.idleCloseWarningDialog.close()
             self.idleCloseWarningDialog = None
+        
+        if self.blockGUIStateSaver:
+          self.blockGUIStateSaver.deleteLater()
+          slicer.app.removeEventFilter(self.blockGUIStateSaver)
+          self.blockGUIStateSaver = None
 
     def enter(self) -> None:
         """Called each time the user opens this module."""
