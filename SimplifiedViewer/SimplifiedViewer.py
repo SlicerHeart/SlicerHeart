@@ -188,18 +188,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.resizeFilter = ResizeFilter(slicer.util.mainWindow(), self)
         self.idleCloseWarningDialog = None
 
-        if self.getIdleCloseEnabled():
-            from UserStatistics import IdleDetectionEventFilter
-            self.idleDetectionEventFilter = IdleDetectionEventFilter()
-            self.idleDetectionEventFilter.setInterval(1000 * self.getIdleTimeoutSeconds())
-            self.idleDetectionEventFilter.idleStarted.connect(self.onIdleStarted)
-            self.idleDetectionEventFilter.idleEnded.connect(self.onIdleEnded)
-            self.idleDetectionEventFilter.start()
-            slicer.app.installEventFilter(self.idleDetectionEventFilter)
-
-        self.blockGUIStateSaver = BlockGUIStateSaver()
-        slicer.app.installEventFilter(self.blockGUIStateSaver)
-
         try:
             slicer.vtkMRMLClipNode
             self.clippingAvailable = True
@@ -403,12 +391,30 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.parent.isEntered:
             self.enter()
 
+        if not hasattr(slicer.modules, 'userstatistics'):
+            slicer.util.messageBox("This modules requires the Sandbox extension. Install Sandbox and restart Slicer.")
+            return
+
+        if self.getIdleCloseEnabled():
+            from UserStatistics import IdleDetectionEventFilter
+            self.idleDetectionEventFilter = IdleDetectionEventFilter()
+            self.idleDetectionEventFilter.setInterval(1000 * self.getIdleTimeoutSeconds())
+            self.idleDetectionEventFilter.idleStarted.connect(self.onIdleStarted)
+            self.idleDetectionEventFilter.idleEnded.connect(self.onIdleEnded)
+            self.idleDetectionEventFilter.start()
+            slicer.app.installEventFilter(self.idleDetectionEventFilter)
+
+        self.blockGUIStateSaver = BlockGUIStateSaver()
+        slicer.app.installEventFilter(self.blockGUIStateSaver)
+
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
         self.removeObservers()
-        self.idleDetectionEventFilter.deleteLater()
-        slicer.app.removeEventFilter(self.idleDetectionEventFilter)
-        self.idleDetectionEventFilter = None
+        if self.idleDetectionEventFilter:
+          self.idleDetectionEventFilter.deleteLater()
+          slicer.app.removeEventFilter(self.idleDetectionEventFilter)
+          self.idleDetectionEventFilter = None
+
         if self.idleCloseWarningDialog:
             # If the dialog is open then close it
             self.idleCloseWarningDialog.deleteLater()
