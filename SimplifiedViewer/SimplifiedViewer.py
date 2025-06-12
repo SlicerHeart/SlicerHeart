@@ -386,6 +386,14 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
         self.removeObservers()
+        self.idleDetectionEventFilter.deleteLater()
+        slicer.app.removeEventFilter(self.idleDetectionEventFilter)
+        self.idleDetectionEventFilter = None
+        if self.idleCloseWarningDialog:
+            # If the dialog is open then close it
+            self.idleCloseWarningDialog.deleteLater()
+            self.idleCloseWarningDialog.close()
+            self.idleCloseWarningDialog = None
 
     def enter(self) -> None:
         """Called each time the user opens this module."""
