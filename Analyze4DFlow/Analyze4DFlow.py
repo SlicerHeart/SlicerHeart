@@ -618,7 +618,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Save mask array into the flow metrics model
                 Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
 
-                # TODO: check if it is better to blank out the low velocities here or later
                 # Set all displacements outside the mask to zero
                 displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
                 maskedDisplacementArray = displacementArray.copy()
@@ -981,10 +980,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             allSpeedMPerSec = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'Speed')
             insideVessel = slicer.util.arrayFromModelPointData(crossSectionModelNode, 'insideVessel')
 
-            # TODO: check unit of threshold and make sure consistent with GUI
-            #speedMagnitudeMPerSec = np.linalg.norm(allSpeedMPerSec, axis=1)  # TODO: check which axis
-            #speedMPerSec = allSpeedMPerSec[speedMagnitudeMPerSec>speedThresholdMPerSec]
-
             speedMPerSec = allSpeedMPerSec[insideVessel != 0]
 
             if itemNumber == 0:
@@ -995,30 +990,29 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 elapsedTimeMSec = (float(sequenceNode.GetNthIndexValue(itemNumber + 1)) - float(sequenceNode.GetNthIndexValue(itemNumber - 1))) / 2
 
             if len(speedMPerSec) > 0:
+
                 # Project speed vector to the plane
                 # Compute dot product of each element of displacementImageArray by planeNormal.
                 # Do not iterate through points one by one because it would be too slow
-                # (use numpy operations instead).
+                # (use numpy operations instead).                
                 projectedSpeedMPerSec = np.sum(speedMPerSec * planeNormal, axis=1)
 
-                averageSpeedMPerSec = projectedSpeedMPerSec.mean()
-                minSpeedMPerSec = projectedSpeedMPerSec.min()
+                velocitySign = np.sign(projectedSpeedMPerSec)
+                velocityMagnitudeMPerSec = np.linalg.norm(speedMPerSec, axis=1)
+                signedVelocityMagnitudeMPerSec = velocitySign * velocityMagnitudeMPerSec
 
-                # Alternative computation (probably not what we need): Only computes minimum within positive values
-                # averageSpeedMPerSec = projectedSpeedMPerSec[projectedSpeedMPerSec>0].mean()
-                # minSpeedMPerSec = projectedSpeedMPerSec[projectedSpeedMPerSec>0].min()
-
-                maxSpeedMPerSec = projectedSpeedMPerSec.max()
-                stdDevSpeedMPerSec = projectedSpeedMPerSec.std()
+                meanVelocityMPerSec = velocityMagnitudeMPerSec.mean()
+                minVelocityMPerSec = velocityMagnitudeMPerSec.min()
+                maxVelocityMPerSec = velocityMagnitudeMPerSec.max()
+                stdDevSpeedMPerSec = velocityMagnitudeMPerSec.std()
 
                 areaMm2 = len(speedMPerSec) * areaPerPointMm2
-                areaPositiveMm2 = np.sum(projectedSpeedMPerSec >= 0) * areaPerPointMm2
+                areaPositiveMm2 = np.sum(signedVelocityMagnitudeMPerSec >= 0) * areaPerPointMm2
                 areaNegativeMm2 = areaMm2 - areaPositiveMm2
 
                 # Forward/backward flow
-                #flowMlPerSec = averageSpeedMPerSec * len(projectedSpeedMPerSec) * areaPerPointMm2 # m/s * mm^2 = (100 * cm/s) * (0.1 cm)^2 = 100 * 0.1 * 0.1 * cm/s * cm^2 = cm3/sec = ml/sec
-                positiveFlowRateMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec>0]) * areaPerPointMm2
-                negativeFlowRateMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec<0]) * areaPerPointMm2
+                positiveFlowRateMlPerSec = np.sum(signedVelocityMagnitudeMPerSec[signedVelocityMagnitudeMPerSec>0]) * areaPerPointMm2
+                negativeFlowRateMlPerSec = np.sum(signedVelocityMagnitudeMPerSec[signedVelocityMagnitudeMPerSec<0]) * areaPerPointMm2
 
                 # TODO: max acceleration (cm/s/s) / min acceleration (cm/s/s) - to be worked on later
 
@@ -1029,9 +1023,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 areaNegativeMm2 = 0
                 positiveFlowRateMlPerSec = 0
                 negativeFlowRateMlPerSec = 0
-                averageSpeedMPerSec = 0
-                maxSpeedMPerSec = 0
-                minSpeedMPerSec = 0
+                meanVelocityMPerSec = 0
+                maxVelocityMPerSec = 0
+                minVelocityMPerSec = 0
                 stdDevSpeedMPerSec = 0
 
             metrics[itemNumber, metricNames.index("Time")] = float(sequenceNode.GetNthIndexValue(itemNumber))
@@ -1041,9 +1035,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             metrics[itemNumber, metricNames.index("FlowRate")] = positiveFlowRateMlPerSec + negativeFlowRateMlPerSec
             metrics[itemNumber, metricNames.index("PositiveFlowRate")] = positiveFlowRateMlPerSec
             metrics[itemNumber, metricNames.index("NegativeFlowRate")] = negativeFlowRateMlPerSec  # can be negative
-            metrics[itemNumber, metricNames.index("MeanVelocity")] = averageSpeedMPerSec
-            metrics[itemNumber, metricNames.index("MinVelocity")] = minSpeedMPerSec
-            metrics[itemNumber, metricNames.index("MaxVelocity")] = maxSpeedMPerSec
+            metrics[itemNumber, metricNames.index("MeanVelocity")] = meanVelocityMPerSec
+            metrics[itemNumber, metricNames.index("MinVelocity")] = minVelocityMPerSec
+            metrics[itemNumber, metricNames.index("MaxVelocity")] = maxVelocityMPerSec
             metrics[itemNumber, metricNames.index("StdDevVelocity")] = stdDevSpeedMPerSec
             metrics[itemNumber, metricNames.index("PositiveVolume")] = positiveFlowRateMlPerSec * (elapsedTimeMSec / 1000.0)
             metrics[itemNumber, metricNames.index("NegativeVolume")] = negativeFlowRateMlPerSec * (elapsedTimeMSec / 1000.0)
@@ -1113,8 +1107,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             volumeEffectiveLiterPerMin = effectiveFlowRateMlPerSec * 60 / 1000  # convert ml/s to l/min
 
             # Simplified Bernoulli equation (https://www.e-echocardiography.com/calculators/miscellaneous/simplified-bernoulli-equation)
-            maxSpeedMPerSec = metrics[:, metricNames.index("MaxVelocity")].max()
-            maxPressureGradient = (4 * maxSpeedMPerSec**2)  # mmHg
+            maxVelocityMPerSec = metrics[:, metricNames.index("MaxVelocity")].max()
+            maxPressureGradient = (4 * maxVelocityMPerSec**2)  # mmHg
 
             maxFlowRateMlPerSec = np.max(metrics[:, metricNames.index("FlowRate")])  # ml/s
 
@@ -1125,7 +1119,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 ["RegurgitationFraction", "%", f"Backflowing blood volume divided by the forward flow volume and is expressed in percent (0-100)", regurgitationFractionPercent],
                 ["VolPerMinute", "l/min", f"Sum of forward and backward flow rate", volumeLiterPerMin],
                 ["EffectiveVolPerMinute", "l/min", f"Effective flow rate (forward flow minus backward flow)", volumeEffectiveLiterPerMin],
-                ["PeakVelocity", "cm/s", f"Maximum speed in the plane cross-section", maxSpeedMPerSec * 100],
+                ["PeakVelocity", "cm/s", f"Maximum speed in the plane cross-section", maxVelocityMPerSec * 100],
                 ["MaxPressureGradient", "mmHg", f"Maximum pressure gradient in the plane cross-section", maxPressureGradient],
                 ["MaxFlow", "ml/s", f"Maximum flow in the plane cross-section", maxFlowRateMlPerSec],
             ]
