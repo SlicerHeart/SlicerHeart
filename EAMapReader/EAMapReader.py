@@ -321,16 +321,16 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
 
   def TextToFloat(self, text):
     # First remove any leading and trailing spaces and newlines
-    leadingNonDigits = "^[^0-9.-]*"
-    trailingNonDigits = "[^0-9.-]*$"
+    leadingNonDigits = r"^[^0-9.-]*"
+    trailingNonDigits = r"[^0-9.-]*$"
     text = re.sub(leadingNonDigits, "",text)
     text = re.sub(trailingNonDigits, "",text)
-    lines = re.split("\n",text)
+    lines = re.split(r"\n",text)
     numbers = []
     for i in range(len(lines)):
       lines[i] = re.sub(leadingNonDigits, "",lines[i])
       lines[i] = re.sub(trailingNonDigits, "",lines[i])
-      lineSplit = re.split("\s+", lines[i])
+      lineSplit = re.split(r"\s+", lines[i])
       #print(lines[i])
       #print(lineSplit)
       thisNumbers = []
@@ -570,9 +570,9 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
         if self.abortRequested:
           return False
         # Remove trailing newline and trailing and leading spaces
-        line = re.sub("[\n]$", "", line)
-        line = re.sub("[ ]*$", "", line)
-        line = re.sub("^[ ]*", "", line)
+        line = re.sub(r"[\n]$", "", line)
+        line = re.sub(r"[ ]*$", "", line)
+        line = re.sub(r"^[ ]*", "", line)
 
         if len(line) == 0: # empty line
           continue
@@ -597,21 +597,21 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
         if section == "general":
           # Look for scalar labels
           if line.find("ColorsNames") > -1:
-            line = re.sub("^ColorsNames[ ]*=[ ]*", "", line)
-            scalarLabels = re.split("\s+",line)
+            line = re.sub(r"^ColorsNames[ ]*=[ ]*", "", line)
+            scalarLabels = re.split(r"\s+",line)
         if section == "vertices":
           # remove line number ("0 =")
-          line = re.sub("[0-9]*[ ]*=[ ]*", "", line)
+          line = re.sub(r"[0-9]*[ ]*=[ ]*", "", line)
           # add "clean" line to string
           verticesText = verticesText+line+'\n'
         if section == "triangles":
-          line = re.sub("[0-9]*[ ]*=[ ]*", "", line)
+          line = re.sub(r"[0-9]*[ ]*=[ ]*", "", line)
           trianglesText = trianglesText+line+'\n'
         if section == "scalars":
-          line = re.sub("[0-9]*[ ]*=[ ]*", "", line)
+          line = re.sub(r"[0-9]*[ ]*=[ ]*", "", line)
           scalarsText = scalarsText+line+'\n'
         if section == "attributes":
-          line = re.sub("[0-9]*[ ]*=[ ]*", "", line)
+          line = re.sub(r"[0-9]*[ ]*=[ ]*", "", line)
           attributesText = attributesText+line+'\n'
 
     verticesLong = self.TextToFloat(verticesText)
@@ -643,7 +643,7 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
     self.addLog("  Read "+str(len(vertices))+" vertices, "+str(len(vertexnormals))+" vertex normals, and "+str(len(triangles))+" triangles.")
     self.addLog("  Read "+str(len(scalarLabels))+" sets of scalars: "+str(scalarLabels)+".")
 
-    meshName = "CARTOmesh_"+re.sub(".mesh$", "", meshName)
+    meshName = "CARTOmesh_"+re.sub(r".mesh$", "", meshName)
     self.addLog("Creating model "+meshName+":")
 
     modelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode')
@@ -670,12 +670,12 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
         if self.abortRequested:
           return False
         # Remove trailing newline and trailing and leading spaces
-        line = re.sub("[\n]$", "", line)
-        line = re.sub("[ ]*$", "", line)
-        line = re.sub("^[ ]*", "", line)
+        line = re.sub(r"[\n]$", "", line)
+        line = re.sub(r"[ ]*$", "", line)
+        line = re.sub(r"^[ ]*", "", line)
         if len(line) == 0: # empty line
           continue
-        lineElements = re.split("[ \t]*", line)
+        lineElements = re.split(r"[ \t]*", line)
         if lineElements[0] == "VERSION_5_0" or lineElements[0] == "VERSION_4_0":
           pointsName = lineElements[1]
         if lineElements[0] == "P":
@@ -693,7 +693,7 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
 
     self.transformCarto(fiducialsNode)
 
-    pointsName = "CARTOpoints_"+re.sub("_car.txt$", "", pointsName)
+    pointsName = "CARTOpoints_"+re.sub(r"_car.txt$", "", pointsName)
     fiducialsNode.SetName(pointsName)
     fiducialsNode.GetMarkupsDisplayNode().SetTextScale(0)
     fiducialsNode.GetMarkupsDisplayNode().SetVisibility(1)
@@ -715,12 +715,12 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
         if self.abortRequested:
           return False
         # Remove trailing newline and trailing and leading spaces
-        line = re.sub("[\n]$", "", line)
-        line = re.sub("[ ]*$", "", line)
-        line = re.sub("^[ ]*", "", line)
+        line = re.sub(r"[\n]$", "", line)
+        line = re.sub(r"[ ]*$", "", line)
+        line = re.sub(r"^[ ]*", "", line)
         if len(line) == 0: # empty line
           continue
-        lineElements = re.split("\s+", line)
+        lineElements = re.split(r"\s+", line)
         if lineElements[0] == "Session" or lineElements[0] == "VERSION_4_0":
           continue
         pointNr = int(lineElements[2])
@@ -987,7 +987,7 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
                                     [0, 0, 1, 0],
                                     [0, 0, 0, 1]]
           if anatomyTransformString != None:
-            anatomyTransformNumbers = re.split("\s+", anatomyTransformString)
+            anatomyTransformNumbers = re.split(r"\s+", anatomyTransformString)
             i = 0
             for row in range(4):
               for col in range(4):
@@ -1111,7 +1111,7 @@ class EAMapReaderLogic(ScriptedLoadableModuleLogic):
                 unnamedCounter += 1
 
             pointXYZ = point.find("xyz").text
-            pointXYZlist = re.split("\s+", pointXYZ)
+            pointXYZlist = re.split(r"\s+", pointXYZ)
             pointsList.append([pointLabel, float(pointXYZlist[0]), float(pointXYZlist[1]),float(pointXYZlist[2])])
 
           if(len(pointsList) > 0):
