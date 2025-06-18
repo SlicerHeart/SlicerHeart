@@ -225,6 +225,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.sequenceBrowserWidget.pushButton_VcrRecord.hide()
         self.ui.sequenceBrowserWidget.pushButton_Snapshot.hide()
 
+        self.setupDicomBrowser()
+
         if self.topLeftWidget:
             self.topLeftWidget.hide()
             self.topLeftWidget.setParent(None)
@@ -236,6 +238,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.bottomLeftWidget.deleteLater()
 
         topLeftButtons = []
+
+        self.dicomBrowserButton = qt.QToolButton()
+        self.dicomBrowserButton.setToolTip("Open DICOM browser")
+        self.dicomBrowserButton.checkable = True
+        self.dicomBrowserButton.connect('clicked(bool)', self.toggleDicomBrowser)
+        topLeftButtons.append(self.dicomBrowserButton)
 
         self.svToggleButton = qt.QToolButton()
         self.svToggleButton.setToolTip("Toggle scene views panel")
@@ -288,21 +296,15 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             if action.isVisible():
                 settingActionVisible = True
                 break
-        # Only show the settings button if there is at least one visible action
-        self.settingsButton.setVisible(settingActionVisible)
 
         if settingActionVisible:
           # Only show the settings button if there is at least one visible action
-          topLeftButtons.append(self.settingsButton)
+          topLeftButtons.append(self.settingsButton)            
 
         buttonSize = 64
-        for button in topLeftButtons:
-            button.setFixedSize(buttonSize, buttonSize)
-
-        centralWidget = slicer.util.mainWindow().centralWidget()
-
         spacing = 3
 
+        centralWidget = slicer.util.mainWindow().centralWidget()
         self.topLeftWidget = OverlayWidget(centralWidget)
         self.topLeftWidget.setObjectName("buttonWidget")
         self.topLeftWidget.corner = OverlayWidget.TopLeft
@@ -310,11 +312,10 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.topLeftWidget.layout().setMargin(0)
         self.topLeftWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
         self.topLeftWidget.layout().setSpacing(spacing)
-        self.topLeftWidget.layout().addWidget(self.svToggleButton)
-        self.topLeftWidget.layout().addWidget(self.measurementsToggleButton)
-        self.topLeftWidget.layout().addWidget(self.crosshairVisibilityButton)
-        self.topLeftWidget.layout().addWidget(self.layoutsButton)
-        self.topLeftWidget.layout().addWidget(self.settingsButton)
+        for button in topLeftButtons:
+            button.setFixedSize(buttonSize, buttonSize)
+            self.topLeftWidget.layout().addWidget(button)
+        self.topLeftWidget.layout().addStretch(1)  # Add stretchable space to the right side
         self.topLeftWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
         self.topLeftWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
         self.topLeftWidget.setAutoFillBackground(False)
@@ -406,6 +407,43 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.blockGUIStateSaver = BlockGUIStateSaver()
         slicer.app.installEventFilter(self.blockGUIStateSaver)
+
+        self.updateButtonVisibility()
+
+    def setupDicomBrowser(self):
+        """
+        Setup the DICOM browser widget and view factory.
+        """
+        self.dicomVisualBrowser = ctk.ctkDICOMVisualBrowserWidget()
+        self.dicomVisualBrowser.findChild(ctk.ctkCollapsibleGroupBox, "ActionsCollapsibleGroupBox").hide()
+        self.dicomVisualBrowser.findChild(ctk.ctkCollapsibleGroupBox, "AdvancedCollapsibleGroupBox").hide()
+        self.dicomVisualBrowser.setDatabaseDirectory(slicer.dicomDatabase.databaseDirectory)
+        self.dicomVisualBrowser.onShowPatients()
+        self.dicomVisualBrowser.seriesRetrieved.connect(self.onSeriesRetrieved)
+
+        self.dicomWidget = qt.QWidget()
+        self.dicomWidget.setLayout(qt.QVBoxLayout())
+        self.dicomWidget.layout().addSpacing(64)
+        self.dicomWidget.layout().addWidget(self.dicomVisualBrowser)
+
+        self.viewFactory = slicer.qSlicerSingletonViewFactory()
+        self.viewFactory.setTagName("visualdicombrowser")
+        self.viewFactory.setWidget(self.dicomWidget)
+        if slicer.app.layoutManager() is not None:
+            slicer.app.layoutManager().registerViewFactory(self.viewFactory)
+        layoutManager = slicer.app.layoutManager()
+        layoutManager.layoutChanged.connect(self.onLayoutChanged)
+        layout = (
+            '<layout type="horizontal">'
+            " <item>"
+            "  <visualdicombrowser></visualdicombrowser>"
+            " </item>"
+            "</layout>"
+        )
+        layoutNode = slicer.app.layoutManager().layoutLogic().GetLayoutNode()
+        self.dicomLayout = slicer.vtkMRMLLayoutNode.SlicerLayoutUserView + slicer.vtkMRMLLayoutNode.SlicerLayoutDicomBrowserView
+        layoutNode.AddLayoutDescription(self.dicomLayout, layout)
+        self.previousViewArrangement = layoutNode.GetViewArrangement()
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -527,6 +565,18 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if oldParameterNode != self._parameterNode:
             self.onParameterNodeModified(None, None)
 
+    def onSeriesRetrieved(self, seriesInstanceUIDs):
+        """
+        Load the series by their instance UIDs.
+        """
+        seriesList = [str(seriesInstanceUID) for seriesInstanceUID in seriesInstanceUIDs]
+        if seriesList is None or not seriesList:
+            return
+
+        from DICOMLib import DICOMUtils
+        DICOMUtils.loadSeriesByUID(seriesList)
+        self.toggleDicomBrowser(False)  # Hide DICOM browser after loading series
+
     def toggleFull3DSlicerInterfaceVisible(self):
         # Toggle the full 3D Slicer interface
         self.setFull3DSlicerInterfaceVisible(not self.getFull3DSlicerInterfaceVisible())
@@ -568,10 +618,42 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.updateApplicationStylesheet()
         self.updateGUIFromMRML()
 
+    def toggleDicomBrowser(self, visible: bool):
+        """
+        Toggle the DICOM browser visibility.
+        """
+        if visible:
+            self.previousViewArrangement = slicer.app.layoutManager().layoutLogic().GetLayoutNode().GetViewArrangement()
+            slicer.app.layoutManager().setLayout(self.dicomLayout)
+        else:
+            # Restore the previous view arrangement
+            slicer.app.layoutManager().setLayout(self.previousViewArrangement)
+        
+        self.dicomBrowserButton.checked = visible
+        self.measurementsToggleButton.checked = False
+        self.svToggleButton.checked = False
+        self.updateSidePanelVisibility()
+        self.updateButtonVisibility()
+
+    def updateButtonVisibility(self):
+        settingActionVisible = False
+        for action in self.settingsMenu.actions():
+            if action.isVisible():
+                settingActionVisible = True
+                break
+        # Only show the settings button if there is at least one visible action
+        self.settingsButton.setVisible(settingActionVisible)
+
+        dicomBrowserVisible = self.dicomBrowserButton.isChecked()
+        self.svToggleButton.visible = not dicomBrowserVisible
+        self.measurementsToggleButton.visible = not dicomBrowserVisible
+        self.crosshairVisibilityButton.visible = not dicomBrowserVisible
+        self.layoutsButton.visible = not dicomBrowserVisible
+        self.settingsButton.visible = settingActionVisible
+
     def toggleSceneViewPanel(self, visible):
         self.measurementsToggleButton.checked = False # BUTTON GROUP
         self.updateSidePanelVisibility()
-
 
     def toggleMeasurementPanel(self, visible):
         self.svToggleButton.checked = False # BUTTON GROUP
@@ -600,6 +682,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.sequenceBrowserWidget.pushButton_VcrNext:      "Icons/SeekNext.svg",
             self.ui.sequenceBrowserWidget.pushButton_VcrLast:      "Icons/SeekLast.svg",
             self.ui.sequenceBrowserWidget.pushButton_VcrLoop:      "Icons/SeekLoop.svg",
+            self.dicomBrowserButton:                               "Icons/Folder.svg",
             self.svToggleButton:                                   "Icons/SceneViews.svg",
             self.measurementsToggleButton:                         "Icons/Measurements.svg",
             self.crosshairVisibilityButton:                        "Icons/Crosshair.svg",
