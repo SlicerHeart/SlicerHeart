@@ -150,3 +150,22 @@ QSlider:sub-page:horizontal:disabled
 {
     background: palette(Dark);
 }
+
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+/* Set the customization for QTabWidget */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+QTabBar::tab
+{
+  background-color: palette(Button);
+  padding: 8px 8px;
+} 
+
+QTabBar::tab:selected
+{
+  background-color: palette(Dark);
+}
+
+QTabBar::tab:hover
+{
+    background-color: palette(MidLight);
+}

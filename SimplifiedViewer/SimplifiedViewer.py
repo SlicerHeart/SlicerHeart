@@ -180,6 +180,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNode = None
         self._parameterNodeGuiTag = None
         self.clippingAvailable = False
+        self.buttonSize = 64
+        self.spacing = 3
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -299,10 +301,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         if settingActionVisible:
           # Only show the settings button if there is at least one visible action
-          topLeftButtons.append(self.settingsButton)            
-
-        buttonSize = 64
-        spacing = 3
+          topLeftButtons.append(self.settingsButton)
 
         centralWidget = slicer.util.mainWindow().centralWidget()
         self.topLeftWidget = OverlayWidget(centralWidget)
@@ -311,17 +310,17 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.topLeftWidget.setLayout(qt.QHBoxLayout())
         self.topLeftWidget.layout().setMargin(0)
         self.topLeftWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
-        self.topLeftWidget.layout().setSpacing(spacing)
+        self.topLeftWidget.layout().setSpacing(self.spacing)
         for button in topLeftButtons:
-            button.setFixedSize(buttonSize, buttonSize)
+            button.setFixedSize(self.buttonSize, self.buttonSize)
             self.topLeftWidget.layout().addWidget(button)
         self.topLeftWidget.layout().addStretch(1)  # Add stretchable space to the right side
         self.topLeftWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
         self.topLeftWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
         self.topLeftWidget.setAutoFillBackground(False)
         self.topLeftWidget.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
-        self.topLeftWidget.setFixedHeight(buttonSize)
-        self.topLeftWidget.setFixedWidth(len(topLeftButtons)*buttonSize + (len(topLeftButtons)-1)*spacing)
+        self.topLeftWidget.setFixedHeight(self.buttonSize)
+        self.topLeftWidget.setFixedWidth(len(topLeftButtons)*self.buttonSize + (len(topLeftButtons)-1)*self.spacing)
         self.topLeftWidget.show()
 
         self.bottomLeftWidget = OverlayWidget(centralWidget)
@@ -330,23 +329,23 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.bottomLeftWidget.setLayout(qt.QVBoxLayout())
         self.bottomLeftWidget.layout().setMargin(0)
         self.bottomLeftWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
-        self.bottomLeftWidget.layout().setSpacing(spacing)
+        self.bottomLeftWidget.layout().setSpacing(self.spacing)
         self.bottomLeftWidget.layout().addWidget(self.ui.sequenceBrowserWidget)
 
         bottomRightButtons = []
         for button in self.ui.sequenceBrowserWidget.findChildren(qt.QAbstractButton):
             if button.isVisibleTo(self.ui.sequenceBrowserWidget):
                 bottomRightButtons.append(button)
-                button.setFixedSize(buttonSize, buttonSize)
+                button.setFixedSize(self.buttonSize, self.buttonSize)
 
-        self.ui.sequenceBrowserSeekWidget.setFixedHeight(buttonSize/2.0)
+        self.ui.sequenceBrowserSeekWidget.setFixedHeight(self.buttonSize/2.0)
         self.bottomLeftWidget.layout().addWidget(self.ui.sequenceBrowserSeekWidget)
         self.bottomLeftWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
         self.bottomLeftWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
         self.bottomLeftWidget.setAutoFillBackground(False)
         self.bottomLeftWidget.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
-        self.bottomLeftWidget.setFixedHeight(buttonSize*1.5 + spacing)
-        self.bottomLeftWidget.setFixedWidth(len(bottomRightButtons)*buttonSize + (len(bottomRightButtons)-1)*spacing)
+        self.bottomLeftWidget.setFixedHeight(self.buttonSize*1.5 + self.spacing)
+        self.bottomLeftWidget.setFixedWidth(len(bottomRightButtons)*self.buttonSize + (len(bottomRightButtons)-1)*self.spacing)
         self.bottomLeftWidget.show()
 
         self.ui.conventionalViewButton.text = ""
@@ -419,11 +418,13 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.dicomVisualBrowser.findChild(ctk.ctkCollapsibleGroupBox, "AdvancedCollapsibleGroupBox").hide()
         self.dicomVisualBrowser.setDatabaseDirectory(slicer.dicomDatabase.databaseDirectory)
         self.dicomVisualBrowser.onShowPatients()
+        self.dicomVisualBrowser.findChild(qt.QToolButton, "patientsTabMenuToolButton").hide()
+        self.dicomVisualBrowser.findChild(qt.QTabWidget, "PatientsTabWidget").setCornerWidget(None, qt.Qt.TopLeftCorner)
         self.dicomVisualBrowser.seriesRetrieved.connect(self.onSeriesRetrieved)
 
         self.dicomWidget = qt.QWidget()
         self.dicomWidget.setLayout(qt.QVBoxLayout())
-        self.dicomWidget.layout().addSpacing(64)
+        self.dicomWidget.layout().addSpacing(self.buttonSize)
         self.dicomWidget.layout().addWidget(self.dicomVisualBrowser)
 
         self.viewFactory = slicer.qSlicerSingletonViewFactory()
@@ -628,7 +629,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         else:
             # Restore the previous view arrangement
             slicer.app.layoutManager().setLayout(self.previousViewArrangement)
-        
+
         self.dicomBrowserButton.checked = visible
         self.measurementsToggleButton.checked = False
         self.svToggleButton.checked = False
@@ -800,9 +801,6 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         Add/Update the buttons shown in the viewer widgets.
         """
-        buttonSize = 64
-        spacing = 3
-
         full3DSlicerInterfaceVisible = self.getFull3DSlicerInterfaceVisible()
         layoutManager = slicer.app.layoutManager()
         layoutNode = layoutManager.layoutLogic().GetLayoutNode()
@@ -820,8 +818,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 overlayWidget.setLayout(qt.QHBoxLayout())
                 overlayWidget.layout().setContentsMargins(qt.QMargins(0,0,0,0))
                 overlayWidget.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
-                overlayWidget.setFixedHeight(64)
-                overlayWidget.layout().setSpacing(spacing)
+                overlayWidget.setFixedHeight(self.buttonSize)
+                overlayWidget.layout().setSpacing(self.spacing)
                 overlayWidget.setAttribute(qt.Qt.WA_NoSystemBackground)
                 overlayWidget.setAttribute(qt.Qt.WA_TranslucentBackground)
                 overlayWidget.setAutoFillBackground(False)
@@ -892,7 +890,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                     elif action.objectName == "clippingPlaneVisibilityAction":
                         action.setChecked(self.logic.getClippingPlaneVisibility())
 
-            overlayWidget.setFixedWidth(len(viewButtons) * buttonSize + (len(viewButtons) - 1) * spacing)
+            overlayWidget.setFixedWidth(len(viewButtons) * self.buttonSize + (len(viewButtons) - 1) * self.spacing)
 
             palette = slicer.app.palette()
             sizePx = 32
@@ -900,7 +898,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             for button in viewButtons:
                 iconPath = viewButtonIconMap[button]
                 icon = self.loadSvg(self.resourcePath(iconPath), sizePx, color)
-                button.setFixedSize(buttonSize, buttonSize)
+                button.setFixedSize(self.buttonSize, self.buttonSize)
                 button.setSizePolicy(qt.QSizePolicy.Fixed, qt.QSizePolicy.Fixed)
                 button.setIcon(icon)
                 button.setIconSize(qt.QSize(sizePx, sizePx))
