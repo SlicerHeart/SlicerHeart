@@ -584,7 +584,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     # Vessel mask is set by segmentation
 
                     # Export mask segment to labelmap node
-                    maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+                    maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "__tmp__Mask labelmap")
                     slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
                     slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
 
@@ -629,6 +629,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
                     maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
                     displacementImageArray[maskImageArray==0, :] = 0
+
+                if maskLabelmapNode:
                     # Clean up
                     slicer.mrmlScene.RemoveNode(maskLabelmapNode)
                     maskLabelmapNode = None
