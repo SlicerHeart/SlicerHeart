@@ -136,6 +136,7 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputMaskSegmentSelectorWidget.connect('currentSegmentChanged(QString)', self.updateParameterNodeFromGUI)
         self.ui.analyzeButton.connect('clicked(bool)', self.onAnalyzeButton)
         self.ui.showFlowMetricsPlotButton.connect('clicked(bool)', self.onShowFlowMetricsPlotButton)
+        self.ui.sequenceRegistrationPushButton.connect('clicked(bool)', self.onSequenceRegistrationPushButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -297,6 +298,13 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         with slicer.util.tryWithErrorDisplay("Failed to create plot."):
             self.logic.createPlotFromTable(self._parameterNode.outputFlowMetricsTable)
 
+    def onSequenceRegistrationPushButton(self) -> None:
+        """
+        Called when the user clicks on the "Sequence registration" button.
+        """
+        with slicer.util.tryWithErrorDisplay("Motion compensation failed."):
+            self.logic.setupSequenceRegistration()
+
 #
 # Analyze4DFlowLogic
 #
@@ -336,6 +344,56 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
     def getParameterNode(self):
         return Analyze4DFlowParameterNode(super().getParameterNode())
+
+    def setupSequenceRegistration(self):
+        if not hasattr(slicer.modules, "sequenceregistration"):
+            raise RuntimeError("'Sequence registration' extension is not installed. Please install it from the Extension Manager.")
+
+        gridTransformNode = self.getParameterNode().inputFlowField
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
+        if not sequenceBrowserNode:
+            raise RuntimeError("Input transform is not in a sequence")
+        
+        segmentationNode = self.getParameterNode().inputMaskSegmentation
+        if not segmentationNode:
+            raise RuntimeError("Input mask segmentation is not set")
+
+        slicer.util.selectModule("SequenceRegistration")
+        sequenceRegistrationGui = slicer.util.getModuleWidget("SequenceRegistration")
+        
+        segmentationTransformNode = segmentationNode.GetParentTransformNode()
+        segmentationTransformSequenceNode = None
+        if segmentationTransformNode:
+            segmentationTransformSequenceNode = sequenceBrowserNode.GetSequenceNode(segmentationTransformNode)
+        if not segmentationTransformNode or not segmentationTransformSequenceNode:
+            # Add transform sequence node for the sequence registration result
+            segmentationTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", segmentationNode.GetName() + " Transform")
+            segmentationTransformSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationTransformNode.GetName() + " Sequence")
+            segmentationTransformSequenceNode.SetIndexType(sequenceBrowserNode.GetMasterSequenceNode().GetIndexType())
+            segmentationTransformSequenceNode.SetIndexName(sequenceBrowserNode.GetMasterSequenceNode().GetIndexName())
+            segmentationTransformSequenceNode.SetIndexUnit(sequenceBrowserNode.GetMasterSequenceNode().GetIndexUnit())
+            slicer.modules.sequences.logic().AddSynchronizedNode(segmentationTransformSequenceNode, segmentationTransformNode, sequenceBrowserNode)
+            sequenceBrowserNode.SetSaveChanges(segmentationTransformSequenceNode, True)
+            sequenceBrowserNode.SetOverwriteProxyName(segmentationTransformSequenceNode, True)
+
+            # Transform the segmentation node with it
+            segmentationNode.SetAndObserveTransformNodeID(segmentationTransformNode.GetID())
+
+        # Set the magnitude volume sequence as input
+        magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+        magnitudeVolumeSequenceNode = sequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
+        sequenceRegistrationGui.inputSelector.setCurrentNode(magnitudeVolumeSequenceNode)
+
+        # No need to generate motion-corrected output volume
+        sequenceRegistrationGui.outputVolumesSelector.setCurrentNode(None)
+
+        # Set the transform sequence node as output
+        sequenceRegistrationGui.outputTransformSelector.setCurrentNode(segmentationTransformSequenceNode)
+
+        # Set registration direction to "fixed frame to moving frames"
+        sequenceRegistrationGui.transformDirectionSelector.currentIndex = 1
+        # Set fixed frame to current frame
+        sequenceRegistrationGui.sequenceFixedItemIndexWidget.value = sequenceBrowserNode.GetSelectedItemNumber()
 
     def _addNodeToSequenceBrowser(self, node, sequenceBrowserNode):
         # Make sure output models are in the same sequence browser as the transform sequence and
@@ -388,6 +446,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         Unwrap the displacement field so that the displacement is continuous across the volume.
         """
         import numpy as np
+
+        if not gridTransformNode:
+            raise ValueError("Input flow field node is invalid")
 
         transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
         if not transformSequenceBrowserNode:
