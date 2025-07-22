@@ -75,7 +75,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
           raise self.AnnulusExportFailed()
         labelNode = createLabelNodeFromVisibleSegments(segNode, valveModel, "Annulus")
         slicer.mrmlScene.RemoveNode(segNode)
-        slicer.util.saveNode(labelNode, os.path.join(self.outputDir, f"{valveModelName}.seg.nrrd"))
+        slicer.util.saveNode(labelNode, os.path.join(self.outputDir, f"{valveModelName}.nii.gz"))
 
 
 def getSegmentationFromAnnulusContourNode(valveModel):

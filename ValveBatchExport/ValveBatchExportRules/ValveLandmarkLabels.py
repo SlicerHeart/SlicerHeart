@@ -86,7 +86,7 @@ class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
       valveType = valveModel.heartValveNode.GetAttribute('ValveType')
       cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
       valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      fileExtension = "seg.nrrd"
+      fileExtension = "nii.gz"
 
       if self.ONE_FILE_PER_LANDMARK:
         lms = []
