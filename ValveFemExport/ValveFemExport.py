@@ -768,8 +768,8 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
         linePoint1Pos = np.zeros(3)
         leafletRegionBoundaryNode.GetNthControlPointPosition(1, linePoint1Pos)
 
-        minDist0Index = (np.Inf, -1)  # Tuple: (distanceMm, controlPointIndex)
-        minDist1Index = (np.Inf, -1)  # Tuple: (distanceMm, controlPointIndex)
+        minDist0Index = (np.inf, -1)  # Tuple: (distanceMm, controlPointIndex)
+        minDist1Index = (np.inf, -1)  # Tuple: (distanceMm, controlPointIndex)
         currentControlPointPos = np.zeros(3)
         for i in range(leafletNURBSSurfaceNode.GetNumberOfControlPoints()):
           leafletNURBSSurfaceNode.GetNthControlPointPosition(i, currentControlPointPos)
