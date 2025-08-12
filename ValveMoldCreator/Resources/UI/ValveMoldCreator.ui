@@ -1,0 +1,798 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ValveMoldCreator</class>
+ <widget class="qMRMLWidget" name="ValveMoldCreator">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>610</width>
+    <height>1282</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QFormLayout" name="formLayout">
+     <property name="sizeConstraint">
+      <enum>QLayout::SetMinimumSize</enum>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="label">
+       <property name="text">
+        <string>Heart valve:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="qMRMLNodeComboBox" name="heartValveSelector">
+       <property name="toolTip">
+        <string>Select heart valve node that will be segmented</string>
+       </property>
+       <property name="nodeTypes">
+        <stringlist>
+         <string>vtkMRMLScriptedModuleNode</string>
+        </stringlist>
+       </property>
+       <property name="showHidden">
+        <bool>true</bool>
+       </property>
+       <property name="showChildNodeTypes">
+        <bool>false</bool>
+       </property>
+       <property name="baseName">
+        <string>HeartValve</string>
+       </property>
+       <property name="noneEnabled">
+        <bool>true</bool>
+       </property>
+       <property name="addEnabled">
+        <bool>false</bool>
+       </property>
+       <property name="removeEnabled">
+        <bool>false</bool>
+       </property>
+       <property name="renameEnabled">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="segmentationEditingCollapsibleButton">
+     <property name="text">
+      <string>Leaflet segmentation</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QFormLayout" name="formLayout_2">
+      <item row="0" column="0" colspan="2">
+       <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget">
+        <property name="segmentationNodeSelectorVisible">
+         <bool>false</bool>
+        </property>
+        <property name="masterVolumeNodeSelectorVisible">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="moldGroupBox">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QGroupBox
+{
+    font-size: 18px;
+    color: #4a9e00;
+}</string>
+     </property>
+     <property name="title">
+      <string>Mold Base</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_3">
+      <item row="1" column="0">
+       <widget class="QLabel" name="baseDepthLabel">
+        <property name="text">
+         <string>Clipping Depth:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkSliderWidget" name="baseDepthSlider">
+        <property name="toolTip">
+         <string>Adjust the depth of the base surface for the mold</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>-20.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>-10.000000000000000</double>
+        </property>
+        <property name="tracking">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="baseMarginLabel">
+        <property name="text">
+         <string>Diameter Margin</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="ctkSliderWidget" name="baseMarginSlider">
+        <property name="singleStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0" colspan="2">
+       <widget class="QPushButton" name="generateMoldButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Run the algorithm.</string>
+        </property>
+        <property name="text">
+         <string>Generate Mold Base</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="coaptationGroupBox">
+     <property name="styleSheet">
+      <string notr="true">QGroupBox
+{
+    font-size: 18px;
+	color: #0fb5f7;
+}</string>
+     </property>
+     <property name="title">
+      <string>Coaptation</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_7">
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="generateCoaptationButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Generate Coaptation Area</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="coaptationWidthLabel">
+        <property name="text">
+         <string>Coaptation Width</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkSliderWidget" name="coaptationWidthSlider">
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>1.600000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="coaptationDistanceThresholdLabel">
+        <property name="text">
+         <string>Leaflet distance threshold</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkSliderWidget" name="coaptationDistanceThresholdSlider">
+        <property name="singleStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="annulusGroupBox">
+     <property name="styleSheet">
+      <string notr="true">QGroupBox
+{
+    font-size: 18px;
+	color: #FB6542;
+}</string>
+     </property>
+     <property name="title">
+      <string>Annulus Projection</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_4">
+      <property name="sizeConstraint">
+       <enum>QLayout::SetDefaultConstraint</enum>
+      </property>
+      <property name="verticalSpacing">
+       <number>3</number>
+      </property>
+      <property name="topMargin">
+       <number>1</number>
+      </property>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Projection Mode</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="annulusProjectionModeCombobox">
+        <item>
+         <property name="text">
+          <string>Vertical Line</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Annulus Centroid</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Closest Point</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="annulusMarginLabel">
+        <property name="text">
+         <string>Diameter Margin</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="ctkSliderWidget" name="annulusMarginSlider">
+        <property name="singleStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>-5.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="0" colspan="2">
+       <widget class="QFrame" name="annulusProjectionButtonFrame">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>200</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+        <layout class="QHBoxLayout" name="horizontalLayout_8">
+         <item>
+          <widget class="QPushButton" name="projectAnnulusButton">
+           <property name="enabled">
+            <bool>true</bool>
+           </property>
+           <property name="text">
+            <string>Project Annulus</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="subtractAnnulusButton">
+           <property name="text">
+            <string>Subtract Annulus</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="annulusOffsetLabel">
+        <property name="text">
+         <string>Projection Offset</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="ctkSliderWidget" name="annulusOffsetSlider">
+        <property name="singleStep">
+         <double>0.050000000000000</double>
+        </property>
+        <property name="pageStep">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="minimum">
+         <double>-5.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>-1.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="0" colspan="2">
+       <widget class="QFrame" name="toggleVisibilityFrame">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+        <layout class="QGridLayout" name="gridLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_9">
+           <property name="text">
+            <string>Toggle Visibility</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QPushButton" name="toggleAnnulusLandmarksButton">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+             <horstretch>1</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="text">
+            <string>Annulus Labels</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QPushButton" name="toggleAnnulusModelButton">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+             <horstretch>1</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="text">
+            <string>Annulus Contour Model</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="hpaGroupBox">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="autoFillBackground">
+      <bool>false</bool>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QGroupBox
+{
+    font-size: 18px;
+	color: #ffea00;
+}</string>
+     </property>
+     <property name="title">
+      <string>Hinge Point Apparatus</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_5">
+      <property name="bottomMargin">
+       <number>1</number>
+      </property>
+      <item row="0" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>1</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="title">
+         <string>Dimensions</string>
+        </property>
+        <property name="collapsed">
+         <bool>false</bool>
+        </property>
+        <layout class="QFormLayout" name="formLayout_6">
+         <item row="1" column="0">
+          <widget class="QLabel" name="hpaLaxOuterDiameterLabel">
+           <property name="text">
+            <string>Long Axis Diameter (Outside)</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkSliderWidget" name="hpaLaxOuterDiameterSlider">
+           <property name="decimals">
+            <number>3</number>
+           </property>
+           <property name="value">
+            <double>78.923000000000002</double>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="hpaLaxInnerDiameterLabel">
+           <property name="text">
+            <string>Long Axis Diameter (Inside)</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="ctkSliderWidget" name="hpaLaxInnerDiameterSlider">
+           <property name="decimals">
+            <number>3</number>
+           </property>
+           <property name="value">
+            <double>68.846999999999994</double>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="hpaSaxOuterDiameterLabel">
+           <property name="text">
+            <string>Short Axis Diameter (Outside)</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="ctkSliderWidget" name="hpaSaxOuterDiameterSlider">
+           <property name="decimals">
+            <number>3</number>
+           </property>
+           <property name="value">
+            <double>58.991999999999997</double>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="hpaSaxInnerDiameterLabel">
+           <property name="text">
+            <string>Short Axis Diameter (Inside)</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="ctkSliderWidget" name="hpaSaxInnerDiameterSlider">
+           <property name="decimals">
+            <number>3</number>
+           </property>
+           <property name="value">
+            <double>48.613000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="1">
+          <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0">
+           <property name="spacing">
+            <number>3</number>
+           </property>
+           <property name="sizeConstraint">
+            <enum>QLayout::SetDefaultConstraint</enum>
+           </property>
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="ctkCheckablePushButton" name="makeHPACircleDimensionsButton">
+             <property name="text">
+              <string>Make Circle!</string>
+             </property>
+             <property name="checkState">
+              <enum>Qt::Checked</enum>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="resetHPADimensionsButton">
+             <property name="text">
+              <string>Reset</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item row="9" column="0" colspan="2">
+          <widget class="QFrame" name="frame">
+           <property name="minimumSize">
+            <size>
+             <width>200</width>
+             <height>100</height>
+            </size>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_2">
+            <item row="1" column="0">
+             <widget class="QLabel" name="hpaTopDistanceLabel">
+              <property name="text">
+               <string>Distance (Top to lowest Annulus point)</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="ctkSliderWidget" name="hpaHeightSlider"/>
+            </item>
+            <item row="0" column="0">
+             <widget class="QLabel" name="hpaHeightLabel">
+              <property name="text">
+               <string>HPA Ring Height</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="ctkSliderWidget" name="hpaMinimumThicknessSlider">
+              <property name="singleStep">
+               <double>0.100000000000000</double>
+              </property>
+              <property name="pageStep">
+               <double>0.100000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>3.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="label_13">
+              <property name="text">
+               <string>Skirt minimum Thickness</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0" colspan="2">
+             <widget class="QPushButton" name="hpaHeightApplyButton">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="toolTipDuration">
+               <number>-1</number>
+              </property>
+              <property name="text">
+               <string>Apply</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="ctkSliderWidget" name="hpaTopDistanceToMinAnnulusSlider">
+              <property name="minimum">
+               <double>5.000000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>50.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <layout class="QGridLayout" name="gridLayout_3">
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <item row="0" column="0">
+         <widget class="QPushButton" name="generateHpaButton">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string>Create HPA</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QPushButton" name="toggleHPAModelButton">
+          <property name="text">
+           <string>Toggle HPA Visibility</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="2">
+         <widget class="QCheckBox" name="useAnnulusProjectionCheckbox">
+          <property name="toolTip">
+           <string>Use the annulus mold projection as the HPA skirt endpoint</string>
+          </property>
+          <property name="text">
+           <string>Use Annulus Mold Projection</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QPushButton" name="addMoldAssemblyButton">
+          <property name="text">
+           <string>Add Mold Assembly</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QPushButton" name="toggleAssemblyModelsButton">
+          <property name="text">
+           <string>Toogle Assembly Visiibility</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QPushButton" name="exportMoldButton">
+        <property name="toolTip">
+         <string>Export mold segmentation node to model.</string>
+        </property>
+        <property name="text">
+         <string>Export to Models</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ctkCheckablePushButton</class>
+   <extends>ctkPushButton</extends>
+   <header>ctkCheckablePushButton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPushButton</class>
+   <extends>QPushButton</extends>
+   <header>ctkPushButton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentEditorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentEditorWidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

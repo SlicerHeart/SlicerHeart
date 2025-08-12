@@ -87,6 +87,7 @@ add_subdirectory(FluoroFlowCalculator)
 add_subdirectory(EAMapReader)
 add_subdirectory(FEBioMeshIO)
 add_subdirectory(PDAQuantification)
+add_subdirectory(ValveMoldCreator)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
