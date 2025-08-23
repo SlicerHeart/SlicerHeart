@@ -252,38 +252,42 @@ class FluoroDeviceBase(CardiacDeviceBase):
     if usePBR:
       import Lights
       lightsLogic = Lights.LightsLogic()
-      # Apply advanced lighting to all view nodes
-      viewNodes = slicer.util.getNodesByClass("vtkMRMLViewNode")
-      for viewNode in viewNodes:
-        # Check if the C-arm is visible in this view and skip the view if it not
-        modelNode = parameterNode.GetNodeReference(models[0][0])
-        if not modelNode.GetDisplayNode().IsDisplayableInView(viewNode.GetID()):
-          continue
-        # Update lighting
+
+
+    # Apply advanced lighting to all view nodes
+    viewNodes = slicer.util.getNodesByClass("vtkMRMLViewNode")
+    for viewNode in viewNodes:
+
+      # Check if the C-arm is visible in this view and skip the view if it not
+      modelNode = parameterNode.GetNodeReference(models[0][0])
+      if not modelNode.GetDisplayNode().IsDisplayableInView(viewNode.GetID()):
+        continue
+
+      if usePBR:
         lightsLogic.addManagedView(viewNode)
-        # Move camera if it is too close to the isocenter
-        cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
-        cameraPos = np.zeros(3)
-        cameraNode.GetPosition(cameraPos)
-        focalPointPos = np.zeros(3)
-        cameraNode.GetFocalPoint(focalPointPos)
-        cameraDistance = np.linalg.norm(cameraPos-focalPointPos)
-        if cameraDistance < 1500:
-          cameraNode.SetPosition(4000, 1500, -80)
-          cameraNode.SetViewUp(0,1,0)
-          cameraNode.ResetClippingRange()
+
+      # Move camera if it is too close to the isocenter
+      cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
+      cameraPos = np.zeros(3)
+      cameraNode.GetPosition(cameraPos)
+      focalPointPos = np.zeros(3)
+      cameraNode.GetFocalPoint(focalPointPos)
+      cameraDistance = np.linalg.norm(cameraPos-focalPointPos)
+      if cameraDistance < 1500:
+        cameraNode.SetPosition(4000, 1500, -80)
+        cameraNode.SetViewUp(0,1,0)
+        cameraNode.ResetClippingRange()
 
       # Enable SSAO
-      lightsLogic.setUseSSAO(True)
-      try:
-        lightsLogic.setAmbientShadowsSizeScale(1.5)
-      except:
-        # Legacy (Slicer-5.6)
-        lightsLogic.setSSAOSizeScaleLog(1.5)
+      viewNode.ShadowsVisibilityOn()
+      viewNode.SetAmbientShadowsSizeScale(1.5)
+
+    if usePBR:
       # Enable image-based lighting
       lightsModuleDir = os.path.dirname(slicer.modules.lights.path)
       mipmapImageFile = os.path.join(lightsModuleDir, 'Resources/hospital_room.jpg')
       lightsLogic.setImageBasedLighting(mipmapImageFile)
+
     # Use PBR interpolation if image-based lighting is available; otherwise use basic Gouraud
     for modelNodeRef, parentTransformNodeRef, forBiplaneOnly in models:
       modelNode = parameterNode.GetNodeReference(modelNodeRef)

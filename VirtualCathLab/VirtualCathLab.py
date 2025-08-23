@@ -117,10 +117,6 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       if child.name == "PresetsLabel" or child.name == "PresetComboBox":
         child.visible = False
 
-    # Display warning if Lights module (provided by Sandbox extension) is not available
-    lightsModuleAvailable = hasattr(slicer.modules, 'lights')
-    self.ui.sandboxExtensionWarningLabel.setVisible(not lightsModuleAvailable)
-
     presets = VirtualCathLabLogic.getVolumeRenderingPresetNames()
     for preset in presets:
       self.ui.volumeRenderingPresetComboBox.addItem(preset, preset)

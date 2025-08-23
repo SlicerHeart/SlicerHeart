@@ -1,11 +1,18 @@
 import vtk, slicer
 from slicer.util import VTKObservationMixin
 import numpy as np
+import qt
 
 class PositionerAngleViewWidget(VTKObservationMixin):
 
   def __init__(self, viewNode, cameraNode):
     super().__init__()
+
+    autoUpdateDelaySec = 0.1
+    self._delayedUpdateTimer = qt.QTimer()
+    self._delayedUpdateTimer.setSingleShot(True)
+    self._delayedUpdateTimer.interval = autoUpdateDelaySec * 1000
+    self._delayedUpdateTimer.connect("timeout()", self.updateFromCameraNode)
 
     self.cornerAnnotationColor = [1,1,0] # yellow
     self.cornerAnnotationFontSize = 24
@@ -62,26 +69,36 @@ class PositionerAngleViewWidget(VTKObservationMixin):
 
   def onCameraNodeModified(self, cameraNode, event=None):
     """
-    Called whenever one of the camera nodes is modified
+    Called whenever one of the camera nodes is modified.
+    Events are compressed to avoid frequent updates (text rendering is slow).
     """
+    self._delayedUpdateTimer.start()
+
+  def updateFromCameraNode(self):
     view = None
     layoutManager = slicer.app.layoutManager()
+
+    # Get widget from view node
+
+    # 3D view
     for threeDViewIndex in range(layoutManager.threeDViewCount):
       currentView = layoutManager.threeDWidget(threeDViewIndex).threeDView()
       if self.viewNode == currentView.mrmlViewNode():
         view = currentView
         break
 
-    for sliceViewName in layoutManager.sliceViewNames():
-      currentView = layoutManager.sliceWidget(sliceViewName).sliceView()
-      if self.viewNode == currentView.mrmlSliceNode():
-        view = currentView
-        break
+    if not view:
+      # Slice view
+      for sliceViewName in layoutManager.sliceViewNames():
+        currentView = layoutManager.sliceWidget(sliceViewName).sliceView()
+        if self.viewNode == currentView.mrmlSliceNode():
+          view = currentView
+          break
 
-    if view is None:
+    if not view:
       return
 
-    viewNormal = np.array(cameraNode.GetCamera().GetDirectionOfProjection())
+    viewNormal = np.array(self.cameraNode.GetCamera().GetDirectionOfProjection())
     viewNormal *= -1.0
     self.updatePositionerAngle(viewNormal, view)
 
