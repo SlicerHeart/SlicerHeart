@@ -88,6 +88,7 @@ add_subdirectory(EAMapReader)
 add_subdirectory(FEBioMeshIO)
 add_subdirectory(PDAQuantification)
 add_subdirectory(ValveMoldCreator)
+add_subdirectory(VirtualCathLab)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
