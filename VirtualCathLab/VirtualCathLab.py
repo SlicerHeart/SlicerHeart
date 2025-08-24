@@ -103,10 +103,10 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.volumeNodeComboBox.setMRMLScene(slicer.mrmlScene)
     self.ui.volumePropertiesCollapsibleGroupBox.visible = False
 
-    self.ui.focalPointPlaceWidget.findChild("ctkColorPickerButton", "ColorButton").visible = False
-    self.ui.focalPointPlaceWidget.deleteAllControlPointsOptionVisible = False
-    self.ui.focalPointPlaceWidget.findChild("QAction", "ActionFixedNumberOfControlPoints").visible = False
-    self.ui.focalPointPlaceWidget.setMRMLScene(slicer.mrmlScene)
+    self.ui.tableCenterPointPlaceWidget.findChild("ctkColorPickerButton", "ColorButton").visible = False
+    self.ui.tableCenterPointPlaceWidget.deleteAllControlPointsOptionVisible = False
+    self.ui.tableCenterPointPlaceWidget.findChild("QAction", "ActionFixedNumberOfControlPoints").visible = False
+    self.ui.tableCenterPointPlaceWidget.setMRMLScene(slicer.mrmlScene)
 
     self.ui.volumeRenderingPresetWidget.setMRMLScene(slicer.mrmlScene)
     self.ui.segmentationComboBox.setMRMLScene(slicer.mrmlScene)
@@ -223,9 +223,9 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.volumeRenderingPresetWidget.setMRMLVolumePropertyNode(volumePropertyNode)
     self.ui.volumeRenderingPresetWidget.blockSignals(False)
 
-    focalPointNode = parameterNode.GetNodeReference(self.logic.FOCAL_POINT_REFERENCE if parameterNode else None)
-    if focalPointNode != self.ui.focalPointPlaceWidget.currentNode():
-      self.ui.focalPointPlaceWidget.setCurrentNode(focalPointNode)
+    tableCenterPointNode = parameterNode.GetNodeReference(self.logic.TABLE_CENTER_POINT_REFERENCE if parameterNode else None)
+    if tableCenterPointNode != self.ui.tableCenterPointPlaceWidget.currentNode():
+      self.ui.tableCenterPointPlaceWidget.setCurrentNode(tableCenterPointNode)
 
     wasBlocking = self.ui.frontalHeightSpinBox.blockSignals(True)
     self.ui.frontalHeightSpinBox.value = int(parameterNode.GetParameter(self.logic.FRONTAL_DETECTOR_HEIGHT_PARAMETER))
@@ -551,7 +551,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
   MODIFIED_VOLUME_REFERENCE = "ModifiedVolume"
   CT_TO_TABLE_TRANSFORM_REFERENCE = "ct-to-table"
   GANTRY_TO_RAS_REFERENCE = "gantry-to-ras"
-  FOCAL_POINT_REFERENCE = "FocalPoint"
+  TABLE_CENTER_POINT_REFERENCE = "TableCenterPoint"
 
   POSITIONING_TRANSFORM_REFERENCE = "PositioningTransform"
   FRONTAL_CAMERA_TRANSFORM_REFERENCE = "frontal-camera-to-frontal-detector"
@@ -652,7 +652,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       self.addObserver(self.parameterNode, vtk.vtkCommand.ModifiedEvent, self.VirtualCathLabWidget.updateGUIFromMRML)
       self.addObserver(self.parameterNode, VirtualCathLabLogic.INPUT_VOLUME_CHANGED_EVENT, lambda caller, event: self.onVolumeNodeChanged())
       self.addObserver(self.parameterNode, VirtualCathLabLogic.VOLUME_RENDERING_PRESET_CHANGED_EVENT, lambda caller, event: self.onPresetChanged())
-      self.updateFocalPointObservers()
+      self.updateTableCenterPointObservers()
       self.onVolumeNodeChanged()
 
   def setDefaultParameters(self, parameterNode):
@@ -663,27 +663,27 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     if not parameterNode.GetParameter(self.SOFT_EDGE_MM_PARAMETER):
       parameterNode.SetParameter(self.SOFT_EDGE_MM_PARAMETER, str(0.0))
 
-  def updateFocalPointObservers(self):
+  def updateTableCenterPointObservers(self):
     """
-    Update observers on the focal point markups node.
+    Update observers on the table center point markups node.
     """
-    self.removeObservers(self.onFocalPointChanged)
+    self.removeObservers(self.onTableCenterPointChanged)
     if self.parameterNode is None:
       return
 
-    focalPointNode = self.getFocalPointNode()
-    if focalPointNode is None:
+    tableCenterPointNode = self.getTableCenterPointNode()
+    if tableCenterPointNode is None:
       return
 
-    self.addObserver(focalPointNode, slicer.vtkMRMLMarkupsNode.PointPositionDefinedEvent, self.onFocalPointChanged)
-    self.addObserver(focalPointNode, slicer.vtkMRMLMarkupsNode.PointPositionUndefinedEvent, self.onFocalPointChanged)
-    self.addObserver(focalPointNode, slicer.vtkMRMLMarkupsNode.PointEndInteractionEvent, self.onFocalPointChanged)
-    self.onFocalPointChanged(focalPointNode)
+    self.addObserver(tableCenterPointNode, slicer.vtkMRMLMarkupsNode.PointPositionDefinedEvent, self.onTableCenterPointChanged)
+    self.addObserver(tableCenterPointNode, slicer.vtkMRMLMarkupsNode.PointPositionUndefinedEvent, self.onTableCenterPointChanged)
+    self.addObserver(tableCenterPointNode, slicer.vtkMRMLMarkupsNode.PointEndInteractionEvent, self.onTableCenterPointChanged)
+    self.onTableCenterPointChanged(tableCenterPointNode)
 
   def updateGantryToRASTransform(self):
     """
     Updates the gantry_to_ras transform to account for the table motion.
-    The focal point of the table coordinate system (0,0,0) should remain aligned with the focal point fiducial position in RAS
+    The table center point of the table coordinate system (0,0,0) should remain aligned with the table center point fiducial position in RAS
     This ensures that that the position of the table remains the same relative to the RAS volume.
     This motion shifts the entire gantry model in RAS.
     """
@@ -699,10 +699,10 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       gantryToRASTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", self.GANTRY_TO_RAS_REFERENCE)
       self.parameterNode.SetNodeReferenceID(self.GANTRY_TO_RAS_REFERENCE, gantryToRASTransformNode.GetID())
 
-    focalPoint_RAS = np.zeros(3)
-    focalPointNode = self.getFocalPointNode()
-    if focalPointNode.GetNumberOfControlPoints() > 0 and focalPointNode.GetNthControlPointPositionStatus(0) == slicer.vtkMRMLMarkupsNode.PositionDefined:
-      focalPoint_RAS = np.array(focalPointNode.GetNthControlPointPositionWorld(0))
+    tableCenterPoint_RAS = np.zeros(3)
+    tableCenterPointNode = self.getTableCenterPointNode()
+    if tableCenterPointNode.GetNumberOfControlPoints() > 0 and tableCenterPointNode.GetNthControlPointPositionStatus(0) == slicer.vtkMRMLMarkupsNode.PositionDefined:
+      tableCenterPoint_RAS = np.array(tableCenterPointNode.GetNthControlPointPositionWorld(0))
 
     gantryToRASMatrix = vtk.vtkMatrix4x4()
     gantryToRASTransformNode.GetMatrixTransformToParent(gantryToRASMatrix)
@@ -710,36 +710,36 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     newGantryToRASTransform = vtk.vtkTransform()
     newGantryToRASTransform.PostMultiply()
     newGantryToRASTransform.Concatenate(gantryToRASMatrix)
-    newGantryToRASTransform.Translate(focalPoint_RAS - tableOrigin_RAS)
+    newGantryToRASTransform.Translate(tableCenterPoint_RAS - tableOrigin_RAS)
     gantryToRASTransformNode.SetMatrixTransformToParent(newGantryToRASTransform.GetMatrix())
 
     positioningTransform = self.parameterNode.GetNodeReference(self.POSITIONING_TRANSFORM_REFERENCE)
     if positioningTransform:
       positioningTransform.SetAndObserveTransformNodeID(gantryToRASTransformNode.GetID())
 
-  def onFocalPointChanged(self, focalPointNode, event=None):
+  def onTableCenterPointChanged(self, tableCenterPointNode, event=None):
     """
-    Called when the position of the focal point fiducial is changed.
+    Called when the position of the table center point fiducial is changed.
     """
     self.updateGantryToRASTransform()
     self.renderToVolume()
 
-  def getFocalPointNode(self):
+  def getTableCenterPointNode(self):
     """
-    Returns the focal point node for the current parameter node.
+    Returns the table center point node for the current parameter node.
     """
     if self.parameterNode is None:
       return None
-    focalPointNode = self.parameterNode.GetNodeReference(self.FOCAL_POINT_REFERENCE)
-    if focalPointNode is None:
-      focalPointNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "FocalPoint")
-      focalPointNode.SetMaximumNumberOfControlPoints(1)
-      focalPointNode.SetRequiredNumberOfControlPoints(1)
-      focalPointNode.SetControlPointLabelFormat("Focal point")
-      focalPointNode.CreateDefaultDisplayNodes()
-      focalPointNode.GetDisplayNode().SetViewNodeIDs(["vtkMRMLViewNode1", "vtkMRMLSliceNodeRed", "vtkMRMLSliceNodeGreen", "vtkMRMLSliceNodeYellow"])
-      self.parameterNode.SetNodeReferenceID(self.FOCAL_POINT_REFERENCE, focalPointNode.GetID())
-    return focalPointNode
+    tableCenterPointNode = self.parameterNode.GetNodeReference(self.TABLE_CENTER_POINT_REFERENCE)
+    if tableCenterPointNode is None:
+      tableCenterPointNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "TableCenterPoint")
+      tableCenterPointNode.SetMaximumNumberOfControlPoints(1)
+      tableCenterPointNode.SetRequiredNumberOfControlPoints(1)
+      tableCenterPointNode.SetControlPointLabelFormat("TableCenter")
+      tableCenterPointNode.CreateDefaultDisplayNodes()
+      tableCenterPointNode.GetDisplayNode().SetViewNodeIDs(["vtkMRMLViewNode1", "vtkMRMLSliceNodeRed", "vtkMRMLSliceNodeGreen", "vtkMRMLSliceNodeYellow"])
+      self.parameterNode.SetNodeReferenceID(self.TABLE_CENTER_POINT_REFERENCE, tableCenterPointNode.GetID())
+    return tableCenterPointNode
 
   def setupDeviceModel(self):
     parameterNode = self.getParameterNode()
@@ -1128,7 +1128,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     cameraViewDirection_RAS = np.array(detectorToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewDirection_Detector))
     cameraViewDirection_RAS = cameraViewDirection_RAS / np.linalg.norm(cameraViewDirection_RAS)
     kAxis_RAS = -cameraViewDirection_RAS
-    focalPoint_RAS = cameraPosition_RAS + cameraViewDirection_RAS * sodMm
+    tableCenterPoint_RAS = cameraPosition_RAS + cameraViewDirection_RAS * sodMm
 
     viewUp_Detector = [0.0, 0.0, 1.0] # View up faces towards +Z direction of camera transform
     jAxis_RAS = np.array(detectorToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewUp_Detector))
@@ -1149,7 +1149,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     detectorVolumeNode.SetSpacing(newSpacing)
     dimensions = detectorVolumeNode.GetImageData().GetDimensions()
 
-    originRAS = focalPoint_RAS
+    originRAS = tableCenterPoint_RAS
     originRAS -= 0.5 * dimensions[0] * newSpacing[0] * iAxis_RAS
     originRAS -= 0.5 * dimensions[1] * newSpacing[1] * jAxis_RAS
     detectorVolumeNode.SetOrigin(originRAS)
@@ -1419,8 +1419,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
 
       viewDirection_Detector = [0.0, 1.0, 0.0] # Look towards +Y direction of camera transform
       viewDirection_RAS = detectorToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewDirection_Detector)
-      focalPoint_RAS = np.array(cameraPosition_RAS) + np.array(viewDirection_RAS) * sourceObjectDistance
-      cameraNode.SetFocalPoint(focalPoint_RAS)
+      tableCenterPoint_RAS = np.array(cameraPosition_RAS) + np.array(viewDirection_RAS) * sourceObjectDistance
+      cameraNode.SetFocalPoint(tableCenterPoint_RAS)
 
       viewUp_Detector = [0.0, 0.0, 1.0] # View up faces towards +Z direction of camera transform
       viewUp_RAS = detectorToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewUp_Detector)
