@@ -1,2 +1,0 @@
-Model,frontalArmAngleL,frontalArmAngleP,frontalArmAngleC,frontalSourceToObjectDistance,frontalSourceToImageDistance,lateralArmAngleP,lateralArmAngleC,lateralArmOffset,lateralSourceToObjectDistance,lateralSourceToImageDistance,tableShiftLongitudinal,tableShiftLateral,tableShiftVertical
-default,0,0,0,720,1100,0,0,0,720,1100,0,0,-100

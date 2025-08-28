@@ -75,6 +75,8 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.logic = VirtualCathLabLogic(self)
     self.logic.moduleName = "VirtualCathLab"
     self.deviceControlshortcuts = []
+    # The GUI is set up for this device class
+    self._currentDeviceClassId = None
 
   def setup(self):
     super(VirtualCathLabWidget, self).setup()
@@ -122,6 +124,8 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       self.ui.volumeRenderingPresetComboBox.addItem(preset, preset)
     self.ui.volumeRenderingPresetComboBox.addItem("CT-X-ray", "CT-X-ray")
 
+    self.ui.deviceModelComboBox.setMRMLScene(slicer.mrmlScene)
+
     self.setupConnections()
 
   def setupConnections(self):
@@ -138,6 +142,11 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.displayROICheckBox.connect("clicked()", self.onDisplayROIClicked)
     self.ui.fitROIToVolumeButton.connect("clicked()", self.onFitROIToVolumeClicked)
     self.ui.softEdgeSlider.connect("valueChanged(double)", self.updateMRMLFromGUI)
+    self.ui.deviceModelComboBox.connect('currentNodeChanged(vtkMRMLNode*)', self.updateMRMLFromGUI)
+    self.ui.deviceModelShowButton.connect("clicked()", self.onDeviceModelShowClicked)
+    self.ui.deviceModelHideButton.connect("clicked()", self.onDeviceModelHideClicked)
+    self.ui.hideAllOtherModelsButton.connect("clicked()", self.onHideAllOtherModelsClicked)
+
 
   def disconnect(self):
     self.ui.volumeNodeComboBox.disconnect('currentNodeChanged(vtkMRMLNode*)', self.updateMRMLFromGUI)
@@ -151,6 +160,10 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.displayROICheckBox.disconnect("clicked()", self.onDisplayROIClicked)
     self.ui.fitROIToVolumeButton.disconnect("clicked()", self.onFitROIToVolumeClicked)
     self.ui.softEdgeSlider.disconnect("valueChanged(double)", self.updateMRMLFromGUI)
+    self.ui.deviceModelComboBox.disconnect('currentNodeChanged(vtkMRMLNode*)', self.updateMRMLFromGUI)
+    self.ui.deviceModelShowButton.disconnect("clicked()", self.onDeviceModelShowClicked)
+    self.ui.deviceModelHideButton.disconnect("clicked()", self.onDeviceModelHideClicked)
+    self.ui.hideAllOtherModelsButton.disconnect("clicked()", self.onHideAllOtherModelsClicked)
 
   def cleanup(self):
     self.removeDeviceControlShortcutKeys()
@@ -182,6 +195,12 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
 
       softEdgeMm = self.ui.softEdgeSlider.value
       parameterNode.SetParameter(self.logic.SOFT_EDGE_MM_PARAMETER, str(softEdgeMm))
+
+      inputDeviceModelNode = self.ui.deviceModelComboBox.currentNode()
+      oldDeviceModelNode = parameterNode.GetNodeReference(self.logic.INPUT_DEVICE_MODEL_REFERENCE)
+      parameterNode.SetNodeReferenceID(self.logic.INPUT_DEVICE_MODEL_REFERENCE, inputDeviceModelNode.GetID() if inputDeviceModelNode else None)
+      if inputDeviceModelNode != oldDeviceModelNode:
+        parameterNode.InvokeCustomModifiedEvent(VirtualCathLabLogic.INPUT_DEVICE_MODEL_CHANGED_EVENT)
 
   def updateGUIFromMRML(self, caller=None, event=None):
     """
@@ -268,6 +287,29 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
 
     self.ui.fitROIToVolumeButton.enabled = roiNode is not None
 
+    deviceClassId = parameterNode.GetParameter('DeviceClassId')
+    if deviceClassId and deviceClassId != self._currentDeviceClassId:
+        self._currentDeviceClassId = deviceClassId
+        # Hide fluoro nodes from input volume node selector
+        alreadyHiddenNodeIds = self.ui.volumeNodeComboBox.sortFilterProxyModel().hiddenNodeIDs
+        nodeIdsToHide = [node.GetID() for node in [self.logic.getFrontalCArmVolumeNode(), self.logic.getLateralCArmVolumeNode()] if node]
+        if tuple(alreadyHiddenNodeIds) != tuple(nodeIdsToHide):
+          self.ui.volumeNodeComboBox.sortFilterProxyModel().hiddenNodeIDs = nodeIdsToHide
+
+        # Hide C-arm model nodes from model node selectors
+        nodeIdsToHide = []
+        for i in range(parameterNode.GetNumberOfNodeReferenceRoles()):
+          referenceRole = parameterNode.GetNthNodeReferenceRole(i)
+          if referenceRole.startswith("frontal-") or referenceRole.startswith("lateral-") or referenceRole.startswith("table-") or referenceRole == "OriginalModel" or referenceRole == "DeformedModel":
+            referencedNode = parameterNode.GetNodeReference(referenceRole)
+            if referencedNode and referencedNode.IsA("vtkMRMLModelNode"):
+              nodeIdsToHide.append(referencedNode.GetID())
+        for modelSelectorComboBox in [self.ui.deviceModelComboBox, self.ui.segmentationComboBox]:
+          alreadyHiddenNodeIds = modelSelectorComboBox.sortFilterProxyModel().hiddenNodeIDs
+          if tuple(alreadyHiddenNodeIds) != tuple(nodeIdsToHide):
+            modelSelectorComboBox.sortFilterProxyModel().hiddenNodeIDs = nodeIdsToHide
+
+
   def onImageSpinBoxChanged(self):
     self.updateMRMLFromGUI()
     self.logic.renderToVolume()
@@ -317,6 +359,15 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
 
   def onFitROIToVolumeClicked(self):
     self.logic.fitROINodeToVolume()
+
+  def onDeviceModelShowClicked(self):
+    self.logic.setDeviceModelVisibilityInFluoro(True)
+
+  def onDeviceModelHideClicked(self):
+    self.logic.setDeviceModelVisibilityInFluoro(False)
+
+  def onHideAllOtherModelsClicked(self):
+    self.logic.hideAllNonDeviceModelsInFluoro()
 
   def installDeviceControlShortcutKeys(self):
     logging.debug('installShortcutKeys: '+str(type(self)))
@@ -540,6 +591,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
 
   INPUT_VOLUME_CHANGED_EVENT = 20500
   VOLUME_RENDERING_PRESET_CHANGED_EVENT = 20501
+  INPUT_DEVICE_MODEL_CHANGED_EVENT = 20502
 
   VOLUME_RENDERING_ROLE_ATTRIBUTE_NAME = "VolumeRenderingRole"
   VOLUME_RENDERING_ROLE_CT_HIGH_CONTRAST = "CTHighContrast"
@@ -552,6 +604,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
   CT_TO_TABLE_TRANSFORM_REFERENCE = "ct-to-table"
   GANTRY_TO_RAS_REFERENCE = "gantry-to-ras"
   TABLE_CENTER_POINT_REFERENCE = "TableCenterPoint"
+  INPUT_DEVICE_MODEL_REFERENCE = "InputDeviceModel"
 
   POSITIONING_TRANSFORM_REFERENCE = "PositioningTransform"
   FRONTAL_CAMERA_TRANSFORM_REFERENCE = "frontal-camera-to-frontal-detector"
@@ -640,6 +693,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       self.removeObserver(self.parameterNode, CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, lambda caller, event: self.computeCenterline())
       self.removeObserver(self.parameterNode, VirtualCathLabLogic.INPUT_VOLUME_CHANGED_EVENT, lambda caller, event: self.onVolumeNodeChanged())
       self.removeObserver(self.parameterNode, VirtualCathLabLogic.VOLUME_RENDERING_PRESET_CHANGED_EVENT, lambda caller, event: self.onPresetChanged())
+      self.removeObserver(self.parameterNode, VirtualCathLabLogic.INPUT_DEVICE_MODEL_CHANGED_EVENT, lambda caller, event: self.onDeviceModelChanged())
 
     # Set parameter node in base class (and set parameter node member variable)
     CardiacDeviceSimulatorLogic.setParameterNode(self, parameterNode)
@@ -652,8 +706,10 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       self.addObserver(self.parameterNode, vtk.vtkCommand.ModifiedEvent, self.VirtualCathLabWidget.updateGUIFromMRML)
       self.addObserver(self.parameterNode, VirtualCathLabLogic.INPUT_VOLUME_CHANGED_EVENT, lambda caller, event: self.onVolumeNodeChanged())
       self.addObserver(self.parameterNode, VirtualCathLabLogic.VOLUME_RENDERING_PRESET_CHANGED_EVENT, lambda caller, event: self.onPresetChanged())
+      self.addObserver(self.parameterNode, VirtualCathLabLogic.INPUT_DEVICE_MODEL_CHANGED_EVENT, lambda caller, event: self.onDeviceModelChanged())
       self.updateTableCenterPointObservers()
       self.onVolumeNodeChanged()
+      self.onDeviceModelChanged()
 
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter(self.FRONTAL_DETECTOR_HEIGHT_PARAMETER):
@@ -703,6 +759,13 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     tableCenterPointNode = self.getTableCenterPointNode()
     if tableCenterPointNode.GetNumberOfControlPoints() > 0 and tableCenterPointNode.GetNthControlPointPositionStatus(0) == slicer.vtkMRMLMarkupsNode.PositionDefined:
       tableCenterPoint_RAS = np.array(tableCenterPointNode.GetNthControlPointPositionWorld(0))
+    elif self.getInputVolumeNode():
+      # Get posterior side of the volume to the table
+      # (the table is usually near the center of the CT bore, but somewhat lower)
+      volumeNode = self.getInputVolumeNode()
+      volumeBounds = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      volumeNode.GetRASBounds(volumeBounds)
+      tableCenterPoint_RAS = np.array([(volumeBounds[0] + volumeBounds[1]) / 2.0, volumeBounds[2] * 0.8 + volumeBounds[3] * 0.2, (volumeBounds[4] + volumeBounds[5]) / 2.0, ])
 
     gantryToRASMatrix = vtk.vtkMatrix4x4()
     gantryToRASTransformNode.GetMatrixTransformToParent(gantryToRASMatrix)
@@ -783,8 +846,27 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     inputVolume = self.getInputVolumeNode()
     if inputVolume:
       self.addObserver(inputVolume, slicer.vtkMRMLScalarVolumeNode.ImageDataModifiedEvent , self.onVolumeNodeModified)
+      # Show the volume in the slice views
+      self.resetSliceViews(True)
+      # Update the default table position based on the volume
+      self.updateModel()
+
+  def onDeviceModelChanged(self):
+    """
+    Called when the input device model node is changed
+    """
+    self.updateVolumeRendering()
+    self.removeObservers(self.onDeviceModelModified)
+    inputDeviceModel = self.getInputDeviceModelNode()
+    if inputDeviceModel:
+      self.addObserver(inputDeviceModel, slicer.vtkMRMLModelNode.MeshModifiedEvent, self.onDeviceModelModified)
+      self.addObserver(inputDeviceModel, slicer.vtkMRMLDisplayableNode.DisplayModifiedEvent, self.onDeviceModelModified)
+      self.addObserver(inputDeviceModel, slicer.vtkMRMLTransformableNode.TransformModifiedEvent, self.onDeviceModelModified)
 
   def onVolumeNodeModified(self, caller=None, event=None):
+    self.renderToVolume()
+
+  def onDeviceModelModified(self, caller=None, event=None):
     self.renderToVolume()
 
   def onPresetChanged(self):
@@ -1082,7 +1164,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         filterOutput.SetOutput(outputImageData)
         filterOutput.Update()
 
-        widget.resize(oldSize)
+        # Disable, as constantly changing the render window size might be slow
+        # widget.resize(oldSize)
         slicer.util.arrayFromVolumeModified(volumeNode)
 
         with slicer.util.RenderBlocker():
@@ -1157,12 +1240,20 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     layoutManager = slicer.app.layoutManager()
     sliceWidget = layoutManager.sliceWidget(f"{threeDViewNode.GetSingletonTag()}Slice")
     sliceNode = sliceWidget.mrmlSliceNode()
-    sliceNode.RemoveAllThreeDViewIDs()
-    sliceNode.AddThreeDViewID("vtkMRMLViewNode1")
+
+    resliceInitialized = bool(sliceNode.GetAttribute("VirtualCathLab.ResliceInitialized"))
+
+    volumeResliceDriverLogic = slicer.modules.volumereslicedriver.logic()
+
+    if not resliceInitialized:
+      sliceNode.RemoveAllThreeDViewIDs()
+      sliceNode.AddThreeDViewID("vtkMRMLViewNode1")
+      sliceNode.SetAttribute("VirtualCathLab.ResliceInitialized", "true")
+      volumeResliceDriverLogic.SetDriverForSlice(detectorVolumeNode.GetID(), sliceNode)
+      volumeResliceDriverLogic.SetModeForSlice(volumeResliceDriverLogic.MODE_TRANSVERSE, sliceNode)
 
     if singletonTag == self.C_ARM_LATERAL_VIEW_NAME:
       # If camera is looking towards -Z direction, flip the view direction to +Z
-      volumeResliceDriverLogic = slicer.modules.volumereslicedriver.logic()
       volumeResliceDriverLogic.SetFlipForSlice(jAxis_RAS[2] < 0.0, sliceNode)
 
     oldFov = sliceNode.GetFieldOfView()
@@ -1172,12 +1263,10 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       newFov[i] = oldFov[i] * fovScale
     sliceNode.SetFieldOfView(newFov[0], newFov[1], newFov[2])
 
-    volumeResliceDriverLogic = slicer.modules.volumereslicedriver.logic()
-    volumeResliceDriverLogic.SetDriverForSlice(detectorVolumeNode.GetID(), sliceNode)
-    volumeResliceDriverLogic.SetModeForSlice(volumeResliceDriverLogic.MODE_TRANSVERSE, sliceNode)
-    if singletonTag == self.C_ARM_FRONTAL_VIEW_NAME:
-      volumeResliceDriverLogic.SetFlipForSlice(True, sliceNode)
-      volumeResliceDriverLogic.SetRotationForSlice(-180, sliceNode)
+    if not resliceInitialized:
+      if singletonTag == self.C_ARM_FRONTAL_VIEW_NAME:
+        volumeResliceDriverLogic.SetFlipForSlice(True, sliceNode)
+        volumeResliceDriverLogic.SetRotationForSlice(-180, sliceNode)
 
   def resetSliceViews(self, fitSliceToVolume=True):
     """
@@ -1225,6 +1314,11 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     if self.parameterNode is None:
       return None
     return self.parameterNode.GetNodeReference(self.INPUT_VOLUME_REFERENCE)
+
+  def getInputDeviceModelNode(self):
+    if self.parameterNode is None:
+      return None
+    return self.parameterNode.GetNodeReference(self.INPUT_DEVICE_MODEL_REFERENCE)
 
   def getModifiedVolumeNode(self):
     if self.parameterNode is None:
@@ -1522,4 +1616,55 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         if not displayNode or not displayNode.IsA("vtkMRMLVolumeRenderingDisplayNode"):
           continue
         volumeRenderingLogic.FitROIToVolume(displayNode)
+    self.renderToVolume()
+
+  def _showModelInFluoroViews(self, modelNode, show):
+    if not modelNode:
+      return
+    if slicer.vtkMRMLSliceLogic.IsSliceModelNode(modelNode):
+      return
+    displayNode = modelNode.GetDisplayNode()
+    if not displayNode:
+      return
+
+    currentViewNodeIDs = list(displayNode.GetViewNodeIDs())
+
+    if not currentViewNodeIDs:
+      viewNodes3d = slicer.util.getNodesByClass("vtkMRMLViewNode")
+      viewNodes2d = slicer.util.getNodesByClass("vtkMRMLSliceNode")
+      currentViewNodeIDs = [viewNode.GetID() for viewNode in viewNodes3d + viewNodes2d]
+
+    # Always remove from fluoro slice views
+    _viewNodesToExclude = [slicer.mrmlScene.GetSingletonNode(self.C_ARM_FRONTAL_SLICE_VIEW_NAME, "vtkMRMLSliceNode"),
+                          slicer.mrmlScene.GetSingletonNode(self.C_ARM_LATERAL_SLICE_VIEW_NAME, "vtkMRMLSliceNode")]
+    viewNodeIDsToExclude = [viewNode.GetID() for viewNode in _viewNodesToExclude if viewNode]
+
+    # Exclude from render views if requested
+    _rendererViews = [slicer.mrmlScene.GetSingletonNode(self.C_ARM_FRONTAL_VIEW_NAME, "vtkMRMLViewNode"),
+                      slicer.mrmlScene.GetSingletonNode(self.C_ARM_LATERAL_VIEW_NAME, "vtkMRMLViewNode")]
+    rendererViewIDs = [rendererView.GetID() for rendererView in _rendererViews if rendererView]
+
+    if show:
+      # Add renderer view IDs to current views (if not in current views already)
+      for rendererViewID in rendererViewIDs:
+        if rendererViewID not in currentViewNodeIDs:
+          currentViewNodeIDs.append(rendererViewID)
+    else:
+      # Add renderer view IDs to exclude from current views
+      viewNodeIDsToExclude += rendererViewIDs
+
+    currentViewNodeIDs = [viewID for viewID in currentViewNodeIDs if viewID not in viewNodeIDsToExclude]
+    displayNode.SetViewNodeIDs(currentViewNodeIDs)
+
+  def setDeviceModelVisibilityInFluoro(self, visible):
+    deviceModelNode = self.getInputDeviceModelNode()
+    self._showModelInFluoroViews(deviceModelNode, visible)
+    self.renderToVolume()
+
+  def hideAllNonDeviceModelsInFluoro(self):
+    deviceModelNode = self.getInputDeviceModelNode()
+    for model in slicer.util.getNodesByClass("vtkMRMLModelNode"):
+      if model == deviceModelNode:
+        continue
+      self._showModelInFluoroViews(model, False)
     self.renderToVolume()

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>496</width>
-    <height>433</height>
+    <width>511</width>
+    <height>601</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -26,29 +26,178 @@
    <property name="bottomMargin">
     <number>0</number>
    </property>
-   <item row="2" column="0">
-    <widget class="QLabel" name="label_3">
+   <item row="9" column="0" colspan="4">
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton_3">
      <property name="text">
-      <string>Fluoro render preset:</string>
+      <string>Fluoroscopy simulation</string>
      </property>
+     <layout class="QGridLayout" name="gridLayout_4">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Volume node:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_3">
+        <property name="text">
+         <string>Fluoro render preset:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="3">
+       <widget class="QCheckBox" name="displayROICheckBox">
+        <property name="text">
+         <string>Display ROI</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1" colspan="4">
+       <widget class="QComboBox" name="volumeRenderingPresetComboBox"/>
+      </item>
+      <item row="5" column="1" colspan="4">
+       <widget class="QSpinBox" name="lateralHeightSpinBox">
+        <property name="suffix">
+         <string> px</string>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>5000</number>
+        </property>
+        <property name="value">
+         <number>470</number>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="lateralImageSizeLabel">
+        <property name="text">
+         <string>Lateral image height:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_7">
+        <property name="text">
+         <string>Crop:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1" colspan="4">
+       <widget class="qMRMLNodeComboBox" name="volumeNodeComboBox">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="frontalImageSizeLabel">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Frontal image height:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1" colspan="4">
+       <widget class="qSlicerVolumeRenderingPresetComboBox" name="volumeRenderingPresetWidget"/>
+      </item>
+      <item row="4" column="1" colspan="4">
+       <widget class="QSpinBox" name="frontalHeightSpinBox">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="suffix">
+         <string> px</string>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>5000</number>
+        </property>
+        <property name="value">
+         <number>800</number>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1" colspan="4">
+       <widget class="ctkCollapsibleGroupBox" name="volumePropertiesCollapsibleGroupBox">
+        <property name="title">
+         <string>Volume properties</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout">
+         <item>
+          <widget class="qMRMLVolumePropertyNodeWidget" name="volumePropertyNodeWidget"/>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="qMRMLNodeComboBox" name="roiNodeSelector">
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLMarkupsROINode</string>
+         </stringlist>
+        </property>
+        <property name="hideChildNodeTypes">
+         <stringlist notr="true"/>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="interactionNodeSingletonTag">
+         <string notr="true"/>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="2">
+       <widget class="QCheckBox" name="enableCropCheckBox">
+        <property name="text">
+         <string>Enable</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="4">
+       <widget class="QPushButton" name="fitROIToVolumeButton">
+        <property name="text">
+         <string>Fit to Volume</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </widget>
    </item>
-   <item row="9" column="0" colspan="4">
+   <item row="10" column="0" colspan="4">
     <widget class="ctkCollapsibleButton" name="CollapsibleButton">
      <property name="text">
       <string>Virtual contrast filling</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2">
-      <item row="0" column="1" colspan="2">
-       <widget class="qMRMLNodeComboBox" name="segmentationComboBox">
-        <property name="nodeTypes">
-         <stringlist>
-          <string>vtkMRMLSegmentationNode</string>
-          <string>vtkMRMLModelNode</string>
-         </stringlist>
-        </property>
-       </widget>
-      </item>
       <item row="1" column="1" colspan="2">
        <widget class="ctkDoubleSpinBox" name="segmentationReplaceValueSpinBox">
         <property name="suffix">
@@ -65,16 +214,10 @@
         </property>
        </widget>
       </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_4">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_8">
         <property name="text">
-         <string>Segmentation / Model:</string>
+         <string>Soft edge distance:</string>
         </property>
        </widget>
       </item>
@@ -82,13 +225,6 @@
        <widget class="QPushButton" name="resetSegmentationButton">
         <property name="text">
          <string>Reset</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="2">
-       <widget class="QPushButton" name="applySegmentationButton">
-        <property name="text">
-         <string>Apply</string>
         </property>
        </widget>
       </item>
@@ -105,10 +241,16 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_8">
-        <property name="text">
-         <string>Soft edge distance:</string>
+      <item row="0" column="1" colspan="2">
+       <widget class="qMRMLNodeComboBox" name="segmentationComboBox">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLSegmentationNode</string>
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
@@ -122,110 +264,44 @@
         </property>
        </widget>
       </item>
-     </layout>
-    </widget>
-   </item>
-   <item row="4" column="1" colspan="3">
-    <widget class="ctkCollapsibleGroupBox" name="volumePropertiesCollapsibleGroupBox">
-     <property name="title">
-      <string>Volume properties</string>
-     </property>
-     <property name="collapsed">
-      <bool>true</bool>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout">
-      <item>
-       <widget class="qMRMLVolumePropertyNodeWidget" name="volumePropertyNodeWidget"/>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_4">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Segmentation / Model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="2">
+       <widget class="QPushButton" name="applySegmentationButton">
+        <property name="text">
+         <string>Apply</string>
+        </property>
+       </widget>
       </item>
      </layout>
-    </widget>
-   </item>
-   <item row="8" column="1">
-    <widget class="QCheckBox" name="enableCropCheckBox">
-     <property name="text">
-      <string>Enable</string>
-     </property>
-    </widget>
-   </item>
-   <item row="7" column="1" colspan="3">
-    <widget class="qMRMLNodeComboBox" name="roiNodeSelector">
-     <property name="nodeTypes">
-      <stringlist notr="true">
-       <string>vtkMRMLMarkupsROINode</string>
-      </stringlist>
-     </property>
-     <property name="hideChildNodeTypes">
-      <stringlist notr="true"/>
-     </property>
-     <property name="noneEnabled">
-      <bool>true</bool>
-     </property>
-     <property name="interactionNodeSingletonTag">
-      <string notr="true"/>
-     </property>
-    </widget>
-   </item>
-   <item row="3" column="1" colspan="3">
-    <widget class="qSlicerVolumeRenderingPresetComboBox" name="volumeRenderingPresetWidget"/>
-   </item>
-   <item row="8" column="2">
-    <widget class="QCheckBox" name="displayROICheckBox">
-     <property name="text">
-      <string>Display ROI</string>
-     </property>
-    </widget>
-   </item>
-   <item row="6" column="0">
-    <widget class="QLabel" name="lateralImageSizeLabel">
-     <property name="text">
-      <string>Lateral image height:</string>
-     </property>
-    </widget>
-   </item>
-   <item row="5" column="0">
-    <widget class="QLabel" name="frontalImageSizeLabel">
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-       <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
-      </sizepolicy>
-     </property>
-     <property name="text">
-      <string>Frontal image height:</string>
-     </property>
     </widget>
    </item>
    <item row="1" column="1" colspan="3">
     <widget class="qSlicerMarkupsPlaceWidget" name="tableCenterPointPlaceWidget"/>
    </item>
-   <item row="5" column="1" colspan="3">
-    <widget class="QSpinBox" name="frontalHeightSpinBox">
-     <property name="minimumSize">
+   <item row="12" column="0">
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
       <size>
-       <width>0</width>
-       <height>0</height>
+       <width>20</width>
+       <height>40</height>
       </size>
      </property>
-     <property name="suffix">
-      <string> px</string>
-     </property>
-     <property name="minimum">
-      <number>1</number>
-     </property>
-     <property name="maximum">
-      <number>5000</number>
-     </property>
-     <property name="value">
-      <number>800</number>
-     </property>
-    </widget>
-   </item>
-   <item row="8" column="0">
-    <widget class="QLabel" name="label_7">
-     <property name="text">
-      <string>Crop:</string>
-     </property>
-    </widget>
+    </spacer>
    </item>
    <item row="1" column="0">
     <widget class="QLabel" name="label_2">
@@ -234,62 +310,81 @@
      </property>
     </widget>
    </item>
-   <item row="2" column="1" colspan="3">
-    <widget class="QComboBox" name="volumeRenderingPresetComboBox"/>
-   </item>
-   <item row="8" column="3">
-    <widget class="QPushButton" name="fitROIToVolumeButton">
+   <item row="11" column="0" colspan="4">
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton_2">
      <property name="text">
-      <string>Fit to Volume</string>
+      <string>Cardiovascular devices</string>
      </property>
-    </widget>
-   </item>
-   <item row="0" column="0">
-    <widget class="QLabel" name="label">
-     <property name="text">
-      <string>Volume node:</string>
-     </property>
-    </widget>
-   </item>
-   <item row="0" column="1" colspan="3">
-    <widget class="qMRMLNodeComboBox" name="volumeNodeComboBox">
-     <property name="nodeTypes">
-      <stringlist>
-       <string>vtkMRMLVolumeNode</string>
-      </stringlist>
-     </property>
-     <property name="noneEnabled">
-      <bool>true</bool>
-     </property>
-     <property name="addEnabled">
-      <bool>false</bool>
-     </property>
-     <property name="removeEnabled">
-      <bool>false</bool>
-     </property>
-    </widget>
-   </item>
-   <item row="7" column="0">
-    <widget class="QLabel" name="label_6">
-     <property name="text">
-      <string>ROI node:</string>
-     </property>
-    </widget>
-   </item>
-   <item row="6" column="1" colspan="3">
-    <widget class="QSpinBox" name="lateralHeightSpinBox">
-     <property name="suffix">
-      <string> px</string>
-     </property>
-     <property name="minimum">
-      <number>1</number>
-     </property>
-     <property name="maximum">
-      <number>5000</number>
-     </property>
-     <property name="value">
-      <number>470</number>
-     </property>
+     <layout class="QGridLayout" name="gridLayout_3">
+      <item row="0" column="3">
+       <widget class="QPushButton" name="deviceModelHideButton">
+        <property name="text">
+         <string>Hide</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1" colspan="3">
+       <widget class="QPushButton" name="hideAllOtherModelsButton">
+        <property name="text">
+         <string>Hide All</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_9">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Other models:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="deviceModelComboBox">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <widget class="QPushButton" name="deviceModelShowButton">
+        <property name="text">
+         <string>Show</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </widget>
    </item>
   </layout>

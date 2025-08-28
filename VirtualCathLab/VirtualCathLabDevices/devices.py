@@ -12,8 +12,8 @@ from CardiacDeviceSimulatorUtils.devices import CardiacDeviceBase
 #
 class FluoroDeviceBase(CardiacDeviceBase):
 
-  NAME = "GenericValveClip"
-  ID = "GenericValveClip"
+  #NAME = "GenericValveClip"
+  #ID = "GenericValveClip"
   RESOURCES_PATH = os.path.join(os.path.dirname(__file__), "..",  "Resources")
 
   PARAMETER_NODE = None
@@ -71,7 +71,7 @@ class FluoroDeviceBase(CardiacDeviceBase):
     return {
       "tableShiftLateral": cls._genParameters("Table transverse:", "Table pan in supine patient's left/right direction, positive = left", 0, "mm", -80, 80, 5.0, 1),
       "tableShiftLongitudinal": cls._genParameters("Table longitudinal:", "Table pan in supine patient's superior/inferior direction, positive = inferior", 0, "mm", -1000, 500, 5.0, 1),
-      "tableShiftVertical": cls._genParameters("Table height:", "Table raise, zero = tabletop at isocenter, positive = higher", -30, "mm", -300, 10, 5.0, 1),
+      "tableShiftVertical": cls._genParameters("Table height:", "Table raise, zero = tabletop at isocenter, positive = higher", -145, "mm", -300, 10, 5.0, 1),
     }
 
   @classmethod
