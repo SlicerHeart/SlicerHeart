@@ -75,6 +75,8 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     self.deviceWidgets = []
     self.logic = CardiacDeviceSimulatorLogic()
     self.setupSuccessful = False
+    self._parameterNode = None
+    self._parameterNodeObserverTag = None
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -146,6 +148,7 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
   def cleanup(self):
     for deviceWidget in self.deviceWidgets:
       deviceWidget.cleanup()
+    self._observeParameterNode(None)
 
   def enter(self):
     """Runs whenever the module is reopened
@@ -160,7 +163,18 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
     for deviceWidget in self.deviceWidgets:
       deviceWidget.exit()
 
+  def _observeParameterNode(self, parameterNode):
+    if self.parameterNodeSelector.currentNode() == self._parameterNode:
+      return
+    if self._parameterNode and self._parameterNodeObserverTag:
+      self._parameterNode.RemoveObserver(self._parameterNodeObserverTag)
+      self._parameterNodeObserverTag = None
+    if parameterNode:
+      self._parameterNode = parameterNode
+      self._parameterNodeObserverTag = self._parameterNode.AddObserver(CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, self.onDeviceClassModified)
+
   def onParameterNodeSelectionChanged(self):
+    self._observeParameterNode(self.parameterNodeSelector.currentNode())
     self.logic.setParameterNode(self.parameterNodeSelector.currentNode())
     for deviceWidget in self.deviceWidgets:
       deviceWidget.setParameterNode(self.logic.parameterNode)
@@ -173,6 +187,10 @@ class CardiacDeviceSimulatorWidget(ScriptedLoadableModuleWidget):
       if guiSection is self.deviceSelectorWidget:
         continue
       guiSection.enabled = guiEnabled
+
+  def onDeviceClassModified(self, caller, event):
+    # Used in derived classes
+    pass
 
   def onDevicePositioningToggled(self, toggled):
     transformNode = self.logic.parameterNode.GetNodeReference('PositioningTransform')
@@ -454,6 +472,14 @@ class CardiacDeviceSimulatorLogic(VTKObservationMixin, ScriptedLoadableModuleLog
     self.addObserver(self.parameterNode, CardiacDeviceBase.DEVICE_PARAMETER_VALUE_MODIFIED_EVENT, self.onDeviceParameterValueModified)
 
   def onDeviceClassModified(self, caller=None, event=None):
+    deviceClass = self.getDeviceClass()
+    if deviceClass:
+      originalModel = self.parameterNode.GetNodeReference('OriginalModel')
+      if originalModel:
+        originalModel.SetName(deviceClass.ID + " model")
+      deformedModel = self.parameterNode.GetNodeReference('DeformedModel')
+      if deformedModel:
+        deformedModel.SetName(deviceClass.ID + " deformed model")
     self.updateModel()
 
   def onDeviceParameterValueModified(self, caller=None, event=None):

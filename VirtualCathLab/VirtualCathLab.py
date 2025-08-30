@@ -75,18 +75,15 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.logic = VirtualCathLabLogic(self)
     self.logic.moduleName = "VirtualCathLab"
     self.deviceControlshortcuts = []
-    # The GUI is set up for this device class
-    self._currentDeviceClassId = None
 
   def setup(self):
     super(VirtualCathLabWidget, self).setup()
     if not self.setupSuccessful:
       return
 
-    if int(slicer.app.revision) < 29848:
-      # Requires fix in markups curve coordinate systems (integrated around April 10, 2021)
-      slicer.util.errorDisplay(f"ValveClip Device Simulator module requires Slicer core version\nSlicer-4.13.0-2021-04-16 (rev 29848) or later.",
-        detailedText="In earlier Slicer versions, device clip motion may be unstable.")
+    if not hasattr(slicer.modules, 'volumereslicedriver'):
+      slicer.util.messageBox("This modules requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
+      return
 
     #self.devicePositioningWidget.vesselGroupBox.hide()
     self.devicePositioningWidget.parent().hide()
@@ -169,6 +166,33 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.removeDeviceControlShortcutKeys()
     CardiacDeviceSimulatorWidget.cleanup(self)
     self.disconnect()
+
+  def onDeviceClassModified(self, caller, event):
+    super().onDeviceClassModified(caller, event)
+    # Update model selector widgets when the new device class is fully built (all C-arm models are added to the scene)
+    qt.QTimer.singleShot(0, self.updateModelSelectorWidgets)
+
+  def updateModelSelectorWidgets(self):
+    parameterNode = self.logic.getParameterNode()
+
+    # Hide fluoro nodes from input volume node selector
+    alreadyHiddenNodeIds = self.ui.volumeNodeComboBox.sortFilterProxyModel().hiddenNodeIDs
+    nodeIdsToHide = [node.GetID() for node in [self.logic.getFrontalCArmVolumeNode(), self.logic.getLateralCArmVolumeNode()] if node]
+    if tuple(alreadyHiddenNodeIds) != tuple(nodeIdsToHide):
+      self.ui.volumeNodeComboBox.sortFilterProxyModel().hiddenNodeIDs = nodeIdsToHide
+
+    # Hide C-arm model nodes from model node selectors
+    nodeIdsToHide = []
+    for i in range(parameterNode.GetNumberOfNodeReferenceRoles()):
+      referenceRole = parameterNode.GetNthNodeReferenceRole(i)
+      if referenceRole.startswith("frontal-") or referenceRole.startswith("lateral-") or referenceRole.startswith("table-") or referenceRole == "OriginalModel" or referenceRole == "DeformedModel":
+        referencedNode = parameterNode.GetNodeReference(referenceRole)
+        if referencedNode and referencedNode.IsA("vtkMRMLModelNode"):
+          nodeIdsToHide.append(referencedNode.GetID())
+    for modelSelectorComboBox in [self.ui.deviceModelComboBox, self.ui.segmentationComboBox]:
+      alreadyHiddenNodeIds = modelSelectorComboBox.sortFilterProxyModel().hiddenNodeIDs
+      if tuple(alreadyHiddenNodeIds) != tuple(nodeIdsToHide):
+        modelSelectorComboBox.sortFilterProxyModel().hiddenNodeIDs = nodeIdsToHide
 
   def updateMRMLFromGUI(self):
     parameterNode = self.logic.getParameterNode()
@@ -286,29 +310,6 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.enableCropCheckBox.blockSignals(wasBlocking)
 
     self.ui.fitROIToVolumeButton.enabled = roiNode is not None
-
-    deviceClassId = parameterNode.GetParameter('DeviceClassId')
-    if deviceClassId and deviceClassId != self._currentDeviceClassId:
-        self._currentDeviceClassId = deviceClassId
-        # Hide fluoro nodes from input volume node selector
-        alreadyHiddenNodeIds = self.ui.volumeNodeComboBox.sortFilterProxyModel().hiddenNodeIDs
-        nodeIdsToHide = [node.GetID() for node in [self.logic.getFrontalCArmVolumeNode(), self.logic.getLateralCArmVolumeNode()] if node]
-        if tuple(alreadyHiddenNodeIds) != tuple(nodeIdsToHide):
-          self.ui.volumeNodeComboBox.sortFilterProxyModel().hiddenNodeIDs = nodeIdsToHide
-
-        # Hide C-arm model nodes from model node selectors
-        nodeIdsToHide = []
-        for i in range(parameterNode.GetNumberOfNodeReferenceRoles()):
-          referenceRole = parameterNode.GetNthNodeReferenceRole(i)
-          if referenceRole.startswith("frontal-") or referenceRole.startswith("lateral-") or referenceRole.startswith("table-") or referenceRole == "OriginalModel" or referenceRole == "DeformedModel":
-            referencedNode = parameterNode.GetNodeReference(referenceRole)
-            if referencedNode and referencedNode.IsA("vtkMRMLModelNode"):
-              nodeIdsToHide.append(referencedNode.GetID())
-        for modelSelectorComboBox in [self.ui.deviceModelComboBox, self.ui.segmentationComboBox]:
-          alreadyHiddenNodeIds = modelSelectorComboBox.sortFilterProxyModel().hiddenNodeIDs
-          if tuple(alreadyHiddenNodeIds) != tuple(nodeIdsToHide):
-            modelSelectorComboBox.sortFilterProxyModel().hiddenNodeIDs = nodeIdsToHide
-
 
   def onImageSpinBoxChanged(self):
     self.updateMRMLFromGUI()
@@ -690,7 +691,6 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     # Remove old parameter node observations
     if self.parameterNode is not None:
       self.removeObserver(self.parameterNode, vtk.vtkCommand.ModifiedEvent, self.VirtualCathLabWidget.updateGUIFromMRML)
-      self.removeObserver(self.parameterNode, CardiacDeviceBase.DEVICE_CLASS_MODIFIED_EVENT, lambda caller, event: self.computeCenterline())
       self.removeObserver(self.parameterNode, VirtualCathLabLogic.INPUT_VOLUME_CHANGED_EVENT, lambda caller, event: self.onVolumeNodeChanged())
       self.removeObserver(self.parameterNode, VirtualCathLabLogic.VOLUME_RENDERING_PRESET_CHANGED_EVENT, lambda caller, event: self.onPresetChanged())
       self.removeObserver(self.parameterNode, VirtualCathLabLogic.INPUT_DEVICE_MODEL_CHANGED_EVENT, lambda caller, event: self.onDeviceModelChanged())
