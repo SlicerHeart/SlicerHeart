@@ -19,8 +19,18 @@ set(SUPERBUILD_TOPLEVEL_PROJECT inner)
 #-----------------------------------------------------------------------------
 # Extension dependencies
 find_package(Slicer REQUIRED)
+# Skip implicit generation of launcher settings triggered by SlicerBlockAdditionalLauncherSettings
+# It was generating the CMake Warning "Dependent extension SlicerIGT cannot be found by CMake find_package() ..."
+set(Slicer_SKIP_SlicerBlockAdditionalLauncherSettings TRUE)
 include(${Slicer_USE_FILE})
 mark_as_superbuild(Slicer_DIR)
+
+# Explicitly include SlicerBlockAdditionalLauncherSettings after resetting EXTENSION_DEPENDS.
+# Since SlicerIGT is a runtime dependency, is it not needed for generating the launcher settings.
+if(NOT Slicer_SOURCE_DIR)
+  set(EXTENSION_DEPENDS NA)
+  include(SlicerBlockAdditionalLauncherSettings)
+endif()
 
 find_package(Git REQUIRED)
 mark_as_superbuild(GIT_EXECUTABLE)
