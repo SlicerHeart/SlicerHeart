@@ -16,7 +16,6 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/GenericFluoro.png
   Resources/Icons/GenericBiplaneFluoro.png
   Resources/CArmModel.arc
-  Resources/Presets/Fluoro.csv
   Resources/Presets/GenericBiplaneFluoro.csv
   Resources/Presets/GenericFluoro.csv
   Resources/Transforms/frontal_camera_to_frontal_source.h5
