@@ -97,15 +97,16 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
   def onProcessVolume(self):
     slicer.app.pauseRender()
     inputVolumeNode = self.ui.processingInputVolumeSelector.currentNode()
-    combinedVolumeNode = None
+    temporaryNode = None
     volumeToSmooth = inputVolumeNode
-    if not self.ui.processingVelocityVolumeSelector.currentNode() is None:
-      combinedVolumeNode = EchoVolumeRenderLogic.combineVolumesSequence(inputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode(),
-        self.ui.applyToSequenceCheckBox.checked)
-      volumeToSmooth = combinedVolumeNode
-
     outputVolumeNode = self.logic.smoothVolume(volumeToSmooth, self.ui.processingOutputVolumeSelector.currentNode(),
       self.ui.applyToSequenceCheckBox.checked, self.ui.smoothingFactorSlider.value)
+
+    if not self.ui.processingVelocityVolumeSelector.currentNode() is None:
+      temporaryNode = outputVolumeNode
+      outputVolumeNode = EchoVolumeRenderLogic.combineVolumesSequence(outputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode(),
+        self.ui.applyToSequenceCheckBox.checked)
+
     self.ui.processingOutputVolumeSelector.setCurrentNode(outputVolumeNode)
     self.ui.renderingInputVolumeSelector.setCurrentNode(outputVolumeNode)
     self.smoothingAutoUpdate = True
@@ -113,12 +114,12 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     self.logic.updateShaderReplacement(outputVolumeNode)
     self.logic.updateVolumeProperty()
 
-    if combinedVolumeNode:
+    if temporaryNode:
       # Erase the intermediate volume and sequence nodes
-      [_, combinedSequenceNode] = self.logic.sequenceFromVolume(combinedVolumeNode)
+      [_, combinedSequenceNode] = self.logic.sequenceFromVolume(temporaryNode)
       if combinedSequenceNode:
         slicer.mrmlScene.RemoveNode(combinedSequenceNode)
-      slicer.mrmlScene.RemoveNode(combinedVolumeNode)
+      slicer.mrmlScene.RemoveNode(temporaryNode)
 
     slicer.app.resumeRender()
 
@@ -329,16 +330,9 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     if imageData1.GetDimensions() != imageData2.GetDimensions():
       raise ValueError("Input volumes must have the same dimensions.")
 
-    # Shift zero speed to 128 to make velocity field continuous (needed to avoid interpolation artifacts)
-    mathFilter = vtk.vtkImageMathematics()
-    mathFilter.SetInputData(imageData2)
-    mathFilter.SetConstantK(128)
-    mathFilter.SetOperationToAdd()
-    mathFilter.Update()
-
     appendComponents = vtk.vtkImageAppendComponents()
     appendComponents.AddInputData(imageData1)
-    appendComponents.AddInputData(mathFilter.GetOutput())
+    appendComponents.AddInputData(imageData2)
     appendComponents.Update()
 
     # Create a new volume node to store the combined volume
@@ -564,6 +558,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
         markupsRoiNode.GetDisplayNode().SetPropertiesLabelVisibility(False)
         markupsRoiNode.GetDisplayNode().SetRotationHandleVisibility(True)
         markupsRoiNode.GetDisplayNode().SetTranslationHandleVisibility(True)
+        markupsRoiNode.GetDisplayNode().FillVisibilityOff()
         annotationRoiNode = volumeRenderingDisplayNode.GetROINode()
         volumeRenderingDisplayNode.SetAndObserveROINodeID(markupsRoiNode.GetID())
         if annotationRoiNode:
@@ -703,15 +698,21 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       self.volumeRenderingDisplayNode.SetAndObserveVolumePropertyNodeID(volPropNode.GetID())
     disableModify = volPropNode.StartModify()
 
+    volPropNode.GetVolumeProperty().SetInterpolationTypeToNearest()
+
     # Set up lighting/material
-    volPropNode.GetVolumeProperty().ShadeOn()
-    #volPropNode.GetVolumeProperty().SetAmbient(0.5)
-    #volPropNode.GetVolumeProperty().SetDiffuse(0.5)
-    #volPropNode.GetVolumeProperty().SetSpecular(0.5)
-    volPropNode.GetVolumeProperty().SetAmbient(0.1)
-    volPropNode.GetVolumeProperty().SetDiffuse(0.9)
-    volPropNode.GetVolumeProperty().SetSpecular(0.2)
-    volPropNode.GetVolumeProperty().SetSpecularPower(10)
+    volPropNode.GetVolumeProperty().ShadeOn(0)
+    volPropNode.GetVolumeProperty().SetAmbient(0, 0.1)
+    volPropNode.GetVolumeProperty().SetDiffuse(0, 0.9)
+    volPropNode.GetVolumeProperty().SetSpecular(0, 0.2)
+    volPropNode.GetVolumeProperty().SetSpecularPower(0, 10.0)
+
+    # disable shading for the second component (velocity)
+    volPropNode.GetVolumeProperty().ShadeOff(1)
+    volPropNode.GetVolumeProperty().SetDiffuse(1, 1.0)
+    volPropNode.GetVolumeProperty().SetAmbient(1, 1.0)
+    volPropNode.GetVolumeProperty().SetSpecular(1, 0.0)
+    volPropNode.GetVolumeProperty().SetSpecularPower(1, 10.0)
 
     slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLViewNode").SetVolumeRenderingSurfaceSmoothing(True)
 
@@ -751,28 +752,37 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
 
     # Transfer functions for the second channel
     # TODO: expose parameters on the GUI
-
-    # build opacity function
-    scalarOpacity = vtk.vtkPiecewiseFunction()
-    scalarOpacity.AddPoint(0,0.0)
-    scalarOpacity.AddPoint(40, 0.0)
-    scalarOpacity.AddPoint(127, 0.2)
-    scalarOpacity.AddPoint(210, 0.0)
-    scalarOpacity.AddPoint(255, 0.0)
-
-    # build color transfer function
+    colorTable = slicer.util.getNode("Speed") # TODO
     colorTransferFunction = vtk.vtkColorTransferFunction()
-    colorTransferFunction.AddRGBPoint(0, 1.0, 0.0, 0.0)
-    colorTransferFunction.AddRGBPoint(127, 1.0, 0.0, 0.0)
-    colorTransferFunction.AddRGBPoint(128, 0.0, 0.0, 1.0)
-    colorTransferFunction.AddRGBPoint(255, 0.0, 0.0, 1.0)
+    scalarOpacity = vtk.vtkPiecewiseFunction()
+    points = list(range(0, 256, 5))
+    points.append(127)
+    points.append(128)
+    for i in points:
+      color = [0.0, 0.0, 0.0, 0.0]
+      colorTable.GetColor(i, color)
+      colorTransferFunction.AddRGBPoint(i, color[0], color[1], color[2])
+    colorTransferFunction.AddRGBPoint(127.5, 1.0, 1.0, 1.0)
+
+    opacityFunction = {
+      0.0: 0.0,
+      40.0: 0.0,
+      55.0: 0.1,
+      127.5: 0.1,
+      205.0: 0.1,
+      220.0: 0.0,
+      255.0: 0.0
+    }
+    for x in opacityFunction:
+      scalarOpacity.AddPoint(x, opacityFunction[x])
 
     volPropNode.GetVolumeProperty().GetScalarOpacity(1).DeepCopy(scalarOpacity)
     volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).DeepCopy(colorTransferFunction)
-
     volPropNode.EndModify(disableModify)
+    volPropNode.GetVolumeProperty().GetScalarOpacity(1).Modified()
+    volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).Modified()
+    volPropNode.GetVolumeProperty().Modified()
     volPropNode.Modified()
-
 
   ComputeColorReplacementSingleComponentFunction = """
 vec4 computeColor(vec4 scalar, float opacity)
