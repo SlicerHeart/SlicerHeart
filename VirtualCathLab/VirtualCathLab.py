@@ -1276,8 +1276,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
 
     volumeToDisplay = self.getVolumeToDisplay()
     volumeToDisplayID = volumeToDisplay.GetID() if volumeToDisplay else None
-    frontalVolumeNodeID = self.getFrontalCArmVolumeNode().GetID()
-    lateralVolumeNodeID = self.getLateralCArmVolumeNode().GetID()
+    frontalVolumeNodeID = self.getFrontalCArmVolumeNode().GetID() if self.getFrontalCArmVolumeNode() else None
+    lateralVolumeNodeID = self.getLateralCArmVolumeNode().GetID() if self.getLateralCArmVolumeNode() else None
 
     layoutManager = slicer.app.layoutManager()
     for sliceViewName in layoutManager.sliceViewNames():
@@ -1429,6 +1429,9 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     for segmentIndex in range(segmentationNode.GetSegmentation().GetNumberOfSegments()):
       # Set active segment
       segmentID = segmentationNode.GetSegmentation().GetNthSegmentID(segmentIndex)
+      if segmentationNode.GetDisplayNode() and not segmentationNode.GetDisplayNode().GetSegmentVisibility(segmentID):
+        # Skip hidden segments
+        continue
       segmentEditorWidget.setCurrentSegmentID(segmentID)
       # Apply mask
       effect.self().onApply()
@@ -1618,10 +1621,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         volumeRenderingLogic.FitROIToVolume(displayNode)
     self.renderToVolume()
 
-  def _showModelInFluoroViews(self, modelNode, show):
+  def _showDisplayableNodeInFluoroViews(self, modelNode, show):
     if not modelNode:
-      return
-    if slicer.vtkMRMLSliceLogic.IsSliceModelNode(modelNode):
       return
     displayNode = modelNode.GetDisplayNode()
     if not displayNode:
@@ -1658,13 +1659,15 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
 
   def setDeviceModelVisibilityInFluoro(self, visible):
     deviceModelNode = self.getInputDeviceModelNode()
-    self._showModelInFluoroViews(deviceModelNode, visible)
+    self._showDisplayableNodeInFluoroViews(deviceModelNode, visible)
     self.renderToVolume()
 
   def hideAllNonDeviceModelsInFluoro(self):
     deviceModelNode = self.getInputDeviceModelNode()
-    for model in slicer.util.getNodesByClass("vtkMRMLModelNode"):
+    allModels = slicer.util.getNodesByClass("vtkMRMLModelNode") + slicer.util.getNodesByClass("vtkMRMLMarkupsNode") + slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
+    for model in allModels:
       if model == deviceModelNode:
         continue
-      self._showModelInFluoroViews(model, False)
+      self._showDisplayableNodeInFluoroViews(model, False)
+
     self.renderToVolume()
