@@ -283,13 +283,13 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
       # Create a new volume node to store the combined volume
-      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode")
       combinedVolumeNode.SetName(echoVolumeNode.GetName() + " + " + velocityVolumeNode.GetName())
       combinedVolumeNode.SetAndObserveTransformNodeID(echoVolumeNode.GetTransformNodeID())
 
       combinedVolumeSequenceNode = sequencesModule.logic().AddSynchronizedNode(None, combinedVolumeNode, seqBrowser)
 
-      tempCombinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+      tempCombinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode")
       tempCombinedVolumeNode.Copy(combinedVolumeNode)
 
       numberOfDataNodes = echoVolumeSequence.GetNumberOfDataNodes()
@@ -339,7 +339,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     if outputVolumeNode:
       combinedVolumeNode = outputVolumeNode
     else:
-      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+      combinedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode")
     combinedVolumeNode.SetAndObserveImageData(appendComponents.GetOutput())
     ijkToRAS = vtk.vtkMatrix4x4()
     echoVolumeNode.GetIJKToRASMatrix(ijkToRAS)
@@ -752,37 +752,40 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
 
     # Transfer functions for the second channel
     # TODO: expose parameters on the GUI
-    colorTable = slicer.util.getNode("Speed") # TODO
-    colorTransferFunction = vtk.vtkColorTransferFunction()
-    scalarOpacity = vtk.vtkPiecewiseFunction()
-    points = list(range(0, 256, 5))
-    points.append(127)
-    points.append(128)
-    for i in points:
-      color = [0.0, 0.0, 0.0, 0.0]
-      colorTable.GetColor(i, color)
-      colorTransferFunction.AddRGBPoint(i, color[0], color[1], color[2])
-    colorTransferFunction.AddRGBPoint(127.5, 1.0, 1.0, 1.0)
-
-    opacityFunction = {
-      0.0: 0.0,
-      40.0: 0.0,
-      55.0: 0.1,
-      127.5: 0.1,
-      205.0: 0.1,
-      220.0: 0.0,
-      255.0: 0.0
-    }
-    for x in opacityFunction:
-      scalarOpacity.AddPoint(x, opacityFunction[x])
-
-    volPropNode.GetVolumeProperty().GetScalarOpacity(1).DeepCopy(scalarOpacity)
-    volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).DeepCopy(colorTransferFunction)
-    volPropNode.EndModify(disableModify)
-    volPropNode.GetVolumeProperty().GetScalarOpacity(1).Modified()
-    volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).Modified()
-    volPropNode.GetVolumeProperty().Modified()
-    volPropNode.Modified()
+    try:
+      colorTable = slicer.util.getNode("Speed") # TODO
+      colorTransferFunction = vtk.vtkColorTransferFunction()
+      scalarOpacity = vtk.vtkPiecewiseFunction()
+      points = list(range(0, 256, 5))
+      points.append(127)
+      points.append(128)
+      for i in points:
+        color = [0.0, 0.0, 0.0, 0.0]
+        colorTable.GetColor(i, color)
+        colorTransferFunction.AddRGBPoint(i, color[0], color[1], color[2])
+      colorTransferFunction.AddRGBPoint(127.5, 1.0, 1.0, 1.0)
+  
+      opacityFunction = {
+        0.0: 0.0,
+        40.0: 0.0,
+        55.0: 0.1,
+        127.5: 0.1,
+        205.0: 0.1,
+        220.0: 0.0,
+        255.0: 0.0
+      }
+      for x in opacityFunction:
+        scalarOpacity.AddPoint(x, opacityFunction[x])
+  
+      volPropNode.GetVolumeProperty().GetScalarOpacity(1).DeepCopy(scalarOpacity)
+      volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).DeepCopy(colorTransferFunction)
+      volPropNode.EndModify(disableModify)
+      volPropNode.GetVolumeProperty().GetScalarOpacity(1).Modified()
+      volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).Modified()
+      volPropNode.GetVolumeProperty().Modified()
+      volPropNode.Modified()
+    except Exception as e:
+      logging.warning("Failed to set transfer functions for the second component: "+str(e))
 
   ComputeColorReplacementSingleComponentFunction = """
 vec4 computeColor(vec4 scalar, float opacity)
