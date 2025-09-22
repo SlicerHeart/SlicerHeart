@@ -14,19 +14,38 @@ import pandas as pd
 getValveVolumeSequenceIndex = lambda valveModel: valveModel.getValveVolumeSequenceIndex()
 hasAnnulusContourDefined = \
   lambda valveModel: valveModel.annulusContourCurveNode.GetNumberOfControlPoints() > 0 if valveModel.annulusContourCurveNode is not None else False
+hasAnnulusLandmarksDefined = \
+  lambda valveModel: valveModel.valveLabelsNode.GetNumberOfControlPoints() > 0 if valveModel.annulusContourCurveNode is not None else False
+
 hasLeafletSegmentation = lambda valveModel: valveModel.leafletSegmentationNode is not None
+
+
+def analyzeSequence(valveBrowser):
+  HEADER_NAMES = ["Frame", "Annulus", "Landmarks", "Segmentation"]
+  ATTR_GETTER_FUNCTIONS = {
+    HEADER_NAMES[0]: getValveVolumeSequenceIndex,
+    HEADER_NAMES[1]: hasAnnulusContourDefined,
+    HEADER_NAMES[2]: hasAnnulusLandmarksDefined,
+    HEADER_NAMES[3]: hasLeafletSegmentation
+  }
+  data = {attr: [] for attr in HEADER_NAMES}
+  heartValveSequenceNode = valveBrowser.heartValveSequenceNode
+  origIndex = valveBrowser.volumeSequenceBrowserNode.GetSelectedItemNumber()
+  for idx in range(heartValveSequenceNode.GetNumberOfDataNodes()):
+    valveBrowser.valveBrowserNode.SetSelectedItemNumber(idx)
+
+    for colName in HEADER_NAMES:
+      data[colName].append(ATTR_GETTER_FUNCTIONS[colName](valveBrowser.valveModel))
+
+  valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(origIndex)
+  return data
 
 
 class ValveSeriesInfo(qt.QAbstractTableModel):
 
   GREEN_COLOR = qt.QColor(17, 84, 18)
   RED_COLOR = qt.QColor(120, 14, 14)
-  HEADER_NAMES = ["Volume Index", "Annulus Contour", " Leaflet Segmentation"]
-  ATTR_GETTER_FUNCTIONS = {
-    HEADER_NAMES[0]: getValveVolumeSequenceIndex,
-    HEADER_NAMES[1]: hasAnnulusContourDefined,
-    HEADER_NAMES[2]: hasLeafletSegmentation
-  }
+  HEADER_NAMES = ["Frame", "Annulus", "Landmarks", "Segmentation"]
 
   @property
   def valveBrowser(self):
@@ -46,7 +65,7 @@ class ValveSeriesInfo(qt.QAbstractTableModel):
     if valveBrowser is None:
       self._df = None
     else:
-      data = self.analyzeSequence()
+      data = analyzeSequence(self.valveBrowser)
       self._df = pd.DataFrame(data)
     self.layoutChanged()
 
@@ -94,20 +113,6 @@ class ValveSeriesInfo(qt.QAbstractTableModel):
       return self._df[self.HEADER_NAMES[0]].tolist().index(volumeSequenceIndex)
     except (ValueError, TypeError):
       return -1
-
-  def analyzeSequence(self):
-    valveBrowser = self.valveBrowser
-    data = {attr: [] for attr in self.HEADER_NAMES}
-    heartValveSequenceNode = valveBrowser.heartValveSequenceNode
-    origIndex = valveBrowser.volumeSequenceBrowserNode.GetSelectedItemNumber()
-    for idx in range(heartValveSequenceNode.GetNumberOfDataNodes()):
-      valveBrowser.valveBrowserNode.SetSelectedItemNumber(idx)
-
-      for colName in self.HEADER_NAMES:
-        data[colName].append(self.ATTR_GETTER_FUNCTIONS[colName](valveBrowser.valveModel))
-
-    valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(origIndex)
-    return data
 
 
 class ValveSequenceInfoWidget:
