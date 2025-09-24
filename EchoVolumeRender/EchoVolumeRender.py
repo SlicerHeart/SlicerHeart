@@ -67,6 +67,8 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     self.ui.croppingToggleCheckBox.connect("toggled(bool)", self.onCroppingToggle)
     self.ui.croppingToggleROIVisibilityCheckBox.connect("toggled(bool)", self.onCroppingToggleROIVisibility)
     self.ui.croppingFitToVolume.connect("clicked()", self.onCroppingFitToVolume)
+    self.ui.cropEchoCheckBox.connect("clicked()", self.updateCroppingComponents)
+    self.ui.cropVelocityCheckBox.connect("clicked()", self.updateCroppingComponents)
 
     # Enable hot update when slider is moved
     self.smoothingAutoUpdate = False
@@ -93,6 +95,12 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     # to do perform filtering immediately
     if not self.ui.applyToSequenceCheckBox.checked and self.smoothingAutoUpdate:
       self.onProcessVolume()
+
+  def updateCroppingComponents(self):
+    clippingComponents = self.logic.clippingComponents
+    clippingComponents[0] = 1.0 if self.ui.cropEchoCheckBox.checked else 0.0
+    clippingComponents[1] = 1.0 if self.ui.cropVelocityCheckBox.checked else 0.0
+    self.logic._setRenderingParameterValue("clippingComponents", clippingComponents)
 
   def onProcessVolume(self):
     slicer.app.pauseRender()
@@ -126,6 +134,7 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
   def onCroppingToggle(self, toggled):
     vrDisplayNode = self.logic.volumeRenderingDisplayNode
     vrDisplayNode.SetCroppingEnabled(toggled)
+    self.logic.updateShaderReplacement(self.logic.inputVolumeNode)
 
   def onCroppingToggleROIVisibility(self, toggled):
     roiDisplayNode = self.logic.volumeRenderingDisplayNode.GetMarkupsROINode().GetDisplayNode()
@@ -154,6 +163,8 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     self.ui.croppingToggleCheckBox.setEnabled(controlsEnabled)
     self.ui.croppingToggleROIVisibilityCheckBox.setEnabled(controlsEnabled)
     self.ui.croppingFitToVolume.setEnabled(controlsEnabled)
+    self.ui.cropEchoCheckBox.setEnabled(controlsEnabled)
+    self.ui.cropVelocityCheckBox.setEnabled(controlsEnabled)
 
     prev = self.ui.thresholdSlider.blockSignals(True)
     self.ui.thresholdSlider.value = self.logic.threshold
@@ -189,6 +200,14 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
     volumeRenderingVisible = self.logic.volumeRenderingDisplayNode.GetVisibility() if self.logic.volumeRenderingDisplayNode else False
     self.ui.volumeRenderingVisibleCheckBox.setChecked(volumeRenderingVisible)
     self.ui.volumeRenderingVisibleCheckBox.blockSignals(prev)
+
+    prev = self.ui.cropEchoCheckBox.blockSignals(True)
+    self.ui.cropEchoCheckBox.setChecked(self.logic.clippingComponents[0] > 0)
+    self.ui.cropEchoCheckBox.blockSignals(prev)
+
+    prev = self.ui.cropVelocityCheckBox.blockSignals(True)
+    self.ui.cropVelocityCheckBox.setChecked(self.logic.clippingComponents[1] > 0)
+    self.ui.cropVelocityCheckBox.blockSignals(prev)
 
     vrDisplayNode = self.logic.volumeRenderingDisplayNode
     if vrDisplayNode:
@@ -227,7 +246,8 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       'depthDarkening': 30,
       'depthColoringRange': [-24, 23],
       'brightnessScale': 120.0,
-      'saturationScale': 120.0
+      'saturationScale': 120.0,
+      'clippingComponents': [1.0, 1.0, 1.0]
       }
 
     # Parameters that needs to trigger volume property update when changed
@@ -591,15 +611,30 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       computeColorReplacement = self.computeColorReplacementMultiComponent
     sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::ComputeColor::Dec", True, computeColorReplacement, True)
 
+    clippingEnabled = volumeRenderingDisplayNode.GetCroppingEnabled()
+    if clippingEnabled:
+      sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::Clipping::Dec", True, self.ClippingDecReplacement, True)
+      sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::Clipping::Init", True, "", True)
+      sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::Cropping::Impl", True, self.CroppingImplReplacement, True)
+      sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::Shading::Impl", True, self.ShadingImplReplacement, True)
+      sp.AddShaderReplacement(vtk.vtkShader.Fragment, "//VTK::ComputeGradient::Dec", True, self.ComputeGradientDecReplacement, True)
+
   def resetRenderingParametersToDefault(self, volumeRenderingDisplayNode, force=True):
     shaderPropertyNode = volumeRenderingDisplayNode.GetOrCreateShaderPropertyNode(slicer.mrmlScene)
     uniforms = shaderPropertyNode.GetFragmentUniforms()
     if force:
-      uni.RemoveAllUniforms()
+      uniforms.RemoveAllUniforms()
     for name in self.defaultShaderParameters:
       if force or uniforms.GetUniformTupleType(name) == vtk.vtkUniforms.TupleTypeInvalid:
         if isinstance(self.defaultShaderParameters[name], list):
-          uniforms.SetUniform2f(name, self.defaultShaderParameters[name])
+          if len(self.defaultShaderParameters[name]) == 2:
+            uniforms.SetUniform2f(name, self.defaultShaderParameters[name])
+          elif len(self.defaultShaderParameters[name]) == 3:
+            uniforms.SetUniform3f(name, self.defaultShaderParameters[name])
+        elif isinstance(self.defaultShaderParameters[name], bool):
+          uniforms.SetUniformi(name, int(self.defaultShaderParameters[name]))
+        elif isinstance(self.defaultShaderParameters[name], int):
+          uniforms.SetUniformi(name, int(self.defaultShaderParameters[name]))
         else:
           uniforms.SetUniformf(name, self.defaultShaderParameters[name])
 
@@ -611,8 +646,14 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       return self.defaultShaderParameters[name]
     uniforms = self.shaderPropertyNode.GetFragmentUniforms()
     if uniforms.GetUniformTupleType(name) == vtk.vtkUniforms.TupleTypeVector:
-      value = [0.0, 0.0]
-      uniforms.GetUniform2f(name, value)
+      numberOfComponents = uniforms.GetUniformNumberOfComponents(name)
+      value = [0.0] * numberOfComponents
+      if numberOfComponents == 2:
+        uniforms.GetUniform2f(name, value)
+      elif numberOfComponents == 3:
+        uniforms.GetUniform3f(name, value)
+      elif numberOfComponents == 4:
+        uniforms.GetUniform4f(name, value)
       return value
     else:
       value = vtk.mutable(0)
@@ -622,7 +663,12 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
   def _setRenderingParameterValue(self, name, value):
     uniforms = self.shaderPropertyNode.GetFragmentUniforms()
     if uniforms.GetUniformTupleType(name) == vtk.vtkUniforms.TupleTypeVector:
-      uniforms.SetUniform2f(name, value)
+      if len(value) == 2:
+        uniforms.SetUniform2f(name, value)
+      elif len(value) == 3:
+        uniforms.SetUniform3f(name, value)
+      elif len(value) == 4:
+        uniforms.SetUniform4f(name, value)
     else:
       uniforms.SetUniformf(name, value)
     if name in self._volumePropertyParameterNames:
@@ -685,6 +731,14 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
   @saturationScale.setter
   def saturationScale(self, value):
     self._setRenderingParameterValue("saturationScale", value)
+
+  @property
+  def clippingComponents(self):
+    return self._getRenderingParameterValue("clippingComponents")
+
+  @clippingComponents.setter
+  def clippingComponents(self, value):
+    self._setRenderingParameterValue("clippingComponents", value)
 
   def updateVolumeProperty(self):
 
@@ -764,7 +818,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
         colorTable.GetColor(i, color)
         colorTransferFunction.AddRGBPoint(i, color[0], color[1], color[2])
       colorTransferFunction.AddRGBPoint(127.5, 1.0, 1.0, 1.0)
-  
+
       opacityFunction = {
         0.0: 0.0,
         40.0: 0.0,
@@ -776,7 +830,7 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
       }
       for x in opacityFunction:
         scalarOpacity.AddPoint(x, opacityFunction[x])
-  
+
       volPropNode.GetVolumeProperty().GetScalarOpacity(1).DeepCopy(scalarOpacity)
       volPropNode.GetVolumeProperty().GetRGBTransferFunction(1).DeepCopy(colorTransferFunction)
       volPropNode.EndModify(disableModify)
@@ -799,7 +853,11 @@ vec4 computeColor(vec4 scalar, float opacity, int component)
 
     if (component > 0)
     {
-        return clamp(computeLighting(vec4(texture2D(in_colorTransferFunc_0[1], vec2(scalar[1],0.0)).xyz, opacity), 1, 0.0), 0.0, 1.0);
+      return clamp(
+        computeLighting(
+          vec4(texture2D(in_colorTransferFunc_0[component], vec2(scalar[component], 0.0)).xyz, opacity), component, 0.0),
+          0.0,
+          1.0);
     }
 """
 
@@ -889,6 +947,160 @@ vec3 hsv2rgb(vec3 c)
 """
   ComputeColorReplacementVTK902SingleComponent = ComputeColorReplacementCommonSingleComponent + ComputeColorReplacementVTK902Return
   ComputeColorReplacementVTK902MultiComponent = ComputeColorReplacementCommonMultiComponent + ComputeColorReplacementVTK902Return
+
+  ClippingDecReplacement = """
+//VTK::Clipping::Dec
+
+// isPointInROI: returns true if pointTex lies inside (or on) all clipping planes.
+// Planes layout:
+//   in_clippingPlanes[0] = 6 * numPlanes
+//   For each plane k:
+//     origin: in_clippingPlanes[1 + 6*k + 0..2]
+//     normal: in_clippingPlanes[1 + 6*k + 3..5]  (object space)
+bool isPointInROI(vec3 pointTex)
+{
+  int clip_numPlanes = int(in_clippingPlanes[0]);
+  if (clip_numPlanes <= 0)
+  {
+    return true;
+  }
+
+  clip_texToObjMat = in_volumeMatrix[0] * inverse(ip_inverseTextureDataAdjusted);
+  clip_objToTexMat = ip_inverseTextureDataAdjusted * in_inverseVolumeMatrix[0];
+
+  vec4 pointPosObj = vec4(0.0);
+  {
+      pointPosObj = clip_texToObjMat * vec4(pointTex, 1.0);
+      pointPosObj = pointPosObj / pointPosObj.w;
+      pointPosObj.w = 1.0;
+  }
+
+  for (int i = 0; i < clip_numPlanes; i = i + 6)
+  {
+    vec3 planeOrigin = vec3(in_clippingPlanes[i + 1],
+                            in_clippingPlanes[i + 2],
+                            in_clippingPlanes[i + 3]);
+    vec3 planeNormal = normalize(vec3(in_clippingPlanes[i + 4],
+                                      in_clippingPlanes[i + 5],
+                                      in_clippingPlanes[i + 6]));
+    float distance = dot(planeNormal, planeOrigin - pointPosObj.xyz);
+    if (distance > 0.0)
+    {
+      return false;
+    }
+  }
+  return true;
+}
+"""
+  CroppingImplReplacement = """
+    vec4 local_componentWeight = in_componentWeight;
+    for (int c = 0; c < in_noOfComponents; ++c)
+    {
+      if (clippingComponents[c] > 0 && !isPointInROI(g_dataPos))
+      {
+        local_componentWeight[c] = 0.0;
+      }
+    }
+"""
+  ShadingImplReplacement = """
+    if (!g_skip)
+    {
+      vec4 scalar;
+
+      scalar = texture3D(in_volume[0], g_dataPos);
+
+      scalar = scalar * in_volume_scale[0] + in_volume_bias[0];
+      vec4 color[4]; vec4 tmp = vec4(0.0);
+      float totalAlpha = 0.0;
+      for (int i = 0; i < in_noOfComponents; ++i)
+        {
+        // Data fetching from the red channel of volume texture
+        color[i][3] = computeOpacity(scalar, i);
+        color[i] = computeColor(scalar, color[i][3], i);
+        totalAlpha += color[i][3] * local_componentWeight[i];
+        }
+      if (totalAlpha > 0.0)
+        {
+        for (int i = 0; i < in_noOfComponents; ++i)
+          {
+          // Only let visible components contribute to the final color
+          if (local_componentWeight[i] <= 0) continue;
+
+          tmp.x += color[i].x * color[i].w * local_componentWeight[i];
+          tmp.y += color[i].y * color[i].w * local_componentWeight[i];
+          tmp.z += color[i].z * color[i].w * local_componentWeight[i];
+          tmp.w += ((color[i].w * color[i].w)/totalAlpha);
+          }
+        }
+      g_fragColor = (1.0f - g_fragColor.a) * tmp + g_fragColor;
+    }
+"""
+  ComputeGradientDecReplacement = """
+vec4 computeGradient(in vec3 texPos, in int c, in sampler3D volume,in int index)
+{
+  // Approximate Nabla(F) derivatives with central differences.
+  vec3 g1; // F_front
+  vec3 g2; // F_back
+  vec3 xvec = vec3(in_cellStep[index].x, 0.0, 0.0);
+  vec3 yvec = vec3(0.0, in_cellStep[index].y, 0.0);
+  vec3 zvec = vec3(0.0, 0.0, in_cellStep[index].z);
+  vec3 texPosPvec[3];
+  texPosPvec[0] = texPos + xvec;
+  texPosPvec[1] = texPos + yvec;
+  texPosPvec[2] = texPos + zvec;
+  vec3 texPosNvec[3];
+  texPosNvec[0] = texPos - xvec;
+  texPosNvec[1] = texPos - yvec;
+  texPosNvec[2] = texPos - zvec;
+  g1.x = texture3D(volume, vec3(texPosPvec[0]))[c];
+  g1.y = texture3D(volume, vec3(texPosPvec[1]))[c];
+  g1.z = texture3D(volume, vec3(texPosPvec[2]))[c];
+  g2.x = texture3D(volume, vec3(texPosNvec[0]))[c];
+  g2.y = texture3D(volume, vec3(texPosNvec[1]))[c];
+  g2.z = texture3D(volume, vec3(texPosNvec[2]))[c];
+
+  for (int j = 0; j < 3; ++j)
+  {
+    if (clippingComponents[c] > 0 && !isPointInROI(texPosPvec[j].xyz))
+    {
+      g1[j] = in_clippedVoxelIntensity;
+    }
+    if (clippingComponents[c] > 0 && !isPointInROI(texPosNvec[j].xyz))
+    {
+      g2[j] = in_clippedVoxelIntensity;
+    }
+  }
+
+  // Apply scale and bias to the fetched values.
+  g1 = g1 * in_volume_scale[index][c] + in_volume_bias[index][c];
+  g2 = g2 * in_volume_scale[index][c] + in_volume_bias[index][c];
+
+  // Scale values the actual scalar range.
+  float range = in_scalarsRange[4*index+c][1] - in_scalarsRange[4*index+c][0];
+  g1 = in_scalarsRange[4*index+c][0] + range * g1;
+  g2 = in_scalarsRange[4*index+c][0] + range * g2;
+
+  // Central differences: (F_front - F_back) / 2h
+  g2 = g1 - g2;
+
+  float avgSpacing = (in_cellSpacing[index].x +
+   in_cellSpacing[index].y + in_cellSpacing[index].z) / 3.0;
+  vec3 aspect = in_cellSpacing[index] * 2.0 / avgSpacing;
+  g2 /= aspect;
+  float grad_mag = length(g2);
+
+  // Handle normalizing with grad_mag == 0.0
+  g2 = grad_mag > 0.0 ? normalize(g2) : vec3(0.0);
+
+  // Since the actual range of the gradient magnitude is unknown,
+  // assume it is in the range [0, 0.25 * dataRange].
+  range = range != 0 ? range : 1.0;
+  grad_mag = grad_mag / (0.25 * range);
+  grad_mag = clamp(grad_mag, 0.0, 1.0);
+
+  return vec4(g2.xyz, grad_mag);
+}
+"""
 
 #
 # EchoVolumeRenderTest
