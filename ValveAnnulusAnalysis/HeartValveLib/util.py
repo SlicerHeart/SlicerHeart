@@ -27,15 +27,13 @@ class Signal:
 
 
 def reload(packageName, submoduleNames):
-  import imp
-  f, filename, description = imp.find_module(packageName)
-  package = imp.load_module(packageName, f, filename, description)
+  import importlib
+  package = importlib.import_module(packageName)
   for submoduleName in submoduleNames:
-    f, filename, description = imp.find_module(submoduleName, package.__path__)
-    try:
-      imp.load_module(packageName + '.' + submoduleName, f, filename, description)
-    finally:
-      f.close()
+    fullName = f"{packageName}.{submoduleName}"
+    submodule = importlib.import_module(fullName)
+    importlib.reload(submodule)
+  importlib.reload(package)
 
 
 def timer(func):
