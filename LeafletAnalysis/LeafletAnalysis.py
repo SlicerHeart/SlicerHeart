@@ -762,17 +762,9 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def onReload(self):
     logging.debug("Reloading LeafletAnalysis")
-
-    def reload(packageName, submoduleNames):
-      import importlib
-      package = importlib.import_module(packageName)
-      for submoduleName in submoduleNames:
-        fullName = f"{packageName}.{submoduleName}"
-        submodule = importlib.import_module(fullName)
-        importlib.reload(submodule)
-      importlib.reload(package)
-
-    reload('HeartValveLib', ['LeafletModel', 'ValveRoi', 'ValveModel', 'ValveSeries', 'HeartValves'])
+    from HeartValveLib.util import reload
+    reload(packageName='HeartValveLib',
+           submoduleNames=['LeafletModel', 'ValveRoi', 'ValveModel', 'ValveSeries', 'HeartValves'])
 
     ScriptedLoadableModuleWidget.onReload(self)
 

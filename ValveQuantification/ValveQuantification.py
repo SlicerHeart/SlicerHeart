@@ -2,7 +2,6 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from ValveQuantificationLib.MeasurementPreset import *
 import ValveQuantificationLib
-from HeartValveLib.util import reload
 from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
 
 #
@@ -47,18 +46,6 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       if widgetToRemove:
         widgetToRemove.setParent(None)
 
-  @staticmethod
-  def reloadPackageWithSubmodules(packageName, submoduleNames):
-    import imp
-    f, filename, description = imp.find_module(packageName)
-    package = imp.load_module(packageName, f, filename, description)
-    for submoduleName in submoduleNames:
-      f, filename, description = imp.find_module(submoduleName, package.__path__)
-      try:
-        imp.load_module(packageName + '.' + submoduleName, f, filename, description)
-      finally:
-        f.close()
-
   def __init__(self, parent):
     ScriptedLoadableModuleWidget.__init__(self, parent)
 
@@ -91,24 +78,14 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.inputFieldValues = {}
 
   def onReload(self):
-    print("Reloading ValveQuantification")
-
-    packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel']
-
-    self.reloadPackageWithSubmodules(packageName, submoduleNames)
-
-    packageName='ValveQuantificationLib'
-    submoduleNames=['MeasurementPreset',
-                    'MeasurementPresetCavc',
-                    'MeasurementPresetGenericValve',
-                    'MeasurementPresetMitralValve',
-                    'MeasurementPresetTricuspidValve',
-                    'MeasurementPresetsPapillary',
-                    'MeasurementPresetPhaseCompare',
-                    'MeasurementPresetLavv']
-
-    self.reloadPackageWithSubmodules(packageName, submoduleNames)
+    from HeartValveLib.util import reload
+    reload(packageName='HeartValveLib',
+           submoduleNames=['LeafletModel', 'ValveModel', 'ValveRoi', 'PapillaryModel', 'CoaptationModel'])
+    reload(packageName='ValveQuantificationLib',
+           submoduleNames=['MeasurementPreset', 'MeasurementPresetCavc', 'MeasurementPresetGenericValve',
+                           'MeasurementPresetMitralValve', 'MeasurementPresetTricuspidValve',
+                           'MeasurementPresetsPapillary','MeasurementPresetPhaseCompare',
+                           'MeasurementPresetLavv'])
 
     ScriptedLoadableModuleWidget.onReload(self)
 
