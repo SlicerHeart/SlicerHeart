@@ -116,21 +116,19 @@ class EchoVolumeRenderWidget(ScriptedLoadableModuleWidget):
         outputVolumeNode = EchoVolumeRenderLogic.combineVolumesSequence(outputVolumeNode, self.ui.processingVelocityVolumeSelector.currentNode(),
           self.ui.applyToSequenceCheckBox.checked)
 
+      if temporaryNode:
+        # Erase the intermediate volume and sequence nodes
+        [_, combinedSequenceNode] = self.logic.sequenceFromVolume(temporaryNode)
+        if combinedSequenceNode:
+          slicer.mrmlScene.RemoveNode(combinedSequenceNode)
+        slicer.mrmlScene.RemoveNode(temporaryNode)
+
       self.ui.processingOutputVolumeSelector.setCurrentNode(outputVolumeNode)
       self.ui.renderingInputVolumeSelector.setCurrentNode(outputVolumeNode)
       self.smoothingAutoUpdate = True
 
       self.logic.updateShaderReplacement(outputVolumeNode)
       self.logic.updateVolumeProperty()
-
-      if temporaryNode:
-
-        # Erase the intermediate volume and sequence nodes
-        [_, combinedSequenceNode] = self.logic.sequenceFromVolume(temporaryNode)
-        if combinedSequenceNode:
-          slicer.mrmlScene.RemoveNode(combinedSequenceNode)
-        slicer.mrmlScene.RemoveNode(temporaryNode)
-      outputVolumeNode.CreateDefaultDisplayNodes()
 
   def onCroppingToggle(self, toggled):
     vrDisplayNode = self.logic.volumeRenderingDisplayNode
