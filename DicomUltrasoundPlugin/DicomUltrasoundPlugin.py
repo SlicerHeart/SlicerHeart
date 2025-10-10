@@ -565,10 +565,23 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     else:
       loadedNode = self.loadPhilips4DUSAsSequence(loadable)
 
+    # Save DICOM SOP instance UID into the sequence so DICOM metadata can be retrieved later if needed
+    if loadedNode:
+      loadedNode.SetAttribute('DICOM.instanceUIDs', slicer.dicomDatabase.instanceForFile(loadable.files[0]))
+
     # Show sequence browser toolbar if a sequence has been loaded
     if loadedNode and loadedNode.IsA('vtkMRMLSequenceNode'):
       sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForSequenceNode(loadedNode)
       if sequenceBrowserNode:
+
+        # Save DICOM SOP instance UID into the master node so DICOM metadata can be retrieved later from
+        # the proxy nodes if needed
+        masterSequenceNode = sequenceBrowserNode.GetMasterSequenceNode()
+        masterSequenceNode.SetAttribute('DICOM.instanceUIDs', loadedNode.GetAttribute('DICOM.instanceUIDs'))
+
+        volumeNode = browserNode.GetProxyNode(loadedNode)
+        volumeNode.SetAttribute('DICOM.instanceUIDs', loadedNode.GetAttribute('DICOM.instanceUIDs'))
+
         slicer.modules.sequences.showSequenceBrowser(sequenceBrowserNode)
 
     return loadedNode
