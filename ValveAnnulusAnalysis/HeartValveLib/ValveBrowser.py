@@ -7,7 +7,8 @@ import logging
 import HeartValves
 from HeartValveLib.util import createMatrixFromString
 
-from Constants import PROBE_POSITION_PRESETS, PROBE_POSITION_UNKNOWN, VALVE_TYPE_PRESETS
+from Constants import PROBE_POSITION_PRESETS, PROBE_POSITION_UNKNOWN
+
 
 class ValveBrowser:
     """Manages a time series of HeartValve nodes.

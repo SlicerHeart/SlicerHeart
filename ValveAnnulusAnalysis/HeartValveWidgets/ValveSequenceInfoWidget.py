@@ -15,9 +15,9 @@ getValveVolumeSequenceIndex = lambda valveModel: valveModel.getValveVolumeSequen
 hasAnnulusContourDefined = \
   lambda valveModel: valveModel.annulusContourCurveNode.GetNumberOfControlPoints() > 0 if valveModel.annulusContourCurveNode is not None else False
 hasAnnulusLandmarksDefined = \
-  lambda valveModel: valveModel.valveLabelsNode.GetNumberOfControlPoints() > 0 if valveModel.annulusContourCurveNode is not None else False
+  lambda valveModel: valveModel.valveLabelsNode.GetNumberOfControlPoints() > 0 if valveModel.valveLabelsNode is not None else False
 
-hasLeafletSegmentation = lambda valveModel: valveModel.leafletSegmentationNode is not None
+hasLeafletSegmentation = lambda valveModel: valveModel.leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 0 if valveModel.leafletSegmentationNode is not None else False
 
 
 def analyzeSequence(valveBrowser):
