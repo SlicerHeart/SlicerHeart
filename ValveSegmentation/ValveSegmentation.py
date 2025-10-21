@@ -320,23 +320,25 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.setHeartValveNode(node)
 
   def setHeartValveNode(self, heartValveNode):
-    if self.valveModel:
+    if self.valveModel is not None:
       self._setupValveVolume()
       self._updateRoiGeometryGui()
       self._updateDisplaySettingsGui()
 
-    # Observe nodes
-    annulusMarkupNode = self.valveModel.getAnnulusContourMarkupNode() if self.valveModel else None
-    self.setAndObserveAnnulusMarkupNode(annulusMarkupNode)
+      # Observe nodes
+      annulusMarkupNode = self.valveModel.getAnnulusContourMarkupNode()
+      self.setAndObserveAnnulusMarkupNode(annulusMarkupNode)
 
-    segmentationNode = self.valveModel.getLeafletSegmentationNode()
-    self.setAndObserveLeafletSegmentationNode(segmentationNode)
+      segmentationNode = self.valveModel.getLeafletSegmentationNode()
+      self.setAndObserveLeafletSegmentationNode(segmentationNode)
 
-    # Update GUI button enabled/disabled state
-    self.setGuiEnabled(heartValveNode is not None)
-    valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
-    leafletClippingModel = self.getLeafletClippingModelNode()
-    self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None or leafletClippingModel is None)
+      # Update GUI button enabled/disabled state
+      self.setGuiEnabled(heartValveNode is not None)
+      valveVolumeNode = self.valveModel.getValveVolumeNode() if self.valveModel else None
+      leafletClippingModel = self.getLeafletClippingModelNode()
+      self.ui.clippingModelSequenceApplyButton.setDisabled(valveVolumeNode is None or leafletClippingModel is None)
+
+      self.ui.segmentEditorWidget.setSegmentationNode(self.valveModel.leafletSegmentationNode)
 
     if not self.ui.segmentationEditingCollapsibleButton.collapsed:
       self.ui.clippingCollapsibleButton.collapsed = False
@@ -758,7 +760,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
     displayNode.SetSegmentVisibility(newSegmentID, displayNode.GetSegmentVisibility(segmentID))
     displayNode.SetSegmentVisibility2DFill(newSegmentID, displayNode.GetSegmentVisibility2DFill(segmentID))
-    displayNode.SetSegmentOpacity(newSegmentID, displayNode.GetSegmentOpacity(segmentID))
+    displayNode.SetSegmentOpacity2DFill(newSegmentID, displayNode.GetSegmentOpacity2DFill(segmentID))
     displayNode.SetSegmentVisibility3D(newSegmentID, displayNode.GetSegmentVisibility3D(segmentID))
 
   def updateSegments(self):
