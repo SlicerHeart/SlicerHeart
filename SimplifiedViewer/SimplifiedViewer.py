@@ -669,7 +669,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             playbackActive = True
 
         palette = slicer.app.palette()
-        sizePx = 32
+        sizePx = 192
         color = palette.color(qt.QPalette.Text)
 
         # Vectors and icons by Css.gg: https://github.com/astrit/css.gg?ref=svgrepo.com
@@ -705,11 +705,11 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Replace #000000 with the desired color
         svg_data = svg_data.replace("#000000", color.name())
-        svg_data = svg_data.replace('width="24"', f'width="{size}"')
-        svg_data = svg_data.replace('height="24"', f'height="{size}"')
+        #svg_data = svg_data.replace('width="24"', f'width="{size}"')
+        #svg_data = svg_data.replace('height="24"', f'height="{size}"')
 
         # Create a QIcon from the QPixmap
-        pixmap = qt.QPixmap(500,500)
+        pixmap = qt.QPixmap(384,384)
         pixmap.loadFromData(svg_data.encode())
         return qt.QIcon(pixmap.scaledToHeight(size, qt.Qt.SmoothTransformation))
 
