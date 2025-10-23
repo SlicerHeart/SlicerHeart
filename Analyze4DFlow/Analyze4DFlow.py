@@ -1045,13 +1045,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
             speedMPerSec = allSpeedMPerSec[insideVessel != 0]
 
-            if itemNumber == 0:
-                elapsedTimeMSec = float(sequenceNode.GetNthIndexValue(itemNumber + 1)) - float(sequenceNode.GetNthIndexValue(itemNumber))
-            elif itemNumber == sequenceBrowserNode.GetNumberOfItems() - 1:
-                elapsedTimeMSec = float(sequenceNode.GetNthIndexValue(itemNumber)) - float(sequenceNode.GetNthIndexValue(itemNumber - 1))
-            else:
-                elapsedTimeMSec = (float(sequenceNode.GetNthIndexValue(itemNumber + 1)) - float(sequenceNode.GetNthIndexValue(itemNumber - 1))) / 2
-
             if len(speedMPerSec) > 0:
 
                 # Project speed vector to the plane
@@ -1102,8 +1095,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             metrics[itemNumber, metricNames.index("MinVelocity")] = minVelocityMPerSec
             metrics[itemNumber, metricNames.index("MaxVelocity")] = maxVelocityMPerSec
             metrics[itemNumber, metricNames.index("StdDevVelocity")] = stdDevSpeedMPerSec
-            metrics[itemNumber, metricNames.index("PositiveVolume")] = positiveFlowRateMlPerSec * (elapsedTimeMSec / 1000.0)
-            metrics[itemNumber, metricNames.index("NegativeVolume")] = negativeFlowRateMlPerSec * (elapsedTimeMSec / 1000.0)
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
         if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
@@ -1122,8 +1113,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 ["MaxVelocity", 100, "cm/s", f"Maximum speed in the plane cross-section"],
                 ["MinVelocity", 100, "cm/s", f"Minimum speed in the plane cross-section"],
                 ["StdDevVelocity", 100, "cm/s", f"Standard deviation of flow speed in the plane cross-section"],
-                ["PositiveVolume", 1, "ml", f"Forward flow volume through the plane cross-section"],
-                ["NegativeVolume", 1, "ml", f"Backward flow volume through the plane cross-section"],
             ]
 
             outputFlowMetricsTableNode.RemoveAllColumns()
@@ -1150,24 +1139,32 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             outputFlowMetricsSummaryTableNode.RemoveAllColumns()
             outputFlowMetricsSummaryTable = outputFlowMetricsSummaryTableNode.GetTable()
 
-            # for frameIndex in range(metrics.shape[0]):
-            #     # Add time column
-            #     timeArray = vtk.vtkDoubleArray()
-            #     timeArray.SetName("Time")
-            #     timeArray.InsertNextValue(metrics[frameIndex, metricNames.index("Time")])
-            #     outputFlowMetricsSummaryTable.AddColumn(timeArray)
+            # Get heart rate from the magnitude volume node (if available)
+            heartRateBpm = None
+            if gridTransformNode:
+                magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+                heartRateBpmStr = magnitudeVolumeNode.GetAttribute("SlicerHeart.heartRateBpm")
+                if heartRateBpmStr:
+                    try:
+                        heartRateBpm = float(heartRateBpmStr)
+                    except ValueError:
+                        pass
+            if heartRateBpm is None:
+                logging.warning("Heart rate information is not available in DICOM metadata, compute it based on image sequence timing")
+                timePoints = metrics[:, metricNames.index("Time")]
+                timeIntervalMsec = (timePoints[-1] - timePoints[0])
+                heartRateBpm = 60000 / timeIntervalMsec
 
-            # TODO: how forward/backward volume is different from positive and negative volume?
-            positiveVolumeMl = np.sum(metrics[:, metricNames.index("PositiveVolume")])
-            negativeVolumeMl = np.sum(metrics[:, metricNames.index("NegativeVolume")])
-            totalVolumeMl = positiveVolumeMl + negativeVolumeMl
-            regurgitationFractionPercent = -negativeVolumeMl / positiveVolumeMl * 100 if positiveVolumeMl > 0 else 0
+            # VolumeMl = integral of FlowRate[ml/s] Time[s] = integral of FlowRate[ml/s] 0.001 * Time[ms]
+            forwardVolumeMl, backwardVolumeMl = Analyze4DFlowLogic.trapezoidAreaSplitZero(0.001 * metrics[:, metricNames.index("Time")], metrics[:, metricNames.index("FlowRate")])
+            totalVolumeMl = forwardVolumeMl + backwardVolumeMl
 
-            flowRateMlPerSec = np.mean(metrics[:, metricNames.index("FlowRate")])  # ml/s
-            volumeLiterPerMin = flowRateMlPerSec * 60 / 1000  # convert ml/s to l/min
+            volumeLiterPerMin = forwardVolumeMl / 1000 * heartRateBpm
+            volumeEffectiveLiterPerMin = totalVolumeMl / 1000 * heartRateBpm
+            regurgitationFractionPercent = -backwardVolumeMl / forwardVolumeMl * 100 if forwardVolumeMl > 0 else 0
 
-            effectiveFlowRateMlPerSec = np.mean(metrics[:, metricNames.index("PositiveFlowRate")]) - np.mean(metrics[:, metricNames.index("NegativeFlowRate")])  # ml/s
-            volumeEffectiveLiterPerMin = effectiveFlowRateMlPerSec * 60 / 1000  # convert ml/s to l/min
+            netPositiveVolumeMl = np.trapezoid(metrics[:, metricNames.index("PositiveFlowRate")], 0.001 * metrics[:, metricNames.index("Time")])
+            netNegativeVolumeMl = np.trapezoid(metrics[:, metricNames.index("NegativeFlowRate")], 0.001 * metrics[:, metricNames.index("Time")])
 
             # Simplified Bernoulli equation (https://www.e-echocardiography.com/calculators/miscellaneous/simplified-bernoulli-equation)
             maxVelocityMPerSec = metrics[:, metricNames.index("MaxVelocity")].max()
@@ -1176,15 +1173,17 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             maxFlowRateMlPerSec = np.max(metrics[:, metricNames.index("FlowRate")])  # ml/s
 
             savedSummaryMetrics = [
-                ["TotalVolume", "ml", f"Sum of forward and backward flow volume values at each time point", totalVolumeMl],
-                ["PositiveVolume", "ml", f"Sum of volume flowing in forward direction through the plane cross-section", positiveVolumeMl],
-                ["NegativeVolume", "ml", f"Sum of volume flowing in backward direction through the plane cross-section", negativeVolumeMl],
-                ["RegurgitationFraction", "%", f"Backflowing blood volume divided by the forward flow volume and is expressed in percent (0-100)", regurgitationFractionPercent],
-                ["VolPerMinute", "l/min", f"Sum of forward and backward flow rate", volumeLiterPerMin],
-                ["EffectiveVolPerMinute", "l/min", f"Effective flow rate (forward flow minus backward flow)", volumeEffectiveLiterPerMin],
-                ["PeakVelocity", "cm/s", f"Maximum speed in the plane cross-section", maxVelocityMPerSec * 100],
-                ["MaxPressureGradient", "mmHg", f"Maximum pressure gradient in the plane cross-section", maxPressureGradient],
-                ["MaxFlow", "ml/s", f"Maximum flow in the plane cross-section", maxFlowRateMlPerSec],
+                ["ForwardVolume", "ml", f"Positive area under FlowRate(time) curve", forwardVolumeMl],
+                ["BackwardVolume", "ml", f"Negative area under FlowRate(time) curve", backwardVolumeMl],
+                ["TotalVolume", "ml", f"Sum of forward and backward volume", totalVolumeMl],
+                ["RegurgitationFraction", "%", f"Backward volume divided by the forward volume, expressed in percent (0-100)", regurgitationFractionPercent],
+                ["VolPerMinute", "l/min", f"Forward volume per minute (computed from heart rate stored in the DICOM image metadata and forward volume)", volumeLiterPerMin],
+                ["EffectiveVolPerMinute", "l/min", f"Total volume per minute (computed from heart rate stored in the DICOM image metadata and total volume)", volumeEffectiveLiterPerMin],
+                ["PeakVelocity", "cm/s", f"Maximum of MaxVelocity values", maxVelocityMPerSec * 100],
+                ["MaxPressureGradient", "mmHg", f"Maximum pressure gradient computed from PeakVelocity", maxPressureGradient],
+                ["MaxFlow", "ml/s", f"Maximum of FlowRate values", maxFlowRateMlPerSec],
+                ["NetPositiveVolume", "ml", f"Area under PositiveFlowRate(time) curve", netPositiveVolumeMl],
+                ["NetNegativeVolume", "ml", f"Area under NegativeFlowRate(time) curve", netNegativeVolumeMl],
             ]
 
             for name, unit, description, value in savedSummaryMetrics:
@@ -1214,6 +1213,58 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # Show plot in layout
         slicer.modules.plots.logic().ShowChartInLayout(plotChartNode)
+
+    @staticmethod
+    def trapezoidAreaSplitZero(x_vals, y_vals):
+        """
+        Compute the positive and negative areas under a curve using the trapezoid rule.
+        If a trapezoid interval crosses zero, it is split at the zero crossing
+        so that the positive and negative contributions are accurately counted.
+
+        Parameters:
+            x_vals (list of float): x-coordinates of the function samples (must be ordered).
+            y_vals (list of float): y-coordinates of the function samples.
+            
+        Returns:
+            tuple:
+                pos_area (float): Total area where y > 0
+                neg_area (float): Total area where y < 0 (negative value)
+        """
+        pos_area = 0
+        neg_area = 0
+        
+        for i in range(len(x_vals)-1):
+            x0, x1 = x_vals[i], x_vals[i+1]
+            y0, y1 = y_vals[i], y_vals[i+1]
+            
+            # If the interval does not cross zero
+            if y0 * y1 >= 0:
+                area = 0.5 * (y0 + y1) * (x1 - x0)
+                if area > 0:
+                    pos_area += area
+                else:
+                    neg_area += area
+            else:
+                # Interval crosses zero: split it
+                # Find zero crossing using linear interpolation
+                x_zero = x0 - y0 * (x1 - x0) / (y1 - y0)
+                
+                # Area from x0 to zero crossing
+                area1 = 0.5 * (y0 + 0) * (x_zero - x0)
+                if area1 > 0:
+                    pos_area += area1
+                else:
+                    neg_area += area1
+                
+                # Area from zero crossing to x1
+                area2 = 0.5 * (0 + y1) * (x1 - x_zero)
+                if area2 > 0:
+                    pos_area += area2
+                else:
+                    neg_area += area2
+        
+        return pos_area, neg_area
+
 
 #
 # 4D MRI phase unwrapping
