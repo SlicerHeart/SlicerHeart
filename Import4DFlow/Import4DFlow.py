@@ -604,6 +604,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                         speedAndDirectionCodeTag = tag
                         break
 
+                # Get heart rate information if available
+                try:
+                    heartRateBpm = 60000.0 / float(ds["NominalInterval"].value)
+                except Exception:
+                    heartRateBpm = None
+
                 if speedAndDirectionCodeTag:
                     # flow vector component image
                     try:
@@ -664,6 +670,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
             volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
             volumeSequenceNode.SetAttribute("SlicerHeart.directionCode", directionCode)
+            if heartRateBpm:
+                volumeSequenceNode.SetAttribute("SlicerHeart.heartRateBpm", str(heartRateBpm))
             volumeNodesSets[acquisitionID]['candidateVolumeNodes'].append(volumeNode)
 
         return volumeNodesSets
