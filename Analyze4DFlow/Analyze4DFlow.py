@@ -327,10 +327,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
         self.logCallback = None
 
-        # raw magnitude image intensity threshold
-        # (speed values below this threshold are set to zero in the flow field to reduce clutter during visualization)
-        self.magnitudeThreshold = 60
-
         self.dopplerLutRange = [-0.6, 0.6]  # m/s
         self.dopplerLutThreshold = [-0.15, 0.15]  # m/s
 
@@ -674,7 +670,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     # Get displacement magnitude array
                     displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
                     displacementMagnitudeArray = np.linalg.norm(displacementArray, axis=1) # TODO: check if this is correct axis
-                    insideVesselArray = displacementMagnitudeArray > self.magnitudeThreshold
+                    insideVesselArray = displacementMagnitudeArray > streamlinesSpeedThresholdMPerSec
 
                 # Save mask array into the flow metrics model
                 Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
@@ -686,7 +682,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
 
                 # Apply mask to displacement image if further processing is requested
-                if maskLabelmapNode and outputStreamlinesModel or outputSpeedVolume:
+                if maskLabelmapNode and (outputStreamlinesModel or outputSpeedVolume):
                     displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
                     maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
                     displacementImageArray[maskImageArray==0, :] = 0
@@ -710,7 +706,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                         displayNode.SetEdgeVisibility(True)
                         displayNode.BackfaceCullingOff()
                         displayNode.LightingOff()  # don't make the lines darker depending on orientation
-                        displayNode.SetActiveScalarName('SpeedMasked')
+                        displayNode.SetActiveScalarName('Speed')
                         if gridTransformNode.GetDisplayNode():
                             # Use the same color table and scaling as the transform node
                             displayNode.SetAndObserveColorNodeID(gridTransformNode.GetDisplayNode().GetColorNodeID())
@@ -944,44 +940,46 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         transformFromCanonicalToRasFilter.Update()
         streamLinesRas = transformFromCanonicalToRasFilter.GetOutput()
         pointData = streamLinesRas.GetPointData()
-        # Rename the input array to "Velocity"
-        pointData.GetArray('ImageScalars').SetName('Velocity')
+        if pointData.GetArray('ImageScalars'):
+            # Rename the input array to "Velocity"
+            pointData.GetArray('ImageScalars').SetName('Velocity')
 
-        # Compute the speed (velocity magnitude) for coloring.
-        # If the velocity vector was used for coloring then the streamlines would be colored by
-        # the first component of the velocity vector, which would not be correct.
-        # The "Speed" array should be used for coloring instead.
-        acalc = vtk.vtkArrayCalculator()
-        acalc.AddVectorArrayName("Velocity")
-        acalc.SetResultArrayName("Speed")
-        acalc.SetFunction("mag(Velocity)")
-        acalc.SetInputData(streamLinesRas)
-        acalc.Update()
+        if pointData.GetArray('Velocity'):
+            # Compute the speed (velocity magnitude) for coloring.
+            # If the velocity vector was used for coloring then the streamlines would be colored by
+            # the first component of the velocity vector, which would not be correct.
+            # The "Speed" array should be used for coloring instead.
+            acalc = vtk.vtkArrayCalculator()
+            acalc.AddVectorArrayName("Velocity")
+            acalc.SetResultArrayName("Speed")
+            acalc.SetFunction("mag(Velocity)")
+            acalc.SetInputData(streamLinesRas)
+            acalc.Update()
 
-        polydata = acalc.GetOutput()
-        pd = acalc.GetOutput().GetPointData()
-        cd = acalc.GetOutput().GetCellData()
+            polydata = acalc.GetOutput()
+            pd = acalc.GetOutput().GetPointData()
+            cd = acalc.GetOutput().GetCellData()
 
-        # Remove non-essential arrays
-        if not computeAllMetrics:
-            pd.RemoveArray('AngularVelocity')
-            pd.RemoveArray('Rotation')
-            pd.RemoveArray('Vorticity')
-            pd.RemoveArray('IntegrationTime')
-            pd.RemoveArray('Normals')
-            pd.RemoveArray('Velocity')
-            cd.RemoveArray('ReasonForTermination')
-            cd.RemoveArray('SeedIds')
+            # Remove non-essential arrays
+            if not computeAllMetrics:
+                pd.RemoveArray('AngularVelocity')
+                pd.RemoveArray('Rotation')
+                pd.RemoveArray('Vorticity')
+                pd.RemoveArray('IntegrationTime')
+                pd.RemoveArray('Normals')
+                pd.RemoveArray('Velocity')
+                cd.RemoveArray('ReasonForTermination')
+                cd.RemoveArray('SeedIds')
 
-        # Convert arrays to float to reduce file size
-        for i in range(pd.GetNumberOfArrays()):
-            dataArray = pd.GetArray(i)
-            if dataArray.GetDataType() == vtk.VTK_DOUBLE:
-                floatArray = vtk.vtkFloatArray()
-                floatArray.DeepCopy(dataArray)
-                pd.AddArray(floatArray)
+            # Convert arrays to float to reduce file size
+            for i in range(pd.GetNumberOfArrays()):
+                dataArray = pd.GetArray(i)
+                if dataArray.GetDataType() == vtk.VTK_DOUBLE:
+                    floatArray = vtk.vtkFloatArray()
+                    floatArray.DeepCopy(dataArray)
+                    pd.AddArray(floatArray)
 
-        outputStreamlinesModel.SetAndObservePolyData(polydata)
+            outputStreamlinesModel.SetAndObservePolyData(polydata)
 
     def computeFlowMetricsTable(
             self,
@@ -1143,7 +1141,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             heartRateBpm = None
             if gridTransformNode:
                 magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
-                heartRateBpmStr = magnitudeVolumeNode.GetAttribute("SlicerHeart.heartRateBpm")
+                magnitudeVolumeSequenceNode = sequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
+                heartRateBpmStr = magnitudeVolumeSequenceNode.GetAttribute("SlicerHeart.heartRateBpm")
                 if heartRateBpmStr:
                     try:
                         heartRateBpm = float(heartRateBpmStr)
