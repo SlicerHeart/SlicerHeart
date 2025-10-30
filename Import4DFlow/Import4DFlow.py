@@ -960,6 +960,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
         magnitudeVolumeSequenceNode = self._getSequenceFromProxyNode(magnitudeVolumeNode)
         labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "___temp1___")
+
+        colorTableNode = slicer.vtkMRMLColorTableNode()
+        colorTableNode.SetTypeToUser()
+        colorTableNode.SaveWithSceneOff()
+        colorTableNode.SetAttribute("Category", "Flow")
+        colorTableNode.SetAttribute("SlicerHeart.ColorMappingType", "SpeedComponent")
+        colorTableNode.SetName("___temp1_color___")
+        colorTableNode = slicer.mrmlScene.AddNode(colorTableNode)
+
         for volumeIndex in range(magnitudeVolumeSequenceNode.GetNumberOfDataNodes()):
             magnitudeVolumeNodeInSequence = magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)
             magnitudeVoxelArray = slicer.util.arrayFromVolume(magnitudeVolumeNodeInSequence)
@@ -1004,7 +1013,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     segmentationSequenceNode = self._getSequenceFromProxyNode(segmentationNode)
                     segmentationNodeInSequence = segmentationSequenceNode.GetNthDataNode(volumeIndex)
                     segmentIds = self._getSegmentIds()
-                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(segmentationNodeInSequence, segmentIds, labelmapNode, magnitudeVolumeNode)
+                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(segmentationNodeInSequence, segmentIds, labelmapNode, magnitudeVolumeNode, slicer.vtkSegmentation.EXTENT_UNION_OF_EFFECTIVE_SEGMENTS, colorTableNode)
                     segmentationArray = slicer.util.arrayFromVolume(labelmapNode)
 
                     for wrapIndex in range(1, self.maxWraps):
