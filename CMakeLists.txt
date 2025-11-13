@@ -107,6 +107,7 @@ add_subdirectory(ImportMimics)
 add_subdirectory(ImportExportSimulationModel)
 add_subdirectory(ViewerLinkCreator)
 add_subdirectory(SimplifiedViewer)
+add_subdirectory(Converter4DSequences)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
