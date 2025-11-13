@@ -105,6 +105,7 @@ add_subdirectory(VirtualCathLab)
 add_subdirectory(ValveFemExport)
 add_subdirectory(ImportMimics)
 add_subdirectory(ImportExportSimulationModel)
+add_subdirectory(Converter4DSequences)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
