@@ -1030,6 +1030,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         metricNames = ["Time", "Area", "PositiveArea", "NegativeArea",
                        "FlowRate", "PositiveFlowRate", "NegativeFlowRate",
                        "MeanVelocity", "MaxVelocity", "MinVelocity", "StdDevVelocity", "ProjectedSpeed",
+                       "Percentile1Velocity", "Percentile5Velocity", "Percentile95Velocity", "Percentile99Velocity",
                        "PositiveVolume", "NegativeVolume"]
         metrics = np.zeros([sequenceBrowserNode.GetNumberOfItems(), len(metricNames)])
 
@@ -1059,6 +1060,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 minVelocityMPerSec = velocityMagnitudeMPerSec.min()
                 maxVelocityMPerSec = velocityMagnitudeMPerSec.max()
                 stdDevSpeedMPerSec = velocityMagnitudeMPerSec.std()
+                percentile1VelocityMPerSec = np.percentile(velocityMagnitudeMPerSec, 1)
+                percentile5VelocityMPerSec = np.percentile(velocityMagnitudeMPerSec, 5)
+                percentile95VelocityMPerSec = np.percentile(velocityMagnitudeMPerSec, 95)
+                percentile99VelocityMPerSec = np.percentile(velocityMagnitudeMPerSec, 99)
 
                 areaMm2 = len(speedMPerSec) * areaPerPointMm2
                 areaPositiveMm2 = np.sum(signedVelocityMagnitudeMPerSec >= 0) * areaPerPointMm2
@@ -1081,6 +1086,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 maxVelocityMPerSec = 0
                 minVelocityMPerSec = 0
                 stdDevSpeedMPerSec = 0
+                percentile1VelocityMPerSec = 0
+                percentile5VelocityMPerSec = 0
+                percentile95VelocityMPerSec = 0
+                percentile99VelocityMPerSec = 0
 
             metrics[itemNumber, metricNames.index("Time")] = float(sequenceNode.GetNthIndexValue(itemNumber))
             metrics[itemNumber, metricNames.index("Area")] = areaMm2
@@ -1093,6 +1102,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             metrics[itemNumber, metricNames.index("MinVelocity")] = minVelocityMPerSec
             metrics[itemNumber, metricNames.index("MaxVelocity")] = maxVelocityMPerSec
             metrics[itemNumber, metricNames.index("StdDevVelocity")] = stdDevSpeedMPerSec
+            metrics[itemNumber, metricNames.index("Percentile1Velocity")] = percentile1VelocityMPerSec
+            metrics[itemNumber, metricNames.index("Percentile5Velocity")] = percentile5VelocityMPerSec
+            metrics[itemNumber, metricNames.index("Percentile95Velocity")] = percentile95VelocityMPerSec
+            metrics[itemNumber, metricNames.index("Percentile99Velocity")] = percentile99VelocityMPerSec
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
         if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
@@ -1110,6 +1123,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 ["MeanVelocity", 100, "cm/s", f"Average speed in the plane cross-section"],
                 ["MaxVelocity", 100, "cm/s", f"Maximum speed in the plane cross-section"],
                 ["MinVelocity", 100, "cm/s", f"Minimum speed in the plane cross-section"],
+                ["Percentile1Velocity", 100, "cm/s", f"1st percentile speed in the plane cross-section"],
+                ["Percentile5Velocity", 100, "cm/s", f"5th percentile speed in the plane cross-section"],
+                ["Percentile95Velocity", 100, "cm/s", f"95th percentile speed in the plane cross-section"],
+                ["Percentile99Velocity", 100, "cm/s", f"99th percentile speed in the plane cross-section"],
                 ["StdDevVelocity", 100, "cm/s", f"Standard deviation of flow speed in the plane cross-section"],
             ]
 
