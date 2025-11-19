@@ -320,9 +320,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if valveID in transformCaptureMap:
                 self._restoreTransformsToReferencedNodes(hvNode, transformCaptureMap[valveID])
 
-        # NOTE: Skip updateLegacyCoaptationModelNodes - let the regular reference conversion handle these nodes
-        # They will be converted to sequences like any other referenced node
-
         # Subject hierarchy cleanup (icons/level attr)
         try:
             shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -556,6 +553,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         referencedNodesByRole = {}
         nodesToRemove = set()
         displayNodesToRemove = set()  # Track display nodes separately
+        processedNodesTracker = {}  # Track which nodes we've already captured: nodeID -> entry data
 
         for heartValveNode in heartValveNodes:
             try:
@@ -584,20 +582,25 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                             logging.info(f"  Skipping '{referencedNode.GetName()}' (role: {role}) - already in a sequence")
                             continue
 
-                        # For segmentation nodes, log segment information
-                        if referencedNode.IsA('vtkMRMLSegmentationNode'):
-                            numSegments = referencedNode.GetSegmentation().GetNumberOfSegments()
-                            segmentIds = [referencedNode.GetSegmentation().GetNthSegmentID(i) for i in range(numSegments)]
-                            logging.info(f"  Found segmentation '{referencedNode.GetName()}' (ID: {referencedNode.GetID()}) with {numSegments} segments: {segmentIds}")
-                        else:
-                            logging.info(f"  Found referenced node '{referencedNode.GetName()}' (ID: {referencedNode.GetID()}, type: {referencedNode.GetClassName()}, role: {role})")
-
                         # Create a more specific key for grouping by role and a base name
-                        # E.g., group "Coaptation1...", "Coaptation2..." separately
-                        baseName = referencedNode.GetName()
+                        # Strip frame-specific suffixes to group all frames of the same node type together
+                        originalName = referencedNode.GetName()
+                        baseName = originalName
+
+                        # Strip frame number suffix (e.g., "_f23", "_25")
                         parts = baseName.split('_')
-                        if len(parts) > 1 and parts[-1].isdigit():
-                            baseName = '_'.join(parts[:-1]) # Strip numeric suffix
+                        if len(parts) > 1:
+                            lastPart = parts[-1]
+                            if lastPart.isdigit() or (lastPart.startswith('f') and lastPart[1:].isdigit()):
+                                baseName = '_'.join(parts[:-1])
+
+                        # Also strip phase indicators for segmentations (e.g., "-ES", "-ED", "-MD")
+                        if referencedNode.IsA('vtkMRMLSegmentationNode'):
+                            phaseSuffixes = ['-ES', '-ED', '-MD', '-MS', '-CT', '-CD', '-CS']
+                            for suffix in phaseSuffixes:
+                                if baseName.endswith(suffix):
+                                    baseName = baseName[:-len(suffix)]
+                                    break
 
                         groupingKey = (role, baseName)
 
@@ -605,34 +608,41 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         if groupingKey not in referencedNodesByRole:
                             referencedNodesByRole[groupingKey] = []
 
-                        # Capture transform ID NOW if node is transformable
-                        originalTransformID = None
-                        if referencedNode.IsA("vtkMRMLTransformableNode"):
-                            originalTransformID = referencedNode.GetTransformNodeID()
-                            if originalTransformID:
-                                logging.info(f"  Captured transform ID '{originalTransformID}' for transformable node '{referencedNode.GetName()}'")
+                        # Capture transform ID and display node per unique node
+                        nodeID = referencedNode.GetID()
+                        if nodeID not in processedNodesTracker:
+                            # Capture transform ID if node is transformable
+                            originalTransformID = None
+                            if referencedNode.IsA("vtkMRMLTransformableNode"):
+                                originalTransformID = referencedNode.GetTransformNodeID()
 
-                        # Capture display node NOW if node is displayable
-                        displayNode = None
-                        if referencedNode.IsA("vtkMRMLDisplayableNode"):
-                            displayNode = referencedNode.GetDisplayNode()
-                            if displayNode:
-                                logging.info(f"  Found display node '{displayNode.GetName()}' for displayable node '{referencedNode.GetName()}'")
-                                displayNodesToRemove.add(displayNode)  # Track for later removal
+                            # Capture display node if node is displayable
+                            displayNode = None
+                            if referencedNode.IsA("vtkMRMLDisplayableNode"):
+                                displayNode = referencedNode.GetDisplayNode()
+                                if displayNode:
+                                    displayNodesToRemove.add(displayNode)  # Track for later removal
+
+                            processedNodesTracker[nodeID] = {
+                                'originalTransformID': originalTransformID,
+                                'displayNode': displayNode
+                            }
+                            nodesToRemove.add(referencedNode)
+                        else:
+                            logging.info(f"  Node '{referencedNode.GetName()}' already captured, reusing transform and display info")
+
+                        # Get the cached transform and display info
+                        cachedInfo = processedNodesTracker[nodeID]
 
                         referencedNodesByRole[groupingKey].append({
                             'node': referencedNode,
                             'indexValue': indexValue,
                             'frameIndex': frameIndex,
-                            'originalTransformID': originalTransformID,  # Store the transform ID
-                            'displayNode': displayNode  # Store the display node
+                            'originalTransformID': cachedInfo['originalTransformID'],  # Store the transform ID
+                            'displayNode': cachedInfo['displayNode']  # Store the display node
                         })
-                        nodesToRemove.add(referencedNode)
             except Exception as err:
                 logging.warning(f"Error processing references for valve '{heartValveNode.GetName()}': {err}")
-
-        # Create one sequence for each role/baseName combination
-        logging.info(f"Creating sequences for {len(referencedNodesByRole)} unique grouping keys")
 
         # Track sequence nodes to their original node entries for later transform verification
         sequenceToEntriesMap = {}
@@ -641,8 +651,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if len(nodeEntries) == 0:
                 continue
 
-            logging.info(f"Processing group: role='{role}', baseName='{baseName}', {len(nodeEntries)} entries")
-
             # Get a representative node to create a meaningful name
             firstNode = nodeEntries[0]['node']
             # Use the baseName for the sequence to keep it consistent
@@ -650,11 +658,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
             # Log details about what we're about to add
             uniqueNodeIds = set([entry['node'].GetID() for entry in nodeEntries])
-            logging.info(f"  Unique node IDs in this group: {len(uniqueNodeIds)}")
             if len(uniqueNodeIds) == 1:
-                logging.info(f"  WARNING: Same node being added at multiple time points!")
-                for entry in nodeEntries:
-                    logging.info(f"    Frame {entry['frameIndex']}: {entry['node'].GetName()} (ID: {entry['node'].GetID()})")
+                logging.warning(f"  WARNING: Same node being added at multiple time points for {baseName}!")
 
             try:
                 # Create a single sequence node for this role
@@ -687,9 +692,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # This is crucial because the same segmentation node may be referenced by multiple
                     # valve nodes at different time points in the old format
                     if nodeToAdd.IsA('vtkMRMLSegmentationNode'):
-                        numSegmentsBefore = nodeToAdd.GetSegmentation().GetNumberOfSegments()
-                        logging.info(f"  Creating deep copy of segmentation '{nodeToAdd.GetName()}' with {numSegmentsBefore} segments for frame {entry['frameIndex']}")
-
+                        # Create a temporary node to hold the copy
                         nodeCopy = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode')
                         nodeCopy.Copy(nodeToAdd)
                         nodeCopy.SetName(nodeToAdd.GetName())
@@ -697,23 +700,19 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         # Apply parent transform if the node is transformable
                         if nodeCopy.IsA("vtkMRMLTransformableNode") and entry['originalTransformID']:
                             nodeCopy.SetAndObserveTransformNodeID(entry['originalTransformID'])
-                            logging.info(f"    Applied parent transform: {entry['originalTransformID']}")
 
-                        numSegmentsAfter = nodeCopy.GetSegmentation().GetNumberOfSegments()
-                        logging.info(f"    Copy created with {numSegmentsAfter} segments")
-
+                        # Add to sequence - SetDataNodeAtValue stores a copy of the node's data internally
                         sequenceNode.SetDataNodeAtValue(nodeCopy, indexValue)
 
                         # Remove the temporary copy and its display node from the scene
                         # The data is now stored in the sequence
-                        if nodeCopy.GetDisplayNode():
-                            slicer.mrmlScene.RemoveNode(nodeCopy.GetDisplayNode())
+                        tempDisplayNode = nodeCopy.GetDisplayNode()
+                        if tempDisplayNode:
+                            slicer.mrmlScene.RemoveNode(tempDisplayNode)
                         slicer.mrmlScene.RemoveNode(nodeCopy)
-                        logging.info(f"    Added to sequence at indexValue {indexValue}")
                     else:
                         # For other node types, SetDataNodeAtValue will create a copy automatically
                         sequenceNode.SetDataNodeAtValue(nodeToAdd, indexValue)
-                        logging.debug(f"Added '{nodeToAdd.GetName()}' to sequence at frame {entry['frameIndex']}")
 
                     addedNodes[indexValue] = nodeToAdd.GetID()                # Store the mapping for later transform verification
                 sequenceToEntriesMap[sequenceNode] = nodeEntries
@@ -748,15 +747,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         logging.info(f"  Created display node sequence: {displaySequenceNode.GetName()} with {displaySequenceNode.GetNumberOfDataNodes()} time points")
                     except Exception as err:
                         logging.warning(f"  Error creating display node sequence: {err}")
-
-                # Verify the sequence contents for segmentation nodes
-                if firstNode.IsA('vtkMRMLSegmentationNode'):
-                    logging.info(f"  Verifying sequence contents:")
-                    for i in range(sequenceNode.GetNumberOfDataNodes()):
-                        dataNode = sequenceNode.GetNthDataNode(i)
-                        if dataNode and dataNode.IsA('vtkMRMLSegmentationNode'):
-                            numSegs = dataNode.GetSegmentation().GetNumberOfSegments()
-                            logging.info(f"    Frame {i}: {numSegs} segments")
 
             except Exception as err:
                 logging.warning(f"Error creating sequence for role '{role}': {err}")
@@ -795,9 +785,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if not seqNode:
                 logging.warning(f"Could not find sequence for group ({role}, {baseName})")
                 continue
-
-            # Hide the sequence node itself (it's just internal storage)
-            seqNode.SetHideFromEditors(1)
 
             # Get and configure the proxy node
             proxyNode = valveBrowserNode.GetProxyNode(seqNode)
@@ -941,33 +928,127 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     heartValveProxyNode.SetNthNodeReferenceID(role, idx, proxyNode.GetID())
                     logging.info(f"  Updated heart valve proxy Nth reference '{role}[{idx}]' to proxy node '{proxyNode.GetName()}'")
 
+        # Collect all proxy nodes to avoid accidentally removing their display nodes
+        proxyNodeIDs = set()
+        proxyDisplayNodeIDs = set()
+        for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
+            seqNode = synchronizedSequenceNodes.GetItemAsObject(i)
+            if seqNode:
+                proxyNode = valveBrowserNode.GetProxyNode(seqNode)
+                if proxyNode:
+                    proxyNodeIDs.add(proxyNode.GetID())
+                    if proxyNode.IsA("vtkMRMLDisplayableNode"):
+                        proxyDisplayNode = proxyNode.GetDisplayNode()
+                        if proxyDisplayNode:
+                            proxyDisplayNodeIDs.add(proxyDisplayNode.GetID())
+                            logging.debug(f"Keeping proxy display node: {proxyDisplayNode.GetName()} for proxy {proxyNode.GetName()}")
+
         # Remove original referenced nodes that have been converted
         # First remove the data nodes themselves
         for node in nodesToRemove:
-            if node:
+            if node and node.GetID() not in proxyNodeIDs:
                 logging.info(f"Removing converted referenced node: {node.GetName()}")
                 slicer.mrmlScene.RemoveNode(node)
+            elif node:
+                logging.debug(f"Skipping removal of {node.GetName()} - it's a proxy node")
 
         # Then remove all display nodes that were captured during discovery
         # (Remove display nodes after data nodes to avoid subject hierarchy warnings)
         logging.info(f"Removing {len(displayNodesToRemove)} display node(s)")
         for displayNode in displayNodesToRemove:
             if displayNode:
+                # Don't remove proxy display nodes
+                if displayNode.GetID() in proxyDisplayNodeIDs:
+                    logging.debug(f"Skipping removal of proxy display node: {displayNode.GetName()}")
+                    continue
+
                 # Check if the display node still exists in the scene (might have been auto-removed with its data node)
                 if slicer.mrmlScene.IsNodePresent(displayNode):
                     logging.info(f"Removing display node: {displayNode.GetName()} (ID: {displayNode.GetID()})")
                     slicer.mrmlScene.RemoveNode(displayNode)
                 else:
-                    logging.info(f"Display node already removed: {displayNode.GetName()} (ID: {displayNode.GetID()})")
+                    logging.debug(f"Display node already removed: {displayNode.GetName()} (ID: {displayNode.GetID()})")
 
-        # Double-check: count remaining segmentation display nodes
-        segDisplayNodes = slicer.mrmlScene.GetNodesByClass("vtkMRMLSegmentationDisplayNode")
-        segDisplayCount = segDisplayNodes.GetNumberOfItems()
-        if segDisplayCount > 0:
-            logging.warning(f"Found {segDisplayCount} segmentation display node(s) still in scene after cleanup:")
-            for i in range(segDisplayCount):
-                node = segDisplayNodes.GetItemAsObject(i)
-                logging.warning(f"  - {node.GetName()} (ID: {node.GetID()})")
+        # Enable display visibility for all display nodes in display sequences
+        # This must be done AFTER all proxy node configuration and cleanup is complete
+        # The display nodes stored in display sequences control visibility during playback
+        logging.info("Enabling display visibility for all display nodes in sequences")
+        synchronizedSequenceNodes = vtk.vtkCollection()
+        valveBrowserNode.GetSynchronizedSequenceNodes(synchronizedSequenceNodes, True)
+
+        displaySequenceCount = 0
+        displayNodeCount = 0
+        proxyCount = 0
+
+        for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
+            seqNode = synchronizedSequenceNodes.GetItemAsObject(i)
+            if not seqNode or seqNode.GetNumberOfDataNodes() == 0:
+                continue
+
+            seqName = seqNode.GetName()
+            firstNode = seqNode.GetNthDataNode(0)
+
+            # Enable visibility on display nodes in sequences
+            if firstNode and firstNode.IsA("vtkMRMLDisplayNode"):
+                logging.info(f"  Processing display sequence '{seqName}' with {seqNode.GetNumberOfDataNodes()} display nodes")
+                for j in range(seqNode.GetNumberOfDataNodes()):
+                    displayNode = seqNode.GetNthDataNode(j)
+                    if displayNode:
+                        wasVisible = displayNode.GetVisibility()
+                        displayNode.SetVisibility(True)
+                        nowVisible = displayNode.GetVisibility()
+                        displayNodeCount += 1
+                displaySequenceCount += 1
+
+            # Enable visibility on proxy nodes
+            elif "_Display_Sequence" not in seqName:
+                proxyNode = valveBrowserNode.GetProxyNode(seqNode)
+                if proxyNode and proxyNode.IsA("vtkMRMLDisplayableNode"):
+                    proxyDisplayNode = proxyNode.GetDisplayNode()
+                    if proxyDisplayNode:
+                        wasVisible = proxyDisplayNode.GetVisibility()
+                        proxyDisplayNode.SetVisibility(True)
+                        nowVisible = proxyDisplayNode.GetVisibility()
+                        logging.info(f"  Proxy '{proxyNode.GetName()}' display visibility: {wasVisible} -> {nowVisible}")
+                        proxyCount += 1
+
+        # Organize all converted nodes in subject hierarchy under the heart valve proxy node
+        logging.info("Organizing converted nodes in subject hierarchy")
+        heartValveProxyNode = valveBrowserNode.GetProxyNode(heartValveSequenceNode)
+        if heartValveProxyNode:
+            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+            if shNode:
+                # Get or create the heart valve item in subject hierarchy
+                valveItemID = shNode.GetItemByDataNode(heartValveProxyNode)
+                if not valveItemID:
+                    valveItemID = shNode.CreateItem(shNode.GetSceneItemID(), heartValveProxyNode)
+
+                # Move all sequence nodes and their proxy nodes under the valve
+                hierarchyCount = 0
+                for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
+                    seqNode = synchronizedSequenceNodes.GetItemAsObject(i)
+                    if not seqNode:
+                        continue
+
+                    # Skip the master sequence (it's the valve itself)
+                    if seqNode.GetID() == heartValveSequenceNode.GetID():
+                        continue
+
+                    # Move sequence node under valve
+                    seqItemID = shNode.GetItemByDataNode(seqNode)
+                    if seqItemID:
+                        shNode.SetItemParent(seqItemID, valveItemID)
+                        hierarchyCount += 1
+
+                    # Move proxy node under valve (if it's not a display node)
+                    proxyNode = valveBrowserNode.GetProxyNode(seqNode)
+                    if proxyNode and not proxyNode.IsA("vtkMRMLDisplayNode"):
+                        proxyItemID = shNode.GetItemByDataNode(proxyNode)
+                        if proxyItemID:
+                            shNode.SetItemParent(proxyItemID, valveItemID)
+                            hierarchyCount += 1
+
+                logging.info(f"Organized {hierarchyCount} item(s) under heart valve '{heartValveProxyNode.GetName()}' in subject hierarchy")
 
         logging.info("Finished converting referenced nodes to sequences")
 
