@@ -388,8 +388,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         logging.info(f"Converting {len(oldFormatHeartValves)} old-format heart valve node(s) to new format")
 
-        # Group heart valve nodes by their volume sequence browser
-        # We need to group them so we can create a single valve browser for related valves
+        # Group heart valve nodes by their volume sequence browser and by valve type
+        # Each unique valve gets its own sequence
         valvesByVolumeSequence = {}
         for heartValveNode in oldFormatHeartValves:
             try:
@@ -409,26 +409,32 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     logging.warning(f"Valve {heartValveNode.GetName()} volume is not part of a sequence, skipping")
                     continue
 
+                # Create a unique key combining browser and valve type
                 browserNodeId = volumeSequenceBrowserNode.GetID()
-                if browserNodeId not in valvesByVolumeSequence:
-                    valvesByVolumeSequence[browserNodeId] = {
+                valveType = heartValveNode.GetAttribute("ValveType") or "Valve"
+                groupingKey = (browserNodeId, valveType)
+
+                if groupingKey not in valvesByVolumeSequence:
+                    valvesByVolumeSequence[groupingKey] = {
                         'volumeSequenceBrowserNode': volumeSequenceBrowserNode,
+                        'valveType': valveType,
                         'heartValveNodes': []
                     }
-                valvesByVolumeSequence[browserNodeId]['heartValveNodes'].append(heartValveNode)
+                valvesByVolumeSequence[groupingKey]['heartValveNodes'].append(heartValveNode)
             except Exception as err:
                 logging.warning(f"Error processing valve '{heartValveNode.GetName()}': {err}")
 
-        # Process each browser's valves
+        # Process each valve group
         convertedCount = 0
-        for browserNodeId, browserData in valvesByVolumeSequence.items():
+        for groupingKey, browserData in valvesByVolumeSequence.items():
             volumeSequenceBrowserNode = browserData['volumeSequenceBrowserNode']
             heartValveNodes = browserData['heartValveNodes']
+            valveType = browserData['valveType']
 
-            logging.info(f"Converting {len(heartValveNodes)} valve(s) for volume browser: {volumeSequenceBrowserNode.GetName()}")
+            logging.info(f"Converting {len(heartValveNodes)} valve node(s) for valve type: {valveType}")
 
-            # Create a valve browser node for these HeartValve nodes if they don't have one
-            # All valves in this group share the same volume sequence, so they can share a valve browser
+            # Create a valve browser node for this specific valve
+            # Each distinct valve gets its own browser and sequence
             valveBrowserNode = None
             for hvNode in heartValveNodes:
                 existingBrowser = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(hvNode)
@@ -437,36 +443,23 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     break
 
             if not valveBrowserNode:
-                # Determine a meaningful name based on the first valve's type
-                valveTypeName = "Valve"
-                if heartValveNodes:
-                    firstValveType = heartValveNodes[0].GetAttribute("ValveType")
-                    if firstValveType:
-                        valveTypeName = firstValveType
-
-                # Create a new valve browser node
+                # Create a new valve browser node with a descriptive name based on valve type
                 valveBrowserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
-                browserName = f"{valveTypeName}Browser"
+                browserName = f"{valveType}_Browser"
                 valveBrowserNode.SetName(slicer.mrmlScene.GetUniqueNameByString(browserName))
                 # Set the ModuleName attribute so it appears in heartValveBrowserSelector
                 valveBrowserNode.SetAttribute("ModuleName", "HeartValve")
                 logging.info(f"Created new valve browser node: {valveBrowserNode.GetName()}")
 
-            # Get or create the heart valve sequence node
+            # Get or create the heart valve sequence node for this specific valve
             heartValveSequenceNode = valveBrowserNode.GetMasterSequenceNode()
             if not heartValveSequenceNode:
-                # Determine a meaningful name based on the valve type
-                valveTypeName = "HeartValve"
-                if heartValveNodes:
-                    firstValveType = heartValveNodes[0].GetAttribute("ValveType")
-                    if firstValveType:
-                        valveTypeName = firstValveType
-
                 # Copy index type and name from the volume sequence to match
                 volumeSequenceNode = volumeSequenceBrowserNode.GetMasterSequenceNode()
 
                 heartValveSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode")
-                heartValveSequenceNode.SetName(slicer.mrmlScene.GetUniqueNameByString(f"{valveTypeName}Sequence"))
+                sequenceName = f"{valveType}_Sequence"
+                heartValveSequenceNode.SetName(slicer.mrmlScene.GetUniqueNameByString(sequenceName))
                 heartValveSequenceNode.SetIndexName(volumeSequenceNode.GetIndexName())
                 heartValveSequenceNode.SetIndexUnit(volumeSequenceNode.GetIndexUnit())
                 heartValveSequenceNode.SetIndexType(volumeSequenceNode.GetIndexType())
