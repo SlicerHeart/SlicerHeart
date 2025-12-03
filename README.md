@@ -23,6 +23,7 @@ The extension currently includes the following features (new features are added 
   - [Annulus Shape Analyzer](Docs/AnnulusShapeAnalyzer.md): make population-wise observations on dynamic annular shape.
   - [Fluoro Flow Calculator](Docs/FluoroFlowCalculator.md): measuring Qp-split using readily available fluoroscopy sequences.
 - Implant placement planning and assessment:
+  - [Virtual Cath Lab](Docs/VirtualCathLab.md): Simulates C-arm angio suite, including 3D model of the C-arm, table, patient and generation of fluoroscopy images. Images can be either static (generated from 3D CT) or dynamic (generated from 4DCT). The module can also display cardiac devices (stents, occluders, clips, etc. provided by the Cardiac Device Simulator module) and virtual contrast filling (from image segmentation).
   - Cardiac Device Simulator: module for evaluating placement of cardiac implants. Shows all cardiac device models (Harmony device, generic cylindrical device, various ASD/VSD devices) and all available analysis tools.
   - [ASD/VSD Device Simulator](Docs/AsdVsdDeviceSimulator.md): cardiac device  simulator for ASD/VSD device placement analysis.
   - TCAV Valve Simulator
