@@ -18,6 +18,8 @@ from slicer import vtkMRMLScalarVolumeNode
 from slicer import vtkMRMLTransformNode
 from slicer import vtkMRMLMarkupsPlaneNode
 from slicer import vtkMRMLModelNode
+from slicer import vtkMRMLPlotChartNode
+from slicer import vtkMRMLPlotSeriesNode
 from slicer import vtkMRMLSegmentationNode
 from slicer import vtkMRMLTableNode
 
@@ -70,6 +72,7 @@ class Analyze4DFlowParameterNode:
     streamlinesBidirectional: bool = True
     streamlinesComputeAllMetrics: bool = False
     speedVolumeProjectedToPlane: bool = False  # if True then signed speed vector is projected to the measurement plane normal
+    outputFlowMetricsPlotChart: vtkMRMLPlotChartNode
 
 #
 # Analyze4DFlowWidget
@@ -268,6 +271,9 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             # TODO: Experimental
             # self.unwrap(self._parameterNode.inputFlowField)
 
+            if not self._parameterNode.inputFlowField:
+                raise ValueError("Please select 'Flow field' input.")
+
             self.addLog("Analyze flow field...")
             self.logic.sampleFlowFieldWithPlane(
                 self._parameterNode.inputPlane,
@@ -349,14 +355,14 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
         if not sequenceBrowserNode:
             raise RuntimeError("Input transform is not in a sequence")
-        
+
         segmentationNode = self.getParameterNode().inputMaskSegmentation
         if not segmentationNode:
             raise RuntimeError("Input mask segmentation is not set")
 
         slicer.util.selectModule("SequenceRegistration")
         sequenceRegistrationGui = slicer.util.getModuleWidget("SequenceRegistration")
-        
+
         segmentationTransformNode = segmentationNode.GetParentTransformNode()
         segmentationTransformSequenceNode = None
         if segmentationTransformNode:
@@ -1049,7 +1055,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Project speed vector to the plane
                 # Compute dot product of each element of displacementImageArray by planeNormal.
                 # Do not iterate through points one by one because it would be too slow
-                # (use numpy operations instead).                
+                # (use numpy operations instead).
                 projectedSpeedMPerSec = np.sum(speedMPerSec * planeNormal, axis=1)
 
                 velocitySign = np.sign(projectedSpeedMPerSec)
@@ -1179,8 +1185,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             volumeEffectiveLiterPerMin = totalVolumeMl / 1000 * heartRateBpm
             regurgitationFractionPercent = -backwardVolumeMl / forwardVolumeMl * 100 if forwardVolumeMl > 0 else 0
 
-            netPositiveVolumeMl = np.trapezoid(metrics[:, metricNames.index("PositiveFlowRate")], 0.001 * metrics[:, metricNames.index("Time")])
-            netNegativeVolumeMl = np.trapezoid(metrics[:, metricNames.index("NegativeFlowRate")], 0.001 * metrics[:, metricNames.index("Time")])
+            netPositiveVolumeMl = np.trapz(metrics[:, metricNames.index("PositiveFlowRate")], 0.001 * metrics[:, metricNames.index("Time")])
+            netNegativeVolumeMl = np.trapz(metrics[:, metricNames.index("NegativeFlowRate")], 0.001 * metrics[:, metricNames.index("Time")])
 
             # Simplified Bernoulli equation (https://www.e-echocardiography.com/calculators/miscellaneous/simplified-bernoulli-equation)
             maxVelocityMPerSec = metrics[:, metricNames.index("MaxVelocity")].max()
@@ -1212,23 +1218,64 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
             outputFlowMetricsSummaryTableNode.Modified()
 
-    @staticmethod
-    def createPlotFromTable(flowMetricsTableNode: vtkMRMLTableNode) -> None:
+    def createPlotFromTable(self, flowMetricsTableNode: vtkMRMLTableNode) -> list[vtkMRMLPlotSeriesNode]:
 
-        # Create plot
-        plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode", flowMetricsTableNode.GetName() + " plot")
-        plotSeriesNode.SetAndObserveTableNodeID(flowMetricsTableNode.GetID())
-        plotSeriesNode.SetXColumnName("Time")
-        plotSeriesNode.SetYColumnName("MeanVelocity")
-        plotSeriesNode.SetPlotType(plotSeriesNode.PlotTypeScatter)
-        plotSeriesNode.SetColor(0, 0.6, 1.0)
+        parameterNode = self.getParameterNode()
 
-        # Create chart and add plot
-        plotChartNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotChartNode")
-        plotChartNode.AddAndObservePlotSeriesNodeID(plotSeriesNode.GetID())
+        metricNamesUnits = [("Area", "mm2"), ("PositiveArea", "mm2"), ("NegativeArea", "mm2"),
+                       ("FlowRate", "ml/s"), ("PositiveFlowRate", "ml/s"), ("NegativeFlowRate", "ml/s"),
+                       ("MeanVelocity", "cm/s"), ("MaxVelocity", "cm/s"), ("MinVelocity", "cm/s"), ("StdDevVelocity", "cm/s"), ("ProjectedSpeed", "cm/s"),
+                       ("Percentile1Velocity", "cm/s"), ("Percentile5Velocity", "cm/s"), ("Percentile95Velocity", "cm/s"), ("Percentile99Velocity", "cm/s"),
+                       ("PositiveVolume", "ml"), ("NegativeVolume", "ml")]
+
+        # Create chart and add plots
+        plotChartNode = parameterNode.outputFlowMetricsPlotChart
+        if not plotChartNode:
+            plotChartNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotChartNode")
+            parameterNode.outputFlowMetricsPlotChart = plotChartNode
+        plotChartNode.SetTitle("Flow Metrics")
+        plotChartNode.SetXAxisTitle("time [ms]")
+
+        plotSeriesNodes = []
+        for metricName, unit in metricNamesUnits:
+            if flowMetricsTableNode.GetColumnIndex(metricName) < 0:
+                continue  # metric not available
+
+            # Check if plot series node already exists
+            plotSeriesNode = None
+            addToPlot = False
+            numberOfSeries = plotChartNode.GetNumberOfPlotSeriesNodes()
+            for seriesIndex in range(numberOfSeries):
+                aPlotSeriesNode = plotChartNode.GetNthPlotSeriesNode(seriesIndex)
+                if aPlotSeriesNode.GetYColumnName() == metricName:
+                    plotSeriesNode = aPlotSeriesNode
+                    break
+            if not plotSeriesNode:
+                plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode")
+                addToPlot = True
+            plotSeriesNodes.append(plotSeriesNode)
+
+            # Set up the plot series
+            plotSeriesNode.SetName(f"{metricName} [{unit}]")
+            plotSeriesNode.SetAndObserveTableNodeID(flowMetricsTableNode.GetID())
+            plotSeriesNode.SetXColumnName("Time")
+            plotSeriesNode.SetYColumnName(metricName)
+            plotSeriesNode.SetPlotType(plotSeriesNode.PlotTypeScatter)
+
+            # Set color
+            chartColorNode = slicer.mrmlScene.GetNodeByID('vtkMRMLColorTableNodeFileMediumChartColors.txt')
+
+            rgba = [0, 0, 0, 1]
+            chartColorNode.GetColor(len(plotSeriesNodes) % chartColorNode.GetNumberOfColors(), rgba)
+            plotSeriesNode.SetColor(rgba[0], rgba[1], rgba[2])
+
+            if addToPlot:
+                plotChartNode.AddAndObservePlotSeriesNodeID(plotSeriesNode.GetID())
 
         # Show plot in layout
         slicer.modules.plots.logic().ShowChartInLayout(plotChartNode)
+
+        return plotSeriesNodes
 
     @staticmethod
     def trapezoidAreaSplitZero(x_vals, y_vals):
@@ -1240,7 +1287,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         Parameters:
             x_vals (list of float): x-coordinates of the function samples (must be ordered).
             y_vals (list of float): y-coordinates of the function samples.
-            
+
         Returns:
             tuple:
                 pos_area (float): Total area where y > 0
@@ -1248,11 +1295,11 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         """
         pos_area = 0
         neg_area = 0
-        
+
         for i in range(len(x_vals)-1):
             x0, x1 = x_vals[i], x_vals[i+1]
             y0, y1 = y_vals[i], y_vals[i+1]
-            
+
             # If the interval does not cross zero
             if y0 * y1 >= 0:
                 area = 0.5 * (y0 + y1) * (x1 - x0)
@@ -1264,21 +1311,21 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 # Interval crosses zero: split it
                 # Find zero crossing using linear interpolation
                 x_zero = x0 - y0 * (x1 - x0) / (y1 - y0)
-                
+
                 # Area from x0 to zero crossing
                 area1 = 0.5 * (y0 + 0) * (x_zero - x0)
                 if area1 > 0:
                     pos_area += area1
                 else:
                     neg_area += area1
-                
+
                 # Area from zero crossing to x1
                 area2 = 0.5 * (0 + y1) * (x1 - x_zero)
                 if area2 > 0:
                     pos_area += area2
                 else:
                     neg_area += area2
-        
+
         return pos_area, neg_area
 
 
