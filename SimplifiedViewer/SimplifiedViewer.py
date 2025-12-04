@@ -265,6 +265,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.crosshairVisibilityButton.connect('toggled(bool)', self.onCrosshairVisibilityButtonClicked)
         topLeftButtons.append(self.crosshairVisibilityButton)
 
+        self.mprVisibilityButton = qt.QToolButton()
+        self.mprVisibilityButton.setToolTip("Toggle slice intersections")
+        self.mprVisibilityButton.checkable = True
+        self.mprVisibilityButton.connect('toggled(bool)', self.onMprVisibilityButtonClicked)
+        topLeftButtons.append(self.mprVisibilityButton)
+
         self.fourUpViewAction = qt.QAction("Four Up View")
         self.fourUpViewAction.setToolTip("Switch to four up view")
         self.fourUpViewAction.connect('triggered()', self.onFourUpViewButtonClicked)
@@ -649,6 +655,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.svToggleButton.visible = not dicomBrowserVisible
         self.measurementsToggleButton.visible = not dicomBrowserVisible
         self.crosshairVisibilityButton.visible = not dicomBrowserVisible
+        self.mprVisibilityButton.visible = not dicomBrowserVisible
         self.layoutsButton.visible = not dicomBrowserVisible
         self.settingsButton.visible = settingActionVisible
 
@@ -687,6 +694,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.svToggleButton:                                   "Icons/SceneViews.svg",
             self.measurementsToggleButton:                         "Icons/Measurements.svg",
             self.crosshairVisibilityButton:                        "Icons/Crosshair.svg",
+            self.mprVisibilityButton:                              "Icons/SliceIntersections.svg",
             self.layoutsButton:                                    "Icons/Layouts.svg",
             self.settingsButton:                                   "Icons/Settings.svg",
         }
@@ -1121,6 +1129,10 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.crosshairVisibilityButton.checked = self.logic.getCrosshairVisibility()
         self.crosshairVisibilityButton.blockSignals(wasBlocking)
 
+        wasBlocking = self.mprVisibilityButton.blockSignals(True)
+        self.mprVisibilityButton.checked = self.logic.getSliceIntersectionsVisibility()
+        self.mprVisibilityButton.blockSignals(wasBlocking)
+
     def onSceneViewClicked(self, sceneViewIndex):
         self.logic.restoreSceneView(sceneViewIndex)
         self.updateGUIFromMRML()
@@ -1177,6 +1189,12 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Update the crosshair visibility
         """
         self.logic.setCrosshairVisibility(visible)
+
+    def onMprVisibilityButtonClicked(self, visible):
+        """
+        Update the slice intersections visibility
+        """
+        self.logic.setSliceIntersectionsVisibility(visible)
 
 #
 # SimplifiedViewerLogic
@@ -1278,6 +1296,19 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
             return False
         return crosshairNode.GetCrosshairMode() == slicer.vtkMRMLCrosshairNode.ShowBasic
 
+    def setSliceIntersectionsVisibility(self, visible: bool):
+        appLogic = slicer.app.applicationLogic()
+        if not appLogic:
+            return
+        appLogic.SetIntersectingSlicesEnabled(slicer.vtkMRMLApplicationLogic.IntersectingSlicesVisibility, visible)
+        appLogic.SetIntersectingSlicesEnabled(slicer.vtkMRMLApplicationLogic.IntersectingSlicesInteractive, visible)
+
+    def getSliceIntersectionsVisibility(self):
+        appLogic = slicer.app.applicationLogic()
+        if not appLogic:
+            return False
+        return appLogic.GetIntersectingSlicesEnabled(slicer.vtkMRMLApplicationLogic.IntersectingSlicesVisibility)
+
     def updateSceneView(self, sceneViewIndex: int):
         """
         Update the scene view with the current view settings
@@ -1304,6 +1335,7 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
         clipping = self.getClipping()
         planeVisibility = self.getClippingPlaneVisibility()
         crosshairVisibility = self.getCrosshairVisibility()
+        sliceIntersectionsVisibility = self.getSliceIntersectionsVisibility()
 
         with slicer.util.RenderBlocker():
             layoutManager = slicer.app.layoutManager()
@@ -1321,6 +1353,7 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
             self.setClipping(clipping)
             self.setClippingPlaneVisibility(planeVisibility)
             self.setCrosshairVisibility(crosshairVisibility)
+            self.setSliceIntersectionsVisibility(sliceIntersectionsVisibility)
 
             # Restore view background color
             for viewNode in slicer.util.getNodesByClass("vtkMRMLViewNode"):
