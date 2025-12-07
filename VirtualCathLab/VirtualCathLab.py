@@ -382,8 +382,8 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       ('s', lambda: self.adjustSlider("frontalArmAngleC",-largeStep)),
       ('e', lambda: self.adjustSlider("frontalArmAngleL",largeStep)),
       ('d', lambda: self.adjustSlider("frontalArmAngleL",-largeStep)),
-      ('z', lambda: self.adjustSlider("frontalSourceToImageDistance",largeStep)),
-      ('x', lambda: self.adjustSlider("frontalSourceToImageDistance",-largeStep)),
+      ('z', lambda: self.adjustSlider("frontalArmSourceToImageDistance",largeStep)),
+      ('x', lambda: self.adjustSlider("frontalArmSourceToImageDistance",-largeStep)),
 
       ('y', lambda: self.adjustSlider("lateralArmAngleP",largeStep)),
       ('h', lambda: self.adjustSlider("lateralArmAngleP",-largeStep)),
@@ -391,8 +391,8 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       ('j', lambda: self.adjustSlider("lateralArmAngleC",-largeStep)),
       ('i', lambda: self.adjustSlider("lateralArmOffset",largeStep)),
       ('k', lambda: self.adjustSlider("lateralArmOffset",-largeStep)),
-      ('n', lambda: self.adjustSlider("lateralSourceToImageDistance",largeStep)),
-      ('m', lambda: self.adjustSlider("lateralSourceToImageDistance",-largeStep)),
+      ('n', lambda: self.adjustSlider("lateralArmSourceToImageDistance",largeStep)),
+      ('m', lambda: self.adjustSlider("lateralArmSourceToImageDistance",-largeStep)),
       
       ('f', lambda: self.adjustSlider("tableShiftLateral",largeStep)),
       ('v', lambda: self.adjustSlider("tableShiftLateral",-largeStep)),
@@ -407,8 +407,8 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       ('Shift+s', lambda: self.adjustSlider("frontalArmAngleC",-smallStep)),
       ('Shift+e', lambda: self.adjustSlider("frontalArmAngleL",smallStep)),
       ('Shift+d', lambda: self.adjustSlider("frontalArmAngleL",-smallStep)),
-      ('Shift+z', lambda: self.adjustSlider("frontalSourceToImageDistance",smallStep)),
-      ('Shift+x', lambda: self.adjustSlider("frontalSourceToImageDistance",-smallStep)),
+      ('Shift+z', lambda: self.adjustSlider("frontalArmSourceToImageDistance",smallStep)),
+      ('Shift+x', lambda: self.adjustSlider("frontalArmSourceToImageDistance",-smallStep)),
 
       ('Shift+y', lambda: self.adjustSlider("lateralArmAngleP",smallStep)),
       ('Shift+h', lambda: self.adjustSlider("lateralArmAngleP",-smallStep)),
@@ -416,8 +416,8 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       ('Shift+j', lambda: self.adjustSlider("lateralArmAngleC",-smallStep)),
       ('Shift+i', lambda: self.adjustSlider("lateralArmOffset",smallStep)),
       ('Shift+k', lambda: self.adjustSlider("lateralArmOffset",-smallStep)),
-      ('Shift+n', lambda: self.adjustSlider("lateralSourceToImageDistance",smallStep)),
-      ('Shift+m', lambda: self.adjustSlider("lateralSourceToImageDistance",-smallStep)),
+      ('Shift+n', lambda: self.adjustSlider("lateralArmSourceToImageDistance",smallStep)),
+      ('Shift+m', lambda: self.adjustSlider("lateralArmSourceToImageDistance",-smallStep)),
 
       ('Shift+f', lambda: self.adjustSlider("tableShiftLateral",smallStep)),
       ('Shift+v', lambda: self.adjustSlider("tableShiftLateral",-smallStep)),
@@ -900,7 +900,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       storageNode.ReadData(frontalCameraTransform)
       slicer.mrmlScene.RemoveNode(storageNode)
 
-    frontalDetectorTransformID = self.parameterNode.GetNodeReferenceID("frontal-arm-c-rotation-transform")
+    frontalDetectorTransformID = self.parameterNode.GetNodeReferenceID("frontal-arm-detector-rotation-transform")
     frontalCameraTransform.SetAndObserveTransformNodeID(frontalDetectorTransformID)
 
     lateralCameraTransform = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
@@ -915,7 +915,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       storageNode.ReadData(lateralCameraTransform)
       slicer.mrmlScene.RemoveNode(storageNode)
 
-    lateralDetectorTransformID = self.parameterNode.GetNodeReferenceID("lateral-arm-c-rotation-transform")
+    lateralDetectorTransformID = self.parameterNode.GetNodeReferenceID("lateral-arm-detector-rotation-transform")
     lateralCameraTransform.SetAndObserveTransformNodeID(lateralDetectorTransformID)
 
   def updateModel(self):
@@ -1067,8 +1067,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
       transformNode = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
       frontalDetectorHeightMm = self.FRONTAL_DETECTOR_HEIGHT_MM
-      frontalSIDMm = deviceParams['frontalSourceToImageDistance']
-      frontalSODMm = deviceParams['frontalSourceToObjectDistance']
+      frontalSIDMm = deviceParams['frontalArmSourceToImageDistance']
+      frontalSODMm = deviceParams['frontalArmSourceToObjectDistance']
       self.updateCameraPosition(cameraNode, transformNode, frontalDetectorHeightMm, frontalSIDMm, frontalSODMm)
 
     if deviceClass.ID == BiplaneFluoro.ID:
@@ -1078,8 +1078,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
         transformNode = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
         lateralDetectorHeightMm = self.LATERAL_DETECTOR_HEIGHT_MM
-        lateralSIDMm = deviceParams['lateralSourceToImageDistance']
-        lateralSODMm = deviceParams['lateralSourceToObjectDistance']
+        lateralSIDMm = deviceParams['lateralArmSourceToImageDistance']
+        lateralSODMm = deviceParams['lateralArmSourceToObjectDistance']
         self.updateCameraPosition(cameraNode, transformNode, lateralDetectorHeightMm, lateralSIDMm, lateralSODMm)
 
   def renderToVolume(self):
@@ -1187,15 +1187,15 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       detectorHeightPxParameter = self.LATERAL_DETECTOR_HEIGHT_PARAMETER
       detectorVolumeNode = self.getLateralCArmVolumeNode()
       cameraTransform = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
-      sidMm = deviceParams['lateralSourceToImageDistance']
-      sodMm = deviceParams['lateralSourceToObjectDistance']
+      sidMm = deviceParams['lateralArmSourceToImageDistance']
+      sodMm = deviceParams['lateralArmSourceToObjectDistance']
     else:
       detectorHeightMm = self.FRONTAL_DETECTOR_HEIGHT_MM
       detectorHeightPxParameter = self.FRONTAL_DETECTOR_HEIGHT_PARAMETER
       detectorVolumeNode = self.getFrontalCArmVolumeNode()
       cameraTransform = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
-      sidMm = deviceParams['frontalSourceToImageDistance']
-      sodMm = deviceParams['frontalSourceToObjectDistance']
+      sidMm = deviceParams['frontalArmSourceToImageDistance']
+      sodMm = deviceParams['frontalArmSourceToObjectDistance']
 
     scaleFactor = sodMm / sidMm
     imageHeight = detectorHeightMm * scaleFactor

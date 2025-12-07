@@ -46,14 +46,15 @@ class FluoroDeviceBase(CardiacDeviceBase):
   # - Table rotation: +/- 180 deg
 
   @classmethod
-  def getFrontalGantryParameters(cls, displayFrontalPrefix=False):
+  def getFrontalGantryParameters(cls, displayFrontalPrefix=False, defaultLarmAngle=0):
     prefix = "Frontal - " if displayFrontalPrefix else ""
     return {
-      "frontalArmAngleL": cls._genParameters(f"{prefix}L-arm angle:", "Positive = counterclockwise", 0, "deg", -90, 90, 1.0, 1),
+      "frontalArmAngleL": cls._genParameters(f"{prefix}L-arm angle:", "Positive = counterclockwise", defaultLarmAngle, "deg", -90, 90, 1.0, 1),
       "frontalArmAngleP": cls._genParameters(f"{prefix}P-arm angle:", "Positive = clockwise", 0, "deg", -180, 180, 1.0, 1),
       "frontalArmAngleC": cls._genParameters(f"{prefix}C-arm angle:", "Positive = detector moves away from the arm", 0, "deg", -180, 180, 1.0, 1),
-      "frontalSourceToObjectDistance": cls._genParameters(f"{prefix}SOD:", "Source to object distance (between the generator and the isocenter)", 720, "mm", 600, 800, 5.0, 1, visible=False),
-      "frontalSourceToImageDistance": cls._genParameters(f"{prefix}SID:", "Source to image distance (between the generator and detector)", 940, "mm", 800, 1200, 5.0, 1),
+      "frontalArmDetectorRotationAngle": cls._genParameters(f"{prefix}Detector rotation:", "Positive = clockwise (looking from the generator)", 90, "deg", -180, 180, 1.0, 1),
+      "frontalArmSourceToObjectDistance": cls._genParameters(f"{prefix}SOD:", "Source to object distance (between the generator and the isocenter)", 720, "mm", 600, 800, 5.0, 1, visible=False),
+      "frontalArmSourceToImageDistance": cls._genParameters(f"{prefix}SID:", "Source to image distance (between the generator and detector)", 940, "mm", 800, 1200, 5.0, 1),
     }
 
   @classmethod
@@ -61,9 +62,10 @@ class FluoroDeviceBase(CardiacDeviceBase):
     return {
       "lateralArmAngleP": cls._genParameters("Lateral - P-arm angle:", "Positive = clockwise", 0, "deg", -270, 270, 1.0, 1),
       "lateralArmAngleC": cls._genParameters("Lateral - C-arm angle:", "Positive = clockwise", 0, "deg", -180, 180, 1.0, 1),
+      "lateralArmDetectorRotationAngle": cls._genParameters("Lateral - Detector rotation:", "Positive = clockwise (looking from the generator)", 0, "deg", -180, 180, 1.0, 1),
       "lateralArmOffset": cls._genParameters("Lateral - Shift:", "Negative = cranial, positive is caudal angle", 0, "mm", -500, 2000, 1.0, 1),
-      "lateralSourceToObjectDistance": cls._genParameters("Lateral - SOD:", "Source to object distance (between the generator and the isocenter)", 720, "mm", 600, 800, 5.0, 1, visible=False),
-      "lateralSourceToImageDistance": cls._genParameters("Lateral - SID:", "Source to image distance (between the generator and detector)", 1100, "mm", 800, 1400, 5.0, 1)
+      "lateralArmSourceToObjectDistance": cls._genParameters("Lateral - SOD:", "Source to object distance (between the generator and the isocenter)", 720, "mm", 600, 800, 5.0, 1, visible=False),
+      "lateralArmSourceToImageDistance": cls._genParameters("Lateral - SID:", "Source to image distance (between the generator and detector)", 1100, "mm", 800, 1400, 5.0, 1)
     }
 
   @classmethod
@@ -83,13 +85,15 @@ class FluoroDeviceBase(CardiacDeviceBase):
         8dcac27060c91ea07ff771cd5ceb6629d76117403b7b3436e9cf58a894e0e9c3 *frontal-arm-c.ply
         b052a49172a8df427a687708125c167f891ee2a2c4975d73023a451894c63e89 *frontal-arm-l.ply
         c161ecd0421f38bbda82279d5de4cf8734af5fc5ae21d4abb9408615af107937 *frontal-arm-p.ply
-        110d808198398bffcc92c28bd27ad81b6ca7002d0737cc9ab10fc47fb0207b87 *frontal-detector.ply
+        b6439ad728c07d2cc46c7e8215ce67db107cb8985e050ca08f1ccaf3cc374b26 *frontal-detector.ply
+        7e89af9cfa192befb63f906a5c111725e19118deb62d65e1b9c8f97ca1fcc9fb *frontal-detector-base.ply
         faefa7db04e5bece0d3df604884965f88a5327fb4460e44315331b8a3dc9f2f5 *lateral-arm-c.ply
         60345244e6b5d3388c1dc07b1b66cc378be12eef3de071dfb28131c8f5f3eb64 *lateral-arm-p.ply
-        278f876461847ddbe537c17de41a89adefd58ab243603bdb65ffdffafc2e30e6 *lateral-detector.ply
+        f90221ae1ed76514d0f98d7764e7710ebf8cc05b29882386905783525e7848bd *lateral-detector.ply
+        36d7ccdf988705100ae1ffcee948d25793f85b770f5c308a3e687df3cd503fb6 *lateral-detector-base.ply
         d64f711a38aeb14f0bb6c5cf9d98bf793a2645ac4820360680e6c746c8725f6f *table-base.ply
         2c3f27de4e0116068d78e2b67080929d74b22b3d816b69bb0dff7e5a78a919ce *table-middle.ply
-        42e3b330a3b5fd8497f101131b1a9754735103d528416655671ce5eedb9d768b *table-top.ply
+        42e3b330a3b5fd8497f101131b1a9754735103d528416655671ce5eedb9d768b *table-top.ply        
         """
       for line in modelFiles.strip().split("\n"):
         checksum, filename = line.split(" *")
@@ -143,10 +147,12 @@ class FluoroDeviceBase(CardiacDeviceBase):
       ("frontal-arm-p-rotation-transform", "frontal-arm-l-rotation-transform", False, "rotate", 2),
       ("frontal-arm-c-rotation-transform", "frontal-arm-p-rotation-transform", False, "rotate", 0),
       ("frontal-arm-detector-translation-transform", "frontal-arm-c-rotation-transform", False, "translate", 1),
+      ("frontal-arm-detector-rotation-transform", "frontal-arm-detector-translation-transform", False, "rotate", 1),
       ("lateral-arm-offset-transform", "PositioningTransform", True, "translate", 2),
       ("lateral-arm-p-rotation-transform", "lateral-arm-offset-transform", True, "rotate", 1),
       ("lateral-arm-c-rotation-transform", "lateral-arm-p-rotation-transform", True, "rotate", 2),
       ("lateral-arm-detector-translation-transform", "lateral-arm-c-rotation-transform", True, "translate", 0),
+      ("lateral-arm-detector-rotation-transform", "lateral-arm-detector-translation-transform", True, "rotate", 0),
       ("table-vertical-transform", "PositioningTransform", False, "translate", 1),
       ("table-lateral-transform", "table-vertical-transform", False, "translate", 0),
       ("table-longitudinal-transform", "table-lateral-transform", False, "translate", 2),
@@ -195,10 +201,12 @@ class FluoroDeviceBase(CardiacDeviceBase):
       ("frontal-arm-l",    "frontal-arm-l-rotation-transform", False),
       ("frontal-arm-p",    "frontal-arm-p-rotation-transform", False),
       ("frontal-arm-c",    "frontal-arm-c-rotation-transform", False),
-      ("frontal-detector", "frontal-arm-detector-translation-transform", False),
+      ("frontal-detector-base", "frontal-arm-detector-translation-transform", False),
+      ("frontal-detector", "frontal-arm-detector-rotation-transform", False),
       ("lateral-arm-p",    "lateral-arm-p-rotation-transform", True),
       ("lateral-arm-c",    "lateral-arm-c-rotation-transform", True),
-      ("lateral-detector", "lateral-arm-detector-translation-transform", True),
+      ("lateral-detector-base", "lateral-arm-detector-translation-transform", True),
+      ("lateral-detector", "lateral-arm-detector-rotation-transform", True),
       ("table-base",       "PositioningTransform", False),
       ("table-middle",     "table-lateral-transform", False),
       ("table-top",        "table-longitudinal-transform", False),
@@ -344,7 +352,8 @@ class FluoroDeviceBase(CardiacDeviceBase):
       FluoroDeviceBase.updateTransform(parameterNode, 'frontal-arm-p-rotation-transform', rotateZ=parameterValues['frontalArmAngleP'])
       FluoroDeviceBase.updateTransform(parameterNode, 'frontal-arm-l-rotation-transform', rotateY=parameterValues['frontalArmAngleL'])
       FluoroDeviceBase.updateTransform(parameterNode, 'frontal-arm-detector-translation-transform',
-        translateY=parameterValues['frontalSourceToImageDistance']-parameterValues['frontalSourceToObjectDistance'])
+        translateY=parameterValues['frontalArmSourceToImageDistance']-parameterValues['frontalArmSourceToObjectDistance'])
+      FluoroDeviceBase.updateTransform(parameterNode, 'frontal-arm-detector-rotation-transform', rotateY=parameterValues['frontalArmDetectorRotationAngle'])
 
       # Table
       FluoroDeviceBase.updateTransform(parameterNode, 'table-lateral-transform', translateX=parameterValues['tableShiftLateral'])
@@ -357,7 +366,8 @@ class FluoroDeviceBase(CardiacDeviceBase):
         FluoroDeviceBase.updateTransform(parameterNode, 'lateral-arm-p-rotation-transform', rotateY=parameterValues['lateralArmAngleP'])
         FluoroDeviceBase.updateTransform(parameterNode, 'lateral-arm-c-rotation-transform', rotateZ=parameterValues['lateralArmAngleC'])
         FluoroDeviceBase.updateTransform(parameterNode, 'lateral-arm-detector-translation-transform',
-          translateX=parameterValues['lateralSourceToImageDistance']-parameterValues['lateralSourceToObjectDistance'])
+          translateX=parameterValues['lateralArmSourceToImageDistance']-parameterValues['lateralArmSourceToObjectDistance'])
+        FluoroDeviceBase.updateTransform(parameterNode, 'lateral-arm-detector-rotation-transform', rotateX=parameterValues['lateralArmDetectorRotationAngle'])
 
     finally:
       slicer.app.resumeRender()
@@ -370,7 +380,7 @@ class GenericFluoro(FluoroDeviceBase):
 
   @classmethod
   def getParameters(cls):
-    return FluoroDeviceBase.getFrontalGantryParameters() | FluoroDeviceBase.getTableParameters()
+    return FluoroDeviceBase.getFrontalGantryParameters(defaultLarmAngle=-90) | FluoroDeviceBase.getTableParameters()
 
 
 class BiplaneFluoro(FluoroDeviceBase):
