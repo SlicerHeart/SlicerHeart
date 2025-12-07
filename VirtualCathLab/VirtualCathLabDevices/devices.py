@@ -93,7 +93,7 @@ class FluoroDeviceBase(CardiacDeviceBase):
         36d7ccdf988705100ae1ffcee948d25793f85b770f5c308a3e687df3cd503fb6 *lateral-detector-base.ply
         d64f711a38aeb14f0bb6c5cf9d98bf793a2645ac4820360680e6c746c8725f6f *table-base.ply
         2c3f27de4e0116068d78e2b67080929d74b22b3d816b69bb0dff7e5a78a919ce *table-middle.ply
-        42e3b330a3b5fd8497f101131b1a9754735103d528416655671ce5eedb9d768b *table-top.ply        
+        42e3b330a3b5fd8497f101131b1a9754735103d528416655671ce5eedb9d768b *table-top.ply
         """
       for line in modelFiles.strip().split("\n"):
         checksum, filename = line.split(" *")
@@ -112,7 +112,7 @@ class FluoroDeviceBase(CardiacDeviceBase):
       os.makedirs(modelsPath)
     if not needToGetModels:
       return
-    
+
     slicer.util.delayDisplay("Setting up C-arm model...", 500)
     from zipfile import ZipFile
     with ZipFile(os.path.join(cls.RESOURCES_PATH, "CArmModel.arc"), "r") as zip:
@@ -122,6 +122,65 @@ class FluoroDeviceBase(CardiacDeviceBase):
       import base64
       zip.extractall(path=modelsPath, pwd=base64.b64decode('cGtXV2prJiomKg=='))
 
+
+  @staticmethod
+  def createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance):
+    """
+    Create a rectangular pyramid polydata with origin at the center of the base (detector position)
+    and apex at the source position.
+
+    Args:
+      detectorWidth: Width of the detector (base of pyramid)
+      detectorHeight: Height of the detector (base of pyramid)
+      sourceToDetectorDistance: Distance from source to detector (height of pyramid)
+
+    Returns:
+      vtkPolyData representing the pyramid
+    """
+    # Create points for the pyramid
+    # Apex at origin (source position)
+    # Base at detector position (along Y axis in local coordinates)
+    points = vtk.vtkPoints()
+
+    # Apex (source position at origin)
+    points.InsertNextPoint(0, -sourceToDetectorDistance, 0)
+
+    # Base corners at detector position
+    halfWidth = detectorWidth / 2.0
+    halfHeight = detectorHeight / 2.0
+
+    # Four corners of the rectangular base
+    points.InsertNextPoint(-halfWidth, 0, -halfHeight)  # bottom-left
+    points.InsertNextPoint(halfWidth, 0, -halfHeight)   # bottom-right
+    points.InsertNextPoint(halfWidth, 0, halfHeight)    # top-right
+    points.InsertNextPoint(-halfWidth, 0, halfHeight)   # top-left
+
+    # Create the pyramid faces
+    pyramid = vtk.vtkCellArray()
+
+    # Base (rectangle at detector)
+    base = vtk.vtkPolygon()
+    base.GetPointIds().SetNumberOfIds(4)
+    base.GetPointIds().SetId(0, 1)
+    base.GetPointIds().SetId(1, 2)
+    base.GetPointIds().SetId(2, 3)
+    base.GetPointIds().SetId(3, 4)
+    pyramid.InsertNextCell(base)
+
+    # Four triangular faces
+    for i in range(4):
+      triangle = vtk.vtkTriangle()
+      triangle.GetPointIds().SetId(0, 0)  # apex
+      triangle.GetPointIds().SetId(1, i + 1)
+      triangle.GetPointIds().SetId(2, ((i + 1) % 4) + 1)
+      pyramid.InsertNextCell(triangle)
+
+    # Create polydata
+    polyData = vtk.vtkPolyData()
+    polyData.SetPoints(points)
+    polyData.SetPolys(pyramid)
+
+    return polyData
 
   @classmethod
   def setupDeviceModel(cls):
@@ -198,18 +257,20 @@ class FluoroDeviceBase(CardiacDeviceBase):
 
     # Load all models from files (if not loaded already)
     models = [ # model and file name, parent transform name, forBiplaneOnly
-      ("frontal-arm-l",    "frontal-arm-l-rotation-transform", False),
-      ("frontal-arm-p",    "frontal-arm-p-rotation-transform", False),
-      ("frontal-arm-c",    "frontal-arm-c-rotation-transform", False),
+      ("frontal-arm-l",         "frontal-arm-l-rotation-transform", False),
+      ("frontal-arm-p",         "frontal-arm-p-rotation-transform", False),
+      ("frontal-arm-c",         "frontal-arm-c-rotation-transform", False),
       ("frontal-detector-base", "frontal-arm-detector-translation-transform", False),
-      ("frontal-detector", "frontal-arm-detector-rotation-transform", False),
-      ("lateral-arm-p",    "lateral-arm-p-rotation-transform", True),
-      ("lateral-arm-c",    "lateral-arm-c-rotation-transform", True),
+      ("frontal-detector",      "frontal-arm-detector-rotation-transform", False),
+      ("frontal-beam",          "frontal-arm-detector-rotation-transform", False),  # X-ray beam visualization
+      ("lateral-arm-p",         "lateral-arm-p-rotation-transform", True),
+      ("lateral-arm-c",         "lateral-arm-c-rotation-transform", True),
       ("lateral-detector-base", "lateral-arm-detector-translation-transform", True),
-      ("lateral-detector", "lateral-arm-detector-rotation-transform", True),
-      ("table-base",       "PositioningTransform", False),
-      ("table-middle",     "table-lateral-transform", False),
-      ("table-top",        "table-longitudinal-transform", False),
+      ("lateral-detector",      "lateral-arm-detector-rotation-transform", True),
+      ("lateral-beam",          "lateral-arm-detector-rotation-transform", True),  # X-ray beam visualization
+      ("table-base",            "PositioningTransform", False),
+      ("table-middle",          "table-lateral-transform", False),
+      ("table-top",             "table-longitudinal-transform", False),
       ]
     temporaryModelsPath = None
     for modelNodeRef, parentTransformNodeRef, forBiplaneOnly in models:
@@ -225,27 +286,39 @@ class FluoroDeviceBase(CardiacDeviceBase):
         continue
       # Need to add the model now
       if modelNodeRef not in cls.MODEL_CACHE:
-        # Model has not been read from file yet, read it now
-        if not temporaryModelsPath:
-          temporaryModelsPath = os.path.join(slicer.app.temporaryPath, "VirtualCathLabModelsCache")
-          cls._getModelFiles(temporaryModelsPath)
+        # Check if this is a beam model (generated procedurally)
+        if modelNodeRef in ["frontal-beam", "lateral-beam"]:
+          # Create beam polydata
+          detectorWidth = 300  # Default detector width in mm
+          detectorHeight = 300  # Default detector height in mm
+          if modelNodeRef == "frontal-beam":
+            sourceToDetectorDistance = parameterValues['frontalArmSourceToImageDistance']
+          else:  # lateral-beam
+            sourceToDetectorDistance = parameterValues['lateralArmSourceToImageDistance']
 
-        reader = vtk.vtkPLYReader()
-        reader.SetFileName(os.path.join(temporaryModelsPath, modelNodeRef+".ply"))
-        reader.Update()
-        model_RAS = vtk.vtkPolyData()
+          model_RAS = cls.createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance)
+        else:
+          # Model has not been read from file yet, read it now
+          if not temporaryModelsPath:
+            temporaryModelsPath = os.path.join(slicer.app.temporaryPath, "VirtualCathLabModelsCache")
+            cls._getModelFiles(temporaryModelsPath)
 
-        # models are stores in files as LPS, but we need in the scene as RAS
-        # TODO: use this single line instead of the several lines below when
-        # the ConvertBetweenRASAndLPS method is exposed in Slicer core:
-        #   slicer.vtkMRMLModelStorageNode.ConvertBetweenRASAndLPS(reader.GetOutput(), model_RAS)
-        transformRasLps = vtk.vtkTransform()
-        transformRasLps.Scale(-1, -1, 1)
-        transformFilter = vtk.vtkTransformPolyDataFilter()
-        transformFilter.SetTransform(transformRasLps)
-        transformFilter.SetInputData(reader.GetOutput())
-        transformFilter.Update()
-        model_RAS = transformFilter.GetOutput()
+          reader = vtk.vtkPLYReader()
+          reader.SetFileName(os.path.join(temporaryModelsPath, modelNodeRef+".ply"))
+          reader.Update()
+          model_RAS = vtk.vtkPolyData()
+
+          # models are stores in files as LPS, but we need in the scene as RAS
+          # TODO: use this single line instead of the several lines below when
+          # the ConvertBetweenRASAndLPS method is exposed in Slicer core:
+          #   slicer.vtkMRMLModelStorageNode.ConvertBetweenRASAndLPS(reader.GetOutput(), model_RAS)
+          transformRasLps = vtk.vtkTransform()
+          transformRasLps.Scale(-1, -1, 1)
+          transformFilter = vtk.vtkTransformPolyDataFilter()
+          transformFilter.SetTransform(transformRasLps)
+          transformFilter.SetInputData(reader.GetOutput())
+          transformFilter.Update()
+          model_RAS = transformFilter.GetOutput()
 
         cls.MODEL_CACHE[modelNodeRef] = model_RAS
       modelNode = slicer.modules.models.logic().AddModel(cls.MODEL_CACHE[modelNodeRef])
@@ -302,11 +375,20 @@ class FluoroDeviceBase(CardiacDeviceBase):
       if not modelNode:
         continue
       modelNode.CreateDefaultDisplayNodes()
+      displayNode = modelNode.GetDisplayNode()
+
+      # Special visualization for beam models
+      if modelNodeRef in ["frontal-beam", "lateral-beam"]:
+        # Make beam semi-transparent with cyan color
+        displayNode.SetOpacity(0.15)
+        displayNode.SetColor(0.0, 0.8, 1.0)  # Cyan color for X-ray beam
+        displayNode.SetBackfaceCulling(False)  # Show both sides
+
       if usePBR:
-        modelNode.GetDisplayNode().SetRoughness(0.4)
-        modelNode.GetDisplayNode().SetInterpolation(slicer.vtkMRMLDisplayNode.PBRInterpolation)
+        displayNode.SetRoughness(0.4)
+        displayNode.SetInterpolation(slicer.vtkMRMLDisplayNode.PBRInterpolation)
       else:
-        modelNode.GetDisplayNode().SetInterpolation(slicer.vtkMRMLDisplayNode.GouraudInterpolation)
+        displayNode.SetInterpolation(slicer.vtkMRMLDisplayNode.GouraudInterpolation)
 
     cls.computeTransforms()
 
@@ -335,6 +417,33 @@ class FluoroDeviceBase(CardiacDeviceBase):
     transformNode.SetMatrixTransformToParent(transform.GetMatrix())
 
   @classmethod
+  def updateBeamModels(cls, parameterNode, parameterValues):
+    """
+    Update beam model geometry when source-to-image distance changes.
+    """
+    detectorWidth = 300  # Default detector width in mm
+    detectorHeight = 300  # Default detector height in mm
+
+    # Update frontal beam
+    frontalBeamNode = parameterNode.GetNodeReference('frontal-beam')
+    if frontalBeamNode:
+      sourceToDetectorDistance = parameterValues['frontalArmSourceToImageDistance']
+      beamPolyData = cls.createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance)
+      frontalBeamNode.SetAndObservePolyData(beamPolyData)
+      # Update cache
+      cls.MODEL_CACHE['frontal-beam'] = beamPolyData
+
+    # Update lateral beam (if biplane)
+    if cls.BIPLANE:
+      lateralBeamNode = parameterNode.GetNodeReference('lateral-beam')
+      if lateralBeamNode:
+        sourceToDetectorDistance = parameterValues['lateralArmSourceToImageDistance']
+        beamPolyData = cls.createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance)
+        lateralBeamNode.SetAndObservePolyData(beamPolyData)
+        # Update cache
+        cls.MODEL_CACHE['lateral-beam'] = beamPolyData
+
+  @classmethod
   def computeTransforms(cls):
     if not cls.PARAMETER_NODE:
       return
@@ -346,6 +455,9 @@ class FluoroDeviceBase(CardiacDeviceBase):
 
     slicer.app.pauseRender()
     try:
+
+      # Update beam models when SID changes
+      cls.updateBeamModels(parameterNode, parameterValues)
 
       # First plane
       FluoroDeviceBase.updateTransform(parameterNode, 'frontal-arm-c-rotation-transform', rotateX=parameterValues['frontalArmAngleC'])
