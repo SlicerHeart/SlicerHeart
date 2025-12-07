@@ -131,14 +131,13 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.volumeRenderingPresetWidget.connect("presetOffsetChanged(double, double, bool)", self.onPresetOffsetChanged)
     self.ui.applySegmentationButton.connect("clicked()", self.onApplySegmentationClicked)
     self.ui.resetSegmentationButton.connect("clicked()", self.onResetSegmentationClicked)
-    self.ui.frontalHeightSpinBox.connect("valueChanged(int)", self.onImageSpinBoxChanged)
-    self.ui.lateralHeightSpinBox.connect("valueChanged(int)", self.onImageSpinBoxChanged)
     self.ui.roiNodeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onROINodeChanged)
     self.ui.roiNodeSelector.connect('nodeAddedByUser(vtkMRMLNode*)', self.onROINodeAdded)
     self.ui.enableCropCheckBox.connect("clicked()", self.onEnableCropClicked)
     self.ui.displayROICheckBox.connect("clicked()", self.onDisplayROIClicked)
     self.ui.fitROIToVolumeButton.connect("clicked()", self.onFitROIToVolumeClicked)
     self.ui.softEdgeSlider.connect("valueChanged(double)", self.updateMRMLFromGUI)
+    self.ui.detectorPixelSizeSpinBox.connect("valueChanged(double)", self.updateMRMLFromGUI)
     self.ui.deviceModelComboBox.connect('currentNodeChanged(vtkMRMLNode*)', self.updateMRMLFromGUI)
     self.ui.deviceModelShowButton.connect("clicked()", self.onDeviceModelShowClicked)
     self.ui.deviceModelHideButton.connect("clicked()", self.onDeviceModelHideClicked)
@@ -157,6 +156,7 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.displayROICheckBox.disconnect("clicked()", self.onDisplayROIClicked)
     self.ui.fitROIToVolumeButton.disconnect("clicked()", self.onFitROIToVolumeClicked)
     self.ui.softEdgeSlider.disconnect("valueChanged(double)", self.updateMRMLFromGUI)
+    self.ui.detectorPixelSizeSpinBox.disconnect("valueChanged(double)", self.updateMRMLFromGUI)
     self.ui.deviceModelComboBox.disconnect('currentNodeChanged(vtkMRMLNode*)', self.updateMRMLFromGUI)
     self.ui.deviceModelShowButton.disconnect("clicked()", self.onDeviceModelShowClicked)
     self.ui.deviceModelHideButton.disconnect("clicked()", self.onDeviceModelHideClicked)
@@ -211,14 +211,14 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
         parameterNode.SetParameter(self.logic.VOLUME_RENDERING_PRESET_PARAMETER_NAME, self.ui.volumeRenderingPresetComboBox.currentText)
         parameterNode.InvokeCustomModifiedEvent(VirtualCathLabLogic.VOLUME_RENDERING_PRESET_CHANGED_EVENT)
 
-      parameterNode.SetParameter(self.logic.FRONTAL_DETECTOR_HEIGHT_PARAMETER, str(self.ui.frontalHeightSpinBox.value))
-      parameterNode.SetParameter(self.logic.LATERAL_DETECTOR_HEIGHT_PARAMETER, str(self.ui.lateralHeightSpinBox.value))
-
       roiNode = self.ui.roiNodeSelector.currentNode()
       self.logic.setVolumeRenderingROINode(roiNode)
 
       softEdgeMm = self.ui.softEdgeSlider.value
       parameterNode.SetParameter(self.logic.SOFT_EDGE_MM_PARAMETER, str(softEdgeMm))
+
+      detectorPixelSizeMm = self.ui.detectorPixelSizeSpinBox.value
+      parameterNode.SetParameter(self.logic.DETECTOR_PIXEL_SIZE_PARAMETER, str(detectorPixelSizeMm))
 
       inputDeviceModelNode = self.ui.deviceModelComboBox.currentNode()
       oldDeviceModelNode = parameterNode.GetNodeReference(self.logic.INPUT_DEVICE_MODEL_REFERENCE)
@@ -270,14 +270,6 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     if tableCenterPointNode != self.ui.tableCenterPointPlaceWidget.currentNode():
       self.ui.tableCenterPointPlaceWidget.setCurrentNode(tableCenterPointNode)
 
-    wasBlocking = self.ui.frontalHeightSpinBox.blockSignals(True)
-    self.ui.frontalHeightSpinBox.value = int(parameterNode.GetParameter(self.logic.FRONTAL_DETECTOR_HEIGHT_PARAMETER))
-    self.ui.frontalHeightSpinBox.blockSignals(wasBlocking)
-
-    wasBlocking = self.ui.lateralHeightSpinBox.blockSignals(True)
-    self.ui.lateralHeightSpinBox.value = int(parameterNode.GetParameter(self.logic.LATERAL_DETECTOR_HEIGHT_PARAMETER))
-    self.ui.lateralHeightSpinBox.blockSignals(wasBlocking)
-
     roiNode = self.logic.getVolumeRenderingROINode()
 
     wasBlocking = self.ui.roiNodeSelector.blockSignals(True)
@@ -308,6 +300,11 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     softEdgeMm = float(parameterNode.GetParameter(self.logic.SOFT_EDGE_MM_PARAMETER))
     self.ui.softEdgeSlider.value = softEdgeMm
     self.ui.enableCropCheckBox.blockSignals(wasBlocking)
+
+    wasBlocking = self.ui.detectorPixelSizeSpinBox.blockSignals(True)
+    detectorPixelSizeMm = self.logic.getDetectorPixelSizeMm()
+    self.ui.detectorPixelSizeSpinBox.value = detectorPixelSizeMm
+    self.ui.detectorPixelSizeSpinBox.blockSignals(wasBlocking)
 
     self.ui.fitROIToVolumeButton.enabled = roiNode is not None
 
@@ -615,18 +612,19 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
   FRONTAL_IMAGE_REFERENCE = "CArmFrontalXRay"
   LATERAL_IMAGE_REFERENCE = "CArmLateralXRay"
 
-  FRONTAL_DETECTOR_HEIGHT_MM = 400.4 # Determined by measuring the model
-  FRONTAL_DETECTOR_WIDTH_MM = 293.7 # Determined by measuring the model
-
-  LATERAL_DETECTOR_HEIGHT_MM = 232.5 # Determined by measuring the model
-  LATERAL_DETECTOR_WIDTH_MM = 234.5 # Determined by measuring the model
-
-  FRONTAL_DETECTOR_HEIGHT_PARAMETER = "FrontalDetectorHeight"
-  FRONTAL_DETECTOR_HEIGHT_DEFAULT_PX = int(FRONTAL_DETECTOR_HEIGHT_MM * 2)
-  LATERAL_DETECTOR_HEIGHT_PARAMETER = "LateralDetectorHeight"
-  LATERAL_DETECTOR_HEIGHT_DEFAULT_PX = int(LATERAL_DETECTOR_HEIGHT_MM * 2)
+  # Detector pixel size parameter (mm per pixel). Default 0.5 means 2 pixels per mm.
+  # Frontal: 400.4 mm * 2 px/mm = 800.8 px
+  # Lateral: 232.5 mm * 2 px/mm = 465 px
+  DETECTOR_PIXEL_SIZE_PARAMETER = "DetectorPixelSize"
+  DETECTOR_PIXEL_SIZE_DEFAULT_MM = 0.5
 
   SOFT_EDGE_MM_PARAMETER = "SoftEdgeMm"
+
+  # Device class detector size parameters
+  FRONTAL_DETECTOR_HEIGHT_MM_PARAMETER = "GenericFluoro_frontalDetectorHeightMm"
+  FRONTAL_DETECTOR_WIDTH_MM_PARAMETER = "GenericFluoro_frontalDetectorWidthMm"
+  LATERAL_DETECTOR_HEIGHT_MM_PARAMETER = "GenericBiplaneFluoro_lateralDetectorHeightMm"
+  LATERAL_DETECTOR_WIDTH_MM_PARAMETER = "GenericBiplaneFluoro_lateralDetectorWidthMm"
 
   def __init__(self, widgetInstance, parent=None):
     CardiacDeviceSimulatorLogic.__init__(self, parent)
@@ -674,6 +672,46 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       slicer.modules.volumerendering.logic().AddPreset(fluoroVolumeProperty)
       slicer.mrmlScene.RemoveNode(fluoroVolumeProperty)
 
+  def getDetectorPixelSizeMm(self):
+    """Get detector pixel size in mm from parameters or default value (0.5 mm/px)"""
+    if self.parameterNode:
+      value = self.parameterNode.GetParameter(self.DETECTOR_PIXEL_SIZE_PARAMETER)
+      if value:
+        return float(value)
+    return self.DETECTOR_PIXEL_SIZE_DEFAULT_MM
+
+  def getFrontalDetectorHeightMm(self):
+    """Get frontal detector height from parameters or default value (400.4 mm)"""
+    if self.parameterNode:
+      value = self.parameterNode.GetParameter(self.FRONTAL_DETECTOR_HEIGHT_MM_PARAMETER)
+      if value:
+        return float(value)
+    return 400.4
+
+  def getFrontalDetectorWidthMm(self):
+    """Get frontal detector width from parameters or default value (293.7 mm)"""
+    if self.parameterNode:
+      value = self.parameterNode.GetParameter(self.FRONTAL_DETECTOR_WIDTH_MM_PARAMETER)
+      if value:
+        return float(value)
+    return 293.7
+
+  def getLateralDetectorHeightMm(self):
+    """Get lateral detector height from parameters or default value (232.5 mm)"""
+    if self.parameterNode:
+      value = self.parameterNode.GetParameter(self.LATERAL_DETECTOR_HEIGHT_MM_PARAMETER)
+      if value:
+        return float(value)
+    return 232.5
+
+  def getLateralDetectorWidthMm(self):
+    """Get lateral detector width from parameters or default value (234.5 mm)"""
+    if self.parameterNode:
+      value = self.parameterNode.GetParameter(self.LATERAL_DETECTOR_WIDTH_MM_PARAMETER)
+      if value:
+        return float(value)
+    return 234.5
+
   def onDeviceClassModified(self, caller=None, event=None):
     CardiacDeviceSimulatorLogic.onDeviceClassModified(self, caller, event)
 
@@ -712,10 +750,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       self.onDeviceModelChanged()
 
   def setDefaultParameters(self, parameterNode):
-    if not parameterNode.GetParameter(self.FRONTAL_DETECTOR_HEIGHT_PARAMETER):
-      parameterNode.SetParameter(self.FRONTAL_DETECTOR_HEIGHT_PARAMETER, str(self.FRONTAL_DETECTOR_HEIGHT_DEFAULT_PX))
-    if not parameterNode.GetParameter(self.LATERAL_DETECTOR_HEIGHT_PARAMETER):
-      parameterNode.SetParameter(self.LATERAL_DETECTOR_HEIGHT_PARAMETER, str(self.LATERAL_DETECTOR_HEIGHT_DEFAULT_PX))
+    if not parameterNode.GetParameter(self.DETECTOR_PIXEL_SIZE_PARAMETER):
+      parameterNode.SetParameter(self.DETECTOR_PIXEL_SIZE_PARAMETER, str(self.DETECTOR_PIXEL_SIZE_DEFAULT_MM))
     if not parameterNode.GetParameter(self.SOFT_EDGE_MM_PARAMETER):
       parameterNode.SetParameter(self.SOFT_EDGE_MM_PARAMETER, str(0.0))
 
@@ -1066,7 +1102,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     if viewNode:
       cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
       transformNode = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
-      frontalDetectorHeightMm = self.FRONTAL_DETECTOR_HEIGHT_MM
+      frontalDetectorHeightMm = self.getFrontalDetectorHeightMm()
       frontalSIDMm = deviceParams['frontalArmSourceToImageDistance']
       frontalSODMm = deviceParams['frontalArmSourceToObjectDistance']
       self.updateCameraPosition(cameraNode, transformNode, frontalDetectorHeightMm, frontalSIDMm, frontalSODMm)
@@ -1077,7 +1113,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       if viewNode:
         cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
         transformNode = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
-        lateralDetectorHeightMm = self.LATERAL_DETECTOR_HEIGHT_MM
+        lateralDetectorHeightMm = self.getLateralDetectorHeightMm()
         lateralSIDMm = deviceParams['lateralArmSourceToImageDistance']
         lateralSODMm = deviceParams['lateralArmSourceToObjectDistance']
         self.updateCameraPosition(cameraNode, transformNode, lateralDetectorHeightMm, lateralSIDMm, lateralSODMm)
@@ -1127,15 +1163,15 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       heightMm = 500
       volumeNode = None
       if singletonTag == self.C_ARM_FRONTAL_VIEW_NAME:
-        widthMm = self.FRONTAL_DETECTOR_WIDTH_MM
-        heightMm = self.FRONTAL_DETECTOR_HEIGHT_MM
+        widthMm = self.getFrontalDetectorWidthMm()
+        heightMm = self.getFrontalDetectorHeightMm()
         volumeNode = self.getFrontalCArmVolumeNode()
-        mmToPixels = float(self.parameterNode.GetParameter(self.FRONTAL_DETECTOR_HEIGHT_PARAMETER)) / self.FRONTAL_DETECTOR_HEIGHT_MM
+        mmToPixels = 1.0 / self.getDetectorPixelSizeMm()
       elif singletonTag == self.C_ARM_LATERAL_VIEW_NAME:
-        widthMm = self.LATERAL_DETECTOR_WIDTH_MM
-        heightMm = self.LATERAL_DETECTOR_HEIGHT_MM
+        widthMm = self.getLateralDetectorWidthMm()
+        heightMm = self.getLateralDetectorHeightMm()
         volumeNode = self.getLateralCArmVolumeNode()
-        mmToPixels = float(self.parameterNode.GetParameter(self.LATERAL_DETECTOR_HEIGHT_PARAMETER)) / self.LATERAL_DETECTOR_HEIGHT_MM
+        mmToPixels = 1.0 / self.getDetectorPixelSizeMm()
 
       if volumeNode is None:
         return
@@ -1183,15 +1219,13 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       if deviceClass.ID != BiplaneFluoro.ID:
         # The view may still be in the layout, but the device is not biplane
         return
-      detectorHeightMm = self.LATERAL_DETECTOR_HEIGHT_MM
-      detectorHeightPxParameter = self.LATERAL_DETECTOR_HEIGHT_PARAMETER
+      detectorHeightMm = self.getLateralDetectorHeightMm()
       detectorVolumeNode = self.getLateralCArmVolumeNode()
       cameraTransform = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
       sidMm = deviceParams['lateralArmSourceToImageDistance']
       sodMm = deviceParams['lateralArmSourceToObjectDistance']
     else:
-      detectorHeightMm = self.FRONTAL_DETECTOR_HEIGHT_MM
-      detectorHeightPxParameter = self.FRONTAL_DETECTOR_HEIGHT_PARAMETER
+      detectorHeightMm = self.getFrontalDetectorHeightMm()
       detectorVolumeNode = self.getFrontalCArmVolumeNode()
       cameraTransform = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
       sidMm = deviceParams['frontalArmSourceToImageDistance']
@@ -1199,8 +1233,8 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
 
     scaleFactor = sodMm / sidMm
     imageHeight = detectorHeightMm * scaleFactor
-    mmToPixels = float(self.parameterNode.GetParameter(detectorHeightPxParameter)) / imageHeight
-    pixelsToMM = 1.0 / mmToPixels
+    mmToPixels = 1.0 / self.getDetectorPixelSizeMm()
+    pixelsToMM = self.getDetectorPixelSizeMm()
 
     detectorToWorld = vtk.vtkGeneralTransform()
     slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(cameraTransform, None, detectorToWorld)

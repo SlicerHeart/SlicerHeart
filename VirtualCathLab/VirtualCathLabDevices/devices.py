@@ -55,6 +55,8 @@ class FluoroDeviceBase(CardiacDeviceBase):
       "frontalArmDetectorRotationAngle": cls._genParameters(f"{prefix}Detector rotation:", "Positive = clockwise (looking from the generator)", 90, "deg", -180, 180, 1.0, 1),
       "frontalArmSourceToObjectDistance": cls._genParameters(f"{prefix}SOD:", "Source to object distance (between the generator and the isocenter)", 720, "mm", 600, 800, 5.0, 1, visible=False),
       "frontalArmSourceToImageDistance": cls._genParameters(f"{prefix}SID:", "Source to image distance (between the generator and detector)", 940, "mm", 800, 1200, 5.0, 1),
+      "frontalDetectorHeightMm": cls._genParameters(f"{prefix}Detector height:", "Height of frontal detector in mm", 400.4, "mm", 100, 600, 1.0, 1, visible=False),
+      "frontalDetectorWidthMm": cls._genParameters(f"{prefix}Detector width:", "Width of frontal detector in mm", 293.7, "mm", 100, 600, 1.0, 1, visible=False),
     }
 
   @classmethod
@@ -65,7 +67,9 @@ class FluoroDeviceBase(CardiacDeviceBase):
       "lateralArmDetectorRotationAngle": cls._genParameters("Lateral - Detector rotation:", "Positive = clockwise (looking from the generator)", 0, "deg", -180, 180, 1.0, 1),
       "lateralArmOffset": cls._genParameters("Lateral - Shift:", "Negative = cranial, positive is caudal angle", 0, "mm", -500, 2000, 1.0, 1),
       "lateralArmSourceToObjectDistance": cls._genParameters("Lateral - SOD:", "Source to object distance (between the generator and the isocenter)", 720, "mm", 600, 800, 5.0, 1, visible=False),
-      "lateralArmSourceToImageDistance": cls._genParameters("Lateral - SID:", "Source to image distance (between the generator and detector)", 1100, "mm", 800, 1400, 5.0, 1)
+      "lateralArmSourceToImageDistance": cls._genParameters("Lateral - SID:", "Source to image distance (between the generator and detector)", 1100, "mm", 800, 1400, 5.0, 1),
+      "lateralDetectorHeightMm": cls._genParameters("Lateral - Detector height:", "Height of lateral detector in mm", 232.5, "mm", 100, 600, 1.0, 1, visible=False),
+      "lateralDetectorWidthMm": cls._genParameters("Lateral - Detector width:", "Width of lateral detector in mm", 234.5, "mm", 100, 600, 1.0, 1, visible=False),
     }
 
   @classmethod
@@ -289,11 +293,13 @@ class FluoroDeviceBase(CardiacDeviceBase):
         # Check if this is a beam model (generated procedurally)
         if modelNodeRef in ["frontal-beam", "lateral-beam"]:
           # Create beam polydata
-          detectorWidth = 300  # Default detector width in mm
-          detectorHeight = 300  # Default detector height in mm
           if modelNodeRef == "frontal-beam":
+            detectorWidth = parameterValues['frontalDetectorWidthMm']
+            detectorHeight = parameterValues['frontalDetectorHeightMm']
             sourceToDetectorDistance = parameterValues['frontalArmSourceToImageDistance']
           else:  # lateral-beam
+            detectorWidth = parameterValues['lateralDetectorWidthMm']
+            detectorHeight = parameterValues['lateralDetectorHeightMm']
             sourceToDetectorDistance = parameterValues['lateralArmSourceToImageDistance']
 
           model_RAS = cls.createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance)
@@ -421,12 +427,11 @@ class FluoroDeviceBase(CardiacDeviceBase):
     """
     Update beam model geometry when source-to-image distance changes.
     """
-    detectorWidth = 300  # Default detector width in mm
-    detectorHeight = 300  # Default detector height in mm
-
     # Update frontal beam
     frontalBeamNode = parameterNode.GetNodeReference('frontal-beam')
     if frontalBeamNode:
+      detectorWidth = parameterValues['frontalDetectorWidthMm']
+      detectorHeight = parameterValues['frontalDetectorHeightMm']
       sourceToDetectorDistance = parameterValues['frontalArmSourceToImageDistance']
       beamPolyData = cls.createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance)
       frontalBeamNode.SetAndObservePolyData(beamPolyData)
@@ -437,6 +442,8 @@ class FluoroDeviceBase(CardiacDeviceBase):
     if cls.BIPLANE:
       lateralBeamNode = parameterNode.GetNodeReference('lateral-beam')
       if lateralBeamNode:
+        detectorWidth = parameterValues['lateralDetectorWidthMm']
+        detectorHeight = parameterValues['lateralDetectorHeightMm']
         sourceToDetectorDistance = parameterValues['lateralArmSourceToImageDistance']
         beamPolyData = cls.createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance)
         lateralBeamNode.SetAndObservePolyData(beamPolyData)
