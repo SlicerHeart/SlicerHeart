@@ -921,20 +921,12 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
   def setupCameraTransforms(self):
     """
     Create and initialize transform for controlling camera position.
+    Transforms are computed from source-to-image distance.
     """
-    virtualCathLabDir = os.path.dirname(slicer.modules.virtualcathlab.path)
-
     frontalCameraTransform = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
     if frontalCameraTransform is None:
       frontalCameraTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
-      frontalCameraTransform.AddDefaultStorageNode()
       self.parameterNode.SetNodeReferenceID(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE, frontalCameraTransform.GetID())
-
-      frontalCameraTransformFilename = os.path.join(virtualCathLabDir, 'Resources/Transforms/frontal_camera_to_frontal_source.h5')
-      storageNode = frontalCameraTransform.GetStorageNode()
-      storageNode.SetFileName(frontalCameraTransformFilename)
-      storageNode.ReadData(frontalCameraTransform)
-      slicer.mrmlScene.RemoveNode(storageNode)
 
     frontalDetectorTransformID = self.parameterNode.GetNodeReferenceID("frontal-arm-detector-rotation-transform")
     frontalCameraTransform.SetAndObserveTransformNodeID(frontalDetectorTransformID)
@@ -942,17 +934,13 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     lateralCameraTransform = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
     if lateralCameraTransform is None:
       lateralCameraTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
-      lateralCameraTransform.AddDefaultStorageNode()
       self.parameterNode.SetNodeReferenceID(self.LATERAL_CAMERA_TRANSFORM_REFERENCE, lateralCameraTransform.GetID())
-
-      lateralCameraTransformFilename = os.path.join(virtualCathLabDir, 'Resources/Transforms/lateral_camera_to_lateral_source.h5')
-      storageNode = lateralCameraTransform.GetStorageNode()
-      storageNode.SetFileName(lateralCameraTransformFilename)
-      storageNode.ReadData(lateralCameraTransform)
-      slicer.mrmlScene.RemoveNode(storageNode)
 
     lateralDetectorTransformID = self.parameterNode.GetNodeReferenceID("lateral-arm-detector-rotation-transform")
     lateralCameraTransform.SetAndObserveTransformNodeID(lateralDetectorTransformID)
+    
+    # Update transforms based on current SID values
+    self.updateCameraTransforms()
 
   def updateModel(self):
     with slicer.util.RenderBlocker():
@@ -1091,6 +1079,9 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     """
     Updates the position of all C-arm cameras.
     """
+    # Update camera transforms based on current SID
+    self.updateCameraTransforms()
+    
     deviceClass = self.getDeviceClass()
     if deviceClass is None:
       return
@@ -1117,6 +1108,55 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         lateralSIDMm = deviceParams['lateralArmSourceToImageDistance']
         lateralSODMm = deviceParams['lateralArmSourceToObjectDistance']
         self.updateCameraPosition(cameraNode, transformNode, lateralDetectorHeightMm, lateralSIDMm, lateralSODMm)
+
+  def updateCameraTransforms(self):
+    """
+    Update camera transforms based on source-to-image distance.
+    The transform positions the camera at the detector plane (origin) with proper orientation.
+    Camera looks along +Y axis (towards the source/object), with +Z as up direction.
+    """
+    deviceClass = self.getDeviceClass()
+    if deviceClass is None or self.parameterNode is None:
+      return
+
+    deviceParams = deviceClass.getParameterValuesFromNode(self.parameterNode)
+
+    # Update frontal camera transform
+    frontalCameraTransform = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
+    if frontalCameraTransform:
+      frontalSIDMm = deviceParams.get('frontalArmSourceToImageDistance', 1000.0)
+      self._computeCameraTransform(frontalCameraTransform, frontalSIDMm)
+
+    # Update lateral camera transform
+    lateralCameraTransform = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
+    if lateralCameraTransform and deviceClass.ID == BiplaneFluoro.ID:
+      lateralSIDMm = deviceParams.get('lateralArmSourceToImageDistance', 1000.0)
+      self._computeCameraTransform(lateralCameraTransform, lateralSIDMm)
+
+  def _computeCameraTransform(self, transformNode, sourceToImageDistanceMm):
+    """
+    Compute camera transform matrix based on source-to-image distance.
+    
+    The camera is positioned at the X-ray source location:
+    - Camera position: (0, -SID, 0) in detector coordinates (source is at -Y from detector)
+    - Camera looking direction: +Y (towards the detector)
+    - Camera up direction: +Z
+    
+    Args:
+      transformNode: vtkMRMLTransformNode to update
+      sourceToImageDistanceMm: Distance from X-ray source to detector in mm
+    """
+    # Create transform matrix positioning camera at source location
+    transformMatrix = vtk.vtkMatrix4x4()
+    transformMatrix.Identity()
+    
+    # Position camera at the X-ray source location
+    # Source is at distance -SID along Y-axis from detector (detector is at origin)
+    # Camera orientation: looking towards +Y (towards detector), up is +Z
+    # X-axis points right, Y-axis points towards detector, Z-axis points up
+    transformMatrix.SetElement(1, 3, -sourceToImageDistanceMm)
+    
+    transformNode.SetMatrixTransformToParent(transformMatrix)
 
   def renderToVolume(self):
     """

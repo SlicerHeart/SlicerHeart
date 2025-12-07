@@ -18,8 +18,6 @@ set(MODULE_PYTHON_RESOURCES
   Resources/CArmModel.arc
   Resources/Presets/GenericBiplaneFluoro.csv
   Resources/Presets/GenericFluoro.csv
-  Resources/Transforms/frontal_camera_to_frontal_source.h5
-  Resources/Transforms/lateral_camera_to_lateral_source.h5
   Resources/VolumeRendering/FluoroRenderingPreset_01.vp
   Resources/VolumeRendering/FluoroRenderingPreset_02.vp
   Resources/VolumeRendering/FluoroRenderingPreset_03.vp
