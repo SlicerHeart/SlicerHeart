@@ -451,6 +451,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 valveBrowserNode.SetAttribute("ModuleName", "HeartValve")
                 logging.info(f"Created new valve browser node: {valveBrowserNode.GetName()}")
 
+            # Set the ValveType attribute so ValveAnnulusAnalysis can read it
+            if not valveBrowserNode.GetAttribute("ValveType"):
+                valveBrowserNode.SetAttribute("ValveType", valveType)
+                logging.info(f"Set ValveType attribute on browser node: {valveBrowserNode.GetName()}")
+
             # Get or create the heart valve sequence node for this specific valve
             heartValveSequenceNode = valveBrowserNode.GetMasterSequenceNode()
             if not heartValveSequenceNode:
@@ -639,6 +644,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         # Track sequence nodes to their original node entries for later transform verification
         sequenceToEntriesMap = {}
+        # Track data sequence nodes to their display sequence nodes for correct linking
+        dataSequenceToDisplaySequenceMap = {}
 
         for (role, baseName), nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
@@ -738,6 +745,9 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                                 addedDisplayNodes[indexValue] = displayNode.GetID()
 
                         logging.info(f"  Created display node sequence: {displaySequenceNode.GetName()} with {displaySequenceNode.GetNumberOfDataNodes()} time points")
+
+                        # Store the mapping between data sequence and display sequence
+                        dataSequenceToDisplaySequenceMap[sequenceNode] = displaySequenceNode
                     except Exception as err:
                         logging.warning(f"  Error creating display node sequence: {err}")
 
@@ -844,26 +854,20 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
             # Link display node sequences to data proxy nodes if the proxy node is displayable
             if proxyNode.IsA("vtkMRMLDisplayableNode"):
-                # Get the base name from the sequence node
-                seqName = seqNode.GetName()
-                if seqName.endswith('_Sequence'):
-                    baseName = seqName[:-9]  # Remove '_Sequence'
+                # Use the direct mapping to find the corresponding display sequence
+                # This avoids issues with name collisions when multiple valves have similar node names
+                displaySequenceNode = dataSequenceToDisplaySequenceMap.get(seqNode)
+                if displaySequenceNode:
+                    displayProxyNode = valveBrowserNode.GetProxyNode(displaySequenceNode)
+                    if displayProxyNode:
+                        currentDisplayID = proxyNode.GetDisplayNodeID() if hasattr(proxyNode, 'GetDisplayNodeID') else None
+                        if currentDisplayID != displayProxyNode.GetID():
+                            proxyNode.SetAndObserveDisplayNodeID(displayProxyNode.GetID())
+                            logging.info(f"  Linked display sequence '{displaySequenceNode.GetName()}' to proxy '{proxyNode.GetName()}'")
+                    else:
+                        logging.warning(f"  Could not get display proxy node for sequence '{displaySequenceNode.GetName()}'")
                 else:
-                    baseName = seqName
-
-                displaySequenceName = f"{baseName}_Display_Sequence"
-
-                # Find the corresponding display sequence
-                for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
-                    candidateSeq = synchronizedSequenceNodes.GetItemAsObject(i)
-                    if candidateSeq and candidateSeq.GetName() == displaySequenceName:
-                        displayProxyNode = valveBrowserNode.GetProxyNode(candidateSeq)
-                        if displayProxyNode:
-                            currentDisplayID = proxyNode.GetDisplayNodeID() if hasattr(proxyNode, 'GetDisplayNodeID') else None
-                            if currentDisplayID != displayProxyNode.GetID():
-                                proxyNode.SetAndObserveDisplayNodeID(displayProxyNode.GetID())
-                                logging.info(f"  Linked display sequence to proxy '{proxyNode.GetName()}'")
-                        break
+                    logging.debug(f"  No display sequence found for data sequence '{seqNode.GetName()}'")
 
         # Update the heart valve proxy node's references to point to the new proxy nodes
         logging.info("Updating heart valve proxy node references")
