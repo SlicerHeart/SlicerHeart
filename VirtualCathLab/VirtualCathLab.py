@@ -1092,28 +1092,27 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     viewNode = slicer.mrmlScene.GetSingletonNode(self.C_ARM_FRONTAL_VIEW_NAME, "vtkMRMLViewNode")
     if viewNode:
       cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
-      transformNode = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
+      cameraTransformNode = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
       frontalDetectorHeightMm = self.getFrontalDetectorHeightMm()
       frontalSIDMm = deviceParams['frontalArmSourceToImageDistance']
       frontalSODMm = deviceParams['frontalArmSourceToObjectDistance']
-      self.updateCameraPosition(cameraNode, transformNode, frontalDetectorHeightMm, frontalSIDMm, frontalSODMm)
-
+      self.updateCameraPosition(cameraNode, cameraTransformNode, frontalDetectorHeightMm, frontalSIDMm, frontalSODMm)
     if deviceClass.ID == BiplaneFluoro.ID:
       # Update lateral view
       viewNode = slicer.mrmlScene.GetSingletonNode(self.C_ARM_LATERAL_VIEW_NAME, "vtkMRMLViewNode")
       if viewNode:
         cameraNode = slicer.modules.cameras.logic().GetViewActiveCameraNode(viewNode)
-        transformNode = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
+        cameraTransformNode = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
         lateralDetectorHeightMm = self.getLateralDetectorHeightMm()
         lateralSIDMm = deviceParams['lateralArmSourceToImageDistance']
         lateralSODMm = deviceParams['lateralArmSourceToObjectDistance']
-        self.updateCameraPosition(cameraNode, transformNode, lateralDetectorHeightMm, lateralSIDMm, lateralSODMm)
+        self.updateCameraPosition(cameraNode, cameraTransformNode, lateralDetectorHeightMm, lateralSIDMm, lateralSODMm)
 
   def updateCameraTransforms(self):
     """
-    Update camera transforms based on source-to-image distance.
-    The transform positions the camera at the detector plane (origin) with proper orientation.
-    Camera looks along +Y axis (towards the source/object), with +Z as up direction.
+    Update camera to detector transforms based on source-to-image distance.
+    The camera transform positions the camera at the detector plane (origin) with proper orientation.
+    Camera looks along +Z axis (towards the source/object), with +Y as up direction.
     """
     deviceClass = self.getDeviceClass()
     if deviceClass is None or self.parameterNode is None:
@@ -1124,39 +1123,50 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     # Update frontal camera transform
     frontalCameraTransform = self.parameterNode.GetNodeReference(self.FRONTAL_CAMERA_TRANSFORM_REFERENCE)
     if frontalCameraTransform:
-      frontalSIDMm = deviceParams.get('frontalArmSourceToImageDistance', 1000.0)
-      self._computeCameraTransform(frontalCameraTransform, frontalSIDMm)
+      # Frontal detector X = patient inferior = camera -X
+      # Frontal detector Y = patient anterior = camera Z
+      # Frontal detector Z = patient right = camera Y
+      cameraTransformMatrix = vtk.vtkMatrix4x4()
+      # Camera X axis
+      cameraTransformMatrix.SetElement(0, 0, -1)
+      cameraTransformMatrix.SetElement(1, 0, 0)
+      cameraTransformMatrix.SetElement(2, 0, 0)
+      # Camera Y axis
+      cameraTransformMatrix.SetElement(0, 1, 0)
+      cameraTransformMatrix.SetElement(1, 1, 0)
+      cameraTransformMatrix.SetElement(2, 1, 1)
+      # Camera Z axis
+      cameraTransformMatrix.SetElement(0, 2, 0)
+      cameraTransformMatrix.SetElement(1, 2, 1)
+      cameraTransformMatrix.SetElement(2, 2, 0)
+      # Camera position
+      sidMm = deviceParams.get('frontalArmSourceToImageDistance', 1000.0)
+      cameraTransformMatrix.SetElement(1, 3, -sidMm)
+      frontalCameraTransform.SetMatrixTransformToParent(cameraTransformMatrix)
 
     # Update lateral camera transform
     lateralCameraTransform = self.parameterNode.GetNodeReference(self.LATERAL_CAMERA_TRANSFORM_REFERENCE)
     if lateralCameraTransform and deviceClass.ID == BiplaneFluoro.ID:
-      lateralSIDMm = deviceParams.get('lateralArmSourceToImageDistance', 1000.0)
-      self._computeCameraTransform(lateralCameraTransform, lateralSIDMm)
-
-  def _computeCameraTransform(self, transformNode, sourceToImageDistanceMm):
-    """
-    Compute camera transform matrix based on source-to-image distance.
-    
-    The camera is positioned at the X-ray source location:
-    - Camera position: (0, -SID, 0) in detector coordinates (source is at -Y from detector)
-    - Camera looking direction: +Y (towards the detector)
-    - Camera up direction: +Z
-    
-    Args:
-      transformNode: vtkMRMLTransformNode to update
-      sourceToImageDistanceMm: Distance from X-ray source to detector in mm
-    """
-    # Create transform matrix positioning camera at source location
-    transformMatrix = vtk.vtkMatrix4x4()
-    transformMatrix.Identity()
-    
-    # Position camera at the X-ray source location
-    # Source is at distance -SID along Y-axis from detector (detector is at origin)
-    # Camera orientation: looking towards +Y (towards detector), up is +Z
-    # X-axis points right, Y-axis points towards detector, Z-axis points up
-    transformMatrix.SetElement(1, 3, -sourceToImageDistanceMm)
-    
-    transformNode.SetMatrixTransformToParent(transformMatrix)
+      # Lateral detector X = patient right = camera Z
+      # Lateral detector Y = patient anterior = camera X
+      # Lateral detector Z = patient superior = camera Y
+      cameraTransformMatrix = vtk.vtkMatrix4x4()
+      # Camera X axis
+      cameraTransformMatrix.SetElement(0, 0, 0)
+      cameraTransformMatrix.SetElement(1, 0, 1)
+      cameraTransformMatrix.SetElement(2, 0, 0)
+      # Camera Y axis
+      cameraTransformMatrix.SetElement(0, 1, 0)
+      cameraTransformMatrix.SetElement(1, 1, 0)
+      cameraTransformMatrix.SetElement(2, 1, 1)
+      # Camera Z axis
+      cameraTransformMatrix.SetElement(0, 2, 1)
+      cameraTransformMatrix.SetElement(1, 2, 0)
+      cameraTransformMatrix.SetElement(2, 2, 0)
+      # Camera position
+      sidMm = deviceParams.get('lateralArmSourceToImageDistance', 1000.0)
+      cameraTransformMatrix.SetElement(0, 3, -sidMm)
+      lateralCameraTransform.SetMatrixTransformToParent(cameraTransformMatrix)
 
   def renderToVolume(self):
     """
@@ -1577,30 +1587,29 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
       self.parameterNode.SetNodeReferenceID(self.LATERAL_IMAGE_REFERENCE, lateralVolumeNode.GetID())
     return lateralVolumeNode
 
-  def updateCameraPosition(self, cameraNode, transformNode, detectorHeightMm, sourceImageDistance, sourceObjectDistance):
+  def updateCameraPosition(self, cameraNode, cameraTransformNode, detectorHeightMm, sourceImageDistance, sourceObjectDistance):
     """
     Update the position, view direction and angle of a C-arm camera.
     """
     with slicer.util.NodeModify(cameraNode):
-      detectorToWorld = vtk.vtkGeneralTransform()
-      slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(transformNode, None, detectorToWorld)
-      position_Detector = [0.0, 0.0, 0.0]
-      cameraPosition_RAS = detectorToWorld.TransformPoint(position_Detector)
+      cameraToWorld = vtk.vtkGeneralTransform()
+      slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(cameraTransformNode, None, cameraToWorld)
+      position_Camera = [0.0, 0.0, 0.0]
+      cameraPosition_RAS = cameraToWorld.TransformPoint(position_Camera)
       cameraNode.SetPosition(cameraPosition_RAS)
 
-      viewDirection_Detector = [0.0, 1.0, 0.0] # Look towards +Y direction of camera transform
-      viewDirection_RAS = detectorToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewDirection_Detector)
-      tableCenterPoint_RAS = np.array(cameraPosition_RAS) + np.array(viewDirection_RAS) * sourceObjectDistance
-      cameraNode.SetFocalPoint(tableCenterPoint_RAS)
+      focalPoint_Camera = [0.0, 0.0, sourceObjectDistance]
+      focalPoint_RAS = cameraToWorld.TransformPoint(focalPoint_Camera)
+      cameraNode.SetFocalPoint(focalPoint_RAS)
 
-      viewUp_Detector = [0.0, 0.0, 1.0] # View up faces towards +Z direction of camera transform
-      viewUp_RAS = detectorToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewUp_Detector)
+      viewUp_Camera = [0.0, 1.0, 0.0]
+      viewUp_RAS = cameraToWorld.TransformVectorAtPoint([0.0, 0.0, 0.0], viewUp_Camera)
       cameraNode.SetViewUp(viewUp_RAS)
 
       viewAngle = 2.0 * math.degrees(math.atan(detectorHeightMm / 2.0 / sourceImageDistance))
       cameraNode.SetViewAngle(viewAngle)
 
-      cameraNode.SetAndObserveTransformNodeID(transformNode.GetID() if transformNode else None)
+      cameraNode.SetAndObserveTransformNodeID(cameraTransformNode.GetID() if cameraTransformNode else None)
       cameraNode.ResetClippingRange()
 
   def onLayoutChanged(self):

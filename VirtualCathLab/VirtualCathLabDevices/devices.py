@@ -75,7 +75,7 @@ class FluoroDeviceBase(CardiacDeviceBase):
   @classmethod
   def getTableParameters(cls):
     return {
-      "tableShiftLateral": cls._genParameters("Table transverse:", "Table pan in supine patient's left/right direction, positive = left", 0, "mm", -80, 80, 5.0, 1),
+      "tableShiftLateral": cls._genParameters("Table transverse:", "Table pan in supine patient's left/right direction, positive = left", 0, "mm", -140, 140, 5.0, 1),
       "tableShiftLongitudinal": cls._genParameters("Table longitudinal:", "Table pan in supine patient's superior/inferior direction, positive = inferior", 0, "mm", -1000, 500, 5.0, 1),
       "tableShiftVertical": cls._genParameters("Table height:", "Table raise, zero = tabletop at isocenter, positive = higher", -145, "mm", -300, 10, 5.0, 1),
     }
@@ -131,7 +131,8 @@ class FluoroDeviceBase(CardiacDeviceBase):
   def createBeamPolyData(detectorWidth, detectorHeight, sourceToDetectorDistance):
     """
     Create a rectangular pyramid polydata with origin at the center of the base (detector position)
-    and apex at the source position.
+    and apex at the source position. Orientation corresponds to the regular frontal/lateral beam orientation
+    when the patient is lying supine on the table.
 
     Args:
       detectorWidth: Width of the detector (base of pyramid)
@@ -141,23 +142,22 @@ class FluoroDeviceBase(CardiacDeviceBase):
     Returns:
       vtkPolyData representing the pyramid
     """
+
     # Create points for the pyramid
-    # Apex at origin (source position)
-    # Base at detector position (along Y axis in local coordinates)
-    points = vtk.vtkPoints()
+    points = vtk.vtkPoints()    
 
-    # Apex (source position at origin)
-    points.InsertNextPoint(0, -sourceToDetectorDistance, 0)
-
-    # Base corners at detector position
+    # Pyramid apex is at the source position.
+    # Pyramid base corners are on the detector plane.
     halfWidth = detectorWidth / 2.0
     halfHeight = detectorHeight / 2.0
 
-    # Four corners of the rectangular base
-    points.InsertNextPoint(-halfWidth, 0, -halfHeight)  # bottom-left
-    points.InsertNextPoint(halfWidth, 0, -halfHeight)   # bottom-right
-    points.InsertNextPoint(halfWidth, 0, halfHeight)    # top-right
-    points.InsertNextPoint(-halfWidth, 0, halfHeight)   # top-left
+    # Apex
+    points.InsertNextPoint(0, 0, 0)
+    # Base
+    points.InsertNextPoint(-halfWidth, -halfHeight, sourceToDetectorDistance)
+    points.InsertNextPoint( halfWidth, -halfHeight, sourceToDetectorDistance)
+    points.InsertNextPoint( halfWidth,  halfHeight, sourceToDetectorDistance)
+    points.InsertNextPoint(-halfWidth,  halfHeight, sourceToDetectorDistance)
 
     # Create the pyramid faces
     pyramid = vtk.vtkCellArray()
@@ -266,12 +266,12 @@ class FluoroDeviceBase(CardiacDeviceBase):
       ("frontal-arm-c",         "frontal-arm-c-rotation-transform", False),
       ("frontal-detector-base", "frontal-arm-detector-translation-transform", False),
       ("frontal-detector",      "frontal-arm-detector-rotation-transform", False),
-      ("frontal-beam",          "frontal-arm-detector-rotation-transform", False),  # X-ray beam visualization
+      ("frontal-beam",          "frontal-camera-to-frontal-detector", False),  # X-ray beam visualization
       ("lateral-arm-p",         "lateral-arm-p-rotation-transform", True),
       ("lateral-arm-c",         "lateral-arm-c-rotation-transform", True),
       ("lateral-detector-base", "lateral-arm-detector-translation-transform", True),
       ("lateral-detector",      "lateral-arm-detector-rotation-transform", True),
-      ("lateral-beam",          "lateral-arm-detector-rotation-transform", True),  # X-ray beam visualization
+      ("lateral-beam",          "lateral-camera-to-lateral-detector", True),  # X-ray beam visualization
       ("table-base",            "PositioningTransform", False),
       ("table-middle",          "table-lateral-transform", False),
       ("table-top",             "table-longitudinal-transform", False),
