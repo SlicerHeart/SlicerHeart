@@ -433,6 +433,15 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
             logging.info(f"Converting {len(heartValveNodes)} valve node(s) for valve type: {valveType}")
 
+            # Migrate ProbePosition to new format
+            if not volumeSequenceBrowserNode.GetAttribute("ProbePosition"):
+                # Try to find ProbePosition from any of the heart valve nodes
+                for hvNode in heartValveNodes:
+                    probePosition = hvNode.GetAttribute("ProbePosition")
+                    if probePosition:
+                        volumeSequenceBrowserNode.SetAttribute("ProbePosition", probePosition)
+                        break
+
             # Create a valve browser node for this specific valve
             # Each distinct valve gets its own browser and sequence
             valveBrowserNode = None
