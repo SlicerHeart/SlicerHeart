@@ -25,6 +25,7 @@ from HeartValveLib.util import getAllSegmentIDs
 
 class Converter4DSequences(ScriptedLoadableModule):
     """Minimal module exposing HeartValve migration utilities."""
+    AUTO_CONVERT_SETTING_KEY = "Converter4DSequences/AutoConvert"
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -36,6 +37,29 @@ class Converter4DSequences(ScriptedLoadableModule):
             "Convert segmented HeartValve nodes in the current scene to the latest HeartValveLib format."
         )
         self.parent.acknowledgementText = ("Part of the SlicerHeart project.")
+
+        # Add scene observer for auto-conversion (active even if widget is not shown)
+        self.sceneObserverTag = None
+        self.logic = None
+        self.addSceneObserver()
+
+    def addSceneObserver(self):
+        """Add observer for scene import/load events."""
+        if self.sceneObserverTag is None:
+            self.sceneObserverTag = slicer.mrmlScene.AddObserver(
+                slicer.mrmlScene.EndImportEvent, self.onSceneLoaded
+            )
+
+    def onSceneLoaded(self, caller, event):
+        """Called when a scene has been loaded."""
+        autoConvert = slicer.util.settingsValue(self.AUTO_CONVERT_SETTING_KEY, False, converter=slicer.util.toBool)
+        if autoConvert:
+            logging.info("Scene loaded - performing automatic conversion")
+            # Create logic if not already created
+            if self.logic is None:
+                self.logic = Converter4DSequencesLogic()
+            # Use QTimer to defer conversion until after scene is fully initialized
+            qt.QTimer.singleShot(100, lambda: self.logic.performFullConversion(showMessage=False))
 
 
 class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
@@ -86,6 +110,14 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
         )
         migrationLayout.addRow(label5, self.convertAllButton)
 
+        # Auto-convert option
+        label6 = qt.QLabel("Automatic conversion on scene load:")
+        self.autoConvertCheckBox = qt.QCheckBox("")
+        self.autoConvertCheckBox.toolTip = (
+            "When enabled, automatically convert all SlicerHeart nodes to sequences after loading a scene."
+        )
+        migrationLayout.addRow(label6, self.autoConvertCheckBox)
+
         self.layout.addWidget(migrationPanel)
         self.layout.addStretch(1)
 
@@ -98,6 +130,12 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
         self.convertMeasurementsButton.connect("clicked(bool)", self.onConvertMeasurementsButton)
         self.convertDevicesButton.connect("clicked(bool)", self.onConvertDevicesButton)
         self.convertAllButton.connect("clicked(bool)", self.onConvertAllButton)
+        self.autoConvertCheckBox.connect("toggled(bool)", self.onAutoConvertToggled)
+
+        # Load current setting value
+        self.autoConvertCheckBox.checked = slicer.util.settingsValue(
+            Converter4DSequences.AUTO_CONVERT_SETTING_KEY, False, converter=slicer.util.toBool
+        )
 
     def onConvertHeartValvesButton(self):
         with slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True):
@@ -137,20 +175,35 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
 
     def onConvertAllButton(self):
+        self.logic.performFullConversion(showMessage=True)
+
+    def cleanup(self):
+        """Called when the module widget is destroyed."""
+        super().cleanup()
+
+    def onAutoConvertToggled(self, checked):
+        """Called when the auto-convert checkbox is toggled."""
+        settings = qt.QSettings()
+        settings.setValue(Converter4DSequences.AUTO_CONVERT_SETTING_KEY, self.autoConvertCheckBox.checked)
+
+
+class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
+    def performFullConversion(self, showMessage=True):
+        """Perform full conversion of all nodes. Orchestrates individual conversion methods."""
         with slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True):
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
                 # First, run the legacy conversion for segmented valves
-                segmentedResults = self.logic.convertSegmentedHeartValvesToNewFormat()
+                segmentedResults = self.convertSegmentedHeartValvesToNewFormat()
                 segmentedCount = segmentedResults['convertedCount']
 
                 # Then, convert all types to sequences
-                results = self.logic.convertSingleFrameToMultiFrameSequences()
+                results = self.convertSingleFrameToMultiFrameSequences()
                 valveCount = results['convertedCount']
                 nodesToDelete = results['nodesToRemove']
 
-                measurementCount = self.logic.convertHeartValveMeasurementNodesToSequences()
-                deviceCount = self.logic.convertCardiacDeviceNodesToSequences()
+                measurementCount = self.convertHeartValveMeasurementNodesToSequences()
+                deviceCount = self.convertCardiacDeviceNodesToSequences()
 
                 # Now that all conversions are done, remove the original nodes
                 for node in nodesToDelete:
@@ -159,19 +212,23 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
                         slicer.mrmlScene.RemoveNode(node)
 
                 totalCount = valveCount + measurementCount + deviceCount
-                slicer.util.infoDisplay(
-                    f"Conversion complete:\n"
-                    f"  - {segmentedCount} segmented HeartValve node(s) updated.\n"
-                    f"  - {valveCount} HeartValve node(s) converted to sequence format.\n"
-                    f"  - {measurementCount} HeartValveMeasurement node(s) converted to sequence format.\n"
-                    f"  - {deviceCount} CardiacDeviceAnalysis node(s) converted to sequence format.\n"
-                    f"Total: {totalCount} node(s) converted to sequences."
-                )
+                if showMessage:
+                    slicer.util.infoDisplay(
+                        f"Conversion complete:\n"
+                        f"  - {segmentedCount} segmented HeartValve node(s) updated.\n"
+                        f"  - {valveCount} HeartValve node(s) converted to sequence format.\n"
+                        f"  - {measurementCount} HeartValveMeasurement node(s) converted to sequence format.\n"
+                        f"  - {deviceCount} CardiacDeviceAnalysis node(s) converted to sequence format.\n"
+                        f"Total: {totalCount} node(s) converted to sequences."
+                    )
+                else:
+                    logging.info(
+                        f"Auto-conversion complete: {segmentedCount} segmented valves updated, "
+                        f"{totalCount} nodes converted to sequences."
+                    )
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
 
-
-class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
     def _createSequenceForNode(self, browserNode, sequenceName, indexName="time", indexUnit="frame", indexType=slicer.vtkMRMLSequenceNode.NumericIndex):
         """
         Helper to create a sequence node and add it to a browser.
@@ -349,12 +406,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         """
         logging.info("Converting single-frame heart valve nodes to multi-frame sequences")
 
+        results = {'convertedCount': 0, 'nodesToRemove': []}
+
         # Get all heart valve nodes using the same method as convertSegmentedHeartValvesToNewFormat
         allHeartValves = list(getAllModuleSpecificScriptableNodes("HeartValve"))
 
         if not allHeartValves:
             logging.info("No heart valve nodes found to convert")
-            return 0
+            return results
 
         # Filter to only old-format heart valves (have ValveVolumeSequenceIndex but not in a sequence)
         oldFormatHeartValves = []
@@ -384,7 +443,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         if not oldFormatHeartValves:
             logging.info("No old-format heart valve nodes found to convert")
-            return 0
+            return results
 
         logging.info(f"Converting {len(oldFormatHeartValves)} old-format heart valve node(s) to new format")
 
@@ -534,8 +593,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         # Remove original heart valve nodes that have been converted
         nodesToRemove = [node for browserData in valvesByVolumeSequence.values() for node in browserData['heartValveNodes']]
 
+        results['convertedCount'] = convertedCount
+        results['nodesToRemove'] = nodesToRemove
+
         logging.info(f"Conversion complete. Converted {convertedCount} heart valve node(s)")
-        return {'convertedCount': convertedCount, 'nodesToRemove': nodesToRemove}
+        return results
 
     def _convertReferencedNodesToSequences(self, valveBrowserNode, heartValveSequenceNode, heartValveNodes, volumeSequenceBrowserNode):
         """
