@@ -82,7 +82,7 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       return
 
     if not hasattr(slicer.modules, 'volumereslicedriver'):
-      slicer.util.messageBox("This modules requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
+      slicer.util.messageBox("This module requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
       return
 
     #self.devicePositioningWidget.vesselGroupBox.hide()
@@ -498,16 +498,16 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
   THREED_VIEW_LAYOUT_ITEM = """
     <item>
      <view class="vtkMRMLViewNode" singletontag="1">
-       <property name="viewlabel" action="default">1</property>"
+       <property name="viewlabel" action="default">1</property>
      </view>
     </item>
     """
   C_ARM_FRONTAL_LAYOUT_ITEM = f"""
     <item>
      <view class="vtkMRMLViewNode" singletontag="{C_ARM_FRONTAL_VIEW_NAME}">
-       <property name="viewlabel" action="default">F</property>"
+       <property name="viewlabel" action="default">F</property>
        <property name="viewcolor" action="default">#C3B1E1</property>
-       <property name="viewgroup" action="default">100</property>"
+       <property name="viewgroup" action="default">100</property>
      </view>
     </item>
     """
@@ -517,15 +517,15 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         <property name="orientation" action="default">Axial</property>
         <property name="viewlabel" action="default">C</property>
         <property name="viewcolor" action="default">#C3B1E1</property>
-        <property name="viewgroup" action="default">101</property>"
+        <property name="viewgroup" action="default">101</property>
      </view>
     </item>"""
   C_ARM_LATERAL_LAYOUT_ITEM = f"""
     <item>
       <view class="vtkMRMLViewNode" singletontag="{C_ARM_LATERAL_VIEW_NAME}">
-        <property name="viewlabel" action="default">L</property>"
+        <property name="viewlabel" action="default">L</property>
         <property name="viewcolor" action="default">#FAC898</property>
-        <property name="viewgroup" action="default">102</property>"
+        <property name="viewgroup" action="default">102</property>
       </view>
     </item>
     """
@@ -535,7 +535,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         <property name="orientation" action="default">Axial</property>
         <property name="viewlabel" action="default">L</property>
         <property name="viewcolor" action="default">#FAC898</property>
-        <property name="viewgroup" action="default">103</property>"
+        <property name="viewgroup" action="default">103</property>
      </view>
     </item>"""
 
@@ -781,7 +781,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     """
     Updates the gantry_to_ras transform to account for the table motion.
     The table center point of the table coordinate system (0,0,0) should remain aligned with the table center point fiducial position in RAS
-    This ensures that that the position of the table remains the same relative to the RAS volume.
+    This ensures that the position of the table remains the same relative to the RAS volume.
     This motion shifts the entire gantry model in RAS.
     """
     tableToRAS = vtk.vtkGeneralTransform()
@@ -1199,7 +1199,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     """
     Schedule a rendering of the contents of the 3D X-ray views.
     """
-    if self.renderTimer.remainingTime <= 0:
+    if self.renderTimer.remainingTime() <= 0:
       # We are ready to render again.
       self.renderRequested = True
       self.renderToVolumeInternal()
@@ -1648,7 +1648,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         # Only apply to C-arm views
         continue
 
-      # Setup dislay settings form C-arm view
+      # Setup display settings for C-arm view
       presetName = self.getParameterNode().GetParameter(self.VOLUME_RENDERING_PRESET_PARAMETER_NAME)
       color = [1.0, 1.0, 1.0] # White
       if presetName == "CT-X-ray":
