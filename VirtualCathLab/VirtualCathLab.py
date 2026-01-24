@@ -296,10 +296,10 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
     self.ui.enableCropCheckBox.enabled = roiNode is not None
     self.ui.enableCropCheckBox.blockSignals(wasBlocking)
 
-    wasBlocking = self.ui.enableCropCheckBox.blockSignals(True)
+    wasBlocking = self.ui.softEdgeSlider.blockSignals(True)
     softEdgeMm = float(parameterNode.GetParameter(self.logic.SOFT_EDGE_MM_PARAMETER))
     self.ui.softEdgeSlider.value = softEdgeMm
-    self.ui.enableCropCheckBox.blockSignals(wasBlocking)
+    self.ui.softEdgeSlider.blockSignals(wasBlocking)
 
     wasBlocking = self.ui.detectorPixelSizeSpinBox.blockSignals(True)
     detectorPixelSizeMm = self.logic.getDetectorPixelSizeMm()
