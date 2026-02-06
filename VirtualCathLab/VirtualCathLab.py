@@ -1199,7 +1199,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     """
     Schedule a rendering of the contents of the 3D X-ray views.
     """
-    if self.renderTimer.remainingTime() <= 0:
+    if self.renderTimer.remainingTime <= 0:
       # We are ready to render again.
       self.renderRequested = True
       self.renderToVolumeInternal()
