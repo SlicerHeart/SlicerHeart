@@ -1,5 +1,6 @@
 import slicer
 import vtk
+import numpy as np
 from abc import abstractmethod
 from ValveQuantificationLib.MeasurementPreset import *
 
