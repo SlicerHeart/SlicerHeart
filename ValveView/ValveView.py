@@ -98,7 +98,7 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
     # Orthogonal slice rotation
     #
     
-    self.lastOrthogonalSlicerRotationVale = 0
+    self.lastOrthogonalSlicerRotationValue = 0
     
     self.orthogonalSlicerRotationSliderWidget = ctk.ctkSliderWidget()
     self.orthogonalSlicerRotationSliderWidget.singleStep = 1
