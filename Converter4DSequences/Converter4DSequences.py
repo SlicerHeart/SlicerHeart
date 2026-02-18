@@ -229,7 +229,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
 
-    def _createSequenceForNode(self, browserNode, sequenceName, indexName="time", indexUnit="frame", indexType=slicer.vtkMRMLSequenceNode.NumericIndex):
+    def _createSequenceForNode(self, browserNode, sequenceName, indexName="time", indexUnit="frame", indexType=slicer.vtkMRMLSequenceNode.NumericIndex, missingItemMode=slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault):
         """
         Helper to create a sequence node and add it to a browser.
 
@@ -239,6 +239,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             indexName: Index name (default: "time")
             indexUnit: Index unit (default: "frame")
             indexType: Index type (default: NumericIndex)
+            missingItemMode: Missing item mode (default: MissingItemSetToDefault)
 
         Returns:
             The created sequence node
@@ -251,7 +252,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         browserNode.AddSynchronizedSequenceNode(sequenceNode)
         browserNode.SetSaveChanges(sequenceNode, True)
-        browserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
+        browserNode.SetMissingItemMode(sequenceNode, missingItemMode)
 
         return sequenceNode
 
@@ -304,6 +305,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         Returns the number of segmented HeartValve nodes considered for conversion.
         """
+        results = {
+            'convertedCount': 0,
+            'segmentedHeartValves': [],
+            'transformCaptureMap': {}
+        }
         # Ensure proxy nodes are up-to-date
         for sequenceBrowserNode in slicer.util.getNodesByClass('vtkMRMLSequenceBrowserNode'):
             slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(sequenceBrowserNode)
@@ -333,7 +339,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         if not segmentedHeartValves:
             logging.info("No segmented HeartValve nodes found to convert.")
-            return 0
+            return results
 
         logging.info(f"Converting {len(segmentedHeartValves)} segmented HeartValve node(s) to new format...")
 
@@ -390,11 +396,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             logging.warning(f"Subject hierarchy cleanup failed: {err}")
 
         logging.info("HeartValve conversion complete.")
-        return {
-            'convertedCount': len(segmentedHeartValves),
-            'segmentedHeartValves': segmentedHeartValves,
-            'transformCaptureMap': transformCaptureMap
-        }
+        results['convertedCount'] = len(segmentedHeartValves)
+        results['segmentedHeartValves'] = segmentedHeartValves
+        results['transformCaptureMap'] = transformCaptureMap
+        return results
 
     def convertSingleFrameToMultiFrameSequences(self):
         """
