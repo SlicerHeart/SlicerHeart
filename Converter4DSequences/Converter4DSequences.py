@@ -34,7 +34,7 @@ class Converter4DSequences(ScriptedLoadableModule):
         self.parent.dependencies = []
         self.parent.contributors = ["SlicerHeart Team"]
         self.parent.helpText = (
-            "Convert segmented HeartValve nodes in the current scene to the latest HeartValveLib format."
+            "Convert HeartValve nodes in the current scene to the latest HeartValveLib format."
         )
         self.parent.acknowledgementText = ("Part of the SlicerHeart project.")
 
@@ -75,10 +75,10 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
         migrationPanel.text = "HeartValve migration"
         migrationLayout = qt.QFormLayout(migrationPanel)
 
-        label = qt.QLabel("Convert segmented HeartValve nodes to the new format:")
-        self.convertHeartValvesButton = qt.QPushButton("Convert segmented HeartValves")
+        label = qt.QLabel("Convert HeartValve nodes to the new format:")
+        self.convertHeartValvesButton = qt.QPushButton("Convert HeartValves")
         self.convertHeartValvesButton.toolTip = (
-            "Scan the scene and convert all segmented HeartValve nodes using HeartValveLib helpers."
+            "Scan the scene and convert all HeartValve nodes using HeartValveLib helpers."
         )
         migrationLayout.addRow(label, self.convertHeartValvesButton)
 
@@ -143,7 +143,7 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
                 results = self.logic.convertSegmentedHeartValvesToNewFormat()
                 count = results['convertedCount']
-                slicer.util.infoDisplay(f"Converted {count} segmented HeartValve node(s) to the new format.")
+                slicer.util.infoDisplay(f"Converted {count} HeartValve node(s) to the new format.")
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
 
@@ -215,7 +215,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 if showMessage:
                     slicer.util.infoDisplay(
                         f"Conversion complete:\n"
-                        f"  - {segmentedCount} segmented HeartValve node(s) updated.\n"
+                        f"  - {segmentedCount} HeartValve node(s) updated.\n"
                         f"  - {valveCount} HeartValve node(s) converted to sequence format.\n"
                         f"  - {measurementCount} HeartValveMeasurement node(s) converted to sequence format.\n"
                         f"  - {deviceCount} CardiacDeviceAnalysis node(s) converted to sequence format.\n"
@@ -223,7 +223,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     )
                 else:
                     logging.info(
-                        f"Auto-conversion complete: {segmentedCount} segmented valves updated, "
+                        f"Auto-conversion complete: {segmentedCount} valves updated, "
                         f"{totalCount} nodes converted to sequences."
                     )
             finally:
@@ -255,6 +255,61 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         browserNode.SetMissingItemMode(sequenceNode, missingItemMode)
 
         return sequenceNode
+
+    def _stripFrameAndPhaseFromName(self, nodeName):
+        """
+        Strip frame numbers and phase indicators from a node name to get a clean base name.
+        
+        Examples:
+            TricuspidValve-ES_f23-segmented -> TricuspidValve-segmented
+            MitralValve-ED_f10 -> MitralValve
+            AnnulusContour_25 -> AnnulusContour
+            
+        Args:
+            nodeName: The node name to process
+            
+        Returns:
+            The cleaned base name
+        """
+        baseName = nodeName
+        
+        # Strip frame number suffix (e.g., "_f23", "_25", "_f23-segmented")
+        parts = baseName.split('_')
+        if len(parts) > 1:
+            lastPart = parts[-1]
+            # Check if the last part starts with a frame number
+            frameMatch = None
+            if lastPart.isdigit():
+                frameMatch = lastPart
+            elif lastPart.startswith('f'):
+                # Extract digits after 'f'
+                frameDigits = ''
+                for char in lastPart[1:]:
+                    if char.isdigit():
+                        frameDigits += char
+                    else:
+                        break
+                if frameDigits:
+                    frameMatch = 'f' + frameDigits
+            
+            if frameMatch:
+                # Remove the frame part from the last segment
+                if lastPart == frameMatch:
+                    # The last part is only the frame number
+                    baseName = '_'.join(parts[:-1])
+                else:
+                    # The last part has the frame number plus other text (e.g., "f23-segmented")
+                    remainder = lastPart[len(frameMatch):]
+                    baseName = '_'.join(parts[:-1]) + remainder
+        
+        # Strip phase indicators (e.g., "-ES", "-ED", "-MD") from anywhere in the name
+        phaseSuffixes = ['-ES', '-ED', '-MD', '-MS', '-CT', '-CD', '-CS']
+        for suffix in phaseSuffixes:
+            if suffix in baseName:
+                baseName = baseName.replace(suffix, '', 1)  # Remove first occurrence
+                break
+        
+        return baseName
 
     def _captureTransformsFromReferencedNodes(self, hvNode, referenceRoles):
         """
@@ -300,10 +355,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
     def convertSegmentedHeartValvesToNewFormat(self):
         """
-        Convert all segmented HeartValve nodes in the current scene to the latest
+        Convert all HeartValve nodes in the current scene to the latest
         HeartValveLib format using the provided conversion helpers.
 
-        Returns the number of segmented HeartValve nodes considered for conversion.
+        Returns the number of HeartValve nodes considered for conversion.
         """
         results = {
             'convertedCount': 0,
@@ -314,34 +369,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         for sequenceBrowserNode in slicer.util.getNodesByClass('vtkMRMLSequenceBrowserNode'):
             slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(sequenceBrowserNode)
 
-        # Collect HeartValve nodes that are segmented (any non-mask segments present)
+        # Collect all HeartValve nodes
         allHeartValves = list(getAllModuleSpecificScriptableNodes("HeartValve"))
-        segmentedHeartValves = []
-        for hvNode in allHeartValves:
-            try:
-                # In legacy nodes, the segmentation is just a referenced node, no valve model exists yet
-                segNode = hvNode.GetNodeReference("LeafletSegmentation")
-                if not segNode:
-                    # Also check for the legacy role name, which was sometimes used
-                    segNode = hvNode.GetNodeReference("vtkMRMLSegmentationNode")
 
-                if not segNode:
-                    continue
-
-                segmentIds = getAllSegmentIDs(segNode)
-                nonMaskSegments = [sid for sid in segmentIds if sid != VALVE_MASK_SEGMENT_ID]
-                if len(nonMaskSegments) > 0:
-                    segmentedHeartValves.append(hvNode)
-            except Exception as err:
-                logging.warning(
-                    f"Skipping HeartValve '{hvNode.GetName()}' due to error while checking segmentation: {err}"
-                )
-
-        if not segmentedHeartValves:
-            logging.info("No segmented HeartValve nodes found to convert.")
+        if not allHeartValves:
+            logging.info("No HeartValve nodes found to convert.")
             return results
 
-        logging.info(f"Converting {len(segmentedHeartValves)} segmented HeartValve node(s) to new format...")
+        logging.info(f"Converting {len(allHeartValves)} HeartValve node(s) to new format...")
 
         # Capture transform IDs from nodes BEFORE legacy update functions recreate them
         # These functions create new markup curve nodes without preserving transforms
@@ -357,28 +392,28 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             'PapillaryLineMarkup'
         ]
 
-        for hvNode in segmentedHeartValves:
+        for hvNode in allHeartValves:
             valveID = hvNode.GetID()
             transformCaptureMap[valveID] = self._captureTransformsFromReferencedNodes(hvNode, referenceRoles)
 
         # Run conversion helpers and restore transforms
         try:
-            updateLegacyAnnulusCurveNode(segmentedHeartValves)
+            updateLegacyAnnulusCurveNode(allHeartValves)
         except Exception as err:
             logging.warning(f"updateLegacyAnnulusCurveNode failed: {err}")
 
         try:
-            updateLegacyPapillaryMuscleNodes(segmentedHeartValves)
+            updateLegacyPapillaryMuscleNodes(allHeartValves)
         except Exception as err:
             logging.warning(f"updateLegacyPapillaryMuscleNodes failed: {err}")
 
         try:
-            updateLegacyLeafletSurfaceBoundaryNodes(segmentedHeartValves)
+            updateLegacyLeafletSurfaceBoundaryNodes(allHeartValves)
         except Exception as err:
             logging.warning(f"updateLegacyLeafletSurfaceBoundaryNodes failed: {err}")
 
         # Restore transforms to all updated nodes
-        for hvNode in segmentedHeartValves:
+        for hvNode in allHeartValves:
             valveID = hvNode.GetID()
             if valveID in transformCaptureMap:
                 self._restoreTransformsToReferencedNodes(hvNode, transformCaptureMap[valveID])
@@ -386,7 +421,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         # Subject hierarchy cleanup (icons/level attr)
         try:
             shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-            for hvNode in segmentedHeartValves:
+            for hvNode in allHeartValves:
                 itemId = shNode.GetItemByDataNode(hvNode)
                 shNode.RemoveItemAttribute(
                     itemId,
@@ -396,8 +431,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             logging.warning(f"Subject hierarchy cleanup failed: {err}")
 
         logging.info("HeartValve conversion complete.")
-        results['convertedCount'] = len(segmentedHeartValves)
-        results['segmentedHeartValves'] = segmentedHeartValves
+        results['convertedCount'] = len(allHeartValves)
+        results['allHeartValves'] = allHeartValves
         results['transformCaptureMap'] = transformCaptureMap
         return results
 
@@ -656,27 +691,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                             logging.info(f"  Skipping '{referencedNode.GetName()}' (role: {role}) - already in a sequence")
                             continue
 
-                        # Create a more specific key for grouping by role and a base name
-                        # Strip frame-specific suffixes to group all frames of the same node type together
-                        originalName = referencedNode.GetName()
-                        baseName = originalName
-
-                        # Strip frame number suffix (e.g., "_f23", "_25")
-                        parts = baseName.split('_')
-                        if len(parts) > 1:
-                            lastPart = parts[-1]
-                            if lastPart.isdigit() or (lastPart.startswith('f') and lastPart[1:].isdigit()):
-                                baseName = '_'.join(parts[:-1])
-
-                        # Also strip phase indicators for segmentations (e.g., "-ES", "-ED", "-MD")
-                        if referencedNode.IsA('vtkMRMLSegmentationNode'):
-                            phaseSuffixes = ['-ES', '-ED', '-MD', '-MS', '-CT', '-CD', '-CS']
-                            for suffix in phaseSuffixes:
-                                if baseName.endswith(suffix):
-                                    baseName = baseName[:-len(suffix)]
-                                    break
-
-                        groupingKey = (role, baseName)
+                        groupingKey = role
 
                         # Store this node for sequence creation
                         if groupingKey not in referencedNodesByRole:
@@ -723,19 +738,19 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         # Track data sequence nodes to their display sequence nodes for correct linking
         dataSequenceToDisplaySequenceMap = {}
 
-        for (role, baseName), nodeEntries in referencedNodesByRole.items():
+        for role, nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
                 continue
 
             # Get a representative node to create a meaningful name
             firstNode = nodeEntries[0]['node']
-            # Use the baseName for the sequence to keep it consistent
-            sequenceBaseName = baseName if baseName else firstNode.GetName()
+            # Derive a clean base name by stripping frame and phase indicators from the first node's name
+            sequenceBaseName = self._stripFrameAndPhaseFromName(firstNode.GetName())
 
             # Log details about what we're about to add
             uniqueNodeIds = set([entry['node'].GetID() for entry in nodeEntries])
             if len(uniqueNodeIds) == 1:
-                logging.warning(f"  WARNING: Same node being added at multiple time points for {baseName}!")
+                logging.warning(f"  WARNING: Same node being added at multiple time points for {role}!")
 
             try:
                 # Create a single sequence node for this role
@@ -793,7 +808,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     addedNodes[indexValue] = nodeToAdd.GetID()                # Store the mapping for later transform verification
                 sequenceToEntriesMap[sequenceNode] = nodeEntries
 
-                logging.info(f"Created sequence for role '{role}' (group: '{baseName}'): {sequenceNode.GetName()} with {sequenceNode.GetNumberOfDataNodes()} time points")
+                logging.info(f"Created sequence for role '{role}': {sequenceNode.GetName()} with {sequenceNode.GetNumberOfDataNodes()} time points")
 
                 # Create a display node sequence if any of the nodes have display nodes
                 displayNodeEntries = [(entry['indexValue'], entry['displayNode']) for entry in nodeEntries if entry.get('displayNode')]
@@ -834,8 +849,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(valveBrowserNode)
 
         # Ensure proxy nodes have the correct parent transforms and descriptive names
-        # Map from grouping key to the actual sequence node that was created
-        createdSequences = {}  # (role, baseName) -> sequenceNode
+        # Map from role to the actual sequence node that was created
+        createdSequences = {}  # role -> sequenceNode
 
         # Get all synchronized sequences
         synchronizedSequenceNodes = vtk.vtkCollection()
@@ -846,30 +861,31 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if not seqNode:
                 continue
 
-            # Try to match this sequence to one of our groups
+            # Try to match this sequence to one of our roles by checking sequence name
             seqName = seqNode.GetName()
-            for (role, baseName) in referencedNodesByRole.keys():
-                expectedBaseName = baseName if baseName else ""
-                if expectedBaseName and expectedBaseName in seqName:
-                    createdSequences[(role, baseName)] = seqNode
+            for role in referencedNodesByRole.keys():
+                # Match by checking if the role-based name is in the sequence name
+                # The sequence is named like "<descriptiveName>_Sequence"
+                if role in seqName or self._stripFrameAndPhaseFromName(seqName.replace('_Sequence', '')) in seqName:
+                    createdSequences[role] = seqNode
                     break
 
         # Now configure each proxy node
-        for (role, baseName), nodeEntries in referencedNodesByRole.items():
+        for role, nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
                 continue
 
-            # Find the sequence we created for this group
-            seqNode = createdSequences.get((role, baseName))
+            # Find the sequence we created for this role
+            seqNode = createdSequences.get(role)
             if not seqNode:
-                logging.warning(f"Could not find sequence for group ({role}, {baseName})")
+                logging.warning(f"Could not find sequence for role '{role}'")
                 continue
 
             # Get and configure the proxy node
             proxyNode = valveBrowserNode.GetProxyNode(seqNode)
             if proxyNode:
                 # Give the proxy node a descriptive name (remove _Sequence suffix)
-                descriptiveName = baseName if baseName else nodeEntries[0]['node'].GetName()
+                descriptiveName = self._stripFrameAndPhaseFromName(nodeEntries[0]['node'].GetName())
                 proxyNode.SetName(descriptiveName)
                 logging.info(f"Renamed proxy node to: {descriptiveName}")
 
@@ -962,13 +978,13 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # Track which Nth reference indices we've set for each role
             nthReferenceIndices = {}  # role -> list of (index, proxyNode)
 
-            # Map from role/baseName to the sequence node
-            for (role, baseName), nodeEntries in referencedNodesByRole.items():
+            # Map from role to the sequence node
+            for role, nodeEntries in referencedNodesByRole.items():
                 if len(nodeEntries) == 0:
                     continue
 
-                # Find the sequence we created for this group
-                sequenceBaseName = baseName if baseName else nodeEntries[0]['node'].GetName()
+                # Find the sequence we created for this role
+                sequenceBaseName = self._stripFrameAndPhaseFromName(nodeEntries[0]['node'].GetName())
                 sequenceName = f"{sequenceBaseName}_Sequence"
 
                 # Find the sequence node by name
