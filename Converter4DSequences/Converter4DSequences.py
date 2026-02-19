@@ -691,7 +691,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                             logging.info(f"  Skipping '{referencedNode.GetName()}' (role: {role}) - already in a sequence")
                             continue
 
-                        groupingKey = role
+                        # Group by role and reference index - this handles:
+                        # - Single refs (LeafletVolume): only refIndex=0, one sequence per role
+                        # - Nth refs (LeafletSurfaceBoundaryMarkup): multiple refIndexes, one sequence per leaflet
+                        groupingKey = (role, refIndex)
 
                         # Store this node for sequence creation
                         if groupingKey not in referencedNodesByRole:
@@ -738,7 +741,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         # Track data sequence nodes to their display sequence nodes for correct linking
         dataSequenceToDisplaySequenceMap = {}
 
-        for role, nodeEntries in referencedNodesByRole.items():
+        for (role, refIndex), nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
                 continue
 
@@ -750,7 +753,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # Log details about what we're about to add
             uniqueNodeIds = set([entry['node'].GetID() for entry in nodeEntries])
             if len(uniqueNodeIds) == 1:
-                logging.warning(f"  WARNING: Same node being added at multiple time points for {role}!")
+                logging.warning(f"  WARNING: Same node being added at multiple time points for role={role}, refIndex={refIndex}!")
 
             try:
                 # Create a single sequence node for this role
@@ -849,8 +852,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(valveBrowserNode)
 
         # Ensure proxy nodes have the correct parent transforms and descriptive names
-        # Map from role to the actual sequence node that was created
-        createdSequences = {}  # role -> sequenceNode
+        # Map from (role, refIndex) to the actual sequence node that was created
+        createdSequences = {}  # (role, refIndex) -> sequenceNode
 
         # Get all synchronized sequences
         synchronizedSequenceNodes = vtk.vtkCollection()
@@ -861,24 +864,24 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if not seqNode:
                 continue
 
-            # Try to match this sequence to one of our roles by checking sequence name
+            # Try to match this sequence to one of our (role, refIndex) keys by checking sequence name
             seqName = seqNode.GetName()
-            for role in referencedNodesByRole.keys():
-                # Match by checking if the role-based name is in the sequence name
+            for (role, refIndex) in referencedNodesByRole.keys():
+                # Match by checking if the descriptive name is in the sequence name
                 # The sequence is named like "<descriptiveName>_Sequence"
                 if role in seqName or self._stripFrameAndPhaseFromName(seqName.replace('_Sequence', '')) in seqName:
-                    createdSequences[role] = seqNode
+                    createdSequences[(role, refIndex)] = seqNode
                     break
 
         # Now configure each proxy node
-        for role, nodeEntries in referencedNodesByRole.items():
+        for (role, refIndex), nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
                 continue
 
-            # Find the sequence we created for this role
-            seqNode = createdSequences.get(role)
+            # Find the sequence we created for this (role, refIndex) pair
+            seqNode = createdSequences.get((role, refIndex))
             if not seqNode:
-                logging.warning(f"Could not find sequence for role '{role}'")
+                logging.warning(f"Could not find sequence for role='{role}', refIndex={refIndex}")
                 continue
 
             # Get and configure the proxy node
@@ -978,12 +981,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # Track which Nth reference indices we've set for each role
             nthReferenceIndices = {}  # role -> list of (index, proxyNode)
 
-            # Map from role to the sequence node
-            for role, nodeEntries in referencedNodesByRole.items():
+            # Map from (role, refIndex) to the sequence node
+            for (role, refIndex), nodeEntries in referencedNodesByRole.items():
                 if len(nodeEntries) == 0:
                     continue
 
-                # Find the sequence we created for this role
+                # Find the sequence we created for this (role, refIndex) pair
                 sequenceBaseName = self._stripFrameAndPhaseFromName(nodeEntries[0]['node'].GetName())
                 sequenceName = f"{sequenceBaseName}_Sequence"
 
