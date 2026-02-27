@@ -1318,7 +1318,7 @@ class SimplifiedViewerLogic(ScriptedLoadableModuleLogic):
         collection = vtk.vtkCollection()
         for clippingNode in clippingNodes:
             collection.AddItem(clippingNode)
-        sceneViewLogic.UpdateNthSceneView(collection, sceneViewIndex)
+        sceneViewLogic.UpdateNthSceneView(sceneViewIndex, collection)
 
     def restoreSceneView(self, sceneViewIndex: int):
         """
