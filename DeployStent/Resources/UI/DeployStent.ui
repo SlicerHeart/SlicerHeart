@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>325</width>
-    <height>311</height>
+    <width>420</width>
+    <height>520</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -16,25 +16,22 @@
      <property name="text">
       <string>Inputs</string>
      </property>
-     <layout class="QFormLayout" name="formLayout_2">
+     <layout class="QFormLayout" name="formLayoutInputs">
       <item row="0" column="0">
-       <widget class="QLabel" name="label">
+       <widget class="QLabel" name="labelInputSurface">
         <property name="text">
-         <string>Input volume:</string>
+         <string>Input surface model:</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="inputSelector">
-        <property name="toolTip">
-         <string>Pick the input to the algorithm.</string>
-        </property>
+       <widget class="qMRMLNodeComboBox" name="inputSurfaceSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
-          <string>vtkMRMLScalarVolumeNode</string>
+          <string>vtkMRMLModelNode</string>
          </stringlist>
         </property>
-        <property name="showChildNodeTypes">
+        <property name="noneEnabled">
          <bool>false</bool>
         </property>
         <property name="addEnabled">
@@ -44,36 +41,130 @@
          <bool>false</bool>
         </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>inputVolume</string>
+         <string>inputSurfaceModel</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelInputCenterline">
+        <property name="text">
+         <string>Input centerline model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="inputCenterlineSelector">
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>inputCenterlineModel</string>
         </property>
        </widget>
       </item>
       <item row="2" column="0">
-       <widget class="QLabel" name="label_3">
+       <widget class="QLabel" name="labelStartPointId">
         <property name="text">
-         <string>Image threshold:</string>
+         <string>Start point id:</string>
         </property>
        </widget>
       </item>
       <item row="2" column="1">
-       <widget class="ctkSliderWidget" name="imageThresholdSliderWidget">
-        <property name="toolTip">
-         <string>Set threshold value for computing the output image. Voxels that have intensities lower than this value will set to zero.</string>
-        </property>
-        <property name="singleStep">
-         <double>0.100000000000000</double>
-        </property>
-        <property name="minimum">
-         <double>-100.000000000000000</double>
-        </property>
+       <widget class="QSpinBox" name="startPointIdSpinBox">
         <property name="maximum">
-         <double>500.000000000000000</double>
-        </property>
-        <property name="value">
-         <double>0.500000000000000</double>
+         <number>2147483647</number>
         </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>imageThreshold</string>
+         <string>startPointId</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="labelTargetRadius">
+        <property name="text">
+         <string>Target radius (cm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="ctkDoubleSpinBox" name="targetRadiusSpinBox">
+        <property name="decimals">
+         <number>4</number>
+        </property>
+        <property name="singleStep">
+         <double>0.01</double>
+        </property>
+        <property name="minimum">
+         <double>0.0001</double>
+        </property>
+        <property name="value">
+         <double>0.4</double>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>targetRadius</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="labelStartRadius">
+        <property name="text">
+         <string>Start radius (cm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="ctkDoubleSpinBox" name="startRadiusSpinBox">
+        <property name="decimals">
+         <number>4</number>
+        </property>
+        <property name="singleStep">
+         <double>0.01</double>
+        </property>
+        <property name="minimum">
+         <double>0.0001</double>
+        </property>
+        <property name="value">
+         <double>0.05</double>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>startRadius</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="labelStentLength">
+        <property name="text">
+         <string>Stent length (cm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="ctkDoubleSpinBox" name="stentLengthSpinBox">
+        <property name="decimals">
+         <number>4</number>
+        </property>
+        <property name="singleStep">
+         <double>0.1</double>
+        </property>
+        <property name="minimum">
+         <double>0.0001</double>
+        </property>
+        <property name="value">
+         <double>3.0</double>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>stentLength</string>
         </property>
        </widget>
       </item>
@@ -85,26 +176,20 @@
      <property name="text">
       <string>Outputs</string>
      </property>
-     <layout class="QFormLayout" name="formLayout_4">
+     <layout class="QFormLayout" name="formLayoutOutputs">
       <item row="0" column="0">
-       <widget class="QLabel" name="label_2">
+       <widget class="QLabel" name="labelOutputSurface">
         <property name="text">
-         <string>Thresholded volume:</string>
+         <string>Output surface model:</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="outputSelector">
-        <property name="toolTip">
-         <string>Pick the output to the algorithm.</string>
-        </property>
+       <widget class="qMRMLNodeComboBox" name="outputSurfaceSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
-          <string>vtkMRMLScalarVolumeNode</string>
+          <string>vtkMRMLModelNode</string>
          </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
         </property>
         <property name="noneEnabled">
          <bool>true</bool>
@@ -116,29 +201,23 @@
          <bool>true</bool>
         </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>thresholdedVolume</string>
+         <string>outputSurfaceModel</string>
         </property>
        </widget>
       </item>
       <item row="1" column="0">
-       <widget class="QLabel" name="label_5">
+       <widget class="QLabel" name="labelOutputCenterline">
         <property name="text">
-         <string>Inverted volume:</string>
+         <string>Output centerline model:</string>
         </property>
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="qMRMLNodeComboBox" name="invertedOutputSelector">
-        <property name="toolTip">
-         <string>Result with inverted threshold will be written into this volume</string>
-        </property>
+       <widget class="qMRMLNodeComboBox" name="outputCenterlineSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
-          <string>vtkMRMLScalarVolumeNode</string>
+          <string>vtkMRMLModelNode</string>
          </stringlist>
-        </property>
-        <property name="showChildNodeTypes">
-         <bool>false</bool>
         </property>
         <property name="noneEnabled">
          <bool>true</bool>
@@ -150,7 +229,7 @@
          <bool>true</bool>
         </property>
         <property name="SlicerParameterName" stdset="0">
-         <string>invertedVolume</string>
+         <string>outputCenterlineModel</string>
         </property>
        </widget>
       </item>
@@ -165,24 +244,64 @@
      <property name="collapsed">
       <bool>true</bool>
      </property>
-     <layout class="QFormLayout" name="formLayout_3">
+     <layout class="QFormLayout" name="formLayoutAdvanced">
       <item row="0" column="0">
-       <widget class="QLabel" name="label_4">
+       <widget class="QLabel" name="labelEnableSnapshots">
         <property name="text">
-         <string>Invert threshold: </string>
+         <string>Enable snapshots:</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="QCheckBox" name="invertOutputCheckBox">
-        <property name="toolTip">
-         <string>If checked, values above threshold are set to 0. If unchecked, values below are set to 0.</string>
-        </property>
+       <widget class="QCheckBox" name="enableSnapshotsCheckBox">
         <property name="text">
          <string/>
         </property>
-        <property name="invertThreshold" stdset="0">
+        <property name="SlicerParameterName" stdset="0">
+         <string>enableSnapshots</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelSaveStep">
+        <property name="text">
+         <string>Save step (cm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkDoubleSpinBox" name="saveStepSpinBox">
+        <property name="decimals">
+         <number>4</number>
+        </property>
+        <property name="singleStep">
+         <double>0.01</double>
+        </property>
+        <property name="minimum">
+         <double>0.0001</double>
+        </property>
+        <property name="value">
+         <double>0.1</double>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>saveStep</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="labelPreserveTempFiles">
+        <property name="text">
+         <string>Preserve temporary files:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QCheckBox" name="preserveTempFilesCheckBox">
+        <property name="text">
          <string/>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>preserveTemporaryFiles</string>
         </property>
        </widget>
       </item>
@@ -194,14 +313,37 @@
      <property name="enabled">
       <bool>false</bool>
      </property>
-     <property name="toolTip">
-      <string>Run the algorithm.</string>
-     </property>
      <property name="text">
       <string>Apply</string>
      </property>
     </widget>
    </item>
+     <item>
+      <widget class="ctkCollapsibleButton" name="statusCollapsibleButton">
+       <property name="text">
+        <string>Status</string>
+       </property>
+       <property name="collapsed">
+        <bool>false</bool>
+       </property>
+       <layout class="QVBoxLayout" name="verticalLayoutStatus">
+        <item>
+         <widget class="QLabel" name="statusLabel">
+          <property name="text">
+           <string>Idle</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPlainTextEdit" name="logPlainTextEdit">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
    <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
@@ -236,9 +378,9 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>ctkSliderWidget</class>
+   <class>ctkDoubleSpinBox</class>
    <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
+   <header>ctkDoubleSpinBox.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
@@ -246,50 +388,26 @@
   <connection>
    <sender>DeployStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>inputSelector</receiver>
+   <receiver>inputSurfaceSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>122</x>
-     <y>132</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>248</x>
-     <y>61</y>
-    </hint>
-   </hints>
   </connection>
   <connection>
    <sender>DeployStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>outputSelector</receiver>
+   <receiver>inputCenterlineSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>82</x>
-     <y>135</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>220</x>
-     <y>161</y>
-    </hint>
-   </hints>
   </connection>
   <connection>
    <sender>DeployStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>invertedOutputSelector</receiver>
+   <receiver>outputSurfaceSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>161</x>
-     <y>8</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>173</x>
-     <y>176</y>
-    </hint>
-   </hints>
+  </connection>
+  <connection>
+   <sender>DeployStent</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputCenterlineSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
   </connection>
  </connections>
 </ui>
