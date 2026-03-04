@@ -89,7 +89,6 @@ add_subdirectory(FEBioMeshIO)
 add_subdirectory(PDAQuantification)
 add_subdirectory(ValveMoldCreator)
 add_subdirectory(VirtualCathLab)
-add_subdirectory(DeployStent)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
