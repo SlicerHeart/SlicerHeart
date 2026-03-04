@@ -30,16 +30,26 @@ optional flags  (see `-h` for the full list):
 import time
 import_start_time = time.time()
 import argparse, pathlib
+import builtins
 from collections import defaultdict
 
 from vtkmodules.vtkIOXML import vtkXMLPolyDataReader, vtkXMLPolyDataWriter
 # from vtk.util.numpy_support import vtk_to_numpy as v2n
-from vtkmodules.vtkCommonCore import vtkIdTypeArray, vtkLongArray
+from vtkmodules.vtkCommonCore import vtkIdTypeArray, vtkLongArray, vtkIdList
 
 import numpy as np
 import jax.numpy as jnp
 import jax as jx
 from scipy.spatial import cKDTree
+
+LOG_LEVEL = 2
+
+
+def print(*args, level=2, **kwargs):
+    if LOG_LEVEL >= level:
+        builtins.print(*args, **kwargs)
+
+
 print(f"Total import time: {time.time() - import_start_time:.4f} seconds")
 
 # a manual copy of the vtk_to_numpy from vtk.util.numpy_support codebase to speed up import
@@ -420,6 +430,26 @@ def polydata_to_parent_tip_map(centerline_polydata):
     # print("unit test: parent id for 7745 = ", point_to_parent_tip[7745])
     return point_to_parent_tip, segment_base_mask
 
+
+def get_first_line_cell_point_ids_and_points(centerline_polydata):
+    """Return point ids and points of the first polyline cell in order."""
+    lines = centerline_polydata.GetLines()
+    if lines is None or lines.GetNumberOfCells() == 0:
+        raise ValueError("Centerline has no line cells.")
+
+    points_np = v2n(centerline_polydata.GetPoints().GetData())
+    id_list = vtkIdList()
+
+    lines.InitTraversal()
+    while lines.GetNextCell(id_list):
+        number_of_ids = id_list.GetNumberOfIds()
+        if number_of_ids < 2:
+            continue
+        point_ids = [int(id_list.GetId(i)) for i in range(number_of_ids)]
+        return point_ids, np.array(points_np[point_ids])
+
+    raise ValueError("No valid line cell with at least 2 points was found in centerline polydata.")
+
 def sample_stent_axis_vertices(points, parent_tip_map, segment_base_mask, starting_point_idx, desired_total_length, desired_segment_length, sampling_direction=-1):
     """
     Extracts and resamples a subsegment of a polyline.
@@ -539,20 +569,26 @@ def one_step(data,
 # main ------------------------------------------------------------------------
 def main():
     setup_start_time = time.time()
+    global LOG_LEVEL
     ap = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Deploy a crimped stent by Kelvinlet SDF contact until its radius reaches the prescribed target.")
     ap.add_argument('--mesh',   required=True, help='input surface .vtp')
-    ap.add_argument('--cline',  required=True, help='input center‑line .vtp')
-    ap.add_argument('--start',   type=int, required=True, help='centre‑line vertex id indicating stent distal tip')
+    ap.add_argument('--cline',  required=True, help='input centerline .vtp')
+    ap.add_argument('--start',   type=int, required=True, help='centerline vertex id indicating stent distal tip')
     ap.add_argument('--target-R', type=float, default=0.4, help='target deployed stent radius [cm]')
     ap.add_argument('--start-R',  type=float, default=0.05, help='initial crimped stent radius [cm]')
-    ap.add_argument('--length',   type=float, default=3.0,  help='stent length along centre‑line [cm]')
+    ap.add_argument('--length',   type=float, default=3.0,  help='stent length along centerline [cm]')
     ap.add_argument('--save-step', type=float, default=0.1,
                    help='write snapshots every x cm increase in radius')
+    ap.add_argument('--log-level', type=int, default=2,
+                   help='logging verbosity level; messages are shown only when log level >= 2')
     ap.add_argument('--out-mesh', default='deployed_surface.vtp', help='output surface mesh')
-    ap.add_argument('--out-cl',   default='deployed_centerline.vtp', help='output center‑line (same topology, displaced verts)')
+    ap.add_argument('--out-cl',   default='deployed_centerline.vtp', help='output centerline (same topology, displaced verts)')
+    ap.add_argument('--centerline-type', default='vmtk', choices=['vmtk', 'single'],
+                   help='centerline representation type: vmtk tree metadata or single polyline')
     args = ap.parse_args()
+    LOG_LEVEL = args.log_level
 
     mesh_pd  = read_vtp(args.mesh)
     cl_pd    = read_vtp(args.cline)
@@ -564,13 +600,24 @@ def main():
     print(f"Data setup time: {time.time() - setup_start_time:.4f} seconds")
 
     # sample stent axis vertices --------------------------------------------
-    parent_tip_start_time = time.time()
-    parent_tip_map, seg_base_mask = polydata_to_parent_tip_map(cl_pd)
-    print(f"Parent tip map compute time: {time.time() - parent_tip_start_time:.4f} seconds")
     sample_stent_start_time = time.time()
-    axis_pts = sample_stent_axis_vertices(
-        data['points']['centerline_points_view_np'], parent_tip_map, seg_base_mask,
-        args.start, args.length, 0.1, sampling_direction=-1)
+    if args.centerline_type == 'vmtk':
+        parent_tip_start_time = time.time()
+        parent_tip_map, seg_base_mask = polydata_to_parent_tip_map(cl_pd)
+        print(f"Parent tip map compute time: {time.time() - parent_tip_start_time:.4f} seconds")
+        axis_pts = sample_stent_axis_vertices(
+            data['points']['centerline_points_view_np'], parent_tip_map, seg_base_mask,
+            args.start, args.length, 0.1, sampling_direction=-1)
+    else:
+        first_line_point_ids, first_line_points = get_first_line_cell_point_ids_and_points(cl_pd)
+        if args.start not in first_line_point_ids:
+            raise ValueError(f"--start point id {args.start} is not part of the first line cell")
+        local_start_idx = first_line_point_ids.index(args.start)
+        single_parent_tip_map = {i: i for i in range(len(first_line_points))}
+        single_seg_base_mask = np.zeros(len(first_line_points), dtype=bool)
+        axis_pts = sample_stent_axis_vertices(
+            first_line_points, single_parent_tip_map, single_seg_base_mask,
+            local_start_idx, args.length, 0.1, sampling_direction=-1)
     print(f"Stent axis sample time: {time.time() - sample_stent_start_time:.4f} seconds")
 
     # material constants and stent parameters --------------------------------------
@@ -605,11 +652,11 @@ def main():
         cl_path = cl_prefix.with_name(cl_prefix.name + suffix)
         write_vtp(mesh_pd, str(mesh_path))
         write_vtp(cl_pd,   str(cl_path))
-        print(f"    wrote snapshot @ R={radius_cm:.3f} cm → {mesh_path}")
+        print(f"    wrote snapshot @ R={radius_cm:.3f} cm -> {mesh_path}")
 
 
     cur_R = args.start_R
-    print(f"Starting deployed‑radius = {cur_R:.4f} cm; target = {args.target_R:.4f} cm\n")
+    print(f"Starting deployed-radius = {cur_R:.4f} cm; target = {args.target_R:.4f} cm\n")
     it = 0
     total_start_time = time.time()
     while True:
@@ -617,11 +664,11 @@ def main():
                        cur_R, eps, force_scale, a, b,
                        halflength, args.target_R)
         if dR <= 0.0:
-            print("Next increment would overshoot – done.")
+            print("Next increment would overshoot - done.")
             break
         cur_R += dR
         it += 1
-        print(f"  step {it:2d}:  ΔR = {dR:.5f}  →  R = {cur_R:.5f}")
+        print(f"  step {it:2d}:  dR = {dR:.5f}  ->  R = {cur_R:.5f}", level=1)
 
         # save snapshot if there are milestones left and we passed a milestone
         if next_ms_idx < len(milestones) and cur_R >= milestones[next_ms_idx]:
@@ -633,9 +680,9 @@ def main():
     mesh_pd.GetPoints().Modified()
     cl_pd.GetPoints().Modified()
     
-    write_vtp(mesh_pd, "args.out_mesh")
+    write_vtp(mesh_pd, args.out_mesh)
     write_vtp(cl_pd,   args.out_cl)
-    print(f"Saved:\n  surface  → {args.out_mesh}\n  center‑line → {args.out_cl}")
+    print(f"Saved:\n  surface  -> {args.out_mesh}\n  centerline -> {args.out_cl}")
 
 if __name__ == '__main__':
     main()
