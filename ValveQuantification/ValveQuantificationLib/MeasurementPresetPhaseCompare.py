@@ -196,7 +196,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
       [interpolatedPointsAfter1, numberOfChordsAfter] = self.getChords(valveModel1, curveSegment1["segmentLengthAfter"],
                        curveSegment1["closestPointIdOnAnnulusCurve"],
                        curveSegment1["segmentEndPointId"],
-                       slicer.util.arrayFromMarkupsCurvePoints(valveModel1.annulusContourCurve).T,
+                       slicer.util.arrayFromMarkupsCurvePoints(valveModel1.annulusContourCurveNode).T,
                        #requestedDistanceBetweenChords=requestedDistanceBetweenChords,
                        numberOfChords=numberOfChords if splitBetweenPoints else numberOfChords*2)
       if interpolatedPointsAfter1 is None:
@@ -206,7 +206,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
         [interpolatedPointsBefore1, numberOfChordsBefore] = self.getChords(valveModel1, curveSegment1["segmentLengthBefore"],
                          curveSegment1["segmentStartPointId"],
                          curveSegment1["closestPointIdOnAnnulusCurve"],
-                         slicer.util.arrayFromMarkupsCurvePoints(valveModel1.annulusContourCurve).T,
+                         slicer.util.arrayFromMarkupsCurvePoints(valveModel1.annulusContourCurveNode).T,
                          #requestedDistanceBetweenChords=requestedDistanceBetweenChords
                          numberOfChords=numberOfChords if splitBetweenPoints else numberOfChords*2)
         if interpolatedPointsBefore1 is None:
@@ -220,7 +220,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
       [interpolatedPointsAfter2, numberOfChordsAfter] = self.getChords(valveModel2, curveSegment2["segmentLengthAfter"],
                        curveSegment2["closestPointIdOnAnnulusCurve"],
                        curveSegment2["segmentEndPointId"],
-                       slicer.util.arrayFromMarkupsCurvePoints(valveModel2.annulusContourCurve).T,
+                       slicer.util.arrayFromMarkupsCurvePoints(valveModel2.annulusContourCurveNode).T,
                        numberOfChords=numberOfChordsAfter)
       if interpolatedPointsAfter2 is None:
         continue
@@ -231,7 +231,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
                                                                            curveSegment2["segmentStartPointId"],
                                                                            curveSegment2[
                                                                              "closestPointIdOnAnnulusCurve"],
-                                                                           slicer.util.arrayFromMarkupsCurvePoints(valveModel2.annulusContourCurve).T,
+                                                                           slicer.util.arrayFromMarkupsCurvePoints(valveModel2.annulusContourCurveNode).T,
                                                                            numberOfChords=numberOfChordsBefore)
         if interpolatedPointsBefore2 is None:
           continue
@@ -382,7 +382,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
       valveModel = inputValveModels[valveId]
       [planePosition, planeNormal] = valveModel.getAnnulusContourPlane()
       valvePlanes[valveId] = [planePosition, planeNormal]
-      annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+      annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
       self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal,
                                    name="{0} annulus plane".format(self.inputValveShortNames[valveId]))
       # Add centroid point. This makes sure centroid distances will be computed.

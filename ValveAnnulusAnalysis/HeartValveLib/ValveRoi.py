@@ -167,7 +167,7 @@ class ValveRoi:
     from HeartValveLib.util import getClosestCurvePointIndexToPosition
     # Find out if the segment is between (when going in increasing point index direction)
     # or outside the two intersection points.
-    annulusContour = self.valveModel.annulusContourCurve
+    annulusContour = self.valveModel.annulusContourCurveNode
 
     annulusContourStartPointId = getClosestCurvePointIndexToPosition(annulusContour, leafletBoundaryPoints[:,0])
     annulusContourEndPointId = getClosestCurvePointIndexToPosition(annulusContour, leafletBoundaryPoints[:, -1])
