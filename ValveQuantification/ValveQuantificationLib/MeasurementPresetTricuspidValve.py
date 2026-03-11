@@ -48,11 +48,11 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
       firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
       from HeartValveLib.util import getClosestPointPositionAlongCurve
       closestAnnulusPointToFirstPoint = \
-        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, firstCoaptationLinePoint)
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, firstCoaptationLinePoint)
       firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint-firstCoaptationLinePoint)
       lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
       closestAnnulusPointToLastPoint = \
-        getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, lastCoaptationLinePoint)
+        getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, lastCoaptationLinePoint)
       lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint-lastCoaptationLinePoint)
 
       if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
@@ -97,7 +97,7 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
     # Annulus height measurements
     self.addAnnulusHeightMeasurements(valveModel, planePosition, planeNormal)
 
-    annulusCurve = valveModel.annulusContourCurve
+    annulusCurve = valveModel.annulusContourCurveNode
     self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, annulusCurve, 'APC', 'PSC', oriented=True, positiveDirection=planeNormal))
     self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, annulusCurve, 'PSC', 'ASC', oriented=True, positiveDirection=planeNormal))
     self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, annulusCurve, 'ASC', 'APC', oriented=True, positiveDirection=planeNormal))
@@ -141,12 +141,12 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
     if fieldId == 'APoint':  # A point (farthest from P)
       pointP = valveModel.getAnnulusMarkupPositionByLabel('P')
       if pointP is not None:
-        pointAPosition = getFarthestCurvePointIndexToPosition(valveModel.annulusContourCurve, pointP)
+        pointAPosition = getFarthestCurvePointIndexToPosition(valveModel.annulusContourCurveNode, pointP)
         valveModel.setAnnulusMarkupLabel('A', pointAPosition)
     elif fieldId == 'PPoint':  # P point (farthest from A)
       pointA = valveModel.getAnnulusMarkupPositionByLabel('A')
       if pointA is not None:
-        pointPPosition = getFarthestCurvePointIndexToPosition(valveModel.annulusContourCurve, pointA)
+        pointPPosition = getFarthestCurvePointIndexToPosition(valveModel.annulusContourCurveNode, pointA)
         valveModel.setAnnulusMarkupLabel('P', pointPPosition)
     elif fieldId == 'SPoint':  # PM point (on the other side of the P-A line from AL, P-A orthogonal to AL-PM)
       pointP = valveModel.getAnnulusMarkupPositionByLabel('P')
