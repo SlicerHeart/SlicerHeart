@@ -1030,8 +1030,6 @@ class ValveModel:
       allLeafletsModel.setSegmentId(allLeafletsSegId)
       allLeafletsModel.setSurfaceModelNode(allLeafletsSurfaceModelNode)
       allLeafletsModel.setSurfaceBoundaryMarkupNode(allLeafletsSurfaceBoundaryMarkupNode)
-      if self.valveBrowserNode.GetSequenceNode(allLeafletsSurfaceBoundaryMarkupNode) is None:
-        self.valveBrowser.makeTimeSequence(allLeafletsSurfaceBoundaryMarkupNode)
 
       #allLeafletsModel.autoDetectSurfaceBoundary(self, planePosition, planeNormal)
       allLeafletsModel.createSurfaceBoundaryFromCurve(planePosition, planeNormal, self.annulusContourCurveNode)
@@ -1042,6 +1040,8 @@ class ValveModel:
       # Delete temporary segment
       segmentationNode.RemoveSegment(allLeafletsSegId)
 
+      if allLeafletsSurfacePolyData is None:
+        return None
       return allLeafletsSurfacePolyData if allLeafletsNumPoints != allLeafletsSurfacePolyData.GetNumberOfPoints() else None
 
     @staticmethod
