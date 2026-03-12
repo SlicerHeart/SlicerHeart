@@ -140,6 +140,9 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.analyzeButton.connect('clicked(bool)', self.onAnalyzeButton)
         self.ui.showFlowMetricsPlotButton.connect('clicked(bool)', self.onShowFlowMetricsPlotButton)
         self.ui.sequenceRegistrationPushButton.connect('clicked(bool)', self.onSequenceRegistrationPushButton)
+        self.ui.setHeartRateFromDicomButton.connect('clicked(bool)', self.onSetHeartRateFromDicomButton)
+        self.ui.setHeartRateFromLengthButton.connect('clicked(bool)', self.onSetHeartRateFromLengthButton)
+        self.ui.heartRateBpmDoubleSpinBox.connect('editingFinished()', self.onHeartRateEdited)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -242,9 +245,15 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             #self.ui.FlowMetricsTableView.firstRowLocked = True
             self.ui.FlowMetricsTableView.firstRowLocked = False
 
+        heartRateBpm = 0.0
+        try:
+            heartRateBpm = self.logic.heartRateBpm(self._parameterNode.inputFlowField)
+        except:
+            pass
+        self.ui.heartRateBpmDoubleSpinBox.value = heartRateBpm
+
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
-
 
     def updateParameterNodeFromGUI(self, caller=None, event=None):
         """
@@ -261,6 +270,29 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNode.inputMaskSegmentation = self.ui.inputMaskSegmentSelectorWidget.currentNode()
             self._parameterNode.inputMaskSegmentID = self.ui.inputMaskSegmentSelectorWidget.currentSegmentID()
 
+    def onSetHeartRateFromDicomButton(self) -> None:
+        with slicer.util.tryWithErrorDisplay("Failed to set heart rate from DICOM."):
+            gridTransformNode = self._parameterNode.inputFlowField
+            heartRateBpm = self.logic.computeHeartRateBpmFromDicom(gridTransformNode)
+            self.logic.setHeartRateBpm(gridTransformNode, heartRateBpm, "dicom-nominal-interval")
+            self.ui.heartRateBpmDoubleSpinBox.value = heartRateBpm
+
+    def onSetHeartRateFromLengthButton(self) -> None:
+        with slicer.util.tryWithErrorDisplay("Failed to set heart rate from acquisition length."):
+            gridTransformNode = self._parameterNode.inputFlowField
+            heartRateBpm = self.logic.computeHeartRateBpmFromAcquisitionLength(gridTransformNode)
+            self.logic.setHeartRateBpm(gridTransformNode, heartRateBpm, "dicom-acquisition-length")
+            self.ui.heartRateBpmDoubleSpinBox.value = heartRateBpm
+
+    def onHeartRateEdited(self) -> None:
+        if self._updatingGUIFromParameterNode:
+            return
+
+        with slicer.util.tryWithErrorDisplay("Failed to update heart rate."):
+            gridTransformNode = self._parameterNode.inputFlowField
+            heartRateBpm = self.ui.heartRateBpmDoubleSpinBox.value
+            self.logic.setHeartRateBpm(gridTransformNode, heartRateBpm, "user-specified")
+
 
     def onAnalyzeButton(self) -> None:
         """
@@ -273,6 +305,9 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
             if not self._parameterNode.inputFlowField:
                 raise ValueError("Please select 'Flow field' input.")
+            
+            if self.ui.heartRateBpmDoubleSpinBox.value <= 0:
+                raise ValueError("Please set a valid heart rate value.")
 
             self.addLog("Analyze flow field...")
             self.logic.sampleFlowFieldWithPlane(
@@ -987,6 +1022,68 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
             outputStreamlinesModel.SetAndObservePolyData(polydata)
 
+    def heartRateBpm(self, gridTransformNode: vtkMRMLTransformNode):
+        magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
+        magnitudeVolumeSequenceNode = sequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
+        heartRateBpmStr = magnitudeVolumeSequenceNode.GetAttribute("SlicerHeart.heartRateBpm")           
+        try:
+            heartRateBpm = float(heartRateBpmStr)
+        except Exception as e:
+            raise RuntimeError("Heart rate information is not available in the magnitude volume sequence.")
+        if heartRateBpm <= 0:
+            raise RuntimeError("Heart rate information in the magnitude volume sequence is invalid.")
+        return heartRateBpm
+
+    def setHeartRateBpm(self, gridTransformNode: vtkMRMLTransformNode, heartRateBpm: float, source: str):
+        magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
+        magnitudeVolumeSequenceNode = sequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
+        magnitudeVolumeSequenceNode.SetAttribute("SlicerHeart.heartRateBpm", str(heartRateBpm))
+        magnitudeVolumeSequenceNode.SetAttribute("SlicerHeart.heartRateSource", source)
+
+    def computeHeartRateBpmFromAcquisitionLength(self, gridTransformNode: vtkMRMLTransformNode):
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
+        gridTransformSequenceNode = sequenceBrowserNode.GetSequenceNode(gridTransformNode)
+        firstFrameTime = float(gridTransformSequenceNode.GetNthIndexValue(0))
+        lastFrameTime = float(gridTransformSequenceNode.GetNthIndexValue(gridTransformSequenceNode.GetNumberOfDataNodes()-1))
+        timeIntervalMsec = lastFrameTime - firstFrameTime
+        heartRateBpm = 60000 / timeIntervalMsec
+        return heartRateBpm
+
+    def computeHeartRateBpmFromDicom(self, gridTransformNode: vtkMRMLTransformNode):
+        magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
+        magnitudeVolumeSequenceNode = sequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
+        if not magnitudeVolumeSequenceNode:
+            raise RuntimeError("Magnitude volume sequence node not found")
+
+        # Get subject hierarchy ID to get DICOM series instance UID
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        shItemID = shNode.GetItemByDataNode(magnitudeVolumeNode)
+        if not shItemID:
+            raise RuntimeError("Subject hierarchy item not found for magnitude volume node")
+        instanceUIDs = shNode.GetItemUID(shItemID, "DICOMInstanceUID")
+        if not instanceUIDs:
+            raise RuntimeError("DICOM instance UIDs not found for magnitude volume node subject hierarchy item")
+        instanceUID = instanceUIDs.split(" ")[0]  # use the first instance UID
+        
+        # Get NominalInterval DICOM field
+        filename = slicer.dicomDatabase.fileForInstance(instanceUID)
+        if not filename:
+            raise RuntimeError("DICOM file not found in database for instance UID: " + instanceUID)
+        import pydicom
+        ds = pydicom.read_file(filename)
+        try:
+            nominalInterval = float(ds["NominalInterval"].value)
+        except Exception as e:
+            raise RuntimeError("Failed to get heart rate from DICOM file: " + str(e))
+
+        # Compute heart rate
+        heartRateBpm = 60000.0 / nominalInterval
+        logging.debug(f"Computed heart rate for {magnitudeVolumeNode.GetName()} from DICOM NominalInterval: {heartRateBpm:.2f} bpm")
+        return heartRateBpm
+
     def computeFlowMetricsTable(
             self,
             crossSectionModelNode: vtkMRMLModelNode,
@@ -1161,21 +1258,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             outputFlowMetricsSummaryTable = outputFlowMetricsSummaryTableNode.GetTable()
 
             # Get heart rate from the magnitude volume node (if available)
-            heartRateBpm = None
-            if gridTransformNode:
-                magnitudeVolumeNode = gridTransformNode.GetNodeReference("magnitudeVolume")
-                magnitudeVolumeSequenceNode = sequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
-                heartRateBpmStr = magnitudeVolumeSequenceNode.GetAttribute("SlicerHeart.heartRateBpm")
-                if heartRateBpmStr:
-                    try:
-                        heartRateBpm = float(heartRateBpmStr)
-                    except ValueError:
-                        pass
-            if heartRateBpm is None:
-                logging.warning("Heart rate information is not available in DICOM metadata, compute it based on image sequence timing")
-                timePoints = metrics[:, metricNames.index("Time")]
-                timeIntervalMsec = (timePoints[-1] - timePoints[0])
-                heartRateBpm = 60000 / timeIntervalMsec
+            try:
+                heartRateBpm = self.heartRateBpm(gridTransformNode)
+            except RuntimeError as e:
+                raise RuntimeError("Invalid heart rate, cannot compute flow metrics summary: " + str(e))
 
             # VolumeMl = integral of FlowRate[ml/s] Time[s] = integral of FlowRate[ml/s] 0.001 * Time[ms]
             forwardVolumeMl, backwardVolumeMl = Analyze4DFlowLogic.trapezoidAreaSplitZero(0.001 * metrics[:, metricNames.index("Time")], metrics[:, metricNames.index("FlowRate")])
