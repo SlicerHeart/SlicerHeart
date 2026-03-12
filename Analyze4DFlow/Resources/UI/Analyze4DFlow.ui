@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>452</width>
+    <width>412</width>
     <height>869</height>
    </rect>
   </property>
@@ -121,6 +121,13 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="1">
+       <widget class="QPushButton" name="sequenceRegistrationPushButton">
+        <property name="text">
+         <string>Propagate segmentation to sequence</string>
+        </property>
+       </widget>
+      </item>
       <item row="3" column="0">
        <widget class="QLabel" name="label_3">
         <property name="text">
@@ -173,7 +180,51 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0" colspan="2">
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_8">
+        <property name="text">
+         <string>Heart rate:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout_4">
+        <item>
+         <widget class="ctkDoubleSpinBox" name="heartRateBpmDoubleSpinBox">
+          <property name="suffix">
+           <string>bpm</string>
+          </property>
+          <property name="decimals">
+           <number>1</number>
+          </property>
+          <property name="maximum">
+           <double>300.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="setHeartRateFromDicomButton">
+          <property name="toolTip">
+           <string>Set heart rate from NominalInterval DICOM attribute of the magnitude image</string>
+          </property>
+          <property name="text">
+           <string>Set from DICOM</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="setHeartRateFromLengthButton">
+          <property name="toolTip">
+           <string>Set heart rate from acquisition length</string>
+          </property>
+          <property name="text">
+           <string>Set from length</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="6" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_3">
         <property name="title">
          <string>Flow metrics</string>
@@ -400,7 +451,7 @@
         </layout>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Streamlines</string>
@@ -521,7 +572,7 @@
         </layout>
        </widget>
       </item>
-      <item row="7" column="0" colspan="2">
+      <item row="8" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Speed image</string>
@@ -590,7 +641,7 @@
         </layout>
        </widget>
       </item>
-      <item row="8" column="0" colspan="2">
+      <item row="9" column="0" colspan="2">
        <widget class="QPushButton" name="analyzeButton">
         <property name="enabled">
          <bool>true</bool>
@@ -603,13 +654,6 @@
         </property>
         <property name="default">
          <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="QPushButton" name="sequenceRegistrationPushButton">
-        <property name="text">
-         <string>Propagate segmentation to sequence</string>
         </property>
        </widget>
       </item>
@@ -643,6 +687,11 @@
    <extends>QGroupBox</extends>
    <header>ctkCollapsibleGroupBox.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkDoubleSpinBox</class>
+   <extends>QWidget</extends>
+   <header>ctkDoubleSpinBox.h</header>
   </customwidget>
   <customwidget>
    <class>ctkSliderWidget</class>
