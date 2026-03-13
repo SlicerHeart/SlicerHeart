@@ -156,10 +156,25 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     self.leafletSurfaceBoundaryMarkupAutoButton = qt.QPushButton("Auto")
     self.leafletSurfaceBoundaryMarkupAutoButton.clicked.connect(self.leafletSurfaceBoundaryMarkupAuto)
 
+    self.leafletSurfaceBoundaryMarkupResampleButton = qt.QPushButton("Resample")
+    self.leafletSurfaceBoundaryMarkupResampleButton.clicked.connect(self.onLeafletSurfaceBoundaryMarkupResample)
+
+    qSize = qt.QSizePolicy()
+    qSize.setHorizontalPolicy(qt.QSizePolicy.MinimumExpanding)
+    self.leafletSurfaceBoundaryMarkupPlaceWidget.setSizePolicy(qSize)
+    self.leafletSurfaceBoundaryFlipButton.setSizePolicy(qSize)
+    self.leafletSurfaceBoundaryMarkupAutoButton.setSizePolicy(qSize)
+    self.leafletSurfaceBoundaryMarkupResampleButton.setSizePolicy(qSize)
+
+    self.leafletSurfaceBoundaryFlipButton.setMinimumHeight(32)
+    self.leafletSurfaceBoundaryMarkupAutoButton.setMinimumHeight(32)
+    self.leafletSurfaceBoundaryMarkupResampleButton.setMinimumHeight(32)
+
     hbox = qt.QHBoxLayout()
     hbox.addWidget(self.leafletSurfaceBoundaryMarkupPlaceWidget)
     hbox.addWidget(self.leafletSurfaceBoundaryFlipButton)
     hbox.addWidget(self.leafletSurfaceBoundaryMarkupAutoButton)
+    hbox.addWidget(self.leafletSurfaceBoundaryMarkupResampleButton)
     surfaceExtractionFormLayout.addRow("Leaflet boundary points:", hbox)
 
     self.fadeCompleteLeafletCheckbox = qt.QCheckBox()
@@ -409,6 +424,17 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     # Only show surface
     self.fadeCompleteLeafletCheckbox.setChecked(True)
 
+  def onLeafletSurfaceBoundaryMarkupResample(self):
+    selectedSegmentIds = self.leafletSegmentSelector.selectedSegmentIDs()
+    if not selectedSegmentIds:
+      return
+    selectedSegmentId = selectedSegmentIds[0]
+    leafletModel = self.valveModel.findLeafletModel(selectedSegmentId)
+    if not leafletModel:
+      return
+
+    leafletModel.resampleSurfaceBoundary( self.numBoundaryPointsSpinBox.value)
+
   def onFadeCompleteLeaflet(self, toggled):
     segmentationNode = self.valveModel.getLeafletSegmentationNode()
     segmentationDisplayNode = segmentationNode.GetDisplayNode()
@@ -625,17 +651,16 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
   def onReload(self):
     logging.debug("Reloading LeafletAnalysis")
 
-    packageName='HeartValveLib'
-    submoduleNames=['LeafletModel', 'SmoothCurve', 'ValveRoi', 'ValveModel', 'HeartValves']
-    import imp
-    f, filename, description = imp.find_module(packageName)
-    package = imp.load_module(packageName, f, filename, description)
-    for submoduleName in submoduleNames:
-      f, filename, description = imp.find_module(submoduleName, package.__path__)
-      try:
-          imp.load_module(packageName+'.'+submoduleName, f, filename, description)
-      finally:
-          f.close()
+    def reload(packageName, submoduleNames):
+      import importlib
+      package = importlib.import_module(packageName)
+      for submoduleName in submoduleNames:
+        fullName = f"{packageName}.{submoduleName}"
+        submodule = importlib.import_module(fullName)
+        importlib.reload(submodule)
+      importlib.reload(package)
+
+    reload('HeartValveLib', ['LeafletModel', 'SmoothCurve', 'ValveRoi', 'ValveModel', 'HeartValves'])
 
     ScriptedLoadableModuleWidget.onReload(self)
 

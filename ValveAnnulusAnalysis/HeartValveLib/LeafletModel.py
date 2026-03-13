@@ -380,6 +380,17 @@ class LeafletModel:
           # Legacy API
           boundaryMarkups.AddFiducial(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1], nearestPointOnLeafletSurface[2])
 
+  def resampleSurfaceBoundary(self, numberOfBoundaryMarkups=30):
+    boundaryMarkups = self.getSurfaceBoundaryMarkupNode()
+    try:
+      markupsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsClosedCurveNode")
+      markupsNode.SetDisplayVisibility(False)
+      slicer.util.updateMarkupsControlPointsFromArray(markupsNode, slicer.util.arrayFromMarkupsControlPoints(boundaryMarkups))
+      sampleDist = markupsNode.GetCurveLengthWorld() / numberOfBoundaryMarkups
+      markupsNode.ResampleCurveWorld(sampleDist)
+      slicer.util.updateMarkupsControlPointsFromArray(boundaryMarkups, slicer.util.arrayFromMarkupsControlPoints(markupsNode))
+    finally:
+      slicer.mrmlScene.RemoveNode(markupsNode)
 
   def createSurfaceBoundaryFromCurve(self, valvePlanePosition, valvePlaneNormal, curve):
     """
