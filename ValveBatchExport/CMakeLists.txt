@@ -15,6 +15,7 @@ set(MODULE_PYTHON_SCRIPTS
   ValveBatchExportRules/ValveLandmarkCoordinates
   ValveBatchExportRules/ValveVolume
   ValveBatchExportRules/LeafletSegmentation
+  ValveBatchExportRules/ValveLeafletSurfaces
   ValveBatchExportRules/ValveLandmarks
   ValveBatchExportRules/ValveLandmarkLabels
   )

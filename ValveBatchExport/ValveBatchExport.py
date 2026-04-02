@@ -75,6 +75,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
                              ValveBatchExportPlugin(ValveLandmarkCoordinatesExportRule),
                              ValveBatchExportPlugin(ValveLandmarkLabelsExportRule, False),
                              ValveBatchExportPlugin(ValveLandmarksExportRule, False),
+                             ValveBatchExportPlugin(ValveLeafletSurfacesExportRule, False),
                              ValveBatchExportPlugin(ValveVolumeExportRule, False),
                              ValveBatchExportPlugin(QuantificationResultsExportRule),
                              ValveBatchExportPlugin(PapillaryAnalysisResultsExportRule),
@@ -592,6 +593,7 @@ def main(argv):
   parser.add_argument(ValveVolumeExportRule.CMD_FLAG, "--export_image_volume", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG, "--export_leaflet_segmentation", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_1, "--individual_segmentation_files", action='store_true')
+  parser.add_argument(ValveLeafletSurfacesExportRule.CMD_FLAG, "--extracted_leaflet_surfaces", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG, "--valve_landmark_labels", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG_QUADRANTS,
                       "--valve_landmark_label_quadrants", action='store_true')
@@ -630,6 +632,8 @@ def main(argv):
     logic.addRule(ValveLandmarksExportRule)
   if args.export_image_volume:
     logic.addRule(ValveVolumeExportRule)
+  if args.extracted_leaflet_surfaces:
+    logic.addRule(ValveLeafletSurfacesExportRule)
   if args.export_leaflet_segmentation:
     if args.individual_segmentation_files:
       LeafletSegmentationExportRule.ONE_FILE_PER_SEGMENT = True
