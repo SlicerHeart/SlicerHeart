@@ -39,11 +39,13 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
       # Add labels to label column
       annulusMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
       numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()
+
+      annulusRadius = valveModel.annulusContourCurve.getCurveLength() / (2 * np.pi)
       for annulusMarkupIndex in range(numberOfMarkups):
         pos = [0,0,0]
         annulusMarkupNode.GetNthFiducialPosition(annulusMarkupIndex, pos)
         [closestPointPositionOnAnnulusCurve, closestPointIdOnAnnulusCurve] = valveModel.annulusContourCurve.getClosestPoint(pos)
-        if np.linalg.norm(np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > valveModel.getAnnulusContourRadius() * 1.5:
+        if np.linalg.norm(np.array(pos) - np.array(closestPointPositionOnAnnulusCurve)) > annulusRadius / 2:
           # it is not a label on the annulus (for example, centroid), ignore it
           continue
         label = annulusMarkupNode.GetNthFiducialLabel(annulusMarkupIndex).strip()
