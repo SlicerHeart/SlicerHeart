@@ -650,7 +650,7 @@ def main(argv):
     logic.addRule(LeafletSegmentationExportRule)
   if args.valve_annulus_contour:
     AnnulusContourModelExportRule.EXPORT_ANNULUS_AS_MODEL = args.valve_annulus_contour_model
-    AnnulusContourModelExportRule.EXPORT_ANNULUS_AS_LABEL = args.valve_annulus_contour_label
+    AnnulusContourModelExportRule.EXPORT_ANNULUS_AS_SEGMENTATION = args.valve_annulus_contour_label
     logic.addRule(AnnulusContourModelExportRule)
   if args.valve_landmark_labels:
     ValveLandmarkLabelsExportRule.EXPORT_QUADRANT_LANDMARKS = args.valve_landmark_label_quadrants

@@ -14,7 +14,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
   CMD_FLAG_MODEL = "-acm"
   CMD_FLAG_SEGMENTATION = "-acl"
 
-  EXPORT_ANNULUS_AS_LABEL = False
+  EXPORT_ANNULUS_AS_SEGMENTATION = False
   EXPORT_ANNULUS_AS_MODEL = True
 
   class AnnulusExportFailed(Exception):
@@ -26,7 +26,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
     segmentationCheckbox = qt.QCheckBox("Export as segmentation")
 
     def onModelCheckboxModified(checked):
-      cls.EXPORT_ANNULUS_AS_LABEL = checked
+      cls.EXPORT_ANNULUS_AS_MODEL = checked
       if checked:
         cls.OTHER_FLAGS.append(cls.CMD_FLAG_MODEL)
       else:
@@ -34,7 +34,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
           cls.OTHER_FLAGS.remove(cls.CMD_FLAG_MODEL)
 
     def onSegCheckboxModified(checked):
-      cls.ONE_FILE_PER_SEGMENT = checked
+      cls.EXPORT_ANNULUS_AS_SEGMENTATION = checked
       if checked:
         cls.OTHER_FLAGS.append(cls.CMD_FLAG_SEGMENTATION)
       else:
@@ -45,7 +45,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
     modelCheckbox.checked = cls.EXPORT_ANNULUS_AS_MODEL
 
     segmentationCheckbox.stateChanged.connect(onSegCheckboxModified)
-    segmentationCheckbox.checked = cls.EXPORT_ANNULUS_AS_LABEL
+    segmentationCheckbox.checked = cls.EXPORT_ANNULUS_AS_SEGMENTATION
 
     layout.addWidget(modelCheckbox)
     layout.addWidget(segmentationCheckbox)
@@ -69,7 +69,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
           self.addLog(f"  Annulus contour model export skipped (file writing failed) - {valveModelName}")
         slicer.mrmlScene.RemoveNode(storageNode)
 
-      if self.CMD_FLAG_SEGMENTATION:
+      if self.EXPORT_ANNULUS_AS_SEGMENTATION:
         segNode = getSegmentationFromAnnulusContourNode(valveModel)
         if not segNode:
           raise self.AnnulusExportFailed()
