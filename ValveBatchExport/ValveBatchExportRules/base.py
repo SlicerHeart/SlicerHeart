@@ -65,6 +65,7 @@ class ValveBatchExportRule(object):
   USER_INTERFACE = False
 
   EXPORT_PHASES = [] # empty means all phases will be exported
+  IMAGE_FILE_EXTENSION = "nrrd"
   OUTPUT_CSV_FILES = []
 
   CMD_FLAG = None  # Necessary when running export via python script
@@ -104,6 +105,13 @@ class ValveBatchExportRule(object):
   def setPhasesToExport(cls, phases):
     logging.debug("Phases to export set to: %s" % phases)
     cls.EXPORT_PHASES = phases
+
+  @classmethod
+  def setImageFileExtension(cls, imageFileExtension):
+    if imageFileExtension not in ("nrrd", "nii.gz"):
+      raise ValueError(f"Unsupported image file extension: {imageFileExtension}")
+    logging.debug("Image file extension set to: %s" % imageFileExtension)
+    cls.IMAGE_FILE_EXTENSION = imageFileExtension
 
   @staticmethod
   def getTableNode(measurementNode, identifier):

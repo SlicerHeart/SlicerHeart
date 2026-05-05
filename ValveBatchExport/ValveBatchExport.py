@@ -121,6 +121,11 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.exportOptionsFrameLayout = qt.QFormLayout()
     self.exportOptionsFrame.setLayout(self.exportOptionsFrameLayout)
 
+    self.imageFileFormatComboBox = qt.QComboBox()
+    self.imageFileFormatComboBox.addItems([".nrrd", ".nii.gz"])
+    self.imageFileFormatComboBox.setToolTip("Preferred file format for exported image volumes and label maps.")
+    self.exportOptionsFrameLayout.addRow("Image file format", self.imageFileFormatComboBox)
+
     # add ui of export plugins here
     for exportPlugin in self.registeredExportPlugins:
       self.exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
@@ -224,6 +229,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.outputDirSelector.addCurrentPathToHistory()
     self.statusLabel.plainText = ''
     ValveBatchExportRule.setPhasesToExport(self.getCheckedPhases())
+    ValveBatchExportRule.setImageFileExtension(self.getSelectedImageFileExtension())
     self.logic.clearRules()
     for registeredPlugin in self.registeredExportPlugins:
       if registeredPlugin.activated:
@@ -232,6 +238,9 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     if not outputDir:
       outputDir = self.inputDirSelector.currentPath
     self.logic.exportDir(self.inputDirSelector.currentPath, outputDir)
+
+  def getSelectedImageFileExtension(self):
+    return self.imageFileFormatComboBox.currentText.lstrip(".")
 
   def _resetExport(self):
     self.exportButton.text = "Start Export"
@@ -334,6 +343,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       args.append(rule.CMD_FLAG)
       args.extend(rule.OTHER_FLAGS)
     args.extend(["-ph", *ValveBatchExportRule.EXPORT_PHASES])
+    args.extend(["-if", ValveBatchExportRule.IMAGE_FILE_EXTENSION])
     return args
 
   def resetExport(self):
@@ -586,13 +596,14 @@ def main(argv):
                       help="data output directory")
   parser.add_argument("-ph", "--phases", metavar="PHASE_SHORTNAME", type=str, nargs="+", required=True,
                       help="cardiac phases which will be exported")
+  parser.add_argument("-if", "--image_file_format", choices=["nrrd", "nii.gz"], default="nrrd",
+                      help="preferred file format for exported image volumes and label maps")
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG, "--export_annulus_coordinates", action='store_true')
   parser.add_argument(QuantificationResultsExportRule.CMD_FLAG, "--export_quantification_results", action='store_true')
   parser.add_argument(ValveLandmarkCoordinatesExportRule.CMD_FLAG, "--export_landmark_coordinates", action='store_true')
   parser.add_argument(PapillaryAnalysisResultsExportRule.CMD_FLAG, "--export_papillary_results", action='store_true')
   parser.add_argument(ValveVolumeExportRule.CMD_FLAG, "--export_image_volume", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG, "--export_leaflet_segmentation", action='store_true')
-  parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_1, "--individual_segmentation_files", action='store_true')
   parser.add_argument(ValveLeafletSurfacesExportRule.CMD_FLAG, "--extracted_leaflet_surfaces", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG, "--valve_landmark_labels", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG_QUADRANTS,
@@ -619,6 +630,7 @@ def main(argv):
   logic = ValveBatchExportLogic()
 
   ValveBatchExportRule.EXPORT_PHASES = args.phases
+  ValveBatchExportRule.setImageFileExtension(args.image_file_format)
 
   if args.export_quantification_results:
     logic.addRule(QuantificationResultsExportRule)
@@ -635,8 +647,6 @@ def main(argv):
   if args.extracted_leaflet_surfaces:
     logic.addRule(ValveLeafletSurfacesExportRule)
   if args.export_leaflet_segmentation:
-    if args.individual_segmentation_files:
-      LeafletSegmentationExportRule.ONE_FILE_PER_SEGMENT = True
     logic.addRule(LeafletSegmentationExportRule)
   if args.valve_annulus_contour:
     AnnulusContourModelExportRule.EXPORT_ANNULUS_AS_MODEL = args.valve_annulus_contour_model

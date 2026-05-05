@@ -7,7 +7,7 @@ from .base import ValveBatchExportRule
 
 class ValveVolumeExportRule(ValveBatchExportRule):
 
-  BRIEF_USE = "Image volume (.nrrd)"
+  BRIEF_USE = "Image volume"
   DETAILED_DESCRIPTION = "Export individual image volume frame for each valve model"
 
   CMD_FLAG = "-iv"
@@ -47,19 +47,16 @@ class ValveVolumeExportRule(ValveBatchExportRule):
       volumeSequenceBrowserNode = HeartValveLib.HeartValves.getSequenceBrowserNodeForMasterOutputNode(volumeNode)
       volumeSequenceNode = \
         volumeSequenceBrowserNode.GetMasterSequenceNode() if volumeSequenceBrowserNode is not None else None
-      storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLNRRDStorageNode")
       if volumeSequenceNode is None:
         # valve volume is not part of a sequence
-        storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nrrd"))
         nodeToWrite = volumeNode
       else:  # save specific frame of the current valve model
         frameNumber = self.getAssociatedFrameNumber(valveModel)
         self.setSequenceFrameNumber(valveModel, frameNumber)
         valveModelName = \
           self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, suffix="volume")
-        storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nrrd"))
         nodeToWrite = valveModel.getValveVolumeNode()
 
-      if not storageNode.WriteData(nodeToWrite):
+      outputFilePath = os.path.join(self.outputDir, f"{valveModelName}.{self.IMAGE_FILE_EXTENSION}")
+      if not slicer.util.saveNode(nodeToWrite, outputFilePath):
         self.addLog(f"  Valve volume export skipped (file writing failed) - {valveModelName}")
-      slicer.mrmlScene.RemoveNode(storageNode)

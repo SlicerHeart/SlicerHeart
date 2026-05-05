@@ -23,7 +23,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
   @classmethod
   def setupUI(cls, layout):
     modelCheckbox = qt.QCheckBox("Export as model (.vtk)")
-    segmentationCheckbox = qt.QCheckBox("Export as segmentation (.nrrd)")
+    segmentationCheckbox = qt.QCheckBox("Export as segmentation")
 
     def onModelCheckboxModified(checked):
       cls.EXPORT_ANNULUS_AS_LABEL = checked
@@ -75,7 +75,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
           raise self.AnnulusExportFailed()
         labelNode = createLabelNodeFromVisibleSegments(segNode, valveModel, "Annulus")
         slicer.mrmlScene.RemoveNode(segNode)
-        slicer.util.saveNode(labelNode, os.path.join(self.outputDir, f"{valveModelName}.nii.gz"))
+        slicer.util.saveNode(labelNode, os.path.join(self.outputDir, f"{valveModelName}.{self.IMAGE_FILE_EXTENSION}"))
 
 
 def getSegmentationFromAnnulusContourNode(valveModel):

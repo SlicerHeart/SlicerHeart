@@ -22,14 +22,14 @@ VALVE_QUADRANT_LANDMARKS = {
 
 class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
 
-  BRIEF_USE = "Valve landmark labels (.nrrd)"
+  BRIEF_USE = "Valve landmark labels"
   DETAILED_DESCRIPTION = "Export valve landmarks as segmentation blob"
   USER_INTERFACE = True
 
   CMD_FLAG = "-ll"
   CMD_FLAG_QUADRANTS = "-llq"
   CMD_FLAG_COMMISSURES = "-llc"
-  CMD_FLAG_SEPARATE_FILES = "-lls"  # each landmark goes into separate nrrd
+  CMD_FLAG_SEPARATE_FILES = "-lls"  # each landmark goes into a separate label map
 
   OTHER_FLAGS = []
   EXPORT_QUADRANT_LANDMARKS = True
@@ -86,7 +86,7 @@ class ValveLandmarkLabelsExportRule(ValveBatchExportRule):
       valveType = valveModel.heartValveNode.GetAttribute('ValveType')
       cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
       valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      fileExtension = "nii.gz"
+      fileExtension = self.IMAGE_FILE_EXTENSION
 
       if self.ONE_FILE_PER_LANDMARK:
         lms = []
