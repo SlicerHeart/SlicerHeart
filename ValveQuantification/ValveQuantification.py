@@ -629,6 +629,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
                                      lambda caller, event, valveId=inputValveIds[inputValveIndex]:
                                      self.onAnnulusLabelMarkupModified(valveId)))
     self.updateValveSequenceBrowserWidget()
+    self.updateAnnulusValveWidgets()
 
   def updateValveSequenceBrowserWidget(self):
     """
@@ -676,7 +677,10 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     if not self.measurementPreset:
       return
 
-    # TODO: update GUI from MRML in one method (currently in onPresetChanged, onAnnulusLabelMarkupModified, onInputFieldValueChanged)
+    if len(self.inputReferenceValueSliders) == 0:
+      return
+
+    valveModel = self.inputValveModels[valveId] if valveId in self.inputValveModels.keys() else None
 
     # Update GUI from label markups (markup points may have been added or deleted)
     inputFields = self.measurementPreset.inputFields
@@ -694,8 +698,9 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         # the user adjusting point position using this slider right now
         continue
 
-      valveModel = self.inputValveModels[valveId]
-      pointPositionAnnulus = valveModel.getAnnulusMarkupPositionByLabel(field[FIELD_NAME])
+      requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
+
+      pointPositionAnnulus = valveModel.getAnnulusMarkupPositionByLabel(field[FIELD_NAME]) if valveModel else None
       if pointPositionAnnulus is None:
         # landmark is not present
         if positionSlider.minimum != positionSlider.maximum:
@@ -719,8 +724,14 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         positionSlider.value = pointDistanceAlongCurve
         positionSlider.blockSignals(wasBlocked)
 
-      requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
+      positionSlider.enabled = not valveModel is None
+
+      requiredCheckBox.enabled = not valveModel is None
       requiredCheckBox.checked = not pointPositionAnnulus is None
+
+      markupsPlaceWidget = self.inputReferencePointPlaceWidgets[inputFieldIndex]
+      markupsPlaceWidget.enabled = not valveModel is None
+
 
   def computeCurrentPhaseMetrics(self):
 
@@ -1071,7 +1082,7 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
 
       for pointLabel, pointCoordinate, sliderPosition in referencePoints:
         self.delayDisplay(f"Define reference point {pointLabel}")
-  
+
         # Find reference point index
         foundPoint = False
         for pointIndex in range(len(valveQuantificationGui.inputReferenceNameLabels)):
@@ -1079,7 +1090,7 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
             foundPoint = True
             break
         self.assertTrue(foundPoint, f"Reference point {pointLabel} not found")
-  
+
         #valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].checked = True
         slicer.app.processEvents()
         valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].click()
