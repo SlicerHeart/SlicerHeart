@@ -98,13 +98,13 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
     # Orthogonal slice rotation
     #
     
-    self.lastOrthogonalSlicerRotationVale = 0
+    self.lastOrthogonalSlicerRotationValue = 0
     
     self.orthogonalSlicerRotationSliderWidget = ctk.ctkSliderWidget()
     self.orthogonalSlicerRotationSliderWidget.singleStep = 1
     self.orthogonalSlicerRotationSliderWidget.minimum = -360
     self.orthogonalSlicerRotationSliderWidget.maximum = 360
-    self.orthogonalSlicerRotationSliderWidget.value = self.lastOrthogonalSlicerRotationVale
+    self.orthogonalSlicerRotationSliderWidget.value = self.lastOrthogonalSlicerRotationValue
     self.orthogonalSlicerRotationSliderWidget.setToolTip("Rotation angle of the orthogonal views")
     parametersFormLayout.addRow("Rotation angle", self.orthogonalSlicerRotationSliderWidget)
     
@@ -182,10 +182,10 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
     self.orthogonalSlicerRotationSliderWidget.value = orthogonalSliceRotationValue
 
   def onOrthogonalSlicerRotationAngleChanged(self, newRotationValue):
-    rotationAngleChangeDeg = newRotationValue-self.lastOrthogonalSlicerRotationVale
+    rotationAngleChangeDeg = newRotationValue-self.lastOrthogonalSlicerRotationValue
     logic = ValveViewLogic()
     logic.rotateOrthogonalSlicesDeg(self.axialSliceSelector.currentNode(), self.orthogonalSlice1Selector.currentNode(), self.orthogonalSlice2Selector.currentNode(), rotationAngleChangeDeg)
-    self.lastOrthogonalSlicerRotationVale = newRotationValue
+    self.lastOrthogonalSlicerRotationValue = newRotationValue
 
   def onMarkupsNodeSelectionChanged(self, markupsNode):
     for node, observation in self.markupsNodeObservations:
