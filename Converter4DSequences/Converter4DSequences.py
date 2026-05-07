@@ -259,20 +259,20 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
     def _stripFrameAndPhaseFromName(self, nodeName):
         """
         Strip frame numbers and phase indicators from a node name to get a clean base name.
-        
+
         Examples:
             TricuspidValve-ES_f23-segmented -> TricuspidValve-segmented
             MitralValve-ED_f10 -> MitralValve
             AnnulusContour_25 -> AnnulusContour
-            
+
         Args:
             nodeName: The node name to process
-            
+
         Returns:
             The cleaned base name
         """
         baseName = nodeName
-        
+
         # Strip frame number suffix (e.g., "_f23", "_25", "_f23-segmented")
         parts = baseName.split('_')
         if len(parts) > 1:
@@ -291,7 +291,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         break
                 if frameDigits:
                     frameMatch = 'f' + frameDigits
-            
+
             if frameMatch:
                 # Remove the frame part from the last segment
                 if lastPart == frameMatch:
@@ -301,14 +301,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # The last part has the frame number plus other text (e.g., "f23-segmented")
                     remainder = lastPart[len(frameMatch):]
                     baseName = '_'.join(parts[:-1]) + remainder
-        
+
         # Strip phase indicators (e.g., "-ES", "-ED", "-MD") from anywhere in the name
         phaseSuffixes = ['-ES', '-ED', '-MD', '-MS', '-CT', '-CD', '-CS']
         for suffix in phaseSuffixes:
             if suffix in baseName:
                 baseName = baseName.replace(suffix, '', 1)  # Remove first occurrence
                 break
-        
+
         return baseName
 
     def _captureTransformsFromReferencedNodes(self, hvNode, referenceRoles):
@@ -435,6 +435,27 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         results['allHeartValves'] = allHeartValves
         results['transformCaptureMap'] = transformCaptureMap
         return results
+
+    def _replaceNodeReferencesInScene(self, oldNode, newNode):
+        """
+        Replace all references to oldNode with newNode in the scene.
+
+        Args:
+            oldNode: The node to be replaced
+            newNode: The node to replace with
+        """
+        if not oldNode or not newNode:
+            logging.warning("Cannot replace node references - oldNode or newNode is None")
+            return
+
+        # 1. Find everything referencing oldNode
+        referencingNodes = slicer.mrmlScene.GetNodes()
+
+        logging.info(f"Replacing references to '{oldNode.GetName()}' with '{newNode.GetName()}' in {referencingNodes.GetNumberOfItems()} node(s)")
+
+        # 2. For each referencing node, swap the reference
+        for node in referencingNodes:
+            node.UpdateReferenceID(oldNode.GetID(), newNode.GetID())
 
     def convertSingleFrameToMultiFrameSequences(self):
         """
@@ -581,7 +602,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
             # For each valve node, add it to the sequence at its specified frame index
             for heartValveNode in heartValveNodes:
-                try:
                     # Get the stored frame index from the attribute
                     sequenceIndexStr = heartValveNode.GetAttribute("ValveVolumeSequenceIndex")
                     frameIndex = int(sequenceIndexStr)
@@ -601,9 +621,9 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # Add this heart valve node to the sequence at the appropriate index
                     heartValveSequenceNode.SetDataNodeAtValue(heartValveNode, indexValue)
                     logging.info(f"Added {heartValveNode.GetName()} to sequence at frame {frameIndex} (index value: {indexValue})")
+                    proxyNode = valveBrowserNode.GetProxyNode(heartValveSequenceNode)
+                    self._replaceNodeReferencesInScene(heartValveNode, proxyNode)
                     convertedCount += 1
-                except Exception as err:
-                    logging.warning(f"Error converting valve '{heartValveNode.GetName()}': {err}")
 
             # Set up the valve browser to save changes to the sequence
             if heartValveSequenceNode.GetNumberOfDataNodes() > 0:
