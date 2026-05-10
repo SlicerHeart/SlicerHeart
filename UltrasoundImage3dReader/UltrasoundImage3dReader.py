@@ -83,20 +83,32 @@ class UltrasoundImage3dReaderFileReader(object):
 
     errorType = -1
     errorMessage = None
-    loaderProgIds = [
-      "GEHC_CARD_US.Image3dFileLoader",
-      "CanonLoader.Image3dFileLoader",
-      "HitCV3DLoader.Image3dFileLoader",
-      "SiemensLoader.Image3dFileLoader",
-      "PhilipsLoader.Image3dFileLoader",
-      "KretzLoader.KretzImage3dFileLoader"
+    loaders = [
+      ("Image3dLoaderGe.dll", "GEHC_CARD_US.Image3dFileLoader"),
+      (None, "CanonLoader.Image3dFileLoader"),
+      (None, "HitCV3DLoader.Image3dFileLoader"),
+      (None, "SiemensLoader.Image3dFileLoader"),
+      (None, "PhilipsLoader.Image3dFileLoader"),
+      (None, "KretzLoader.KretzImage3dFileLoader")
       ]
-    for loaderProgId in loaderProgIds:
+    for loaderLibary, loaderProgId in loaders:
       # create loader object
-      try:
-        image3dAPI = self.typeLibFromProgId(loaderProgId)
-      except:
-        logging.debug("Ultrasound image reader not installed: "+loaderProgId)
+      image3dAPI = None
+      if loaderLibary:
+        try:
+          logging.debug(f"Attempting to generate and/or load type library wrapper from {loaderLibary}")
+          image3dAPI = comtypes.client.GetModule(loaderLibary)
+        except:
+          logging.debug(f"Error loading Python type library wrapper: {loaderLibary}")
+      if not image3dAPI:
+        try:
+          logging.debug(f"Attempting to load type library wrapper from registry using {loaderProgId}")
+          image3dAPI = self.typeLibFromProgId(loaderProgId)
+        except:
+          logging.debug(f"Error loading type library wrapper from registry: {loaderProgId}")
+
+      if not image3dAPI:
+        logging.debug(f"Ultrasound image reader not installed: {loaderProgId}")
         continue
 
       try:
