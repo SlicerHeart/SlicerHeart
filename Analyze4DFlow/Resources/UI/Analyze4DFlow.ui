@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>412</width>
+    <width>452</width>
     <height>869</height>
    </rect>
   </property>
@@ -224,7 +224,7 @@
         </item>
        </layout>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_3">
         <property name="title">
          <string>Flow metrics</string>
@@ -451,7 +451,7 @@
         </layout>
        </widget>
       </item>
-      <item row="7" column="0" colspan="2">
+      <item row="8" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Streamlines</string>
@@ -572,7 +572,7 @@
         </layout>
        </widget>
       </item>
-      <item row="8" column="0" colspan="2">
+      <item row="9" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Speed image</string>
@@ -641,7 +641,7 @@
         </layout>
        </widget>
       </item>
-      <item row="9" column="0" colspan="2">
+      <item row="10" column="0" colspan="2">
        <widget class="QPushButton" name="analyzeButton">
         <property name="enabled">
          <bool>true</bool>
@@ -655,6 +655,61 @@
         <property name="default">
          <bool>true</bool>
         </property>
+       </widget>
+      </item>
+      <item row="6" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_4">
+        <property name="title">
+         <string>Flow field processing</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="formLayout_8">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_17">
+           <property name="text">
+            <string>Output masked flow field:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputMaskedFlowFieldSelector">
+           <property name="toolTip">
+            <string>Flow field with flow set to zero outside the selected mask</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLTransformNode</string>
+            </stringlist>
+           </property>
+           <property name="showChildNodeTypes">
+            <bool>false</bool>
+           </property>
+           <property name="baseName">
+            <string>Masked 4D flow</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputMaskedFlowField</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
      </layout>
@@ -765,8 +820,8 @@
      <y>450</y>
     </hint>
     <hint type="destinationlabel">
-     <x>368</x>
-     <y>231</y>
+     <x>422</x>
+     <y>352</y>
     </hint>
    </hints>
   </connection>
@@ -781,8 +836,8 @@
      <y>454</y>
     </hint>
     <hint type="destinationlabel">
-     <x>216</x>
-     <y>318</y>
+     <x>340</x>
+     <y>442</y>
     </hint>
    </hints>
   </connection>
@@ -793,12 +848,12 @@
    <slot>setEnabled(bool)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>216</x>
-     <y>318</y>
+     <x>340</x>
+     <y>442</y>
     </hint>
     <hint type="destinationlabel">
-     <x>367</x>
-     <y>320</y>
+     <x>421</x>
+     <y>444</y>
     </hint>
    </hints>
   </connection>
@@ -829,8 +884,8 @@
      <y>276</y>
     </hint>
     <hint type="destinationlabel">
-     <x>368</x>
-     <y>616</y>
+     <x>422</x>
+     <y>605</y>
     </hint>
    </hints>
   </connection>
@@ -845,8 +900,8 @@
      <y>728</y>
     </hint>
     <hint type="destinationlabel">
-     <x>368</x>
-     <y>696</y>
+     <x>422</x>
+     <y>686</y>
     </hint>
    </hints>
   </connection>
@@ -861,8 +916,8 @@
      <y>633</y>
     </hint>
     <hint type="destinationlabel">
-     <x>232</x>
-     <y>253</y>
+     <x>381</x>
+     <y>379</y>
     </hint>
    </hints>
   </connection>
@@ -873,12 +928,12 @@
    <slot>setMRMLTableNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>195</x>
-     <y>252</y>
+     <x>344</x>
+     <y>379</y>
     </hint>
     <hint type="destinationlabel">
-     <x>245</x>
-     <y>359</y>
+     <x>401</x>
+     <y>530</y>
     </hint>
    </hints>
   </connection>
@@ -889,12 +944,28 @@
    <slot>setMRMLTableNode(vtkMRMLNode*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>170</x>
-     <y>310</y>
+     <x>319</x>
+     <y>442</y>
     </hint>
     <hint type="destinationlabel">
-     <x>208</x>
-     <y>399</y>
+     <x>364</x>
+     <y>775</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputMaskedFlowFieldSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>440</x>
+     <y>858</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>220</x>
+     <y>279</y>
     </hint>
    </hints>
   </connection>
