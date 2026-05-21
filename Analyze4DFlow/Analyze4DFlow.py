@@ -61,6 +61,7 @@ class Analyze4DFlowParameterNode:
     inputPlane: vtkMRMLMarkupsPlaneNode
     inputMaskSegmentation: vtkMRMLSegmentationNode
     inputMaskSegmentID: str
+    outputMaskedFlowField: vtkMRMLTransformNode
     outputStreamlinesModel: vtkMRMLModelNode
     outputFlowMetricsModel: vtkMRMLModelNode
     outputFlowMetricsTable: vtkMRMLTableNode
@@ -324,7 +325,8 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.streamlinesComputeAllMetrics,
                 self._parameterNode.speedThreshold,
                 self._parameterNode.outputSpeedVolume,
-                self._parameterNode.speedVolumeProjectedToPlane)
+                self._parameterNode.speedVolumeProjectedToPlane,
+                self._parameterNode.outputMaskedFlowField)
 
             if self._parameterNode.outputFlowMetricsTable or self._parameterNode.outputFlowMetricsSummaryTable:
                 self.addLog("Compute flow metrics table...")
@@ -494,11 +496,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         try:
 
             # Turn off transform visibility to speed up browsing
-            if gridTransformNode.GetDisplayNode():
-                originalTransformVisibility = gridTransformNode.GetDisplayNode().GetVisibility()
-                gridTransformNode.GetDisplayNode().SetVisibility(False)
-            else:
-                originalTransformVisibility = False
+            savedTransformVisibility = self._saveAndHideTransformVisibility(gridTransformNode)
 
             originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
             numberOfItems = transformSequenceBrowserNode.GetNumberOfItems()
@@ -544,8 +542,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         finally:
             # Clean up
             transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
-            if originalTransformVisibility and gridTransformNode.GetDisplayNode():
-                gridTransformNode.GetDisplayNode().SetVisibility(True)
+            self._restoreTransformVisibility(savedTransformVisibility)
 
     @staticmethod
     def _addPointDataArray(modelNode, arrayName, arrayValues, arrayType):
@@ -563,6 +560,37 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         modelData = modelNode.GetMesh().GetPointData()
         modelData.AddArray(dataArray)
 
+    @staticmethod
+    def _saveAndHideTransformVisibility(transformNode, additionalNodes=None):
+        """Hide display nodes of all transform proxy nodes in the same sequence browser as transformNode.
+        Returns a {nodeID: wasVisible} dict for later restoration by _restoreTransformVisibility."""
+        savedState = {}
+        sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(transformNode)
+        if not sequenceBrowserNode:
+            return savedState
+        proxyNodes = vtk.vtkCollection()
+        sequenceBrowserNode.GetAllProxyNodes(proxyNodes)
+        nodesToProcess = [proxyNodes.GetItemAsObject(i) for i in range(proxyNodes.GetNumberOfItems())]
+        if additionalNodes:
+            nodesToProcess.extend(n for n in additionalNodes if n is not None)
+        for node in nodesToProcess:
+            if node and node.IsA("vtkMRMLTransformNode") and node.GetID() not in savedState:
+                dn = node.GetDisplayNode()
+                if dn:
+                    savedState[node.GetID()] = dn.GetVisibility()
+                    dn.SetVisibility(False)
+        return savedState
+
+    @staticmethod
+    def _restoreTransformVisibility(savedState):
+        """Restore transform node visibility from state saved by _saveAndHideTransformVisibility."""
+        for nodeID, wasVisible in savedState.items():
+            if not wasVisible:
+                continue
+            node = slicer.mrmlScene.GetNodeByID(nodeID)
+            if node and node.GetDisplayNode():
+                node.GetDisplayNode().SetVisibility(True)
+
     def sampleFlowFieldWithPlane(
             self,
             crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
@@ -578,7 +606,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             streamlinesComputeAllMetrics: bool = False,
             streamlinesSpeedThresholdMPerSec: float = 0.01,
             outputSpeedVolume: vtkMRMLScalarVolumeNode = None,
-            speedVolumeProjectedToPlane: bool = False) -> vtkMRMLModelNode:
+            speedVolumeProjectedToPlane: bool = False,
+            outputMaskedFlowField: vtkMRMLTransformNode = None) -> vtkMRMLModelNode:
 
         import numpy as np
 
@@ -597,11 +626,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         try:
 
             # Turn off transform visibility to speed up browsing
-            if gridTransformNode.GetDisplayNode():
-                originalTransformVisibility = gridTransformNode.GetDisplayNode().GetVisibility()
-                gridTransformNode.GetDisplayNode().SetVisibility(False)
-            else:
-                originalTransformVisibility = False
+            savedTransformVisibility = self._saveAndHideTransformVisibility(gridTransformNode, [outputMaskedFlowField])
 
             originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
             numberOfItems = transformSequenceBrowserNode.GetNumberOfItems()
@@ -649,7 +674,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
                 # Add the output nodes to the same sequence browser as the input 4D flow field
-                resultProxyNodes = [outputStreamlinesModel, outputSpeedVolume]
+                resultProxyNodes = [outputStreamlinesModel, outputSpeedVolume, outputMaskedFlowField]
                 if not deleteOutputFlowMetricsModel:
                     # only create sequence and proxy node if the flow metrics model is not temporary
                     resultProxyNodes.append(outputFlowMetricsModel)
@@ -723,10 +748,19 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
 
                 # Apply mask to displacement image if further processing is requested
-                if maskLabelmapNode and (outputStreamlinesModel or outputSpeedVolume):
+                if maskLabelmapNode and (outputStreamlinesModel or outputSpeedVolume or outputMaskedFlowField):
                     displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
                     maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
                     displacementImageArray[maskImageArray==0, :] = 0
+                elif outputMaskedFlowField and not maskLabelmapNode:
+                    # No segmentation mask — apply speed threshold as a 3D mask
+                    displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                    displacementMagnitudeArray = np.linalg.norm(displacementImageArray, axis=3)
+                    displacementImageArray[displacementMagnitudeArray <= streamlinesSpeedThresholdMPerSec, :] = 0
+
+                if outputMaskedFlowField:
+                    self._setTransformFromDisplacementImage(outputMaskedFlowField, displacementImageNode)
+                    outputMaskedFlowField.Modified()
 
                 if maskLabelmapNode:
                     # Clean up
@@ -820,6 +854,35 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 slicer.mrmlScene.RemoveNode(displacementImageNode)
                 displacementImageNode = None
 
+            if outputMaskedFlowField:
+                # Move the masked flow field into next to the input flow field in the subject hierarchy
+                shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+                inputItem = shNode.GetItemByDataNode(gridTransformNode)
+                outputItem = shNode.GetItemByDataNode(outputMaskedFlowField)
+                if inputItem and outputItem:
+                    shNode.SetItemParent(outputItem, shNode.GetItemParent(inputItem))
+
+                # Copy the transform display node
+                if not outputMaskedFlowField.GetDisplayNode():
+                    sourceDisplayNode = gridTransformNode.GetDisplayNode()
+                    if sourceDisplayNode:
+                        newDisplayNode = slicer.mrmlScene.AddNewNodeByClass(sourceDisplayNode.GetClassName())
+                        newDisplayNode.CopyContent(sourceDisplayNode)
+                        newDisplayNode.SetVisibility(False)
+                        regionNodeID = sourceDisplayNode.GetNodeReferenceID("region")
+                        newDisplayNode.SetNodeReferenceID("region", regionNodeID)
+                        outputMaskedFlowField.SetAndObserveDisplayNodeID(newDisplayNode.GetID())
+
+                # Copy the color legend display node
+                for i in range(gridTransformNode.GetNumberOfDisplayNodes()):
+                    dn = gridTransformNode.GetNthDisplayNode(i)
+                    if dn and dn.IsA("vtkMRMLColorLegendDisplayNode"):
+                        existingIDs = [outputMaskedFlowField.GetNthDisplayNodeID(j)
+                                       for j in range(outputMaskedFlowField.GetNumberOfDisplayNodes())]
+                        if dn.GetID() not in existingIDs:
+                            outputMaskedFlowField.AddAndObserveDisplayNodeID(dn.GetID())
+                        break
+
         finally:
             # Clean up
             if probeVolumeCliNode:
@@ -829,8 +892,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             if maskLabelmapNode:
                 slicer.mrmlScene.RemoveNode(maskLabelmapNode)
             transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
-            if originalTransformVisibility and gridTransformNode.GetDisplayNode():
-                gridTransformNode.GetDisplayNode().SetVisibility(True)
+            self._restoreTransformVisibility(savedTransformVisibility)
             if deleteOutputFlowMetricsModel and outputFlowMetricsModel:
                 slicer.mrmlScene.RemoveNode(outputFlowMetricsModel.GetDisplayNode())
                 slicer.mrmlScene.RemoveNode(outputFlowMetricsModel)
@@ -903,6 +965,34 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.AddNode(colorNode)
 
         return colorNode
+
+    @staticmethod
+    def _setTransformFromDisplacementImage(transformNode, displacementImageNode):
+        import numpy as np
+        import vtkAddon
+
+        spacing = list(displacementImageNode.GetSpacing())
+        origin = list(displacementImageNode.GetOrigin())
+
+        ijkToRAS = vtk.vtkMatrix4x4()
+        displacementImageNode.GetIJKToRASMatrix(ijkToRAS)
+        directionMatrix = vtk.vtkMatrix4x4()
+        for c in range(3):
+            col_norm = np.linalg.norm([ijkToRAS.GetElement(r, c) for r in range(3)])
+            for r in range(3):
+                directionMatrix.SetElement(r, c, ijkToRAS.GetElement(r, c) / col_norm if col_norm > 0 else 0)
+
+        gridImageData = vtk.vtkImageData()
+        gridImageData.DeepCopy(displacementImageNode.GetImageData())
+        gridImageData.SetOrigin(origin)
+        gridImageData.SetSpacing(spacing)
+
+        gridTransform = vtkAddon.vtkOrientedGridTransform()
+        gridTransform.SetDisplacementGridData(gridImageData)
+        gridTransform.SetGridDirectionMatrix(directionMatrix)
+        gridTransform.SetInterpolationModeToCubic()
+
+        transformNode.SetAndObserveTransformToParent(gridTransform)
 
     def _createStreamlines(self, outputStreamlinesModel, speedImageNodeMPerSec, seedPointsModel, maximumLengthMm, bidirectional, computeAllMetrics, speedThresholdMPerSec):
         import vtkAddon
@@ -1111,11 +1201,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             if proxyNode.IsA("vtkMRMLTransformNode"):
                 gridTransformNode = proxyNode
                 break
-        if gridTransformNode and gridTransformNode.GetDisplayNode():
-            originalTransformVisibility = gridTransformNode.GetDisplayNode().GetVisibility()
-            gridTransformNode.GetDisplayNode().SetVisibility(False)
-        else:
-            originalTransformVisibility = False
+        savedTransformVisibility = self._saveAndHideTransformVisibility(gridTransformNode) if gridTransformNode else {}
 
         triangulate = vtk.vtkTriangleFilter()
         triangulate.SetInputData(crossSectionModelNode.GetPolyData())
@@ -1211,8 +1297,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             metrics[itemNumber, metricNames.index("Percentile99Velocity")] = percentile99VelocityMPerSec
 
         sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
-        if gridTransformNode and originalTransformVisibility and gridTransformNode.GetDisplayNode():
-            gridTransformNode.GetDisplayNode().SetVisibility(True)
+        self._restoreTransformVisibility(savedTransformVisibility)
 
         if outputFlowMetricsTableNode:
             savedMetrics = [
