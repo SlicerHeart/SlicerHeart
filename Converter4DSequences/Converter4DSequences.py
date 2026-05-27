@@ -229,6 +229,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
 
+            # Find and remove orphan display nodes in the scene
+            for displayNode in slicer.util.getNodesByClass('vtkMRMLDisplayNode'):
+                if displayNode.GetDisplayableNode() is None:
+                    slicer.mrmlScene.RemoveNode(displayNode)
+
     def _createSequenceForNode(self, browserNode, sequenceName, indexName="time", indexUnit="frame", indexType=slicer.vtkMRMLSequenceNode.NumericIndex, missingItemMode=slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault):
         """
         Helper to create a sequence node and add it to a browser.
