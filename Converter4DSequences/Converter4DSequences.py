@@ -15,12 +15,9 @@ from HeartValveLib.HeartValves import (
     updateLegacyAnnulusCurveNode,
     updateLegacyPapillaryMuscleNodes,
     updateLegacyLeafletSurfaceBoundaryNodes,
-    updateLegacyCoaptationModelNodes,
     getSequenceBrowserNodeForMasterOutputNode,
 )
 from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
-from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
-from HeartValveLib.util import getAllSegmentIDs
 
 
 class Converter4DSequences(ScriptedLoadableModule):
@@ -151,7 +148,7 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
         with slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True):
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
-                count = self.logic.convertSingleFrameToMultiFrameSequences()
+                count = self.logic.convertSingleFrameToMultiFrameSequences()['convertedCount']
                 slicer.util.infoDisplay(f"Converted {count} HeartValve node(s) to multi-frame sequence format.")
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
@@ -184,7 +181,7 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
     def onAutoConvertToggled(self, checked):
         """Called when the auto-convert checkbox is toggled."""
         settings = qt.QSettings()
-        settings.setValue(Converter4DSequences.AUTO_CONVERT_SETTING_KEY, self.autoConvertCheckBox.checked)
+        settings.setValue(Converter4DSequences.AUTO_CONVERT_SETTING_KEY, checked)
 
 
 class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
@@ -1111,9 +1108,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 for j in range(seqNode.GetNumberOfDataNodes()):
                     displayNode = seqNode.GetNthDataNode(j)
                     if displayNode:
-                        wasVisible = displayNode.GetVisibility()
                         displayNode.SetVisibility(True)
-                        nowVisible = displayNode.GetVisibility()
                         displayNodeCount += 1
                 displaySequenceCount += 1
 
