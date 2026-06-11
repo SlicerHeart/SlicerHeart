@@ -730,7 +730,7 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
       raise ValueError("Fixed points fidicuals list is not assigned")
     try:
       # Current API (Slicer-4.13 February 2022)
-      numberOfFiducials = self.getInputFixedPointsNode().GetNthControlPointPosition()
+      numberOfFiducials = self.getInputFixedPointsNode().GetNumberOfControlPoints()
     except:
       # Legacy API
       numberOfFiducials = self.getInputFixedPointsNode().GetNumberOfFiducials()
@@ -744,63 +744,84 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     # Hide flattened baffle model until rescaling to prevent flickering between initial size and final size
     flattenedModelNode.SetDisplayVisibility(False)
 
-    parameters = {}
-    parameters["inputModel"] = self.getOutputBaffleModelNode().GetID()
-    parameters["fixedPoints"] = self.getInputFixedPointsNode().GetID()
-    # Arbitrary value for the first two fixed points. Baffle will be scaled later
-    parameters["fixedPointTextureCoords"] = "0 0 100 0"
-    parameters["outputModel"] = flattenedModelNode.GetID()
+    # Prevent rendering during flattening to avoid flickering and speed up the process
+    # and potential crashes (in earlier VTK versions) due to incompletely initialized geometry attempted to be rendered.
+    with slicer.util.RenderBlocker():
 
-    self.cliConformalTextureMapping = None
-    self.cliConformalTextureMapping = slicer.cli.run(slicer.modules.conformaltexturemapping, None, parameters)
-    waitTime = 0 # Total amount of time we wait until we give up waiting
-    waitCycle = 0.1 # Amount of time we wait between checking if it finished
-    import time
-    while self.cliConformalTextureMapping.GetStatusString() != 'Completed' and waitTime < 20:
-      time.sleep(waitCycle)
-      waitTime += waitCycle
-      if progressCallback:
-        progressCallback(str(waitTime))
+      # The flattened pattern represents the cross-sectional (non-thickened) surface, so always
+      # flatten the thin surface, even if the baffle model itself has been made thick. ConformalTextureMapping
+      # only works on open surfaces, while the thickened model is a closed (capped) shell, so it must
+      # not be used as input. Stage the thin surface in a temporary model node, since the CLI takes a model node.
+      self.updateOutputBaffleModel() # Make sure self.surfacePolyDataNormalsThin is up to date with the current baffle surface
 
-    if self.cliConformalTextureMapping.GetStatusString() != 'Completed':
-      self.cliConformalTextureMapping.Cancel()
-      raise ValueError('Flattening baffle failed')
+      thinSurfacePolyData = vtk.vtkPolyData()
+      thinSurfacePolyData.DeepCopy(self.surfacePolyDataNormalsThin.GetOutput())
+      thinBaffleModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "tmp_ThinBaffleModel")
+      thinBaffleModelNode.SetHideFromEditors(True)
+      thinBaffleModelNode.SetAndObservePolyData(thinSurfacePolyData)
 
-    # Scale the flattened baffle to actual size
-    massProperties = vtk.vtkMassProperties()
-    massProperties.SetInputConnection(self.getOutputBaffleModelNode().GetPolyDataConnection())
-    massProperties.Update()
-    baffleArea = massProperties.GetSurfaceArea()
-    massProperties.SetInputConnection(flattenedModelNode.GetPolyDataConnection())
-    massProperties.Update()
-    flattenedUnscaledBaffleArea = massProperties.GetSurfaceArea()
-    import math
-    scale = math.sqrt(baffleArea / flattenedUnscaledBaffleArea)
-    flattenedBaffleToScaledFlattenedBaffleTransform = vtk.vtkTransform()
-    flattenedBaffleToScaledFlattenedBaffleTransform.Scale(scale, scale, scale)
-    transformFilter = vtk.vtkTransformPolyDataFilter()
-    transformFilter.SetInputData(flattenedModelNode.GetPolyData())
-    transformFilter.SetTransform(flattenedBaffleToScaledFlattenedBaffleTransform)
-    transformFilter.Update()
-    flattenedModelNode.SetAndObservePolyData(transformFilter.GetOutput())
-    flattenedModelNode.SetDisplayVisibility(True)
+      try:
+        parameters = {}
+        parameters["inputModel"] = thinBaffleModelNode.GetID()
+        parameters["fixedPoints"] = self.getInputFixedPointsNode().GetID()
+        # Arbitrary value for the first two fixed points. Baffle will be scaled later
+        parameters["fixedPointTextureCoords"] = "0 0 100 0"
+        parameters["outputModel"] = flattenedModelNode.GetID()
 
-    # Update flattened fixed points markup node
-    flattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
-    inputFixedPointsNode = self.getInputFixedPointsNode()
-    flattenedFixedPointsNode.RemoveAllControlPoints()
-    closestVertexIndices = BafflePlannerLogic.getClosestVerticesForFiducials(self.getOutputBaffleModelNode(), inputFixedPointsNode)
-    flattenedPolyDataPoints = flattenedModelNode.GetPolyData().GetPoints()
-    # Set the flattened fixed node points size based on the model size
-    bounds = [0,0,0,0,0,0]
-    self.getOutputBaffleModelNode().GetRASBounds(bounds)
-    modelDiameter = pow(pow(bounds[1]-bounds[0], 2)+pow(bounds[3]-bounds[2], 2)+pow(bounds[5]-bounds[4], 2), 0.5)
-    flattenedFixedPointsNode.GetDisplayNode().SetUseGlyphScale(False)
-    flattenedFixedPointsNode.GetDisplayNode().SetGlyphSize(modelDiameter*0.05)
-    flattenedFixedPointsNode.GetDisplayNode().SetTextScale(5.0)
-    for pointIndex, vertIdx in enumerate(closestVertexIndices):
-      p = flattenedPolyDataPoints.GetPoint(vertIdx)
-      flattenedFixedPointsNode.AddControlPointWorld(vtk.vtkVector3d(p), inputFixedPointsNode.GetNthControlPointLabel(pointIndex))
+        self.cliConformalTextureMapping = None
+        self.cliConformalTextureMapping = slicer.cli.run(slicer.modules.conformaltexturemapping, None, parameters)
+        waitTime = 0 # Total amount of time we wait until we give up waiting
+        waitCycle = 0.1 # Amount of time we wait between checking if it finished
+        import time
+        while self.cliConformalTextureMapping.GetStatusString() != 'Completed' and waitTime < 20:
+          time.sleep(waitCycle)
+          waitTime += waitCycle
+          if progressCallback:
+            progressCallback(str(waitTime))
+
+        if self.cliConformalTextureMapping.GetStatusString() != 'Completed':
+          self.cliConformalTextureMapping.Cancel()
+          raise ValueError('Flattening baffle failed')
+
+        # Scale the flattened baffle to actual size.
+        # Use the non-thickened surface area as normalization basis, because the thickened
+        # surface also includes the side walls and so its area is more than twice the
+        # cross-sectional area.
+        massProperties = vtk.vtkMassProperties()
+        massProperties.SetInputData(thinSurfacePolyData)
+        massProperties.Update()
+        baffleArea = massProperties.GetSurfaceArea()
+        massProperties.SetInputConnection(flattenedModelNode.GetPolyDataConnection())
+        massProperties.Update()
+        flattenedUnscaledBaffleArea = massProperties.GetSurfaceArea()
+        import math
+        scale = math.sqrt(baffleArea / flattenedUnscaledBaffleArea)
+        flattenedBaffleToScaledFlattenedBaffleTransform = vtk.vtkTransform()
+        flattenedBaffleToScaledFlattenedBaffleTransform.Scale(scale, scale, scale)
+        transformFilter = vtk.vtkTransformPolyDataFilter()
+        transformFilter.SetInputData(flattenedModelNode.GetPolyData())
+        transformFilter.SetTransform(flattenedBaffleToScaledFlattenedBaffleTransform)
+        transformFilter.Update()
+        flattenedModelNode.SetAndObservePolyData(transformFilter.GetOutput())
+        flattenedModelNode.SetDisplayVisibility(True)
+
+        # Update flattened fixed points markup node
+        flattenedFixedPointsNode = self.getOutputFlattenedFixedPointsNode()
+        inputFixedPointsNode = self.getInputFixedPointsNode()
+        flattenedFixedPointsNode.RemoveAllControlPoints()
+        closestVertexIndices = BafflePlannerLogic.getClosestVerticesForFiducials(thinBaffleModelNode, inputFixedPointsNode)
+        flattenedPolyDataPoints = flattenedModelNode.GetPolyData().GetPoints()
+        # Set the flattened fixed node points size based on the model size
+        bounds = thinSurfacePolyData.GetBounds()
+        modelDiameter = pow(pow(bounds[1]-bounds[0], 2)+pow(bounds[3]-bounds[2], 2)+pow(bounds[5]-bounds[4], 2), 0.5)
+        flattenedFixedPointsNode.GetDisplayNode().SetUseGlyphScale(False)
+        flattenedFixedPointsNode.GetDisplayNode().SetGlyphSize(modelDiameter*0.05)
+        flattenedFixedPointsNode.GetDisplayNode().SetTextScale(5.0)
+        for pointIndex, vertIdx in enumerate(closestVertexIndices):
+          p = flattenedPolyDataPoints.GetPoint(vertIdx)
+          flattenedFixedPointsNode.AddControlPointWorld(vtk.vtkVector3d(p), inputFixedPointsNode.GetNthControlPointLabel(pointIndex))
+      finally:
+        slicer.mrmlScene.RemoveNode(thinBaffleModelNode)
 
   def generatePixmapForPrinting(self, filePath):
     if not self.getOutputFlattenedModelNode():
