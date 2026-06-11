@@ -164,45 +164,30 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
                                                            self.papillaryMuscleLineMarkupPlaceWidget)
 
   def onAddTimePoint(self):
-    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-    selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
-    selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
-
-    papillaryModel = self.valveModel.findPapillaryModel(selectedSurface)
+    papillaryModel = self._getSelectedPapillaryModel()
     if papillaryModel is None:
-      logging.error("Selected papillary muscle not found")
       return
-
-    selectedPapillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
-    sequenceNode = self.valveModel.valveBrowserNode.GetSequenceNode(selectedPapillaryMarkupNode)
-    if sequenceNode is None:
-      logging.error("Selected papillary muscle not found in sequence browser")
-      return
-
-    self.valveModel.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
-    self.updateTimePointButtons()
-    self.onPapillaryLineMarkupNodeModified()
+    if self.valveModel.addPapillaryMuscleTimePoint(papillaryModel):
+      self.updateTimePointButtons()
+      self.onPapillaryLineMarkupNodeModified()
 
   def onRemoveTimePoint(self):
+    papillaryModel = self._getSelectedPapillaryModel()
+    if papillaryModel is None:
+      return
+    if self.valveModel.removePapillaryMuscleTimePoint(papillaryModel):
+      self.updateTimePointButtons()
+      self.onPapillaryLineMarkupNodeModified()
+
+  def _getSelectedPapillaryModel(self):
+    """:returns PapillaryModel for the muscle selected in the tree view, or None if none is selected."""
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
     selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
-
     papillaryModel = self.valveModel.findPapillaryModel(selectedSurface)
     if papillaryModel is None:
       logging.error("Selected papillary muscle not found")
-      return
-
-    selectedPapillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
-    sequenceNode = self.valveModel.valveBrowserNode.GetSequenceNode(selectedPapillaryMarkupNode)
-    if sequenceNode is None:
-      logging.error("Selected papillary muscle not found in sequence browser")
-      return
-
-    _, indexValue = self.valveModel.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    sequenceNode.RemoveDataNodeAtValue(indexValue)
-    self.updateTimePointButtons()
-    self.onPapillaryLineMarkupNodeModified()
+    return papillaryModel
 
   def addMuscleCenteringButtons(self):
     self.showMuscleButtons = []
