@@ -233,7 +233,7 @@
         <item>
          <widget class="ctkSliderWidget" name="thicknessSliderWidgetPositive">
           <property name="toolTip">
-           <string>Set threshold value for computing the output image. Voxels that have intensities lower than this value will set to zero.</string>
+           <string>Set thickness of the generated baffle surface added on the positive normal side.</string>
           </property>
           <property name="singleStep">
            <double>0.100000000000000</double>
@@ -255,7 +255,7 @@
         <item>
          <widget class="ctkSliderWidget" name="thicknessSliderWidgetNegative">
           <property name="toolTip">
-           <string>Set threshold value for computing the output image. Voxels that have intensities lower than this value will set to zero.</string>
+           <string>Set thickness of the generated baffle surface added on the negative normal side.</string>
           </property>
           <property name="singleStep">
            <double>0.100000000000000</double>
