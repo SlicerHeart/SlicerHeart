@@ -559,48 +559,14 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.setNewRotationValue(0)
 
   def onAddAnnulusContourCurve(self):
-    if self.valveModel.annulusContourCurveNode:
-      # Curve is already defined for the current time point
-      return
-
-    annulusContourCurveSequenceNode = self.valveModel.annulusContourCurveSequenceNode
-    if not annulusContourCurveSequenceNode:
-      logging.debug("Did not find annulus contour curve node, create a new one")
-      annulusContourCurveNode = self.valveModel.createAnnulusCurveNode()
-      self.valveModel.annulusContourCurveNode = annulusContourCurveNode
-      self.setAndObserveAnnulusContourCurveNode(annulusContourCurveNode)
-      self.updateGUIFromHeartValveNode()
-      return
-
-    # Contour sequence is there, but no contour for displayed heart valve phase.
-    self.valveBrowser.addCurrentTimePointToSequence(annulusContourCurveSequenceNode)
-
-    # Set the new node in the GUI
-    annulusContourCurveNode = self.valveModel.annulusContourCurveNode
-    if annulusContourCurveNode:
-      self.valveBrowserNode.SetSaveChanges(annulusContourCurveSequenceNode, True)
-    else:
-      # Curve should be defined for the current time point
-      logging.error("Failed to create annulus contour curve node")
+    annulusContourCurveNode = self.valveModel.addAnnulusContourCurve()
     self.setAndObserveAnnulusContourCurveNode(annulusContourCurveNode)
+    self.updateGUIFromHeartValveNode()
 
   def onRemoveAnnulusContourCurve(self):
-    annulusContourCurveNode = self.valveModel.annulusContourCurveNode
-    if not annulusContourCurveNode:
-      return
-
-    # Check and log error if failed
-    if not self.valveModel.isNodeSpecifiedForCurrentTimePoint(annulusContourCurveNode):
-      # Curve is not present
-      return
-
-    # Remove contour from sequence
-    annulusContourCurveSequenceNode = self.valveBrowserNode.GetSequenceNode(annulusContourCurveNode)
-    valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    annulusContourCurveSequenceNode.RemoveDataNodeAtValue(indexValue)
-
-    # Update observers
-    self.setAndObserveAnnulusContourCurveNode(None)
+    if self.valveModel.removeAnnulusContourCurve():
+      # Update observers
+      self.setAndObserveAnnulusContourCurveNode(None)
 
   def setAndObserveAnnulusContourCurveNode(self, annulusCurveNode):
     logging.debug("Observe annulus curve node: {0}".format(annulusCurveNode.GetName() if annulusCurveNode else "None"))

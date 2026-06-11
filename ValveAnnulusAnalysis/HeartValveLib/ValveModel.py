@@ -279,6 +279,184 @@ class ValveModel:
         annulusContourMarkupsNode.RemoveAllControlPoints()
         self.storeAnnulusContour()
 
+    def addAnnulusContourCurve(self):
+      """Ensure an annulus contour curve exists for the current time point and return it.
+
+      If no annulus contour sequence exists yet, a new (empty) curve node is created.
+      If a sequence exists but has no entry for the current time point, a new (empty) entry is added.
+      If the curve is already defined for the current time point it is returned unchanged.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: annulus contour curve node for the current time point, or None on failure.
+      """
+      # Already defined for the current time point
+      if self.annulusContourCurveNode:
+        return self.annulusContourCurveNode
+
+      annulusContourCurveSequenceNode = self.annulusContourCurveSequenceNode
+      if not annulusContourCurveSequenceNode:
+        # No sequence/proxy exists yet: create the node. The setter creates the time sequence.
+        logging.debug("Did not find annulus contour curve node, create a new one")
+        annulusContourCurveNode = self.createAnnulusCurveNode()
+        self.annulusContourCurveNode = annulusContourCurveNode
+        return annulusContourCurveNode
+
+      # Sequence exists, but no contour for the displayed time point: add an entry so that edits to
+      # the proxy node are saved for this time point instead of being discarded on the next sync.
+      self.valveBrowser.addCurrentTimePointToSequence(annulusContourCurveSequenceNode)
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if annulusContourCurveNode:
+        self.valveBrowserNode.SetSaveChanges(annulusContourCurveSequenceNode, True)
+      else:
+        logging.error("addAnnulusContourCurve: failed to create annulus contour curve for current time point")
+      return annulusContourCurveNode
+
+    def removeAnnulusContourCurve(self):
+      """Remove the annulus contour curve entry for the current time point, if one is specified.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: True if an entry was removed, False otherwise.
+      """
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if not annulusContourCurveNode:
+        return False
+      if not self.isNodeSpecifiedForCurrentTimePoint(annulusContourCurveNode):
+        return False
+      annulusContourCurveSequenceNode = self.valveBrowserNode.GetSequenceNode(annulusContourCurveNode)
+      _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      annulusContourCurveSequenceNode.RemoveDataNodeAtValue(indexValue)
+      return True
+
+    def setAnnulusContourPoints(self, rasPoints):
+      """Set annulus contour control points for the current time point, replacing any existing points.
+
+      If no annulus contour sequence exists yet, the curve node is created automatically.
+      If a sequence exists but has no entry for the current time point, a new entry is added so that
+      the points are stored for this time point (and not just shown on the shared proxy node).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param rasPoints: Nx3 array-like of [R, A, S] coordinates.
+      :returns: annulus contour curve node for the current time point, or None on failure.
+      """
+      annulusContourCurveNode = self.addAnnulusContourCurve()
+      if not annulusContourCurveNode:
+        logging.error("setAnnulusContourPoints failed: could not create annulus contour curve")
+        return None
+
+      wasModify = annulusContourCurveNode.StartModify()
+      annulusContourCurveNode.RemoveAllControlPoints()
+      for p in rasPoints:
+        annulusContourCurveNode.AddControlPoint(vtk.vtkVector3d(p[0], p[1], p[2]))
+      annulusContourCurveNode.EndModify(wasModify)
+      self.storeAnnulusContour()
+      return annulusContourCurveNode
+
+    def setValveLabels(self, labeledPoints):
+      """Set valve label fiducial points for the current time point, replacing any existing labels.
+
+      If no valve labels sequence exists yet, the labels node is created automatically.
+      If a sequence exists but has no entry for the current time point, a new entry is added so that
+      the labels are stored for this time point (and not just shown on the shared proxy node).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param labeledPoints: list of (label_str, R, A, S) tuples.
+      :returns: valve labels markups node for the current time point.
+      """
+      # If a sequence already exists, make sure the current time point has an entry so that edits to
+      # the proxy node are saved for this time point instead of being discarded on the next sync.
+      valveLabelsSequenceNode = self.valveLabelsSequenceNode
+      if valveLabelsSequenceNode:
+        self.valveBrowser.addCurrentTimePointToSequence(valveLabelsSequenceNode)
+
+      valveLabelsNode = self.valveLabelsNode
+      if not valveLabelsNode:
+        valveLabelsNode = self.createAnnulusLabelsMarkupNode()
+        self.valveLabelsNode = valveLabelsNode
+      valveLabelsNode.SetLocked(False)
+      wasModify = valveLabelsNode.StartModify()
+      valveLabelsNode.RemoveAllControlPoints()
+      for label, r, a, s in labeledPoints:
+        idx = valveLabelsNode.AddControlPoint(vtk.vtkVector3d(r, a, s))
+        valveLabelsNode.SetNthControlPointLabel(idx, label)
+      valveLabelsNode.EndModify(wasModify)
+      valveLabelsNode.SetLocked(True)
+      return valveLabelsNode
+
+    def addPapillaryMuscleTimePoint(self, papillaryModel):
+      """Add an entry for the current time point to the given papillary muscle's line sequence.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param papillaryModel: PapillaryModel whose line markup should get a new time point entry.
+      :returns: True if an entry was added, False on failure.
+      """
+      sequenceNode = self._papillaryLineSequenceNode(papillaryModel)
+      if sequenceNode is None:
+        return False
+      self.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+      return True
+
+    def removePapillaryMuscleTimePoint(self, papillaryModel):
+      """Remove the current time point entry from the given papillary muscle's line sequence.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param papillaryModel: PapillaryModel whose line markup time point entry should be removed.
+      :returns: True if an entry was removed, False on failure.
+      """
+      sequenceNode = self._papillaryLineSequenceNode(papillaryModel)
+      if sequenceNode is None:
+        return False
+      _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      sequenceNode.RemoveDataNodeAtValue(indexValue)
+      return True
+
+    def setPapillaryLinePoints(self, papillaryModel, rasPoints):
+      """Set the papillary muscle line control points for the current time point.
+
+      If a sequence exists, an entry for the current time point is added so that the points are
+      stored for this time point (and not just shown on the shared proxy node).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param papillaryModel: PapillaryModel to update.
+      :param rasPoints: Nx3 array-like of [R, A, S] coordinates (typically base, tip, chord insertion).
+      :returns: papillary line markup node, or None on failure.
+      """
+      if papillaryModel is None:
+        logging.error("setPapillaryLinePoints failed: invalid papillaryModel")
+        return None
+      papillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
+      if not papillaryMarkupNode:
+        logging.error("setPapillaryLinePoints failed: papillary muscle has no line markup node")
+        return None
+      # If a sequence exists, make sure the current time point has an entry so that edits to the
+      # proxy node are saved for this time point instead of being discarded on the next sync.
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryMarkupNode)
+      if sequenceNode:
+        self.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+      wasModify = papillaryMarkupNode.StartModify()
+      papillaryMarkupNode.RemoveAllControlPoints()
+      for p in rasPoints:
+        papillaryMarkupNode.AddControlPoint(vtk.vtkVector3d(p[0], p[1], p[2]))
+      papillaryMarkupNode.EndModify(wasModify)
+      return papillaryMarkupNode
+
+    def _papillaryLineSequenceNode(self, papillaryModel):
+      """:returns Sequence node for the given papillary muscle's line markup, or None if not found."""
+      if papillaryModel is None:
+        logging.error("papillary muscle time point operation failed: invalid papillaryModel")
+        return None
+      papillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryMarkupNode) if papillaryMarkupNode else None
+      if sequenceNode is None:
+        logging.error("papillary muscle time point operation failed: muscle not found in sequence browser")
+      return sequenceNode
+
     def moveNodeToHeartValveFolder(self, node, subfolderName=None):
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
       valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
@@ -401,6 +579,130 @@ class ValveModel:
       self.moveNodeToHeartValveFolder(segmentationNode)
       self.updateValveNodeNames()
       return segmentationNode
+
+    def initializeLeafletSegmentation(self):
+      """Initialize leaflet volume and segmentation for the current time point.
+
+      If they already exist for this time point this is a no-op.
+      If a sequence exists but is missing an entry for this time point, a new entry is added.
+      If no sequence exists yet, new nodes are created.
+      Segment definitions (name, color, terminology) are copied from an existing time point.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: leaflet segmentation node for the current time point, or None on failure.
+      """
+      import HeartValveLib
+
+      # Ensure leaflet volume exists for this time point
+      leafletVolumeNode = self.leafletVolumeNode
+      if not leafletVolumeNode:
+        HeartValveLib.goToAnalyzedFrame(self)
+        volumeNode = self.valveBrowser.valveVolumeNode
+        name = slicer.mrmlScene.GetUniqueNameByString(f"{self.heartValveNode.GetName()}-segmented")
+        newLeafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
+        leafletVolumeSequenceNode = self.leafletVolumeSequenceNode
+        if leafletVolumeSequenceNode:
+          self.valveBrowser.addCurrentTimePointToSequence(leafletVolumeSequenceNode)
+          leafletVolumeNode = self.leafletVolumeNode
+          leafletVolumeNode.CopyContent(newLeafletVolumeNode)
+          slicer.mrmlScene.RemoveNode(newLeafletVolumeNode)
+        else:
+          self.leafletVolumeNode = newLeafletVolumeNode
+        leafletVolumeNode = self.leafletVolumeNode
+
+      # Ensure leaflet segmentation exists for this time point
+      leafletSegmentationNode = self.leafletSegmentationNode
+      if not leafletSegmentationNode:
+        leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+        if leafletSegmentationSequenceNode:
+          self.valveBrowser.addCurrentTimePointToSequence(leafletSegmentationSequenceNode)
+          self.valveBrowserNode.SetSaveChanges(leafletSegmentationSequenceNode, True)
+        else:
+          name = slicer.mrmlScene.GetUniqueNameByString(f"{self.heartValveNode.GetName()}-LeafletSegmentation")
+          newSegNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", name)
+          newSegNode.SetNodeReferenceID(newSegNode.GetReferenceImageGeometryReferenceRole(),
+                                        leafletVolumeNode.GetID())
+          newSegNode.CreateDefaultDisplayNodes()
+          newSegNode.GetDisplayNode().SetRemoveUnusedDisplayProperties(False)
+          self.leafletSegmentationNode = newSegNode
+        leafletSegmentationNode = self.leafletSegmentationNode
+
+        # Copy segment definitions (empty geometry) from an existing time point
+        leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+        if leafletSegmentationSequenceNode:
+          for i in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+            templateNode = leafletSegmentationSequenceNode.GetNthDataNode(i)
+            if templateNode is None or templateNode is leafletSegmentationNode:
+              continue
+            templateSegmentation = templateNode.GetSegmentation()
+            segmentIDs = templateSegmentation.GetSegmentIDs()
+            if not segmentIDs:
+              continue
+            for segmentID in segmentIDs:
+              if not leafletSegmentationNode.GetSegmentation().GetSegment(segmentID):
+                newID = leafletSegmentationNode.GetSegmentation().AddEmptySegment(segmentID)
+                ValveModel._copySegmentProperties(
+                  templateSegmentation.GetSegment(segmentID),
+                  leafletSegmentationNode.GetSegmentation().GetSegment(newID))
+            break  # one reference time point is sufficient
+
+      return leafletSegmentationNode
+
+    @staticmethod
+    def _copySegmentProperties(sourceSegment, destinationSegment):
+      """Copy name, color, and terminology tag from source to destination segment."""
+      if not sourceSegment or not destinationSegment:
+        return
+      destinationSegment.SetName(sourceSegment.GetName())
+      destinationSegment.SetColor(sourceSegment.GetColor())
+      terminologyRef = vtk.reference("")
+      if sourceSegment.GetTag("TerminologyEntry", terminologyRef):
+        destinationSegment.SetTag("TerminologyEntry", terminologyRef.get())
+
+    def setLeafletSegmentation(self, sourceSegmentationNode, segmentIDs=None):
+      """Replace the leaflet segmentation content for the current time point with segments copied
+      from sourceSegmentationNode.
+
+      The leaflet volume and segmentation for the current time point are created if needed (see
+      initializeLeafletSegmentation), so this can be used to populate a brand new time point in a
+      single call. All existing segments in the current time point's leaflet segmentation are removed
+      and replaced with copies of the requested segments from sourceSegmentationNode. Segment IDs are
+      preserved so that the same anatomical structure keeps a consistent ID across time points (which
+      is what segmentation propagation workflows rely on).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param sourceSegmentationNode: vtkMRMLSegmentationNode whose segments should be copied.
+      :param segmentIDs: optional list of segment IDs to copy. If None, all segments are copied.
+      :returns: leaflet segmentation node for the current time point, or None on failure.
+      """
+      if not sourceSegmentationNode:
+        logging.error("setLeafletSegmentation failed: invalid sourceSegmentationNode")
+        return None
+
+      leafletSegmentationNode = self.initializeLeafletSegmentation()
+      if not leafletSegmentationNode:
+        logging.error("setLeafletSegmentation failed: could not initialize leaflet segmentation")
+        return None
+
+      sourceSegmentation = sourceSegmentationNode.GetSegmentation()
+      targetSegmentation = leafletSegmentationNode.GetSegmentation()
+      if segmentIDs is None:
+        segmentIDs = list(sourceSegmentation.GetSegmentIDs())
+
+      wasModify = leafletSegmentationNode.StartModify()
+      # Remove existing segments so the result is a clean replacement.
+      for segmentID in list(targetSegmentation.GetSegmentIDs()):
+        targetSegmentation.RemoveSegment(segmentID)
+      # Copy the requested segments (geometry and properties), preserving segment IDs.
+      for segmentID in segmentIDs:
+        if not sourceSegmentation.GetSegment(segmentID):
+          logging.warning(f"setLeafletSegmentation: segment '{segmentID}' not found in source, skipping")
+          continue
+        targetSegmentation.CopySegmentFromSegmentation(sourceSegmentation, segmentID)
+      leafletSegmentationNode.EndModify(wasModify)
+      return leafletSegmentationNode
 
     def removePapillaryModel(self, papillaryModelIndex):
       papillaryModel = self.papillaryModels[papillaryModelIndex]

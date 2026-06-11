@@ -241,18 +241,9 @@ class ValveSequenceBrowserWidget:
     self.valveModel.setCardiacCyclePhase(self.ui.cardiacCyclePhaseSelector.currentText)
 
   def onAddTimePointButtonClicked(self):
-    volumeSequenceIndex, volumeSequenceIndexValue = self.valveBrowser.getDisplayedValveVolumeSequenceIndexAndValue()
-    heartValveSequenceIndex = self.valveBrowser.heartValveSequenceNode.GetItemNumberFromIndexValue(volumeSequenceIndexValue)
-
-    if heartValveSequenceIndex >= 0: # item for timepoint exists
-      self.valveBrowser.valveBrowserNode.SetSelectedItemNumber(heartValveSequenceIndex)
-    else:
-      logging.info(f"Add time point")
-      if not volumeSequenceIndexValue:
-        raise RuntimeError("Failed to add time point, could not get volume sequence")
-      self.valveBrowser.addTimePoint(volumeSequenceIndexValue, self.valveBrowser.valveBrowserNode.GetName())
-      self.heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
-
+    if self.valveBrowser.addTimePointAtCurrentFrame() is None:
+      raise RuntimeError("Failed to add time point, could not get volume sequence")
+    self.heartValveNode = self.valveBrowser.heartValveNode if self.valveBrowser else None
     self.updateGUIFromMRML()
 
   def onRemoveTimePointButtonClicked(self):
