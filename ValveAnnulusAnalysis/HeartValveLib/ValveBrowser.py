@@ -107,6 +107,33 @@ class ValveBrowser:
 
       logging.info(f"Switched to heart valve phase: {index}")
 
+    def addTimePointAtCurrentFrame(self, valveName=None):
+      """Add a time point for the currently displayed valve volume frame (or switch to it if it
+      already exists).
+
+      The time point is linked to the volume frame by using the volume sequence's current index
+      value as the time point's index value, which is the convention used throughout HeartValveLib
+      (see ValveModel.getValveVolumeSequenceIndex). This lets scripts create a time point that is
+      correctly associated with a volume frame without having to replicate the index-value bookkeeping
+      (a time point created with a mismatched index value would not be linked to any volume frame).
+
+      :param valveName: name to use if a new valve node is created. Defaults to the browser node name.
+      :returns: index value of the new or existing time point, or None on failure.
+      """
+      _, volumeSequenceIndexValue = self.getDisplayedValveVolumeSequenceIndexAndValue()
+      if not volumeSequenceIndexValue:
+        logging.error("addTimePointAtCurrentFrame failed: could not get current valve volume frame")
+        return None
+      heartValveSequenceIndex = self.heartValveSequenceNode.GetItemNumberFromIndexValue(volumeSequenceIndexValue)
+      if heartValveSequenceIndex >= 0:
+        # Time point for this frame already exists: switch to it
+        self.valveBrowserNode.SetSelectedItemNumber(heartValveSequenceIndex)
+      else:
+        if valveName is None:
+          valveName = self.valveBrowserNode.GetName()
+        self.addTimePoint(volumeSequenceIndexValue, valveName)
+      return volumeSequenceIndexValue
+
     def removeTimePoint(self, indexValue):
       self.heartValveSequenceNode.RemoveDataNodeAtValue(indexValue)
 
