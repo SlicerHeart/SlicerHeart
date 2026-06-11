@@ -17,7 +17,8 @@ hasAnnulusContourDefined = \
 hasAnnulusLandmarksDefined = \
   lambda valveModel: valveModel.valveLabelsNode.GetNumberOfControlPoints() > 0 if valveModel.valveLabelsNode is not None else False
 
-hasLeafletSegmentation = lambda valveModel: valveModel.leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 0 if valveModel.leafletSegmentationNode is not None else False
+from HeartPropagationLib.utils import hasNonEmptySegments
+hasLeafletSegmentation = lambda valveModel: hasNonEmptySegments(valveModel.leafletSegmentationNode) if valveModel.leafletSegmentationNode is not None else False
 
 
 def analyzeSequence(valveBrowser):
