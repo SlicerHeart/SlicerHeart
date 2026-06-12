@@ -254,6 +254,16 @@
         </property>
        </widget>
       </item>
+      <item row="0" column="0">
+       <widget class="QPushButton" name="clippingButton">
+        <property name="text">
+         <string>Clipping</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
       <item row="1" column="0">
        <widget class="QPushButton" name="conventionalViewButton">
         <property name="text">
@@ -271,17 +281,39 @@
         </property>
        </widget>
       </item>
-      <item row="0" column="0">
-       <widget class="QPushButton" name="clippingButton">
-        <property name="text">
-         <string>Clipping</string>
-        </property>
-        <property name="checkable">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
      </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer_2">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeType">
+      <enum>QSizePolicy::Fixed</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>10</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item>
+    <widget class="QPushButton" name="toggleFullInterfaceButton">
+     <property name="font">
+      <font>
+       <weight>75</weight>
+       <bold>true</bold>
+      </font>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">background-color: lightgreen;</string>
+     </property>
+     <property name="text">
+      <string>Toggle full 3D Slicer interface</string>
+     </property>
     </widget>
    </item>
    <item>
@@ -299,13 +331,6 @@
       </size>
      </property>
     </spacer>
-   </item>
-   <item>
-    <widget class="QPushButton" name="toggleFullInterfaceButton">
-     <property name="text">
-      <string>Toggle full 3D Slicer interface</string>
-     </property>
-    </widget>
    </item>
   </layout>
  </widget>
