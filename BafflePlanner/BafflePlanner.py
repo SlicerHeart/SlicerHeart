@@ -726,6 +726,10 @@ class BafflePlannerLogic(ScriptedLoadableModuleLogic):
     return closestVertices
 
   def flattenOutputBaffleModel(self, progressCallback=None):
+    if not hasattr(slicer.modules, 'conformaltexturemapping'):
+      raise ValueError("ConformalTextureMapping module is not available. This module is provided by SlicerHeart extension."
+        " If it is missing then SlicerHeart may not have been installed or built correctly for this Slicer version."
+        " Install SlicerHeart extension from the extensions manager.")
     if not self.getInputFixedPointsNode():
       raise ValueError("Fixed points fidicuals list is not assigned")
     try:
