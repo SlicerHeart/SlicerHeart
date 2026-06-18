@@ -539,6 +539,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 if groupingKey not in valvesByVolumeSequence:
                     valvesByVolumeSequence[groupingKey] = {
                         'volumeSequenceBrowserNode': volumeSequenceBrowserNode,
+                        'volumeNode': volumeNode,
                         'valveType': valveType,
                         'heartValveNodes': []
                     }
@@ -550,6 +551,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         convertedCount = 0
         for groupingKey, browserData in valvesByVolumeSequence.items():
             volumeSequenceBrowserNode = browserData['volumeSequenceBrowserNode']
+            volumeNode = browserData['volumeNode']
             heartValveNodes = browserData['heartValveNodes']
             valveType = browserData['valveType']
 
@@ -586,6 +588,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if not valveBrowserNode.GetAttribute("ValveType"):
                 valveBrowserNode.SetAttribute("ValveType", valveType)
                 logging.info(f"Set ValveType attribute on browser node: {valveBrowserNode.GetName()}")
+
+            # In the new format the ValveVolume reference lives on the valve browser node (see
+            # HeartValveLib.ValveBrowser.valveVolumeNode), not on the individual HeartValve nodes
+            # like the old format. Copy it over so getValveVolumeNode() and everything that depends
+            # on it (volumeSequenceBrowserNode, probe position, volume sequence index, ...) works.
+            if volumeNode and not valveBrowserNode.GetNodeReference("ValveVolume"):
+                valveBrowserNode.SetNodeReferenceID("ValveVolume", volumeNode.GetID())
+                logging.info(f"Set ValveVolume reference on browser node '{valveBrowserNode.GetName()}' to '{volumeNode.GetName()}'")
 
             # Get or create the heart valve sequence node for this specific valve
             heartValveSequenceNode = valveBrowserNode.GetMasterSequenceNode()
