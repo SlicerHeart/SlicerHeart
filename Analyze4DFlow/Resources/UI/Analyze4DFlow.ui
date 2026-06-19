@@ -27,6 +27,7 @@
        </property>
        <property name="nodeTypes">
         <stringlist notr="true">
+         <string>vtkMRMLModelNode</string>
          <string>vtkMRMLTransformNode</string>
         </stringlist>
        </property>
@@ -680,6 +681,7 @@
            </property>
            <property name="nodeTypes">
             <stringlist notr="true">
+             <string>vtkMRMLModelNode</string>
              <string>vtkMRMLTransformNode</string>
             </stringlist>
            </property>
