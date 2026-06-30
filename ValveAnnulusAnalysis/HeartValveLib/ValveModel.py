@@ -349,6 +349,8 @@ class ValveModel:
         return
       self.heartValveNode.SetAttribute("ValveVolumeSequenceIndex", str(index))
       self.updateValveNodeNames()
+      if self.getLeafletVolumeNode():
+        HeartValves.useCurrentValveVolumeAsLeafletVolume(self)
 
     # Annulus contour line radius
     def getAnnulusContourRadius(self):

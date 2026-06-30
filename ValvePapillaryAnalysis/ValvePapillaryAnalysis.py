@@ -283,14 +283,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.removeNodeObservers()
 
     if self.valveModel:
-      valveVolumeNode = self.valveModel.getValveVolumeNode()
-      if not valveVolumeNode:
-        # select background volume by default as valve volume (to spare a click for the user)
-        appLogic = slicer.app.applicationLogic()
-        selNode = appLogic.GetSelectionNode()
-        if selNode.GetActiveVolumeID():
-          valveVolumeNode = slicer.mrmlScene.GetNodeByID(selNode.GetActiveVolumeID())
-          self.valveModel.setValveVolumeNode(valveVolumeNode)
+      HeartValveLib.getOrSetValveVolumeNode(self.valveModel)
       self.valveModel.updatePapillaryModels()
       self.showAllPapillaryMuscles()
 
