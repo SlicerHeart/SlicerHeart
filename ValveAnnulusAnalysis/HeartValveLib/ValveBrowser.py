@@ -427,6 +427,44 @@ class ValveBrowser:
       self.valveBrowserNode.SetSaveChanges(sequenceNode, oldSaveChanges)
       self.valveBrowserNode.SetMissingItemMode(sequenceNode, oldMissingItemMode)
 
+      # If the proxy node's display nodes are driven by display sequences (e.g. in scenes converted
+      # from the old format) then those sequences need an item for this time point as well,
+      # otherwise the display nodes are reset to defaults on every browser update and the user
+      # cannot control visibility or any other display property.
+      proxyNode = self.valveBrowserNode.GetProxyNode(sequenceNode)
+      self.addCurrentTimePointToDisplaySequences(proxyNode)
+
+    def addCurrentTimePointToDisplaySequences(self, proxyNode):
+      """Make sure that display node sequences of a displayable proxy node contain an item
+      for the current time point.
+      If a display node is driven by a display sequence that has no item for the current time point
+      then the display node is reset to defaults on each sequence browser update and any user
+      modification (such as toggling visibility) is reverted, therefore an item must be added.
+      Display properties are copied from the closest existing time point.
+      :param proxyNode: displayable proxy node whose display node sequences should be updated
+      """
+      if not proxyNode or not proxyNode.IsA("vtkMRMLDisplayableNode"):
+        return
+      _, indexValue = self.getDisplayedHeartValveSequenceIndexAndValue()
+      if indexValue is None:
+        return
+      for displayNodeIndex in range(proxyNode.GetNumberOfDisplayNodes()):
+        displayNode = proxyNode.GetNthDisplayNode(displayNodeIndex)
+        if not displayNode:
+          continue
+        displaySequenceNode = self.valveBrowserNode.GetSequenceNode(displayNode)
+        if not displaySequenceNode:
+          # Display node is not driven by a sequence, nothing to do
+          continue
+        if displaySequenceNode.GetItemNumberFromIndexValue(indexValue) < 0:
+          # Use the closest existing time point as template so that the new time point starts out
+          # with the same appearance (the proxy display node may have already been reset to
+          # defaults, so it cannot be used as template)
+          templateDisplayNode = displaySequenceNode.GetDataNodeAtValue(indexValue, False)
+          displaySequenceNode.SetDataNodeAtValue(templateDisplayNode if templateDisplayNode else displayNode, indexValue)
+        self.valveBrowserNode.SetSaveChanges(displaySequenceNode, True)
+      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
+
     def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
 
       axialSliceToRasTransformNode = self.axialSliceToRasTransformNode

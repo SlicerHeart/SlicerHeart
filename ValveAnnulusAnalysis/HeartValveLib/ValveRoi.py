@@ -34,21 +34,27 @@ class ValveRoi:
 
   def setRoiModelNode(self, destination):
     self.roiModelNode = destination
-
-    # initialize with defaults
-    if self.roiModelNode:
-      if not self.roiModelNode.GetAttribute(self.PARAM_SCALE):
-        self.roiModelNode.SetAttribute(self.PARAM_SCALE, "120")
-      if not self.roiModelNode.GetAttribute(self.PARAM_TOP_DISTANCE):
-        self.roiModelNode.SetAttribute(self.PARAM_TOP_DISTANCE, "10")
-      if not self.roiModelNode.GetAttribute(self.PARAM_TOP_SCALE):
-        self.roiModelNode.SetAttribute(self.PARAM_TOP_SCALE, "50")
-      if not self.roiModelNode.GetAttribute(self.PARAM_BOTTOM_DISTANCE):
-        self.roiModelNode.SetAttribute(self.PARAM_BOTTOM_DISTANCE, "30")
-      if not self.roiModelNode.GetAttribute(self.PARAM_BOTTOM_SCALE):
-        self.roiModelNode.SetAttribute(self.PARAM_BOTTOM_SCALE, "50")
-
+    self.initializeDefaultRoiGeometry()
     self.updateRoi()
+
+  def initializeDefaultRoiGeometry(self):
+    """Fill in default values for any missing ROI geometry parameter attributes.
+
+    The geometry parameters are stored as attributes of the ROI model node. They can be missing on
+    a newly created node, or on a node that was created as a new (default) item of a ROI model
+    sequence for a new time point.
+    """
+    if not self.roiModelNode:
+      return
+    defaultGeometryParams = {
+      self.PARAM_SCALE: "120",
+      self.PARAM_TOP_DISTANCE: "10",
+      self.PARAM_TOP_SCALE: "50",
+      self.PARAM_BOTTOM_DISTANCE: "30",
+      self.PARAM_BOTTOM_SCALE: "50"}
+    for paramName, defaultValue in defaultGeometryParams.items():
+      if not self.roiModelNode.GetAttribute(paramName):
+        self.roiModelNode.SetAttribute(paramName, defaultValue)
 
   def setAnnulusContourCurve(self, source):
     self.annulusContourCurve = source
@@ -252,6 +258,10 @@ class ValveRoi:
       self.roiModelNode.SetAndObservePolyData(clippingPolyData)
       self.roiModelNode.Modified()
       return
+
+    # Geometry parameter attributes can be missing if the ROI model was created as a new (default)
+    # item of a ROI model sequence for a new time point.
+    self.initializeDefaultRoiGeometry()
 
     scale = float(self.roiModelNode.GetAttribute(self.PARAM_SCALE)) * 0.01
     topDistance = float(self.roiModelNode.GetAttribute(self.PARAM_TOP_DISTANCE))
