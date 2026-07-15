@@ -604,8 +604,12 @@ class ValveModel:
         leafletVolumeSequenceNode = self.leafletVolumeSequenceNode
         if leafletVolumeSequenceNode:
           self.valveBrowser.addCurrentTimePointToSequence(leafletVolumeSequenceNode)
+          self.valveBrowserNode.SetSaveChanges(leafletVolumeSequenceNode, True)
           leafletVolumeNode = self.leafletVolumeNode
           leafletVolumeNode.CopyContent(newLeafletVolumeNode)
+          # The missing sequence item was created as an empty default node. Write the cloned
+          # volume content into the sequence item, otherwise it would remain empty.
+          slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(self.valveBrowserNode, leafletVolumeNode)
           slicer.mrmlScene.RemoveNode(newLeafletVolumeNode)
         else:
           self.leafletVolumeNode = newLeafletVolumeNode
@@ -636,7 +640,10 @@ class ValveModel:
             if templateNode is None or templateNode is leafletSegmentationNode:
               continue
             templateSegmentation = templateNode.GetSegmentation()
-            segmentIDs = templateSegmentation.GetSegmentIDs()
+            # The valve mask segment is not copied: it is regenerated from the current time
+            # point's valve ROI below, since the mask geometry is specific to each time point.
+            segmentIDs = [segmentID for segmentID in templateSegmentation.GetSegmentIDs()
+                          if segmentID != HeartValveLib.VALVE_MASK_SEGMENT_ID]
             if not segmentIDs:
               continue
             for segmentID in segmentIDs:
@@ -646,6 +653,24 @@ class ValveModel:
                   templateSegmentation.GetSegment(segmentID),
                   leafletSegmentationNode.GetSegmentation().GetSegment(newID))
             break  # one reference time point is sufficient
+
+      # Make sure the segmentation uses the leaflet volume as its source (reference geometry)
+      # volume. Segmentations restored from a sequence item may not have this reference.
+      if leafletSegmentationNode and leafletVolumeNode:
+        leafletSegmentationNode.SetNodeReferenceID(
+          leafletSegmentationNode.GetReferenceImageGeometryReferenceRole(), leafletVolumeNode.GetID())
+
+      # Make sure display properties of the leaflet volume and segmentation can be stored for this
+      # time point. If a display node is driven by a display sequence without an item for this time
+      # point then it is reset to defaults on every sequence browser update and the user cannot
+      # control visibility.
+      self.valveBrowser.addCurrentTimePointToDisplaySequences(self.leafletVolumeNode)
+      self.valveBrowser.addCurrentTimePointToDisplaySequences(leafletSegmentationNode)
+
+      # Generate the valve mask segment ("Annulus mask") from the current time point's valve ROI.
+      # If no valve ROI is defined for this time point yet then this is a no-op; the mask is
+      # (re)generated when setLeafletSegmentation or updateValveMaskSegment is called later.
+      self.updateValveMaskSegment()
 
       return leafletSegmentationNode
 
@@ -660,6 +685,66 @@ class ValveModel:
       if sourceSegment.GetTag("TerminologyEntry", terminologyRef):
         destinationSegment.SetTag("TerminologyEntry", terminologyRef.get())
 
+    def updateValveMaskSegment(self):
+      """Create or update the valve mask segment ("Annulus mask") of the leaflet segmentation for
+      the current time point.
+
+      The mask is generated from the current time point's valve ROI (clipping model), therefore it
+      is specific to each time point and must be regenerated instead of copied between time points.
+
+      :returns: True on success, False on failure.
+      """
+      import HeartValveLib
+      import vtkSegmentationCorePython as vtkSegmentationCore
+
+      leafletSegmentationNode = self.leafletSegmentationNode
+      if not leafletSegmentationNode:
+        logging.error("updateValveMaskSegment failed: no leaflet segmentation for the current time point")
+        return False
+
+      # Imported locally because the ValveSegmentation module depends on HeartValveLib
+      from ValveSegmentation import ValveSegmentationLogic
+      try:
+        leafletMaskOrientedImageData = ValveSegmentationLogic.getLeafletVolumeClippedAxisAligned(self)
+      except Exception as err:
+        logging.warning(f"updateValveMaskSegment: could not compute valve mask image: {err}")
+        return False
+      if not leafletMaskOrientedImageData:
+        logging.warning("updateValveMaskSegment: could not compute valve mask image")
+        return False
+
+      segmentation = leafletSegmentationNode.GetSegmentation()
+      valveMaskSegment = segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      if valveMaskSegment:
+        slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+          leafletMaskOrientedImageData, leafletSegmentationNode, HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      else:
+        valveMaskSegment = vtkSegmentationCore.vtkSegment()
+        valveMaskSegment.SetName("Annulus mask")
+        valveMaskSegment.AddRepresentation(
+          vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName(),
+          leafletMaskOrientedImageData)
+        segmentation.AddSegment(valveMaskSegment, HeartValveLib.VALVE_MASK_SEGMENT_ID)
+
+      # Default appearance: blue, semi-transparent, hidden (matches the ValveSegmentation module)
+      valveMaskSegment.SetColor(0, 0, 1)
+      displayNode = leafletSegmentationNode.GetDisplayNode()
+      if displayNode:
+        displayNode.SetSegmentOpacity(HeartValveLib.VALVE_MASK_SEGMENT_ID, 0.3)
+        displayNode.SetSegmentVisibility2DOutline(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+        displayNode.SetSegmentVisibility3D(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+        displayNode.SetSegmentVisibility(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+
+      # Use the mask geometry as reference image geometry of the segmentation
+      volumeIjkToRasMatrix = vtk.vtkMatrix4x4()
+      leafletMaskOrientedImageData.GetImageToWorldMatrix(volumeIjkToRasMatrix)
+      leafletMaskGeometry = vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(
+        volumeIjkToRasMatrix, leafletMaskOrientedImageData)
+      segmentation.SetConversionParameter(
+        vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName(),
+        leafletMaskGeometry)
+      return True
+
     def setLeafletSegmentation(self, sourceSegmentationNode, segmentIDs=None):
       """Replace the leaflet segmentation content for the current time point with segments copied
       from sourceSegmentationNode.
@@ -671,12 +756,18 @@ class ValveModel:
       preserved so that the same anatomical structure keeps a consistent ID across time points (which
       is what segmentation propagation workflows rely on).
 
+      The valve mask segment ("Annulus mask") is never copied from the source: it is generated
+      from the current time point's valve ROI, so a new one is created instead (see
+      updateValveMaskSegment).
+
       This method contains no GUI dependencies and can be called from scripts.
 
       :param sourceSegmentationNode: vtkMRMLSegmentationNode whose segments should be copied.
       :param segmentIDs: optional list of segment IDs to copy. If None, all segments are copied.
       :returns: leaflet segmentation node for the current time point, or None on failure.
       """
+      import HeartValveLib
+
       if not sourceSegmentationNode:
         logging.error("setLeafletSegmentation failed: invalid sourceSegmentationNode")
         return None
@@ -690,6 +781,8 @@ class ValveModel:
       targetSegmentation = leafletSegmentationNode.GetSegmentation()
       if segmentIDs is None:
         segmentIDs = list(sourceSegmentation.GetSegmentIDs())
+      # The valve mask is specific to each time point, never copy it from the source
+      segmentIDs = [segmentID for segmentID in segmentIDs if segmentID != HeartValveLib.VALVE_MASK_SEGMENT_ID]
 
       wasModify = leafletSegmentationNode.StartModify()
       # Remove existing segments so the result is a clean replacement.
@@ -702,6 +795,10 @@ class ValveModel:
           continue
         targetSegmentation.CopySegmentFromSegmentation(sourceSegmentation, segmentID)
       leafletSegmentationNode.EndModify(wasModify)
+
+      # Generate a new valve mask segment from this time point's valve ROI
+      self.updateValveMaskSegment()
+
       return leafletSegmentationNode
 
     def removePapillaryModel(self, papillaryModelIndex):
