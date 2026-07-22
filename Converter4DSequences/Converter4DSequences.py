@@ -231,6 +231,62 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 if displayNode.GetDisplayableNode() is None:
                     slicer.mrmlScene.RemoveNode(displayNode)
 
+            # Parent each heart valve's proxy subtree under its sequence browser node, so the whole
+            # valve (proxies, folders, ...) appears nested under the browser in the subject hierarchy
+            # instead of hanging off the scene root.
+            self._organizeValvesUnderBrowsers()
+
+            # Remove empty subject-hierarchy folders left behind by the conversion. Legacy scenes
+            # place leaflet/coaptation nodes into named folders under the (old) heart valve node;
+            # once that node and its contents are converted and removed, the folders are orphaned
+            # (reparented to the scene root) and empty. Clean them up so the hierarchy stays tidy.
+            self._removeEmptyValveFolders()
+
+    def _organizeValvesUnderBrowsers(self):
+        """Parent each HeartValve master proxy node under its sequence browser node in the subject
+        hierarchy. The master proxy carries the whole valve subtree (annulus, segmentation, leaflet
+        folders, ...), so this nests everything under the browser (e.g. 'tricuspid_Browser')."""
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        if not shNode:
+            return
+        for browserNode in slicer.util.getNodesByClass('vtkMRMLSequenceBrowserNode'):
+            if browserNode.GetAttribute("ModuleName") != "HeartValve":
+                continue
+            masterSequenceNode = browserNode.GetMasterSequenceNode()
+            if not masterSequenceNode:
+                continue
+            proxyNode = browserNode.GetProxyNode(masterSequenceNode)
+            if not proxyNode:
+                continue
+            browserItemID = shNode.GetItemByDataNode(browserNode)
+            proxyItemID = shNode.GetItemByDataNode(proxyNode)
+            if browserItemID and proxyItemID:
+                shNode.SetItemParent(proxyItemID, browserItemID)
+
+    def _removeEmptyValveFolders(self):
+        """Remove empty HeartValveLib subject-hierarchy folders (e.g. leftover 'LeafletSurface'
+        folders orphaned to the scene root after legacy nodes are converted and removed)."""
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        if not shNode:
+            return
+        folderLevel = slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelFolder()
+        knownValveFolderNames = {"LeafletSurface", "LeafletSurfaceEdit", "Coaptation",
+                                 "CoaptationEdit", "PapillaryMuscles"}
+        allItems = vtk.vtkIdList()
+        shNode.GetItemChildren(shNode.GetSceneItemID(), allItems, True)  # recursive
+        emptyFolderItemIDs = []
+        for i in range(allItems.GetNumberOfIds()):
+            itemID = allItems.GetId(i)
+            if (shNode.GetItemLevel(itemID) == folderLevel
+                    and shNode.GetItemName(itemID) in knownValveFolderNames):
+                childItems = vtk.vtkIdList()
+                shNode.GetItemChildren(itemID, childItems)
+                if childItems.GetNumberOfIds() == 0:
+                    emptyFolderItemIDs.append(itemID)
+        for itemID in emptyFolderItemIDs:
+            logging.info(f"Removing empty leftover folder: '{shNode.GetItemName(itemID)}'")
+            shNode.RemoveItem(itemID)
+
     def _createSequenceForNode(self, browserNode, sequenceName, indexName="time", indexUnit="frame", indexType=slicer.vtkMRMLSequenceNode.NumericIndex, missingItemMode=slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault):
         """
         Helper to create a sequence node and add it to a browser.
@@ -772,6 +828,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         sequenceToEntriesMap = {}
         # Track data sequence nodes to their display sequence nodes for correct linking
         dataSequenceToDisplaySequenceMap = {}
+        # Map sequence node IDs to the subject-hierarchy subfolder they should be organized into.
+        # Leaflet surface models go into "LeafletSurface" and their boundary markups into
+        # "LeafletSurfaceEdit" (matching the folders used by ValveModel for freshly created nodes).
+        leafletRoleFolders = {
+            "LeafletSurfaceModel": "LeafletSurface",
+            "LeafletSurfaceBoundaryMarkup": "LeafletSurfaceEdit",
+        }
+        seqIdToSubfolder = {}
 
         for (role, refIndex), nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
@@ -843,6 +907,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     addedNodes[indexValue] = nodeToAdd.GetID()                # Store the mapping for later transform verification
                 sequenceToEntriesMap[sequenceNode] = nodeEntries
 
+                # Remember which subject-hierarchy subfolder this sequence should live in
+                subfolderName = leafletRoleFolders.get(role)
+                if subfolderName:
+                    seqIdToSubfolder[sequenceNode.GetID()] = subfolderName
+
                 logging.info(f"Created sequence for role '{role}': {sequenceNode.GetName()} with {sequenceNode.GetNumberOfDataNodes()} time points")
 
                 # Create a display node sequence if any of the nodes have display nodes
@@ -874,6 +943,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                         # Store the mapping between data sequence and display sequence
                         dataSequenceToDisplaySequenceMap[sequenceNode] = displaySequenceNode
+
+                        # The display sequence belongs in the same subfolder as its data sequence
+                        if subfolderName:
+                            seqIdToSubfolder[displaySequenceNode.GetID()] = subfolderName
                     except Exception as err:
                         logging.warning(f"  Error creating display node sequence: {err}")
 
@@ -1145,7 +1218,25 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 if not valveItemID:
                     valveItemID = shNode.CreateItem(shNode.GetSceneItemID(), heartValveProxyNode)
 
-                # Move all sequence nodes and their proxy nodes under the valve
+                # Cache of subfolder name -> subject hierarchy folder item ID (created on demand)
+                subfolderItemIDs = {}
+
+                def getSubfolderItemID(subfolderName):
+                    if not subfolderName:
+                        return valveItemID
+                    folderItemID = subfolderItemIDs.get(subfolderName)
+                    if not folderItemID:
+                        folderItemID = shNode.GetItemChildWithName(valveItemID, subfolderName)
+                        if not folderItemID:
+                            folderItemID = shNode.CreateFolderItem(valveItemID, subfolderName)
+                        subfolderItemIDs[subfolderName] = folderItemID
+                    return folderItemID
+
+                # Move each proxy node under the valve. Leaflet surface proxy nodes are placed into
+                # the "LeafletSurface" / "LeafletSurfaceEdit" subfolders instead of directly under
+                # the valve. Sequence nodes themselves are intentionally left untouched: they are
+                # hidden from the subject hierarchy (no item), and force-creating an item for them
+                # would surface an unowned ("?") item in the tree.
                 hierarchyCount = 0
                 for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
                     seqNode = synchronizedSequenceNodes.GetItemAsObject(i)
@@ -1156,18 +1247,21 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     if seqNode.GetID() == heartValveSequenceNode.GetID():
                         continue
 
-                    # Move sequence node under valve
+                    targetItemID = getSubfolderItemID(seqIdToSubfolder.get(seqNode.GetID()))
+
+                    # Move the sequence node only if it already has a subject-hierarchy item
+                    # (do not create one - see note above).
                     seqItemID = shNode.GetItemByDataNode(seqNode)
                     if seqItemID:
-                        shNode.SetItemParent(seqItemID, valveItemID)
+                        shNode.SetItemParent(seqItemID, targetItemID)
                         hierarchyCount += 1
 
-                    # Move proxy node under valve (if it's not a display node)
+                    # Move the proxy node (the item actually shown in the tree) into the target folder
                     proxyNode = valveBrowserNode.GetProxyNode(seqNode)
                     if proxyNode and not proxyNode.IsA("vtkMRMLDisplayNode"):
                         proxyItemID = shNode.GetItemByDataNode(proxyNode)
                         if proxyItemID:
-                            shNode.SetItemParent(proxyItemID, valveItemID)
+                            shNode.SetItemParent(proxyItemID, targetItemID)
                             hierarchyCount += 1
 
                 logging.info(f"Organized {hierarchyCount} item(s) under heart valve '{heartValveProxyNode.GetName()}' in subject hierarchy")
