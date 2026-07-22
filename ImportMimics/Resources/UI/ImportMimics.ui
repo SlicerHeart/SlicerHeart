@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ImportMimics</class>
+ <widget class="qMRMLWidget" name="ImportMimics">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>368</width>
+    <height>327</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
+     <property name="text">
+      <string>Inputs</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_input">
+        <property name="text">
+         <string>Mimics project file (.mcs) or folder:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkPathLineEdit" name="inputPathLineEdit">
+        <property name="toolTip">
+         <string>Select a Materialise Mimics project file (.mcs), or a folder to batch convert every .mcs file it contains.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_loadIntoScene">
+        <property name="text">
+         <string>Load into scene:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QHBoxLayout" name="loadIntoSceneLayout">
+        <item>
+         <widget class="QCheckBox" name="loadIntoSceneCheckBox">
+          <property name="toolTip">
+           <string>Load the extracted data into the current Slicer scene.</string>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="inputWarningLabel">
+          <property name="visible">
+           <bool>false</bool>
+          </property>
+          <property name="styleSheet">
+           <string>color: red;</string>
+          </property>
+          <property name="text">
+           <string>Select a valid Mimics project file</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="loadIntoSceneSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>0</width>
+            <height>0</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_exportDir">
+        <property name="text">
+         <string>Output folder:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QRadioButton" name="exportSameFolderRadioButton">
+        <property name="toolTip">
+         <string>Save the extracted files next to the input .mcs file, in a subfolder named after the project.</string>
+        </property>
+        <property name="text">
+         <string>Same as input folder</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QRadioButton" name="exportNoSaveRadioButton">
+        <property name="toolTip">
+         <string>Only load into the scene; do not write any converted files to disk.</string>
+        </property>
+        <property name="text">
+         <string>Do not save converted files</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <item>
+         <widget class="QRadioButton" name="exportCustomFolderRadioButton">
+          <property name="toolTip">
+           <string>Save the extracted files to a custom folder.</string>
+          </property>
+          <property name="text">
+           <string>Custom folder:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="ctkPathLineEdit" name="exportPathLineEdit">
+          <property name="toolTip">
+           <string>Folder where the extracted NRRD / PLY / JSON files will be saved.</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="5" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="contentGroupBox">
+        <property name="title">
+         <string>Content</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_options">
+         <item>
+          <widget class="QCheckBox" name="importImageCheckBox">
+           <property name="toolTip">
+            <string>Reconstruct the image volume from the embedded DICOM headers and pixel data.</string>
+           </property>
+           <property name="text">
+            <string>Image volume</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="importModelsCheckBox">
+           <property name="toolTip">
+            <string>Import surface models (3D objects / segmentation surfaces).</string>
+           </property>
+           <property name="text">
+            <string>Surface models</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="importNurbsCheckBox">
+           <property name="toolTip">
+            <string>Import NURBS surfaces (e.g. valve annuli) as closed markups curves.</string>
+           </property>
+           <property name="text">
+            <string>NURBS curves (markups)</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="importPointsCheckBox">
+           <property name="toolTip">
+            <string>Import point sets as markups point lists.</string>
+           </property>
+           <property name="text">
+            <string>Point sets (markups)</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="importDicomCheckBox">
+           <property name="toolTip">
+            <string>Reconstruct the original DICOM files (image headers with pixel data). Written to a &quot;dicom&quot; subfolder when an output folder is selected. Note: may contain patient information.</string>
+           </property>
+           <property name="text">
+            <string>DICOM files</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="importMetadataCheckBox">
+           <property name="toolTip">
+            <string>Save a JSON file with the project inventory and image, patient, study and series metadata. Note: may contain patient information.</string>
+           </property>
+           <property name="text">
+            <string>Metadata (JSON)</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="applyButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="toolTip">
+      <string>Import the selected Mimics project.</string>
+     </property>
+     <property name="text">
+      <string>Import</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progressBar">
+     <property name="value">
+      <number>0</number>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPlainTextEdit" name="statusLabel">
+     <property name="readOnly">
+      <bool>true</bool>
+     </property>
+     <property name="centerOnScroll">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
