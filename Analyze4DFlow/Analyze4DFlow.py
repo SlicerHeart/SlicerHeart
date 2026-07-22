@@ -673,6 +673,343 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         imageData.SetDirectionMatrix(directionMatrix)
         return imageData
 
+    @staticmethod
+    def _buildCrossSectionSamplePolyDataWorld(crossSectionPlaneNode, samplingDistanceMm):
+        """Build a regular grid of sample points covering the measurement plane's bounds, transformed
+        to world coordinates. Returns (samplePolyDataWorld, objectToWorldMatrix)."""
+        import math
+
+        planeBoundsMm = crossSectionPlaneNode.GetPlaneBounds()
+        # Floor towards zero to get number of grid points within the plane's boundary
+        planeBoundsGrid = [math.floor(boundMm/samplingDistanceMm) if boundMm >= 0 else math.ceil(boundMm/samplingDistanceMm) for boundMm in planeBoundsMm]
+        samplingGrid_Object = vtk.vtkPlaneSource()
+        # Resolution: how many part the plane is divided into (2 means 1 dividing line in the middle)
+        samplingGrid_Object.SetXResolution(abs(planeBoundsGrid[1]-planeBoundsGrid[0]))
+        samplingGrid_Object.SetYResolution(abs(planeBoundsGrid[3]-planeBoundsGrid[2]))
+        samplingGrid_Object.SetOrigin(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
+        samplingGrid_Object.SetPoint1(planeBoundsGrid[1] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
+        samplingGrid_Object.SetPoint2(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[3] * samplingDistanceMm, 0)
+
+        # Transform plane to world coordinate system
+        objectToWorldMatrix = vtk.vtkMatrix4x4()
+        crossSectionPlaneNode.GetObjectToWorldMatrix(objectToWorldMatrix)
+        objectToWorldTransform = vtk.vtkTransform()
+        objectToWorldTransform.SetMatrix(objectToWorldMatrix)
+        objectToWorldTransformFilter = vtk.vtkTransformPolyDataFilter()
+        objectToWorldTransformFilter.SetTransform(objectToWorldTransform)
+        objectToWorldTransformFilter.SetInputConnection(samplingGrid_Object.GetOutputPort())
+        objectToWorldTransformFilter.Update()
+
+        return objectToWorldTransformFilter.GetOutput(), objectToWorldMatrix
+
+    @staticmethod
+    def _prepareOutputFlowMetricsModel(outputFlowMetricsModel, samplePolyDataWorld):
+        """Ensure outputFlowMetricsModel exists (creating a temporary one if needed) and has a default
+        display node, then set its polydata to samplePolyDataWorld.
+        Returns (outputFlowMetricsModel, createdTemporary)."""
+        createdTemporary = False
+        if not outputFlowMetricsModel:
+            # Create model node for the output flow metrics, if not provided then we create a temporary one
+            outputFlowMetricsModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Flow metrics")
+            createdTemporary = True
+        if not outputFlowMetricsModel.GetDisplayNode():
+            # Initialize model display node
+            outputFlowMetricsModel.CreateDefaultDisplayNodes()
+            displayNode = outputFlowMetricsModel.GetDisplayNode()
+            displayNode.SetColor(1, 1, 0)
+            displayNode.SetEdgeVisibility(True)
+            displayNode.BackfaceCullingOff()
+            displayNode.LightingOff()  # don't make the grid darker if it is rotated
+        outputFlowMetricsModel.SetAndObservePolyData(samplePolyDataWorld)
+        return outputFlowMetricsModel, createdTemporary
+
+    def _addOutputNodesToSequenceBrowser(self, sequenceBrowserNode, outputStreamlinesModel, outputSpeedVolume,
+            outputMaskedFlowField, outputFlowMetricsModel, includeFlowMetricsModel):
+        """Add the given output nodes to the same sequence browser as the input flow field."""
+        resultProxyNodes = [outputStreamlinesModel, outputSpeedVolume, outputMaskedFlowField]
+        if includeFlowMetricsModel:
+            resultProxyNodes.append(outputFlowMetricsModel)
+        for node in resultProxyNodes:
+            if not node:
+                continue
+            self._addNodeToSequenceBrowser(node, sequenceBrowserNode)
+
+    def _sampleTransformFrame(self, flowFieldNode, magnitudeVolumeNode, outputFlowMetricsModel,
+            maskSegmentationNode, maskSegmentID, streamlinesSpeedThresholdMPerSec,
+            outputStreamlinesModel, outputSpeedVolume, outputMaskedFlowField, probeVolumeCliNode):
+        """Sample the grid transform's displacement field onto outputFlowMetricsModel's points ("Speed"
+        array), compute the vessel mask ("insideVessel"/"SpeedMasked" arrays), optionally mask the full
+        3D displacement image (needed for streamlines / speed volume / masked output), and write
+        outputMaskedFlowField if requested.
+        Returns (displacementImageNode, probeVolumeCliNode). The caller owns displacementImageNode and
+        must remove it after use; probeVolumeCliNode is reused across frames and should only be removed
+        once the whole sequence has been processed."""
+        import numpy as np
+
+        displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(
+            flowFieldNode, magnitudeVolumeNode, False, slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode"))
+
+        maskLabelmapNode = None
+        try:
+            parameters = {}
+            parameters["InputVolume"] = displacementImageNode
+            parameters["InputModel"] = outputFlowMetricsModel
+            parameters["OutputModel"] = outputFlowMetricsModel
+            parameters["OutputArrayName"] = "Speed"
+            probeVolumeWithModel = slicer.modules.probevolumewithmodel
+            probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
+            if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
+                # error
+                errorText = probeVolumeCliNode.GetErrorText()
+                slicer.mrmlScene.RemoveNode(probeVolumeCliNode)
+                raise ValueError("Probe 4D field execution failed: " + errorText)
+
+            if maskSegmentationNode and maskSegmentID:
+                # Vessel mask is set by segmentation
+
+                # Export mask segment to labelmap node
+                maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "__tmp__Mask labelmap")
+                slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
+                slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
+
+                # Probe mask image with model
+                parameters["InputVolume"] = maskLabelmapNode
+                parameters["InputModel"] = outputFlowMetricsModel
+                tempOutputFlowMetricsMaskModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Mask model")
+                parameters["OutputModel"] = tempOutputFlowMetricsMaskModel
+                parameters["OutputArrayName"] = "insideVessel"
+                probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
+                if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
+                    # error
+                    errorText = probeVolumeCliNode.GetErrorText()
+                    slicer.mrmlScene.RemoveNode(tempOutputFlowMetricsMaskModel)
+                    slicer.mrmlScene.RemoveNode(probeVolumeCliNode)
+                    raise ValueError("Probe 4D field execution failed: " + errorText)
+
+                # Save mask array
+                insideVesselArray = slicer.util.arrayFromModelPointData(tempOutputFlowMetricsMaskModel, 'insideVessel').copy()
+                slicer.mrmlScene.RemoveNode(tempOutputFlowMetricsMaskModel)
+
+            else:
+                # Generate mask based on speed magnitude
+                maskLabelmapNode = None
+
+                # Get displacement magnitude array
+                displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
+                displacementMagnitudeArray = np.linalg.norm(displacementArray, axis=1)
+                insideVesselArray = displacementMagnitudeArray > streamlinesSpeedThresholdMPerSec
+
+            # Save mask array into the flow metrics model
+            Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
+
+            # Set all displacements outside the mask to zero
+            displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
+            maskedDisplacementArray = displacementArray.copy()
+            maskedDisplacementArray[insideVesselArray==0, :] = 0
+            Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
+
+            # Apply mask to displacement image if further processing is requested
+            if maskLabelmapNode and (outputStreamlinesModel or outputSpeedVolume or outputMaskedFlowField):
+                displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
+                displacementImageArray[maskImageArray==0, :] = 0
+            elif outputMaskedFlowField and not maskLabelmapNode:
+                # No segmentation mask — apply speed threshold as a 3D mask
+                displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                displacementMagnitudeArray = np.linalg.norm(displacementImageArray, axis=3)
+                displacementImageArray[displacementMagnitudeArray <= streamlinesSpeedThresholdMPerSec, :] = 0
+
+            if outputMaskedFlowField:
+                self._setTransformFromDisplacementImage(outputMaskedFlowField, displacementImageNode)
+                outputMaskedFlowField.Modified()
+
+        except Exception:
+            # The caller only takes ownership of displacementImageNode on a successful return,
+            # so clean it up here if we bail out early.
+            slicer.mrmlScene.RemoveNode(displacementImageNode)
+            raise
+        finally:
+            if maskLabelmapNode:
+                slicer.mrmlScene.RemoveNode(maskLabelmapNode)
+
+        return displacementImageNode, probeVolumeCliNode
+
+    def _sampleModelFrame(self, flowFieldNode, outputFlowMetricsModel, maskSegmentationNode, maskSegmentID,
+            streamlinesSpeedThresholdMPerSec, needMaskedMesh):
+        """Sample the flow field model's velocity field onto outputFlowMetricsModel's points ("Speed"
+        array), compute the vessel mask ("insideVessel"/"SpeedMasked" arrays), and optionally build a
+        masked copy of the full flow field mesh (needed for streamlines / speed volume / masked output).
+        Returns (flowFieldMeshWorld, velocityArrayName, maskedFlowFieldMesh-or-None)."""
+        import numpy as np
+        import vtk.util.numpy_support
+
+        # Sample the velocity field ("V" or "Velocity" point data array) of the flow field mesh onto the cross-section sample points
+        flowFieldMeshWorld = self._getMeshInWorld(flowFieldNode)
+        velocityArrayName = self._getVelocityArrayName(flowFieldMeshWorld.GetPointData())
+        if velocityArrayName is None:
+            raise ValueError("Input flow field model does not contain a point data array named 'V' or 'Velocity'")
+        probeFilter = vtk.vtkProbeFilter()
+        probeFilter.SetInputData(outputFlowMetricsModel.GetPolyData())
+        probeFilter.SetSourceData(flowFieldMeshWorld)
+        probeFilter.Update()
+        velocityArray = probeFilter.GetOutput().GetPointData().GetArray(velocityArrayName)
+        Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "Speed",
+            vtk.util.numpy_support.vtk_to_numpy(velocityArray), vtk.VTK_FLOAT)
+
+        # Determine which sample points are inside the vessel of interest
+        if maskSegmentationNode and maskSegmentID:
+            # Vessel mask is set by segmentation
+            insideVesselArray = self._computeInsideSegmentMask(
+                outputFlowMetricsModel.GetPolyData().GetPoints(), maskSegmentationNode, maskSegmentID)
+        else:
+            # Generate mask based on speed magnitude
+            displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
+            displacementMagnitudeArray = np.linalg.norm(displacementArray, axis=1)
+            insideVesselArray = displacementMagnitudeArray > streamlinesSpeedThresholdMPerSec
+
+        # Save mask array into the flow metrics model
+        Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
+
+        # Set all displacements outside the mask to zero
+        displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
+        maskedDisplacementArray = displacementArray.copy()
+        maskedDisplacementArray[insideVesselArray==0, :] = 0
+        Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
+
+        # Prepare a masked copy of the full flow field mesh for streamlines / masked output / speed volume
+        maskedFlowFieldMesh = None
+        if needMaskedMesh:
+            maskedFlowFieldMesh = flowFieldMeshWorld.NewInstance()
+            maskedFlowFieldMesh.DeepCopy(flowFieldMeshWorld)
+            fullVelocityArray = vtk.util.numpy_support.vtk_to_numpy(maskedFlowFieldMesh.GetPointData().GetArray(velocityArrayName))
+            if maskSegmentationNode and maskSegmentID:
+                insideVesselArrayFull = self._computeInsideSegmentMask(
+                    maskedFlowFieldMesh.GetPoints(), maskSegmentationNode, maskSegmentID)
+            else:
+                speedMagnitudeFull = np.linalg.norm(fullVelocityArray, axis=1)
+                insideVesselArrayFull = speedMagnitudeFull > streamlinesSpeedThresholdMPerSec
+            fullVelocityArray[insideVesselArrayFull == 0, :] = 0
+            maskedFlowFieldMesh.GetPointData().GetArray(velocityArrayName).Modified()
+
+        return flowFieldMeshWorld, velocityArrayName, maskedFlowFieldMesh
+
+    @staticmethod
+    def _initializeStreamlinesDisplayNode(outputStreamlinesModel, flowFieldNode):
+        """Set up the streamlines model's display node (color/edges/lighting, colored by "Speed",
+        reusing the flow field's color table if it has one), unless already initialized."""
+        if outputStreamlinesModel.GetDisplayNode() and outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
+            return
+        outputStreamlinesModel.CreateDefaultDisplayNodes()
+        displayNode = outputStreamlinesModel.GetDisplayNode()
+        displayNode.SetColor(0, 0, 1)
+        displayNode.SetEdgeVisibility(True)
+        displayNode.BackfaceCullingOff()
+        displayNode.LightingOff()  # don't make the lines darker depending on orientation
+        displayNode.SetActiveScalarName('Speed')
+        if flowFieldNode.GetDisplayNode() and flowFieldNode.GetDisplayNode().GetColorNodeID():
+            # Use the same color table and scaling as the flow field
+            displayNode.SetAndObserveColorNodeID(flowFieldNode.GetDisplayNode().GetColorNodeID())
+            displayNode.SetScalarRangeFlag(displayNode.UseColorNodeScalarRange)
+        else:
+            displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
+        displayNode.ScalarVisibilityOn()
+
+    @staticmethod
+    def _computeSpeedVolumeScalarArray(vectorImageArray, speedVolumeProjectedToPlane, planeNormal):
+        """Compute the scalar speed volume array from a vector field image array: either the speed
+        magnitude, or (if speedVolumeProjectedToPlane) the signed component along planeNormal."""
+        import numpy as np
+        if speedVolumeProjectedToPlane:
+            # Project speed vector to the plane.
+            # Compute dot product of each element of vectorImageArray by planeNormal.
+            # Do not iterate through points one by one because it would be too slow
+            # (use numpy operations instead).
+            return np.sum(vectorImageArray * planeNormal, axis=3)
+        else:
+            return np.linalg.norm(vectorImageArray, axis=3)
+
+    def _updateSpeedVolumeColorMapping(self, outputSpeedVolume, flowFieldNode, speedVolumeProjectedToPlane, streamlinesSpeedThresholdMPerSec):
+        """Set up (or refresh) outputSpeedVolume's color table and window/level for Doppler-like visualization."""
+        if not outputSpeedVolume.GetScalarVolumeDisplayNode():
+            outputSpeedVolume.CreateDefaultDisplayNodes()
+        colorNode = outputSpeedVolume.GetScalarVolumeDisplayNode().GetColorNode()
+        # colorMappingType is Speed (for absolute speed) or SpeedComponent (for Doppler-like signed speed)
+        currentColorMappingType = colorNode.GetAttribute("SlicerHeart.ColorMappingType") if colorNode else None
+        requiredColorMappingType = "SpeedComponent" if speedVolumeProjectedToPlane else "Speed"
+        if currentColorMappingType == requiredColorMappingType and not self.forceColorMappingReset:
+            return
+
+        # Update color table
+        if currentColorMappingType:
+            # We need to switch to a different color mapping type, but keep reference to this color node
+            outputSpeedVolume.SetNodeReferenceID("SlicerHeart."+currentColorMappingType, colorNode.GetID())
+        colorNode = outputSpeedVolume.GetNodeReference("SlicerHeart." + requiredColorMappingType)
+        if colorNode:
+            # There is a saved color table that we can use
+            colorNodeID = colorNode.GetID()
+        else:
+            # Need to create new color node
+            if speedVolumeProjectedToPlane:
+                colorNodeID = self._createSpeedComponentColorNode().GetID()
+            else:
+                if flowFieldNode.GetDisplayNode() and flowFieldNode.GetDisplayNode().GetColorNodeID():
+                    # Use the same color table and scaling as the flow field
+                    colorNodeID = flowFieldNode.GetDisplayNode().GetColorNodeID()
+                else:
+                    colorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
+        speedVolumeDisplayNode = outputSpeedVolume.GetScalarVolumeDisplayNode()
+        speedVolumeDisplayNode.SetAndObserveColorNodeID(colorNodeID)
+
+        # Set default window/level and threshold settings
+        # (it could make sense to not overwrite it once it is set by the user, but for now we always set it to default)
+        if speedVolumeProjectedToPlane:
+            speedVolumeDisplayNode.SetAutoWindowLevel(False)
+            speedVolumeDisplayNode.SetWindowLevelMinMax(*self.dopplerLutRange)
+            speedVolumeDisplayNode.SetApplyThreshold(False)
+        else:
+            # Use the color node's range
+            speedVolumeDisplayNode.SetAutoWindowLevel(False)
+            scalarRange = speedVolumeDisplayNode.GetColorNode().GetScalarsToColors().GetRange()
+            speedVolumeDisplayNode.SetWindowLevelMinMax(*scalarRange)
+            speedVolumeDisplayNode.SetApplyThreshold(True)
+            speedVolumeDisplayNode.SetThreshold(streamlinesSpeedThresholdMPerSec, scalarRange[1])
+
+    @staticmethod
+    def _finalizeOutputMaskedFlowField(outputMaskedFlowField, flowFieldNode, isTransformInput):
+        """After the per-frame loop, position outputMaskedFlowField next to flowFieldNode in the subject
+        hierarchy and copy display settings (and the color legend, if any) from flowFieldNode."""
+        # Move the masked flow field into next to the input flow field in the subject hierarchy
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        inputItem = shNode.GetItemByDataNode(flowFieldNode)
+        outputItem = shNode.GetItemByDataNode(outputMaskedFlowField)
+        if inputItem and outputItem:
+            shNode.SetItemParent(outputItem, shNode.GetItemParent(inputItem))
+
+        if not outputMaskedFlowField.GetDisplayNode():
+            sourceDisplayNode = flowFieldNode.GetDisplayNode()
+            if sourceDisplayNode:
+                newDisplayNode = slicer.mrmlScene.AddNewNodeByClass(sourceDisplayNode.GetClassName())
+                newDisplayNode.CopyContent(sourceDisplayNode)
+                newDisplayNode.SetVisibility(False)
+                if isTransformInput:
+                    # Copy the transform display node's region reference too
+                    regionNodeID = sourceDisplayNode.GetNodeReferenceID("region")
+                    newDisplayNode.SetNodeReferenceID("region", regionNodeID)
+                outputMaskedFlowField.SetAndObserveDisplayNodeID(newDisplayNode.GetID())
+            elif not isTransformInput:
+                outputMaskedFlowField.CreateDefaultDisplayNodes()
+                outputMaskedFlowField.GetDisplayNode().SetVisibility(False)
+
+        # Copy the color legend display node
+        for i in range(flowFieldNode.GetNumberOfDisplayNodes()):
+            dn = flowFieldNode.GetNthDisplayNode(i)
+            if dn and dn.IsA("vtkMRMLColorLegendDisplayNode"):
+                existingIDs = [outputMaskedFlowField.GetNthDisplayNodeID(j)
+                               for j in range(outputMaskedFlowField.GetNumberOfDisplayNodes())]
+                if dn.GetID() not in existingIDs:
+                    outputMaskedFlowField.AddAndObserveDisplayNodeID(dn.GetID())
+                break
+
     def sampleFlowFieldWithPlane(
             self,
             crossSectionPlaneNode: vtkMRMLMarkupsPlaneNode,
@@ -690,7 +1027,6 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             speedVolumeProjectedToPlane: bool = False,
             outputMaskedFlowField: Union[vtkMRMLModelNode, vtkMRMLTransformNode] = None) -> vtkMRMLModelNode:
 
-        import numpy as np
         import vtk.util.numpy_support
 
         if not crossSectionPlaneNode:
@@ -711,10 +1047,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         if isTransformInput and not sequenceBrowserNode:
             raise RuntimeError("Input transform is not in a sequence")
 
-        # Temporary nodes used only by the transform-based (grid transform) path
-        displacementImageNode = None
-        maskLabelmapNode = None
-        probeVolumeCliNode = None
+        needMaskedField = bool(outputStreamlinesModel or outputSpeedVolume or outputMaskedFlowField)
+        probeVolumeCliNode = None  # reused across frames by the grid transform path
+        deleteOutputFlowMetricsModel = False
 
         try:
 
@@ -727,286 +1062,59 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             else:
                 originalItemNumber = None
                 numberOfItems = 1
-            deleteOutputFlowMetricsModel = False
             for itemNumber in range(numberOfItems):
                 self.log("Sampling flow field with plane... ({item}/{count})".format(item=itemNumber+1, count=numberOfItems))
 
                 if sequenceBrowserNode:
                     sequenceBrowserNode.SetSelectedItemNumber(itemNumber)
 
-                # Create sampling plane
-                planeBoundsMm = crossSectionPlaneNode.GetPlaneBounds()
-                import math
-                # Floor towards zero to get number of grid points within the plane's boundary
-                planeBoundsGrid = [math.floor(boundMm/samplingDistanceMm) if boundMm >= 0 else math.ceil(boundMm/samplingDistanceMm) for boundMm in planeBoundsMm]
-                samplingGrid_Object = vtk.vtkPlaneSource()
-                # Resolution: how many part the plane is divided into (2 means 1 dividing line in the middle)
-                samplingGrid_Object.SetXResolution(abs(planeBoundsGrid[1]-planeBoundsGrid[0]))
-                samplingGrid_Object.SetYResolution(abs(planeBoundsGrid[3]-planeBoundsGrid[2]))
-                samplingGrid_Object.SetOrigin(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
-                samplingGrid_Object.SetPoint1(planeBoundsGrid[1] * samplingDistanceMm, planeBoundsGrid[2] * samplingDistanceMm, 0)
-                samplingGrid_Object.SetPoint2(planeBoundsGrid[0] * samplingDistanceMm, planeBoundsGrid[3] * samplingDistanceMm, 0)
-
-                # Transform plane to world coordinate system
-                objectToWorldMatrix = vtk.vtkMatrix4x4()
-                crossSectionPlaneNode.GetObjectToWorldMatrix(objectToWorldMatrix)
-                objectToWorldTransform = vtk.vtkTransform()
-                objectToWorldTransform.SetMatrix(objectToWorldMatrix)
-                objectToWorldTransformFilter = vtk.vtkTransformPolyDataFilter()
-                objectToWorldTransformFilter.SetTransform(objectToWorldTransform)
-                objectToWorldTransformFilter.SetInputConnection(samplingGrid_Object.GetOutputPort())
-
-                # Save model to plane
-                if not outputFlowMetricsModel:
-                    # Create model node for the output flow metrics, if not provided then we create a temporary one
-                    outputFlowMetricsModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Flow metrics")
+                samplePolyDataWorld, objectToWorldMatrix = self._buildCrossSectionSamplePolyDataWorld(crossSectionPlaneNode, samplingDistanceMm)
+                outputFlowMetricsModel, createdTemporary = self._prepareOutputFlowMetricsModel(outputFlowMetricsModel, samplePolyDataWorld)
+                if createdTemporary:
                     deleteOutputFlowMetricsModel = True
-                if not outputFlowMetricsModel.GetDisplayNode():
-                    # Initialize model display node
-                    outputFlowMetricsModel.CreateDefaultDisplayNodes()
-                    displayNode = outputFlowMetricsModel.GetDisplayNode()
-                    displayNode.SetColor(1, 1, 0)
-                    displayNode.SetEdgeVisibility(True)
-                    displayNode.BackfaceCullingOff()
-                    displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
                 if sequenceBrowserNode:
                     # Add the output nodes to the same sequence browser as the input 4D flow field
-                    resultProxyNodes = [outputStreamlinesModel, outputSpeedVolume, outputMaskedFlowField]
-                    if not deleteOutputFlowMetricsModel:
-                        # only create sequence and proxy node if the flow metrics model is not temporary
-                        resultProxyNodes.append(outputFlowMetricsModel)
-                    for node in resultProxyNodes:
-                        if not node:
-                            continue
-                        self._addNodeToSequenceBrowser(node, sequenceBrowserNode)
-
-                objectToWorldTransformFilter.Update()
-                outputFlowMetricsModel.SetAndObservePolyData(objectToWorldTransformFilter.GetOutput())
+                    # (only add the flow metrics model if it is not temporary)
+                    self._addOutputNodesToSequenceBrowser(sequenceBrowserNode, outputStreamlinesModel, outputSpeedVolume,
+                        outputMaskedFlowField, outputFlowMetricsModel, not deleteOutputFlowMetricsModel)
 
                 if isTransformInput:
                     # ============================================================
                     # Grid transform (4D flow MRI) path
                     # ============================================================
+                    displacementImageNode, probeVolumeCliNode = self._sampleTransformFrame(
+                        flowFieldNode, magnitudeVolumeNode, outputFlowMetricsModel, maskSegmentationNode, maskSegmentID,
+                        streamlinesSpeedThresholdMPerSec, outputStreamlinesModel, outputSpeedVolume, outputMaskedFlowField,
+                        probeVolumeCliNode)
+                    try:
+                        # Update streamlines
+                        if outputStreamlinesModel:
+                            speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
+                            self._createStreamlinesFromImage(outputStreamlinesModel, speedImageNodeMPerSec, outputFlowMetricsModel,
+                                streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesComputeAllMetrics, streamlinesSpeedThresholdMPerSec)
+                            self._initializeStreamlinesDisplayNode(outputStreamlinesModel, flowFieldNode)
 
-                    # Sample displacement field with the model
-                    displacementImageNode = slicer.modules.transforms.logic().CreateDisplacementVolumeFromTransform(
-                        flowFieldNode, magnitudeVolumeNode, False, slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode"))
-
-                    parameters = {}
-
-                    parameters["InputVolume"] = displacementImageNode
-                    parameters["InputModel"] = outputFlowMetricsModel
-                    parameters["OutputModel"] = outputFlowMetricsModel
-                    parameters["OutputArrayName"] = "Speed"
-                    probeVolumeWithModel = slicer.modules.probevolumewithmodel
-                    probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
-                    if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
-                        # error
-                        errorText = probeVolumeCliNode.GetErrorText()
-                        raise ValueError("Probe 4D field execution failed: " + errorText)
-
-                    if maskSegmentationNode and maskSegmentID:
-                        # Vessel mask is set by segmentation
-
-                        # Export mask segment to labelmap node
-                        maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "__tmp__Mask labelmap")
-                        slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
-                        slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
-
-                        # Probe mask image with model
-                        parameters["InputVolume"] = maskLabelmapNode
-                        parameters["InputModel"] = outputFlowMetricsModel
-                        tempOutputFlowMetricsMaskModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__tmp__Mask model")
-                        parameters["OutputModel"] = tempOutputFlowMetricsMaskModel
-                        parameters["OutputArrayName"] = "insideVessel"
-                        probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
-                        if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
-                            # error
-                            errorText = probeVolumeCliNode.GetErrorText()
-                            slicer.mrmlScene.RemoveNode(tempOutputFlowMetricsMaskModel)
-                            raise ValueError("Probe 4D field execution failed: " + errorText)
-
-                        # Save mask array
-                        insideVesselArray = slicer.util.arrayFromModelPointData(tempOutputFlowMetricsMaskModel, 'insideVessel').copy()
-                        slicer.mrmlScene.RemoveNode(tempOutputFlowMetricsMaskModel)
-
-                    else:
-                        # Generate mask based on speed magnitude
-                        maskLabelmapNode = None
-
-                        # Get displacement magnitude array
-                        displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
-                        displacementMagnitudeArray = np.linalg.norm(displacementArray, axis=1)
-                        insideVesselArray = displacementMagnitudeArray > streamlinesSpeedThresholdMPerSec
-
-                    # Save mask array into the flow metrics model
-                    Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
-
-                    # Set all displacements outside the mask to zero
-                    displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
-                    maskedDisplacementArray = displacementArray.copy()
-                    maskedDisplacementArray[insideVesselArray==0, :] = 0
-                    Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
-
-                    # Apply mask to displacement image if further processing is requested
-                    if maskLabelmapNode and (outputStreamlinesModel or outputSpeedVolume or outputMaskedFlowField):
-                        displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
-                        maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
-                        displacementImageArray[maskImageArray==0, :] = 0
-                    elif outputMaskedFlowField and not maskLabelmapNode:
-                        # No segmentation mask — apply speed threshold as a 3D mask
-                        displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
-                        displacementMagnitudeArray = np.linalg.norm(displacementImageArray, axis=3)
-                        displacementImageArray[displacementMagnitudeArray <= streamlinesSpeedThresholdMPerSec, :] = 0
-
-                    if outputMaskedFlowField:
-                        self._setTransformFromDisplacementImage(outputMaskedFlowField, displacementImageNode)
-                        outputMaskedFlowField.Modified()
-
-                    if maskLabelmapNode:
-                        # Clean up
-                        slicer.mrmlScene.RemoveNode(maskLabelmapNode)
-                        maskLabelmapNode = None
-
-                    # Update streamlines
-                    if outputStreamlinesModel:
-                        speedImageNodeMPerSec = displacementImageNode  # "displacement image" actually stores a speed vector field
-                        streamlinesSeedModel = outputFlowMetricsModel  # the plane profile is also used for generating seed points
-                        self._createStreamlinesFromImage(outputStreamlinesModel, speedImageNodeMPerSec, streamlinesSeedModel,
-                            streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesComputeAllMetrics, streamlinesSpeedThresholdMPerSec)
-                        if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
-                            # Initialize streamlines model display node
-                            outputStreamlinesModel.CreateDefaultDisplayNodes()
-                            displayNode = outputStreamlinesModel.GetDisplayNode()
-                            displayNode.SetColor(0, 0, 1)
-                            displayNode.SetEdgeVisibility(True)
-                            displayNode.BackfaceCullingOff()
-                            displayNode.LightingOff()  # don't make the lines darker depending on orientation
-                            displayNode.SetActiveScalarName('Speed')
-                            if flowFieldNode.GetDisplayNode() and flowFieldNode.GetDisplayNode().GetColorNodeID():
-                                # Use the same color table and scaling as the transform node
-                                displayNode.SetAndObserveColorNodeID(flowFieldNode.GetDisplayNode().GetColorNodeID())
-                                displayNode.SetScalarRangeFlag(displayNode.UseColorNodeScalarRange)
-                            else:
-                                displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
-                            displayNode.ScalarVisibilityOn()
-
-                    # Create speed volume for Doppler-like visualization
-                    if outputSpeedVolume:
-                        ijkToRAS = vtk.vtkMatrix4x4()
-                        displacementImageNode.GetIJKToRASMatrix(ijkToRAS)
-                        outputSpeedVolume.SetIJKToRASMatrix(ijkToRAS)
-                        displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
-                        if speedVolumeProjectedToPlane:
-                            # Project speed vector to the plane
-                            # Get plane normal
-                            planeNormal = crossSectionPlaneNode.GetNormal()
-                            # Compute dot product of each element of displacementImageArray by planeNormal.
-                            # Do not iterate through points one by one because it would be too slow
-                            # (use numpy operations instead).
-                            speedVolumeArray = np.sum(displacementImageArray * planeNormal, axis=3)
-                        else:
-                            speedVolumeArray = np.linalg.norm(displacementImageArray, axis=3)
-                        slicer.util.updateVolumeFromArray(outputSpeedVolume, speedVolumeArray)
-
-                        if not outputSpeedVolume.GetScalarVolumeDisplayNode():
-                            outputSpeedVolume.CreateDefaultDisplayNodes()
-                        colorNode = outputSpeedVolume.GetScalarVolumeDisplayNode().GetColorNode()
-                        # colorMappingType is Speed (for absolute speed) or SpeedComponent (for Doppler-like signed speed)
-                        currentColorMappingType = colorNode.GetAttribute("SlicerHeart.ColorMappingType") if colorNode else None
-                        requiredColorMappingType = "SpeedComponent" if speedVolumeProjectedToPlane else "Speed"
-                        if currentColorMappingType != requiredColorMappingType or self.forceColorMappingReset:
-                            # Update color table
-                            if currentColorMappingType:
-                                # We need to switch to a different color mapping type, but keep reference to this color node
-                                outputSpeedVolume.SetNodeReferenceID("SlicerHeart."+currentColorMappingType, colorNode.GetID())
-                            colorNode = outputSpeedVolume.GetNodeReference("SlicerHeart." + requiredColorMappingType)
-                            if colorNode:
-                                # There is a saved color table that we can use
-                                colorNodeID = colorNode.GetID()
-                            else:
-                                # Need to create new color node
-                                if speedVolumeProjectedToPlane:
-                                    colorNodeID = self._createSpeedComponentColorNode().GetID()
-                                else:
-                                    if flowFieldNode.GetDisplayNode() and flowFieldNode.GetDisplayNode().GetColorNodeID():
-                                        # Use the same color table and scaling as the transform node
-                                        colorNodeID = flowFieldNode.GetDisplayNode().GetColorNodeID()
-                                    else:
-                                        colorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
-                            speedVolumeDisplayNode = outputSpeedVolume.GetScalarVolumeDisplayNode()
-                            speedVolumeDisplayNode.SetAndObserveColorNodeID(colorNodeID)
-
-                            # Set default window/level and threshold settings
-                            # (it could make sense to not overwrite it once it is set by the user, but for now we always set it to default)
-                            if speedVolumeProjectedToPlane:
-                                speedVolumeDisplayNode.SetAutoWindowLevel(False)
-                                speedVolumeDisplayNode.SetWindowLevelMinMax(*self.dopplerLutRange)
-                                speedVolumeDisplayNode.SetApplyThreshold(False)
-                            else:
-                                # Use the transform color node's range
-                                speedVolumeDisplayNode.SetAutoWindowLevel(False)
-                                scalarRange = speedVolumeDisplayNode.GetColorNode().GetScalarsToColors().GetRange()
-                                speedVolumeDisplayNode.SetWindowLevelMinMax(*scalarRange)
-                                speedVolumeDisplayNode.SetApplyThreshold(True)
-                                speedVolumeDisplayNode.SetThreshold(streamlinesSpeedThresholdMPerSec, scalarRange[1])
-
-                    slicer.mrmlScene.RemoveNode(displacementImageNode)
-                    displacementImageNode = None
+                        # Create speed volume for Doppler-like visualization
+                        if outputSpeedVolume:
+                            ijkToRAS = vtk.vtkMatrix4x4()
+                            displacementImageNode.GetIJKToRASMatrix(ijkToRAS)
+                            outputSpeedVolume.SetIJKToRASMatrix(ijkToRAS)
+                            displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
+                            speedVolumeArray = self._computeSpeedVolumeScalarArray(
+                                displacementImageArray, speedVolumeProjectedToPlane, crossSectionPlaneNode.GetNormal())
+                            slicer.util.updateVolumeFromArray(outputSpeedVolume, speedVolumeArray)
+                            self._updateSpeedVolumeColorMapping(outputSpeedVolume, flowFieldNode, speedVolumeProjectedToPlane, streamlinesSpeedThresholdMPerSec)
+                    finally:
+                        slicer.mrmlScene.RemoveNode(displacementImageNode)
 
                 else:
                     # ============================================================
                     # Model (e.g. CFD result) path
                     # ============================================================
-
-                    # Sample the velocity field ("V" or "Velocity" point data array) of the flow field mesh onto the cross-section sample points
-                    flowFieldMeshWorld = self._getMeshInWorld(flowFieldNode)
-                    velocityArrayName = self._getVelocityArrayName(flowFieldMeshWorld.GetPointData())
-                    if velocityArrayName is None:
-                        raise ValueError("Input flow field model does not contain a point data array named 'V' or 'Velocity'")
-                    probeFilter = vtk.vtkProbeFilter()
-                    probeFilter.SetInputData(outputFlowMetricsModel.GetPolyData())
-                    probeFilter.SetSourceData(flowFieldMeshWorld)
-                    probeFilter.Update()
-                    velocityArray = probeFilter.GetOutput().GetPointData().GetArray(velocityArrayName)
-                    Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "Speed",
-                        vtk.util.numpy_support.vtk_to_numpy(velocityArray), vtk.VTK_FLOAT)
-
-                    # Determine which sample points are inside the vessel of interest
-                    if maskSegmentationNode and maskSegmentID:
-                        # Vessel mask is set by segmentation
-                        insideVesselArray = self._computeInsideSegmentMask(
-                            outputFlowMetricsModel.GetPolyData().GetPoints(), maskSegmentationNode, maskSegmentID)
-                    else:
-                        # Generate mask based on speed magnitude
-                        displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
-                        displacementMagnitudeArray = np.linalg.norm(displacementArray, axis=1)
-                        insideVesselArray = displacementMagnitudeArray > streamlinesSpeedThresholdMPerSec
-
-                    # Save mask array into the flow metrics model
-                    Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "insideVessel", insideVesselArray, vtk.VTK_UNSIGNED_SHORT)
-
-                    # Set all displacements outside the mask to zero
-                    displacementArray = slicer.util.arrayFromModelPointData(outputFlowMetricsModel, 'Speed')
-                    maskedDisplacementArray = displacementArray.copy()
-                    maskedDisplacementArray[insideVesselArray==0, :] = 0
-                    Analyze4DFlowLogic._addPointDataArray(outputFlowMetricsModel, "SpeedMasked", maskedDisplacementArray, vtk.VTK_FLOAT)
-
-                    # Prepare a masked copy of the full flow field mesh for streamlines / masked output / speed volume
-                    maskedFlowFieldMesh = None
-                    if outputStreamlinesModel or outputSpeedVolume or outputMaskedFlowField:
-                        maskedFlowFieldMesh = flowFieldMeshWorld.NewInstance()
-                        maskedFlowFieldMesh.DeepCopy(flowFieldMeshWorld)
-                        fullVelocityArray = vtk.util.numpy_support.vtk_to_numpy(maskedFlowFieldMesh.GetPointData().GetArray(velocityArrayName))
-                        if maskSegmentationNode and maskSegmentID:
-                            insideVesselArrayFull = self._computeInsideSegmentMask(
-                                maskedFlowFieldMesh.GetPoints(), maskSegmentationNode, maskSegmentID)
-                        else:
-                            speedMagnitudeFull = np.linalg.norm(fullVelocityArray, axis=1)
-                            insideVesselArrayFull = speedMagnitudeFull > streamlinesSpeedThresholdMPerSec
-                        fullVelocityArray[insideVesselArrayFull == 0, :] = 0
-                        maskedFlowFieldMesh.GetPointData().GetArray(velocityArrayName).Modified()
+                    flowFieldMeshWorld, velocityArrayName, maskedFlowFieldMesh = self._sampleModelFrame(
+                        flowFieldNode, outputFlowMetricsModel, maskSegmentationNode, maskSegmentID,
+                        streamlinesSpeedThresholdMPerSec, needMaskedField)
 
                     if outputMaskedFlowField:
                         outputMaskedFlowField.SetAndObserveMesh(maskedFlowFieldMesh)
@@ -1014,25 +1122,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
                     # Update streamlines
                     if outputStreamlinesModel:
-                        streamlinesSeedModel = outputFlowMetricsModel  # the plane profile is also used for generating seed points
-                        self._createStreamlinesFromMesh(outputStreamlinesModel, maskedFlowFieldMesh, velocityArrayName, streamlinesSeedModel,
+                        self._createStreamlinesFromMesh(outputStreamlinesModel, maskedFlowFieldMesh, velocityArrayName, outputFlowMetricsModel,
                             streamlinesMaximumLengthMm, streamlinesBidirectional, streamlinesComputeAllMetrics, streamlinesSpeedThresholdMPerSec)
-                        if not outputStreamlinesModel.GetDisplayNode() or not outputStreamlinesModel.GetDisplayNode().GetScalarVisibility():
-                            # Initialize streamlines model display node
-                            outputStreamlinesModel.CreateDefaultDisplayNodes()
-                            displayNode = outputStreamlinesModel.GetDisplayNode()
-                            displayNode.SetColor(0, 0, 1)
-                            displayNode.SetEdgeVisibility(True)
-                            displayNode.BackfaceCullingOff()
-                            displayNode.LightingOff()  # don't make the lines darker depending on orientation
-                            displayNode.SetActiveScalarName('Speed')
-                            if flowFieldNode.GetDisplayNode() and flowFieldNode.GetDisplayNode().GetColorNodeID():
-                                # Use the same color table and scaling as the flow field model
-                                displayNode.SetAndObserveColorNodeID(flowFieldNode.GetDisplayNode().GetColorNodeID())
-                                displayNode.SetScalarRangeFlag(displayNode.UseColorNodeScalarRange)
-                            else:
-                                displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
-                            displayNode.ScalarVisibilityOn()
+                        self._initializeStreamlinesDisplayNode(outputStreamlinesModel, flowFieldNode)
 
                     # Create speed volume for Doppler-like visualization
                     if outputSpeedVolume:
@@ -1046,110 +1138,18 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                         dims = resampledImageData.GetDimensions()
                         velocityImageArray = vtk.util.numpy_support.vtk_to_numpy(
                             resampledImageData.GetPointData().GetArray(velocityArrayName)).reshape([dims[2], dims[1], dims[0], 3])
-                        if speedVolumeProjectedToPlane:
-                            # Project speed vector to the plane
-                            # Get plane normal
-                            planeNormal = crossSectionPlaneNode.GetNormal()
-                            # Compute dot product of each element of velocityImageArray by planeNormal.
-                            # Do not iterate through points one by one because it would be too slow
-                            # (use numpy operations instead).
-                            speedVolumeArray = np.sum(velocityImageArray * planeNormal, axis=3)
-                        else:
-                            speedVolumeArray = np.linalg.norm(velocityImageArray, axis=3)
+                        speedVolumeArray = self._computeSpeedVolumeScalarArray(
+                            velocityImageArray, speedVolumeProjectedToPlane, crossSectionPlaneNode.GetNormal())
                         slicer.util.updateVolumeFromArray(outputSpeedVolume, speedVolumeArray)
-
-                        if not outputSpeedVolume.GetScalarVolumeDisplayNode():
-                            outputSpeedVolume.CreateDefaultDisplayNodes()
-                        colorNode = outputSpeedVolume.GetScalarVolumeDisplayNode().GetColorNode()
-                        # colorMappingType is Speed (for absolute speed) or SpeedComponent (for Doppler-like signed speed)
-                        currentColorMappingType = colorNode.GetAttribute("SlicerHeart.ColorMappingType") if colorNode else None
-                        requiredColorMappingType = "SpeedComponent" if speedVolumeProjectedToPlane else "Speed"
-                        if currentColorMappingType != requiredColorMappingType or self.forceColorMappingReset:
-                            # Update color table
-                            if currentColorMappingType:
-                                # We need to switch to a different color mapping type, but keep reference to this color node
-                                outputSpeedVolume.SetNodeReferenceID("SlicerHeart."+currentColorMappingType, colorNode.GetID())
-                            colorNode = outputSpeedVolume.GetNodeReference("SlicerHeart." + requiredColorMappingType)
-                            if colorNode:
-                                # There is a saved color table that we can use
-                                colorNodeID = colorNode.GetID()
-                            else:
-                                # Need to create new color node
-                                if speedVolumeProjectedToPlane:
-                                    colorNodeID = self._createSpeedComponentColorNode().GetID()
-                                else:
-                                    if flowFieldNode.GetDisplayNode() and flowFieldNode.GetDisplayNode().GetColorNodeID():
-                                        # Use the same color table and scaling as the flow field model
-                                        colorNodeID = flowFieldNode.GetDisplayNode().GetColorNodeID()
-                                    else:
-                                        colorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
-                            speedVolumeDisplayNode = outputSpeedVolume.GetScalarVolumeDisplayNode()
-                            speedVolumeDisplayNode.SetAndObserveColorNodeID(colorNodeID)
-
-                            # Set default window/level and threshold settings
-                            # (it could make sense to not overwrite it once it is set by the user, but for now we always set it to default)
-                            if speedVolumeProjectedToPlane:
-                                speedVolumeDisplayNode.SetAutoWindowLevel(False)
-                                speedVolumeDisplayNode.SetWindowLevelMinMax(*self.dopplerLutRange)
-                                speedVolumeDisplayNode.SetApplyThreshold(False)
-                            else:
-                                # Use the color node's range
-                                speedVolumeDisplayNode.SetAutoWindowLevel(False)
-                                scalarRange = speedVolumeDisplayNode.GetColorNode().GetScalarsToColors().GetRange()
-                                speedVolumeDisplayNode.SetWindowLevelMinMax(*scalarRange)
-                                speedVolumeDisplayNode.SetApplyThreshold(True)
-                                speedVolumeDisplayNode.SetThreshold(streamlinesSpeedThresholdMPerSec, scalarRange[1])
+                        self._updateSpeedVolumeColorMapping(outputSpeedVolume, flowFieldNode, speedVolumeProjectedToPlane, streamlinesSpeedThresholdMPerSec)
 
             if outputMaskedFlowField:
-                # Move the masked flow field into next to the input flow field in the subject hierarchy
-                shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-                inputItem = shNode.GetItemByDataNode(flowFieldNode)
-                outputItem = shNode.GetItemByDataNode(outputMaskedFlowField)
-                if inputItem and outputItem:
-                    shNode.SetItemParent(outputItem, shNode.GetItemParent(inputItem))
-
-                if isTransformInput:
-                    # Copy the transform display node
-                    if not outputMaskedFlowField.GetDisplayNode():
-                        sourceDisplayNode = flowFieldNode.GetDisplayNode()
-                        if sourceDisplayNode:
-                            newDisplayNode = slicer.mrmlScene.AddNewNodeByClass(sourceDisplayNode.GetClassName())
-                            newDisplayNode.CopyContent(sourceDisplayNode)
-                            newDisplayNode.SetVisibility(False)
-                            regionNodeID = sourceDisplayNode.GetNodeReferenceID("region")
-                            newDisplayNode.SetNodeReferenceID("region", regionNodeID)
-                            outputMaskedFlowField.SetAndObserveDisplayNodeID(newDisplayNode.GetID())
-                else:
-                    # Copy the display settings, if possible
-                    if not outputMaskedFlowField.GetDisplayNode():
-                        sourceDisplayNode = flowFieldNode.GetDisplayNode()
-                        if sourceDisplayNode:
-                            newDisplayNode = slicer.mrmlScene.AddNewNodeByClass(sourceDisplayNode.GetClassName())
-                            newDisplayNode.CopyContent(sourceDisplayNode)
-                            newDisplayNode.SetVisibility(False)
-                            outputMaskedFlowField.SetAndObserveDisplayNodeID(newDisplayNode.GetID())
-                        else:
-                            outputMaskedFlowField.CreateDefaultDisplayNodes()
-                            outputMaskedFlowField.GetDisplayNode().SetVisibility(False)
-
-                # Copy the color legend display node
-                for i in range(flowFieldNode.GetNumberOfDisplayNodes()):
-                    dn = flowFieldNode.GetNthDisplayNode(i)
-                    if dn and dn.IsA("vtkMRMLColorLegendDisplayNode"):
-                        existingIDs = [outputMaskedFlowField.GetNthDisplayNodeID(j)
-                                       for j in range(outputMaskedFlowField.GetNumberOfDisplayNodes())]
-                        if dn.GetID() not in existingIDs:
-                            outputMaskedFlowField.AddAndObserveDisplayNodeID(dn.GetID())
-                        break
+                self._finalizeOutputMaskedFlowField(outputMaskedFlowField, flowFieldNode, isTransformInput)
 
         finally:
             # Clean up
             if probeVolumeCliNode:
                 slicer.mrmlScene.RemoveNode(probeVolumeCliNode)
-            if displacementImageNode:
-                slicer.mrmlScene.RemoveNode(displacementImageNode)
-            if maskLabelmapNode:
-                slicer.mrmlScene.RemoveNode(maskLabelmapNode)
             if sequenceBrowserNode:
                 sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
             self._restoreTransformVisibility(savedTransformVisibility)
