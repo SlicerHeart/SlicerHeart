@@ -190,6 +190,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         with slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True):
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
+                # Capture each measurement's phase/time point BEFORE the valve conversion below
+                # redirects measurement->valve references to the single valve proxy and removes the
+                # per-phase valve nodes that carry the ValveVolumeSequenceIndex attribute.
+                measurementTimepointMap = self._captureMeasurementTimepoints()
                 # First, run the legacy conversion for segmented valves
                 segmentedResults = self.convertSegmentedHeartValvesToNewFormat()
                 segmentedCount = segmentedResults['convertedCount']
@@ -199,7 +203,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 valveCount = results['convertedCount']
                 nodesToDelete = results['nodesToRemove']
 
-                measurementCount = self.convertHeartValveMeasurementNodesToSequences()
+                measurementCount = self.convertHeartValveMeasurementNodesToSequences(measurementTimepointMap)
                 deviceCount = self.convertCardiacDeviceNodesToSequences()
 
                 # Now that all conversions are done, remove the original nodes
@@ -1359,163 +1363,207 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         return None
 
-    def convertHeartValveMeasurementNodesToSequences(self):
-        """
-        Convert HeartValveMeasurement nodes to sequences.
+    def _captureMeasurementTimepoints(self):
+        """Capture, for each old-format HeartValveMeasurement node, the time point (valve frame index)
+        and valve it belongs to.
 
-        HeartValveMeasurement nodes store analysis results like A-P distance, annulus area, etc.
-        In the old format, these were single nodes. In the new format, they should be in sequences.
+        This MUST run BEFORE the valve conversion, which both redirects each measurement's valve
+        reference to the single valve proxy (collapsing the per-phase link) and removes the original
+        per-phase valve nodes that carry the ValveVolumeSequenceIndex attribute.
+
+        Returns: {measurementNodeID: {'frameIndex', 'valveType', 'volumeNodeID'}}
+        """
+        result = {}
+        seqLogic = slicer.modules.sequences.logic()
+        for measurementNode in getAllModuleSpecificScriptableNodes("HeartValveMeasurement"):
+            # Skip measurements already stored in a sequence (already new format)
+            if seqLogic.GetFirstBrowserNodeForProxyNode(measurementNode):
+                continue
+            valveNodeId = self._getValveNodeIdForMeasurement(measurementNode)
+            valveNode = slicer.mrmlScene.GetNodeByID(valveNodeId) if valveNodeId else None
+            if not valveNode:
+                continue
+            frameIndexStr = valveNode.GetAttribute("ValveVolumeSequenceIndex")
+            if frameIndexStr is None or frameIndexStr == "":
+                continue
+            result[measurementNode.GetID()] = {
+                'frameIndex': int(frameIndexStr),
+                'valveType': valveNode.GetAttribute("ValveType") or "Valve",
+                'volumeNodeID': valveNode.GetNodeReferenceID("ValveVolume"),
+            }
+        return result
+
+    def _findBrowserByValveType(self, valveType):
+        """Find the (new-format) HeartValve sequence browser node for a given valve type."""
+        for browserNode in slicer.util.getNodesByClass('vtkMRMLSequenceBrowserNode'):
+            if (browserNode.GetAttribute("ModuleName") == "HeartValve"
+                    and browserNode.GetAttribute("ValveType") == valveType):
+                return browserNode
+        return None
+
+    def _volumeSequenceForBrowser(self, valveBrowserNode, volumeNodeID=None):
+        """Return the volume master sequence node whose index values the valve browser is synchronized
+        with, so measurement time points line up with the valve/volume frames."""
+        volumeNode = valveBrowserNode.GetNodeReference("ValveVolume")
+        if not volumeNode and volumeNodeID:
+            volumeNode = slicer.mrmlScene.GetNodeByID(volumeNodeID)
+        if not volumeNode:
+            return None
+        volumeBrowserNode = getSequenceBrowserNodeForMasterOutputNode(volumeNode)
+        return volumeBrowserNode.GetMasterSequenceNode() if volumeBrowserNode else None
+
+    def convertHeartValveMeasurementNodesToSequences(self, measurementTimepointMap=None):
+        """
+        Convert HeartValveMeasurement nodes (per-phase quantification result nodes) to sequences.
+
+        Old format: one HeartValveMeasurement node per analyzed phase, each referencing its per-phase
+        valve node and one or more result table nodes. New format: a single measurement sequence per
+        valve (synchronized with the valve browser) holding the per-phase measurement nodes at their
+        matching time points, plus one table sequence per referenced table role, with the measurement
+        proxy re-pointed at the table proxies.
+
+        measurementTimepointMap: {measurementNodeID: {'frameIndex','valveType','volumeNodeID'}} captured
+        by performFullConversion BEFORE the valve conversion collapses the per-phase valve references.
+        When not supplied it is rebuilt here on a best-effort basis (only works while the measurements
+        still reference their original per-phase valve nodes, e.g. before valves have been converted).
         """
         logging.info("Converting HeartValveMeasurement nodes to sequences")
+        seqLogic = slicer.modules.sequences.logic()
 
-        # Get all HeartValveMeasurement nodes
+        if measurementTimepointMap is None:
+            measurementTimepointMap = self._captureMeasurementTimepoints()
+
         allMeasurementNodes = list(getAllModuleSpecificScriptableNodes("HeartValveMeasurement"))
-
-        logging.info(f"Found {len(allMeasurementNodes)} total HeartValveMeasurement node(s)")
-
         if not allMeasurementNodes:
             logging.info("No HeartValveMeasurement nodes found to convert")
             return 0
 
-        # Filter to only old-format nodes (not already in a sequence)
-        oldFormatMeasurementNodes = []
-        measurementNodeValveInfo = {}
-
+        # Keep only old-format measurements (not already sequenced) that we have time point info for,
+        # and group by (valveType, MeasurementPreset): one measurement sequence per group. Grouping by
+        # the measurement node NAME would be wrong here - the nodes are named per phase (unique), which
+        # previously produced one empty sequence per phase instead of one consolidated sequence.
+        groups = {}
         for measurementNode in allMeasurementNodes:
-            try:
-                # Check if already in a sequence browser
-                browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(measurementNode)
-                if browserNode:
-                    logging.info(f"Skipping '{measurementNode.GetName()}' - already in sequence")
-                    continue
+            if seqLogic.GetFirstBrowserNodeForProxyNode(measurementNode):
+                continue  # already in a sequence (new format)
+            info = measurementTimepointMap.get(measurementNode.GetID())
+            if not info:
+                logging.warning(f"No time point info for measurement '{measurementNode.GetName()}', skipping")
+                continue
+            preset = measurementNode.GetAttribute("MeasurementPreset") or info['valveType'] or "Measurement"
+            groups.setdefault((info['valveType'], preset), []).append(measurementNode)
 
-                # Find referenced valve
-                valveNodeId = self._getValveNodeIdForMeasurement(measurementNode)
-                if not valveNodeId:
-                    # List all references for debugging
-                    allRoles = []
-                    numRoles = measurementNode.GetNumberOfNodeReferenceRoles()
-                    for roleIndex in range(numRoles):
-                        role = measurementNode.GetNthNodeReferenceRole(roleIndex)
-                        numRefs = measurementNode.GetNumberOfNodeReferences(role)
-                        if numRefs > 0:
-                            allRoles.append(f"{role}({numRefs})")
-                    logging.warning(f"Measurement '{measurementNode.GetName()}' has no Valve reference, skipping. Available references: {', '.join(allRoles) if allRoles else 'none'}")
-                    continue
-
-                logging.info(f"Measurement '{measurementNode.GetName()}' needs conversion (references valve ID: {valveNodeId})")
-                oldFormatMeasurementNodes.append(measurementNode)
-                measurementNodeValveInfo[measurementNode.GetID()] = valveNodeId
-            except Exception as err:
-                logging.warning(f"Error checking measurement node '{measurementNode.GetName()}': {err}")
-
-        if not oldFormatMeasurementNodes:
+        if not groups:
             logging.info("No old-format HeartValveMeasurement nodes found to convert")
             return 0
 
-        logging.info(f"Converting {len(oldFormatMeasurementNodes)} HeartValveMeasurement node(s)")
-
-        # Group measurement nodes by the valve they reference
-        measurementsByValve = {}
-        for measurementNode in oldFormatMeasurementNodes:
-            try:
-                measurementId = measurementNode.GetID()
-                if measurementId not in measurementNodeValveInfo:
-                    logging.warning(f"Measurement '{measurementNode.GetName()}' missing valve info, skipping")
-                    continue
-
-                valveNodeId = measurementNodeValveInfo[measurementId]
-                if valveNodeId not in measurementsByValve:
-                    measurementsByValve[valveNodeId] = []
-                measurementsByValve[valveNodeId].append(measurementNode)
-            except Exception as err:
-                logging.warning(f"Error grouping measurement '{measurementNode.GetName()}': {err}")
-
-        # Process each group of measurements based on their common valve
         convertedCount = 0
         nodesToRemove = []
+        affectedBrowserIDs = set()
 
-        for valveNodeId, measurementNodes in measurementsByValve.items():
+        for (valveType, preset), measurementNodes in groups.items():
             try:
-                valveNode = slicer.mrmlScene.GetNodeByID(valveNodeId)
-                if not valveNode:
-                    logging.warning(f"Invalid valve ID '{valveNodeId}' for a group of measurements, skipping")
-                    continue
-
-                # Find the valve's sequence browser
-                valveBrowserNode = self._findValveBrowserForValveNode(valveNode)
+                valveBrowserNode = self._findBrowserByValveType(valveType)
                 if not valveBrowserNode:
-                    logging.warning(f"Could not find sequence browser for valve '{valveNode.GetName()}', skipping {len(measurementNodes)} measurement(s).")
+                    logging.warning(f"No valve browser for valve type '{valveType}', skipping {len(measurementNodes)} measurement(s)")
                     continue
 
-                logging.info(f"Converting {len(measurementNodes)} measurement(s) for valve browser: {valveBrowserNode.GetName()}")
+                volumeSequenceNode = self._volumeSequenceForBrowser(
+                    valveBrowserNode, measurementTimepointMap[measurementNodes[0].GetID()].get('volumeNodeID'))
+                if not volumeSequenceNode:
+                    logging.warning(f"No volume sequence for browser '{valveBrowserNode.GetName()}', skipping measurements")
+                    continue
 
-                # Group measurements by name to create one sequence per type
-                measurementsByName = {}
-                for mnode in measurementNodes:
-                    mname = mnode.GetName()
-                    if mname not in measurementsByName:
-                        measurementsByName[mname] = []
-                    measurementsByName[mname].append(mnode)
-
-                for measurementName, nodes in measurementsByName.items():
-                    if not nodes:
+                # Pair each measurement node with the index value of its phase's frame
+                timedMeasurements = []
+                for measurementNode in measurementNodes:
+                    frameIndex = measurementTimepointMap[measurementNode.GetID()]['frameIndex']
+                    if frameIndex < 0 or frameIndex >= volumeSequenceNode.GetNumberOfDataNodes():
+                        logging.warning(f"Frame index {frameIndex} out of range for measurement '{measurementNode.GetName()}'")
                         continue
+                    timedMeasurements.append((measurementNode, volumeSequenceNode.GetNthIndexValue(frameIndex)))
 
-                    # Create a sequence for this measurement type
-                    masterSequenceNode = valveBrowserNode.GetMasterSequenceNode()
-                    measurementSequenceNode = self._createSequenceForNode(
-                        valveBrowserNode,
-                        f"{measurementName}_Sequence",
-                        masterSequenceNode.GetIndexName(),
-                        masterSequenceNode.GetIndexUnit(),
-                        masterSequenceNode.GetIndexType()
-                    )
+                if not timedMeasurements:
+                    continue
 
-                    # Add each node to the sequence at the correct timepoint
-                    for measurementNode in nodes:
-                        try:
-                            valveIdForMeasurement = measurementNodeValveInfo[measurementNode.GetID()]
+                affectedBrowserIDs.add(valveBrowserNode.GetID())
 
-                            # Find the timepoint where this valve exists
-                            foundTimepoint = False
-                            for timeIdx in range(masterSequenceNode.GetNumberOfDataNodes()):
-                                valveNodeAtTime = masterSequenceNode.GetNthDataNode(timeIdx)
-                                if valveNodeAtTime and valveNodeAtTime.GetID() == valveIdForMeasurement:
-                                    indexValue = masterSequenceNode.GetNthIndexValue(timeIdx)
-                                    measurementSequenceNode.SetDataNodeAtValue(measurementNode, indexValue)
-                                    logging.debug(f"Added '{measurementName}' to sequence at timepoint {timeIdx}")
-                                    foundTimepoint = True
-                                    break
+                # One measurement sequence for this valve/preset
+                measurementSequenceNode = self._createSequenceForNode(
+                    valveBrowserNode,
+                    f"{preset}-Measurement_Sequence",
+                    volumeSequenceNode.GetIndexName(),
+                    volumeSequenceNode.GetIndexUnit(),
+                    volumeSequenceNode.GetIndexType())
 
-                            if not foundTimepoint:
-                                logging.warning(f"Could not find matching valve for '{measurementName}' in sequence")
+                # One table sequence per referenced (role, refIndex), populated across all phases
+                tableSequencesByRole = {}
+                for measurementNode, indexValue in timedMeasurements:
+                    measurementSequenceNode.SetDataNodeAtValue(measurementNode, indexValue)
+                    convertedCount += 1
+                    nodesToRemove.append(measurementNode)
+
+                    roles = []
+                    measurementNode.GetNodeReferenceRoles(roles)
+                    for role in roles:
+                        for refIndex in range(measurementNode.GetNumberOfNodeReferences(role)):
+                            tableNode = measurementNode.GetNthNodeReference(role, refIndex)
+                            if not tableNode or not tableNode.IsA('vtkMRMLTableNode'):
                                 continue
+                            if seqLogic.GetFirstBrowserNodeForProxyNode(tableNode):
+                                continue
+                            roleKey = (role, refIndex)
+                            tableSequenceNode = tableSequencesByRole.get(roleKey)
+                            if tableSequenceNode is None:
+                                tableSequenceNode = self._createSequenceForNode(
+                                    valveBrowserNode,
+                                    f"{tableNode.GetName()}_Sequence",
+                                    volumeSequenceNode.GetIndexName(),
+                                    volumeSequenceNode.GetIndexUnit(),
+                                    volumeSequenceNode.GetIndexType())
+                                tableSequencesByRole[roleKey] = tableSequenceNode
+                            tableSequenceNode.SetDataNodeAtValue(tableNode, indexValue)
+                            nodesToRemove.append(tableNode)
 
-                            convertedCount += 1
-                            nodesToRemove.append(measurementNode)
-                            self._convertMeasurementTableNodes(measurementNode, valveBrowserNode, masterSequenceNode)
-                        except Exception as err:
-                            logging.warning(f"Error converting measurement '{measurementNode.GetName()}': {err}")
+                # Create proxies for the new sequences, then point the measurement proxy's table
+                # references at the table proxies (the stored copies still reference the original tables,
+                # which are removed below).
+                seqLogic.UpdateProxyNodesFromSequences(valveBrowserNode)
+                measurementProxyNode = valveBrowserNode.GetProxyNode(measurementSequenceNode)
+                if measurementProxyNode:
+                    for (role, refIndex), tableSequenceNode in tableSequencesByRole.items():
+                        tableProxyNode = valveBrowserNode.GetProxyNode(tableSequenceNode)
+                        if tableProxyNode:
+                            measurementProxyNode.SetNthNodeReferenceID(role, refIndex, tableProxyNode.GetID())
 
-                    if measurementSequenceNode.GetNumberOfDataNodes() > 0:
-                        logging.info(f"Created sequence '{measurementSequenceNode.GetName()}' with {measurementSequenceNode.GetNumberOfDataNodes()} node(s)")
+                    # Nest the measurement proxy (and any table proxies) under the valve's master proxy in
+                    # the subject hierarchy so they do not clutter the scene root.
+                    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+                    valveProxyNode = valveBrowserNode.GetProxyNode(valveBrowserNode.GetMasterSequenceNode())
+                    if shNode and valveProxyNode:
+                        valveItemID = shNode.GetItemByDataNode(valveProxyNode)
+                        if valveItemID:
+                            for proxyNode in [measurementProxyNode] + [valveBrowserNode.GetProxyNode(s) for s in tableSequencesByRole.values()]:
+                                if proxyNode:
+                                    proxyItemID = shNode.GetItemByDataNode(proxyNode)
+                                    if proxyItemID:
+                                        shNode.SetItemParent(proxyItemID, valveItemID)
 
+                logging.info(f"Created measurement sequence '{measurementSequenceNode.GetName()}' with "
+                             f"{measurementSequenceNode.GetNumberOfDataNodes()} time point(s) and "
+                             f"{len(tableSequencesByRole)} table sequence(s)")
             except Exception as err:
-                logging.warning(f"Error processing measurement group for valve ID '{valveNodeId}': {err}")
+                logging.warning(f"Error converting measurements for valve type '{valveType}': {err}")
 
-        # Update proxy nodes for all affected browsers
-        for valveId in measurementsByValve.keys():
-            valveNode = slicer.mrmlScene.GetNodeByID(valveId)
-            if valveNode:
-                browser = self._findValveBrowserForValveNode(valveNode)
-                if browser:
-                    slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browser)
+        for browserID in affectedBrowserIDs:
+            browserNode = slicer.mrmlScene.GetNodeByID(browserID)
+            if browserNode:
+                seqLogic.UpdateProxyNodesFromSequences(browserNode)
 
-        # Remove original measurement nodes
+        # Remove the original per-phase measurement and table nodes (now stored in the sequences)
         for node in nodesToRemove:
-            if node:
-                logging.info(f"Removing converted measurement node: {node.GetName()}")
+            if node and slicer.mrmlScene.IsNodePresent(node):
+                logging.info(f"Removing converted measurement/table node: {node.GetName()}")
                 slicer.mrmlScene.RemoveNode(node)
 
         logging.info(f"Converted {convertedCount} HeartValveMeasurement node(s)")
