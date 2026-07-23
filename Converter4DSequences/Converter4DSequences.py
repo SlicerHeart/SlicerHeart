@@ -707,6 +707,19 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 else:
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points")
 
+                # In the new format the AxialSliceToRasTransform is stored as a node reference on the
+                # valve BROWSER node (see HeartValveLib.ValveBrowser.axialSliceToRasTransformNode), not
+                # on each HeartValve node as in the old format. Temporarily point the browser reference
+                # at the first phase's transform BEFORE the valve model is created below: otherwise
+                # ValveBrowser.setValveBrowserNodeDefaults() finds no transform on the browser and creates a
+                # default one (leaking an extra transform node per valve).
+                if not valveBrowserNode.GetNodeReference("AxialSliceToRasTransform"):
+                    for hvNode in heartValveNodes:
+                        axialSliceToRasTransformNode = hvNode.GetNodeReference("AxialSliceToRasTransform")
+                        if axialSliceToRasTransformNode:
+                            valveBrowserNode.SetNodeReferenceID("AxialSliceToRasTransform", axialSliceToRasTransformNode.GetID())
+                            break
+
                 # Initialize the valve model for the first timepoint
                 try:
                     valveModel = getValveModel(proxyNode if proxyNode else heartValveNodes[0])
@@ -836,6 +849,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             "LeafletSurfaceBoundaryMarkup": "LeafletSurfaceEdit",
         }
         seqIdToSubfolder = {}
+        # The axial-transform sequence, captured directly at creation (below). The generic
+        # name-matching used elsewhere is unreliable, so keep an explicit handle to wire the browser's
+        # AxialSliceToRasTransform reference to this sequence's proxy afterwards.
+        axialSequenceNode = None
 
         for (role, refIndex), nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
@@ -860,6 +877,9 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     volumeSequenceNode.GetIndexUnit(),
                     volumeSequenceNode.GetIndexType()
                 )
+
+                if role == "AxialSliceToRasTransform":
+                    axialSequenceNode = sequenceNode
 
                 # Add all nodes for this role to the sequence at their respective time points
                 # Track which nodes we've added to avoid true duplicates (same node at same time)
@@ -1124,6 +1144,21 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 for idx, proxyNode in enumerate(proxyNodes):
                     heartValveProxyNode.SetNthNodeReferenceID(role, idx, proxyNode.GetID())
                     logging.info(f"  Updated heart valve proxy Nth reference '{role}[{idx}]' to proxy node '{proxyNode.GetName()}'")
+
+        # Point the valve browser's AxialSliceToRasTransform reference at the per-frame proxy created for
+        # the axial-transform sequence.
+        axialProxyNode = valveBrowserNode.GetProxyNode(axialSequenceNode) if axialSequenceNode else None
+        if axialProxyNode:
+            valveBrowserNode.SetNodeReferenceID("AxialSliceToRasTransform", axialProxyNode.GetID())
+            logging.info(f"Set AxialSliceToRasTransform browser reference to per-frame proxy '{axialProxyNode.GetName()}'")
+            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+            if shNode:
+                axialItemID = shNode.GetItemByDataNode(axialProxyNode)
+                if axialItemID:
+                    shNode.SetItemAttribute(
+                        axialItemID,
+                        slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(),
+                        "1")
 
         # Collect all proxy nodes to avoid accidentally removing their display nodes
         proxyNodeIDs = set()
