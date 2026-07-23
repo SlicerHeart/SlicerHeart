@@ -20,14 +20,14 @@
       <item row="0" column="0">
        <widget class="QLabel" name="label_input">
         <property name="text">
-         <string>Mimics project file (.mcs) or folder:</string>
+         <string>Project file (.mcs / .mxp) or folder:</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
        <widget class="ctkPathLineEdit" name="inputPathLineEdit">
         <property name="toolTip">
-         <string>Select a Materialise Mimics project file (.mcs), or a folder to batch convert every .mcs file it contains.</string>
+         <string>Select a Materialise Mimics (.mcs) or 3-matic (.mxp) project file, or a folder to batch convert every .mcs / .mxp file it contains.</string>
         </property>
        </widget>
       </item>
@@ -91,7 +91,7 @@
       <item row="2" column="1">
        <widget class="QRadioButton" name="exportSameFolderRadioButton">
         <property name="toolTip">
-         <string>Save the extracted files next to the input .mcs file, in a subfolder named after the project.</string>
+         <string>Save the extracted files next to the input project file, in a subfolder named after the project.</string>
         </property>
         <property name="text">
          <string>Same as input folder</string>
@@ -157,10 +157,10 @@
          <item>
           <widget class="QCheckBox" name="importModelsCheckBox">
            <property name="toolTip">
-            <string>Import surface models (3D objects / segmentation surfaces).</string>
+            <string>Import surface models (3D objects / segmentation surfaces), curves/wireframes, and point clouds.</string>
            </property>
            <property name="text">
-            <string>Surface models</string>
+            <string>Surface models &amp; curves</string>
            </property>
            <property name="checked">
             <bool>true</bool>

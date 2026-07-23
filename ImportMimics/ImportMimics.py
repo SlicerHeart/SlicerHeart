@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import pathlib
+import re
+import struct
 import zlib
 
 import numpy as np
@@ -20,7 +22,7 @@ from slicer.ScriptedLoadableModule import *
 
 
 class ImportMimics(ScriptedLoadableModule):
-    """Import Materialise Mimics project files (.mcs) into 3D Slicer."""
+    """Import Materialise Mimics (.mcs) and 3-matic (.mxp) project files into 3D Slicer."""
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
@@ -29,19 +31,28 @@ class ImportMimics(ScriptedLoadableModule):
         self.parent.dependencies = []
         self.parent.contributors = ["Andras Lasso (PerkLab, Queen's University)"]
         self.parent.helpText = _("""
-This module imports Materialise Mimics project files (<b>.mcs</b>) into 3D Slicer.
+This module imports Materialise <b>Mimics</b> (<b>.mcs</b>) and <b>3-matic</b> (<b>.mxp</b>)
+project files into 3D Slicer. It can load a single project into the scene, convert projects to
+standard files, or batch-convert a whole folder.
 
-A Mimics project is a SQLite database that stores a blob container. This importer extracts:
+<b>What is imported:</b>
 <ul>
-<li><b>Image volume</b> - reconstructed from the embedded DICOM headers (geometry, patient/study
-information) combined with the separately stored pixel data.</li>
-<li><b>Surface models</b> - segmentation surfaces (3D objects) stored as fixed-point meshes.</li>
-<li><b>Metadata</b> - patient/study/series information and a blob inventory, saved as node
-attributes and optionally exported to a JSON file.</li>
+<li><b>Surface models</b> - segmentation surfaces / 3D objects.</li>
+<li><b>Curves</b> - contours and wireframes (mainly from 3-matic projects).</li>
+<li><b>Image volume</b> - the CT/MR image, when the project contains one (Mimics projects only;
+3-matic projects contain no image).</li>
+<li><b>NURBS surfaces and point sets</b> - imported as markups (Mimics projects).</li>
+<li><b>Metadata</b> - patient/study/series information, optionally saved to a JSON file.</li>
 </ul>
 
-Note: the project's <i>header.xml</i> (object list, colors, analysis data) is stored encrypted by
-Mimics and cannot be decoded, so object names/colors are not recovered.
+<b>Limitations:</b> object names, colors, and analysis measurements are stored encrypted in the
+project and cannot be recovered, so imported objects are named generically (object1, curve1, ...).
+The module is experimental and not guaranteed to be correct for all projects.
+
+<b>Patient information:</b> Mimics projects embed the original DICOM headers, so the optional
+<i>DICOM files</i> and <i>Metadata</i> outputs may contain patient identifiers (name, ID, dates);
+both are off by default. The image, model, and markups outputs contain only geometry.
+
 For research use only. Materialise is not affiliated with the development of this module.
 """)
         self.parent.acknowledgementText = _("""
@@ -79,8 +90,8 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         self.logic.logCallback = self.addLog
         self.logic.progressCallback = self.updateProgress
 
-        # The input may be a single .mcs file or a folder (for batch conversion). No name filter
-        # is set: a *.mcs filter would suppress the currentPathChanged signal for folders.
+        # The input may be a single .mcs / .mxp file or a folder (for batch conversion). No name
+        # filter is set: a name filter would suppress the currentPathChanged signal for folders.
         import ctk
         self.ui.inputPathLineEdit.filters = ctk.ctkPathLineEdit.Files | ctk.ctkPathLineEdit.Dirs
         # Configure the custom export path selector to pick a folder.
@@ -167,7 +178,8 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         inputPath = self.ui.inputPathLineEdit.currentPath
         hasInput = bool(inputPath)
         isFolder = hasInput and os.path.isdir(inputPath)
-        isMcsFile = hasInput and os.path.isfile(inputPath) and inputPath.lower().endswith(".mcs")
+        isProjectFile = (hasInput and os.path.isfile(inputPath)
+                         and inputPath.lower().endswith((".mcs", ".mxp")))
         saveToFiles = not self.ui.exportNoSaveRadioButton.checked
 
         # A folder input is a batch conversion, so loading into the scene does not apply:
@@ -176,9 +188,9 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         if isFolder:
             self.ui.loadIntoSceneCheckBox.enabled = False
             label.text = _("Folder selected - batch conversion")
-            label.toolTip = _("A folder is selected, so every Mimics project (.mcs) file it "
-                              "contains will be converted to files. Loading into the scene does "
-                              "not apply to batch conversion.")
+            label.toolTip = _("A folder is selected, so every Mimics (.mcs) and 3-matic (.mxp) "
+                              "project file it contains will be converted to files. Loading into "
+                              "the scene does not apply to batch conversion.")
             label.styleSheet = "color: gray; font-style: italic;"
             label.visible = True
         else:
@@ -199,7 +211,7 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
             self.ui.applyButton.text = _("Convert")
         else:
             self.ui.applyButton.text = _("Load")
-        self.ui.applyButton.enabled = isMcsFile or isFolder
+        self.ui.applyButton.enabled = isProjectFile or isFolder
 
     def clearLog(self):
         self.ui.statusLabel.plainText = ''
@@ -215,13 +227,13 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         slicer.app.processEvents()
 
     def onApplyButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay(_("Failed to import Mimics project."), waitCursor=True):
+        with slicer.util.tryWithErrorDisplay(_("Failed to import project."), waitCursor=True):
             try:
                 self.clearLog()
                 self.logic.messages = []
                 inputPath = self.ui.inputPathLineEdit.currentPath
                 if not inputPath:
-                    raise ValueError("Please specify an input .mcs file or folder")
+                    raise ValueError("Please specify an input .mcs / .mxp file or folder")
                 isFolder = os.path.isdir(inputPath)
 
                 self.loadingInProgress = True
@@ -246,14 +258,14 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
                 if saveToFiles and useCustom and not customBase:
                     raise ValueError("Please specify a custom output folder")
 
-                def exportDirFor(mcsPath, perProjectSubfolder):
+                def exportDirFor(projectPath, perProjectSubfolder):
                     if not saveToFiles:
                         return None
-                    projectName = os.path.splitext(os.path.basename(mcsPath))[0]
+                    projectName = os.path.splitext(os.path.basename(projectPath))[0]
                     if useCustom:
                         return os.path.join(customBase, projectName) if perProjectSubfolder else customBase
-                    # Save next to the .mcs file, inside a subfolder named after the project.
-                    return os.path.join(os.path.dirname(os.path.abspath(mcsPath)), projectName)
+                    # Save next to the project file, inside a subfolder named after the project.
+                    return os.path.join(os.path.dirname(os.path.abspath(projectPath)), projectName)
 
                 commonArgs = dict(loadImage=loadImage, loadModels=loadModels, loadNurbs=loadNurbs,
                                   loadPoints=loadPoints, exportDicom=exportDicom,
@@ -263,30 +275,31 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
 
                 if isFolder:
                     import glob
-                    mcsFiles = sorted(glob.glob(os.path.join(inputPath, "*.mcs")))
-                    if not mcsFiles:
-                        raise ValueError("No .mcs files found in the selected folder")
+                    projectFiles = sorted(glob.glob(os.path.join(inputPath, "*.mcs"))
+                                          + glob.glob(os.path.join(inputPath, "*.mxp")))
+                    if not projectFiles:
+                        raise ValueError("No .mcs or .mxp files found in the selected folder")
                     verb = "Inspecting" if inspectMode else "Batch converting"
-                    self.addLog(f"{verb} {len(mcsFiles)} Mimics project(s)...")
+                    self.addLog(f"{verb} {len(projectFiles)} project(s)...")
                     nOk = 0
-                    for i, mcsPath in enumerate(mcsFiles):
-                        self.addLog(f"[{i + 1}/{len(mcsFiles)}] {os.path.basename(mcsPath)}")
+                    for i, projectPath in enumerate(projectFiles):
+                        self.addLog(f"[{i + 1}/{len(projectFiles)}] {os.path.basename(projectPath)}")
                         try:
                             if inspectMode:
-                                self.logic.inspect(mcsPath)
+                                self.logic.inspect(projectPath)
                             else:
-                                self.logic.importMcs(mcsPath, loadIntoScene=False,
-                                                     exportDir=exportDirFor(mcsPath, True), **commonArgs)
+                                self.logic.importProject(projectPath, loadIntoScene=False,
+                                                         exportDir=exportDirFor(projectPath, True), **commonArgs)
                             nOk += 1
                         except Exception as e:  # noqa: BLE001 - keep going on the rest of the batch
                             self.addLog(f"  ERROR: {e}")
-                        self.updateProgress(int((i + 1) / len(mcsFiles) * 100))
-                    self.addLog(f"Finished: {nOk}/{len(mcsFiles)} project(s).")
+                        self.updateProgress(int((i + 1) / len(projectFiles) * 100))
+                    self.addLog(f"Finished: {nOk}/{len(projectFiles)} project(s).")
                 elif inspectMode:
                     self.logic.inspect(inputPath)
                 else:
-                    self.logic.importMcs(inputPath, loadIntoScene=loadIntoScene,
-                                         exportDir=exportDirFor(inputPath, False), **commonArgs)
+                    self.logic.importProject(inputPath, loadIntoScene=loadIntoScene,
+                                             exportDir=exportDirFor(inputPath, False), **commonArgs)
 
                 # Show a pop-up at the end if any project reported an error (e.g. >10% non-uniform
                 # slice spacing). Warnings are only written to the log above.
@@ -303,28 +316,127 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
 
 
 #
+# Blob stores
+#
+
+
+class _SqliteBlobStore:
+    """Access to the named blobs of a Materialise Mimics `.mcs` project.
+
+    A `.mcs` file is a SQLite database with two tables: `blobs` (blob_id, blob_name,
+    number_of_parts) and `blobs_parts` (per-part data, optionally zlib-compressed). A blob is the
+    concatenation of its parts in order.
+    """
+
+    def __init__(self, filename):
+        import sqlite3
+        # Open read-only so the source project file is never modified.
+        try:
+            self._con = sqlite3.connect(f"{pathlib.Path(filename).as_uri()}?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            self._con = sqlite3.connect(filename)
+        tables = [r[0] for r in self._con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")]
+        if "blobs" not in tables:
+            self._con.close()
+            raise ValueError("Not a Mimics project file (no 'blobs' table).")
+        cur = self._con.cursor()
+        cur.execute("SELECT blob_name, blob_id FROM blobs")
+        self._ids = {name: bid for name, bid in cur.fetchall()}
+        self.names = set(self._ids.keys())
+
+    def read(self, name):
+        """Return the decompressed bytes of the named blob."""
+        cur = self._con.cursor()
+        cur.execute(
+            "SELECT is_blob_compressed, blob_part_data FROM blobs_parts "
+            "WHERE blob_id=? ORDER BY blob_part_number", (self._ids[name],))
+        parts = []
+        for compressed, data in cur.fetchall():
+            if compressed:
+                data = zlib.decompress(data)
+            parts.append(data)
+        return b"".join(parts)
+
+    def close(self):
+        self._con.close()
+
+
+class _MxpBlobStore:
+    """Access to the named blobs of a Materialise 3-matic `.mxp` project.
+
+    A `.mxp` file is a ZIP archive in which the usual 'PK' signatures are replaced with 'MT'
+    (Materialise); each member is stored with a standard 30-byte local file header and raw
+    DEFLATE (or 'store') compression. Only the local file headers are walked (the trailing
+    central directory is ignored), so members are read by seeking to the recorded data offset.
+    """
+
+    LOCAL_HEADER_SIGNATURE = b"MT\x03\x04"
+
+    def __init__(self, filename):
+        self._filename = filename
+        self._members = {}  # name -> (compression_method, data_offset, compressed_size)
+        with open(filename, "rb") as f:
+            while True:
+                header = f.read(30)
+                if len(header) < 30 or header[:4] != self.LOCAL_HEADER_SIGNATURE:
+                    break
+                (_ver, _flags, method, _mtime, _mdate, _crc, csize, _usize,
+                 nameLen, extraLen) = struct.unpack("<HHHHHIIIHH", header[4:30])
+                name = f.read(nameLen).decode("utf-8", "replace")
+                f.seek(extraLen, 1)
+                dataOffset = f.tell()
+                f.seek(csize, 1)
+                self._members[name] = (method, dataOffset, csize)
+        if not self._members:
+            raise ValueError("Not a 3-matic project file (no 'MT' archive entries).")
+        self.names = set(self._members.keys())
+
+    def read(self, name):
+        """Return the decompressed bytes of the named member."""
+        method, dataOffset, csize = self._members[name]
+        with open(self._filename, "rb") as f:
+            f.seek(dataOffset)
+            data = f.read(csize)
+        if method == 8:  # DEFLATE (raw, no zlib header)
+            return zlib.decompress(data, -15)
+        if method == 0:  # stored uncompressed
+            return data
+        raise ValueError(f"Unsupported compression method {method} for member '{name}'.")
+
+    def close(self):
+        pass
+
+
+#
 # ImportMimicsLogic
 #
 
 
 class ImportMimicsLogic(ScriptedLoadableModuleLogic):
-    """Reads Materialise Mimics .mcs project files.
+    """Reads Materialise Mimics (.mcs) and 3-matic (.mxp) project files.
 
-    File format (reverse engineered):
-      - The .mcs file is a SQLite database with two tables: `blobs` (blob_id, blob_name,
-        number_of_parts) and `blobs_parts` (blob data, optionally zlib-compressed, in parts).
+    Both formats are containers of named, individually zlib/deflate-compressed binary blobs; only
+    the container differs (see the blob-store classes below), while the blob contents are shared:
       - `blob_0` contains the original DICOM files concatenated (128-byte preamble + 'DICM' +
-        dataset), one per slice, but with the pixel data removed.
+        dataset), one per slice, but with the pixel data removed. (Mimics .mcs only.)
       - `blob_1`, `blob_2`, ... are the per-slice pixel data, each prefixed with a 4-byte 'MMFD'
-        magic and followed by Rows*Columns*2 bytes of little-endian 16-bit pixels.
-      - `Stl{guid}_vertices` and `Stl{guid}_surfaces` store surface models: vertices as int32
-        fixed-point coordinates (millimeters * 10000, in LPS/patient coordinate system), and
-        surfaces as int32 triangle vertex indices.
+        magic and followed by Rows*Columns*2 bytes of little-endian 16-bit pixels. (.mcs only.)
+      - `Stl{guid}_vertices` / `Stl(N)_vertices` store vertices as int32 fixed-point coordinates
+        (millimeters * 10000, in LPS/patient coordinate system).
+      - `Stl..._surfaces` store triangle vertex indices as int32 triplets (surface meshes).
+      - `Stl..._curves` store a polyline as an ordered list of int32 vertex indices into the
+        object's own `_vertices` (contours/wireframes; 3-matic .mxp).
+      - `NURBS_{guid}` store closed B-spline curves (valve annuli; .mcs only).
       - `header.xml` holds the project structure but is stored encrypted, so it is not decoded.
     """
 
-    # Mimics stores mesh vertex coordinates as integers in units of 0.1 micrometer (mm * 1e4).
+    # Materialise stores mesh vertex coordinates as integers in units of 0.1 micrometer (mm * 1e4).
     MESH_COORD_SCALE = 1.0e-4
+
+    # Matches both id styles used for mesh/curve objects: `Stl{guid}_part` and `Stl(N)_part`.
+    # Group 1 is the id including its delimiters ('{guid}' or '(N)'); group 2 is the part name.
+    _STL_RE = re.compile(r"^Stl(\{[0-9a-fA-F-]+\}|\(\d+\))_(vertices|surfaces|curves)$")
 
     def __init__(self) -> None:
         ScriptedLoadableModuleLogic.__init__(self)
@@ -347,36 +459,65 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
     # ------------------------------------------------------------------ blob store
 
     @staticmethod
-    def _readBlob(cur, blobId):
-        """Return the (decompressed, concatenated) bytes of a blob given its id."""
-        cur.execute(
-            "SELECT is_blob_compressed, blob_part_data FROM blobs_parts "
-            "WHERE blob_id=? ORDER BY blob_part_number", (blobId,))
-        parts = []
-        for compressed, data in cur.fetchall():
-            if compressed:
-                data = zlib.decompress(data)
-            parts.append(data)
-        return b"".join(parts)
+    def openStore(filename):
+        """Open a Mimics/3-matic project and return a blob store, chosen from the file's magic.
+
+        A `.mcs` file is a SQLite database; a `.mxp` file is a ZIP-like archive with 'MT'
+        signatures. The extension is used only as a fallback when the magic is inconclusive.
+        """
+        if not os.path.isfile(filename):
+            raise FileNotFoundError(filename)
+        with open(filename, "rb") as f:
+            magic = f.read(16)
+        if magic.startswith(b"SQLite format 3"):
+            return _SqliteBlobStore(filename)
+        if magic.startswith(_MxpBlobStore.LOCAL_HEADER_SIGNATURE):
+            return _MxpBlobStore(filename)
+        ext = os.path.splitext(filename)[1].lower()
+        if ext == ".mcs":
+            return _SqliteBlobStore(filename)
+        if ext == ".mxp":
+            return _MxpBlobStore(filename)
+        raise ValueError("Unrecognized file (not a Mimics .mcs or 3-matic .mxp project).")
 
     @classmethod
-    def _blobIndex(cls, con):
-        """Return {blob_name: blob_id} for all blobs."""
-        cur = con.cursor()
-        cur.execute("SELECT blob_name, blob_id FROM blobs")
-        return {name: bid for name, bid in cur.fetchall()}
+    def _stlObjects(cls, names):
+        """Return {objectId: set(parts)} for every Stl mesh/curve object in the blob names.
+
+        objectId includes its delimiters, e.g. '{6543...}' or '(18)'; parts is a subset of
+        {'vertices', 'surfaces', 'curves'}.
+        """
+        objects = {}
+        for name in names:
+            match = cls._STL_RE.match(name)
+            if match:
+                objects.setdefault(match.group(1), set()).add(match.group(2))
+        return objects
 
     @staticmethod
-    def _inventory(names):
+    def _stlSortKey(objectId):
+        """Order integer ids '(N)' numerically and before guid ids '{...}' (ordered lexically)."""
+        if objectId.startswith("("):
+            return (0, int(objectId[1:-1]), "")
+        return (1, 0, objectId)
+
+    @classmethod
+    def _inventory(cls, names):
         """Summarize the project contents from blob names alone (no decompression)."""
-        stl = sorted(n[len("Stl"):-len("_vertices")]
-                     for n in names if n.startswith("Stl{") and n.endswith("}_vertices"))
+        objects = cls._stlObjects(names)
+        surfaces = sorted((i for i, p in objects.items() if "surfaces" in p), key=cls._stlSortKey)
+        curves = sorted((i for i, p in objects.items() if "curves" in p), key=cls._stlSortKey)
+        pointClouds = sorted((i for i, p in objects.items() if p == {"vertices"}), key=cls._stlSortKey)
         nurbs = sorted(n[len("NURBS_"):] for n in names if n.startswith("NURBS_"))
         pointSets = [n for n in names if n.startswith("00007FF")]
         previews = [n for n in names if n.startswith("ImageBlockPngPreview")]
         return {
-            "surfaceModelCount": len(stl),
-            "surfaceModelGuids": stl,
+            "surfaceModelCount": len(surfaces),
+            "surfaceModelIds": surfaces,
+            "curveCount": len(curves),
+            "curveIds": curves,
+            "pointCloudCount": len(pointClouds),
+            "pointCloudIds": pointClouds,
             "nurbsSurfaceCount": len(nurbs),
             "nurbsSurfaceGuids": nurbs,
             "pointSetCount": len(pointSets),
@@ -385,46 +526,37 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ main entry
 
-    def importMcs(self, filename, loadImage=True, loadModels=True, loadNurbs=True,
-                  loadPoints=True, loadIntoScene=True, exportDir=None, exportDicom=False,
-                  saveMetadata=True):
-        import sqlite3
-
-        if not os.path.isfile(filename):
-            raise FileNotFoundError(filename)
-
-        self.addLog(f"Importing Mimics project: {filename}")
+    def importProject(self, filename, loadImage=True, loadModels=True, loadNurbs=True,
+                      loadPoints=True, loadIntoScene=True, exportDir=None, exportDicom=False,
+                      saveMetadata=True):
+        """Import a Mimics (.mcs) or 3-matic (.mxp) project. Returns
+        (volumeNode, modelNodes, curveNodes, markupsNodes)."""
+        isMxp = os.path.splitext(filename)[1].lower() == ".mxp"
+        self.addLog(f"Importing {'3-matic' if isMxp else 'Mimics'} project: {filename}")
         self.updateProgress(1)
 
-        # Open read-only so the source project file is never modified.
+        store = self.openStore(filename)
         try:
-            con = sqlite3.connect(f"{pathlib.Path(filename).as_uri()}?mode=ro", uri=True)
-        except sqlite3.OperationalError:
-            con = sqlite3.connect(filename)
-        try:
-            names = self._blobIndex(con)
-            if "blobs" not in [r[0] for r in con.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'")]:
-                raise ValueError("Not a Mimics project file (no 'blobs' table).")
-
+            names = store.names
             projectName = os.path.splitext(os.path.basename(filename))[0]
             inventory = self._inventory(names)
             metadata = {
                 "sourceFile": os.path.normpath(os.path.abspath(filename)),
                 "projectName": projectName,
-                "format": "Materialise Mimics project (.mcs)",
+                "format": ("Materialise 3-matic project (.mxp)" if isMxp
+                           else "Materialise Mimics project (.mcs)"),
                 "blobCount": len(names),
                 "contents": inventory,
                 "notes": [
                     "The project header (object names, colors, analysis data) is stored "
-                    "encrypted by Mimics and cannot be decoded; objects are named generically.",
+                    "encrypted by Materialise and cannot be decoded; objects are named generically.",
                 ],
             }
 
             volumeNode = None
             dicomMeta = None
             if loadImage:
-                volumeNode, dicomMeta = self.importImage(con, names)
+                volumeNode, dicomMeta = self.importImage(store)
                 if dicomMeta:
                     metadata["image"] = dicomMeta
                     if dicomMeta.get("sliceSpacingError"):
@@ -435,42 +567,51 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                     metadata["notes"].append(
                         "Image data is present but could not be reconstructed "
                         "(unsupported or compressed pixel storage).")
-                self.updateProgress(55)
+                self.updateProgress(50)
 
             modelNodes = []
             if loadModels:
-                modelNodes = self.importModels(con, names, attachMetadata=saveMetadata)
+                modelNodes = self.importModels(store, attachMetadata=saveMetadata)
                 metadata["surfaceModels"] = [{
                     "name": m.GetName(),
-                    "guid": m.GetAttribute("Mimics.guid"),
+                    "id": m.GetAttribute("Mimics.id"),
                     "points": m.GetPolyData().GetNumberOfPoints(),
                     "triangles": m.GetPolyData().GetNumberOfCells(),
                 } for m in modelNodes]
                 self.updateProgress(70)
 
-            curveNodes = []
+            curveModelNodes = []
+            if loadModels and inventory["curveCount"]:
+                curveModelNodes = self.importCurves(store, attachMetadata=saveMetadata)
+                metadata["curves"] = [{
+                    "name": c.GetName(), "id": c.GetAttribute("Mimics.id"),
+                    "points": c.GetPolyData().GetNumberOfPoints(),
+                } for c in curveModelNodes]
+                self.updateProgress(78)
+
+            nurbsNodes = []
             if loadNurbs and inventory["nurbsSurfaceCount"]:
-                curveNodes = self.importNurbsCurves(con, names, attachMetadata=saveMetadata)
+                nurbsNodes = self.importNurbsCurves(store, attachMetadata=saveMetadata)
                 metadata["nurbsCurves"] = [{
                     "name": c.GetName(), "guid": c.GetAttribute("Mimics.guid"),
-                } for c in curveNodes]
-                self.updateProgress(80)
+                } for c in nurbsNodes]
+                self.updateProgress(84)
 
             pointNodes = []
             if loadPoints and inventory["pointSetCount"]:
-                pointNodes = self.importPointSets(con, names, attachMetadata=saveMetadata)
+                pointNodes = self.importPointSets(store, attachMetadata=saveMetadata)
                 metadata["pointSets"] = [{
                     "name": p.GetName(), "points": p.GetNumberOfControlPoints(),
                 } for p in pointNodes]
-                self.updateProgress(85)
+                self.updateProgress(88)
 
-            markupsNodes = curveNodes + pointNodes
+            markupsNodes = nurbsNodes + pointNodes
 
             if exportDir:
-                self._exportFiles(exportDir, volumeNode, modelNodes, markupsNodes, metadata,
-                                  saveMetadata)
+                self._exportFiles(exportDir, volumeNode, modelNodes, curveModelNodes,
+                                  markupsNodes, metadata, saveMetadata)
                 if exportDicom:
-                    self.exportDicomFiles(con, names, exportDir)
+                    self.exportDicomFiles(store, exportDir)
                 self.updateProgress(95)
 
             if loadIntoScene:
@@ -480,42 +621,36 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                     slicer.util.setSliceViewerLayers(background=volumeNode, fit=True)
                 self.addLog(
                     f"Done. Loaded {'1 volume, ' if volumeNode else ''}{len(modelNodes)} model(s), "
-                    f"{len(curveNodes)} curve(s), {len(pointNodes)} point set(s) into the scene.")
+                    f"{len(curveModelNodes)} curve(s), {len(nurbsNodes)} NURBS, "
+                    f"{len(pointNodes)} point set(s) into the scene.")
             else:
                 # Not loading into the scene: remove the nodes that were created for export.
                 nVolume = 1 if volumeNode is not None else 0
-                counts = (nVolume, len(modelNodes), len(curveNodes), len(pointNodes))
-                for node in [volumeNode] + modelNodes + markupsNodes:
+                counts = (nVolume, len(modelNodes), len(curveModelNodes), len(markupsNodes))
+                for node in [volumeNode] + modelNodes + curveModelNodes + markupsNodes:
                     if node is not None:
                         slicer.mrmlScene.RemoveNode(node)
-                volumeNode, modelNodes, markupsNodes = None, [], []
+                volumeNode, modelNodes, curveModelNodes, markupsNodes = None, [], [], []
                 self.addLog(
                     f"Done. Exported {counts[0]} volume, {counts[1]} model(s), "
-                    f"{counts[2]} curve(s), {counts[3]} point set(s) to files.")
+                    f"{counts[2]} curve(s), {counts[3]} markup(s) to files.")
             self.updateProgress(100)
-            return volumeNode, modelNodes, markupsNodes
+            return volumeNode, modelNodes, curveModelNodes, markupsNodes
         finally:
-            con.close()
+            store.close()
+
+    # Backwards-compatible alias (the module historically exposed importMcs).
+    importMcs = importProject
 
     def inspect(self, filename):
-        """Log a summary of a Mimics project without creating any nodes or writing files."""
-        import sqlite3
-
-        if not os.path.isfile(filename):
-            raise FileNotFoundError(filename)
+        """Log a summary of a project without creating any nodes or writing files."""
+        store = self.openStore(filename)
         try:
-            con = sqlite3.connect(f"{pathlib.Path(filename).as_uri()}?mode=ro", uri=True)
-        except sqlite3.OperationalError:
-            con = sqlite3.connect(filename)
-        try:
-            names = self._blobIndex(con)
-            if "blobs" not in [r[0] for r in con.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'")]:
-                raise ValueError("Not a Mimics project file (no 'blobs' table).")
+            names = store.names
             inventory = self._inventory(names)
             projectName = os.path.splitext(os.path.basename(filename))[0]
             self.addLog(f"  Project: {projectName}  ({len(names)} blobs)")
-            image = self._imageInfo(con, names)
+            image = self._imageInfo(store)
             if image:
                 self.addLog(f"  Image: {image['modality']} "
                             f"{image['columns']}x{image['rows']}x{image['sliceCount']}"
@@ -535,24 +670,25 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             else:
                 self.addLog("  Image: none")
             self.addLog(f"  Surface models: {inventory['surfaceModelCount']}, "
+                        f"curves: {inventory['curveCount']}, "
+                        f"point clouds: {inventory['pointCloudCount']}, "
                         f"NURBS curves: {inventory['nurbsSurfaceCount']}, "
-                        f"point sets: {inventory['pointSetCount']}, "
-                        f"image previews: {inventory['imagePreviewCount']}")
+                        f"point sets: {inventory['pointSetCount']}")
             return inventory
         finally:
-            con.close()
+            store.close()
 
-    def _imageInfo(self, con, names):
+    def _imageInfo(self, store):
         """Return an image summary from the DICOM headers (blob_0), including a slice-spacing
         uniformity check. Only headers are parsed - no pixel data is read."""
         try:
             import pydicom
         except ImportError:
             return None
-        if "blob_0" not in names:
+        if "blob_0" not in store.names:
             return None
         import io
-        blob0 = self._readBlob(con.cursor(), names["blob_0"])
+        blob0 = store.read("blob_0")
         offsets = []
         start = 0
         while True:
@@ -598,7 +734,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ image
 
-    def _reconstructSlices(self, con, names):
+    def _reconstructSlices(self, store):
         """Split blob_0 into per-slice DICOM headers, pair with MMFD pixel blobs and decode pixels.
 
         Returns (slices, dicomMeta) where `slices` is a list of (instanceNumber, ipp, pixels, ds)
@@ -610,12 +746,12 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             self.addLog("  WARNING: pydicom is not available; skipping image reconstruction.")
             return None, None
 
+        names = store.names
         if "blob_0" not in names:
             self.addLog("  No image data found (blob_0 missing).")
             return None, None
 
-        cur = con.cursor()
-        blob0 = self._readBlob(cur, names["blob_0"])
+        blob0 = store.read("blob_0")
 
         # Split concatenated DICOM files: each starts 128 bytes before its 'DICM' marker.
         headerChunks = []
@@ -634,10 +770,10 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
         # Collect per-slice pixel data blobs (prefixed with 'MMFD').
         pixelBlobs = []
-        for name, bid in names.items():
+        for name in names:
             if name == "blob_0" or not (name.startswith("blob_") and name[5:].isdigit()):
                 continue
-            data = self._readBlob(cur, bid)
+            data = store.read(name)
             if data[:4] == b"MMFD":
                 pixelBlobs.append((int(name[5:]), data[4:]))
         pixelBlobs.sort()
@@ -699,9 +835,9 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         slices.sort(key=lambda s: np.dot(s[1], sliceNormal))
         return slices, dicomMeta
 
-    def importImage(self, con, names):
+    def importImage(self, store):
         """Reconstruct the image volume from DICOM headers (blob_0) + MMFD pixel blobs."""
-        slices, dicomMeta = self._reconstructSlices(con, names)
+        slices, dicomMeta = self._reconstructSlices(store)
         if not slices:
             return None, None
         nSlices = len(slices)
@@ -798,7 +934,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             self.addLog(f"  WARNING: {message}")
             dicomMeta["sliceSpacingWarning"] = message
 
-    def exportDicomFiles(self, con, names, outputDir):
+    def exportDicomFiles(self, store, outputDir):
         """Reconstruct the complete original DICOM files (headers + pixel data) and save them.
 
         Files are written to a `dicom` subfolder, one per slice.
@@ -806,7 +942,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         """
         import pydicom
 
-        slices, dicomMeta = self._reconstructSlices(con, names)
+        slices, dicomMeta = self._reconstructSlices(store)
         if not slices:
             self.addLog("  No DICOM data to export.")
             return 0
@@ -828,65 +964,138 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ models
 
-    def importModels(self, con, names, attachMetadata=True):
-        """Create model nodes from Stl{guid}_vertices / _surfaces blobs."""
-        cur = con.cursor()
-        guids = []
-        for name in names:
-            if name.startswith("Stl{") and name.endswith("}_vertices"):
-                guids.append(name[len("Stl"):-len("_vertices")])
+    # A small palette so consecutive objects get distinguishable colors (names/colors from the
+    # project header are encrypted and unavailable).
+    _COLOR_PALETTE = [
+        (0.9, 0.5, 0.5), (0.5, 0.7, 0.9), (0.6, 0.9, 0.6),
+        (0.9, 0.8, 0.5), (0.8, 0.6, 0.9), (0.5, 0.9, 0.85),
+    ]
 
+    def _readVerticesRas(self, store, objectId):
+        """Read an object's `_vertices` blob and return its points as an (N,3) RAS array."""
+        vertices = np.frombuffer(store.read(f"Stl{objectId}_vertices"),
+                                 dtype="<i4").reshape(-1, 3).astype(np.float64)
+        vertices *= self.MESH_COORD_SCALE  # fixed-point -> millimeters (LPS)
+        return self._lpsToRas(vertices)
+
+    def importModels(self, store, attachMetadata=True):
+        """Create model nodes from Stl objects that have a `_surfaces` blob (triangle meshes).
+
+        Objects that have `_vertices` but neither surfaces nor curves are imported as point-cloud
+        models. Both id styles (`Stl{guid}_...` and `Stl(N)_...`) are supported.
+        """
+        names = store.names
+        objects = self._stlObjects(names)
         modelNodes = []
-        colorPalette = [
-            (0.9, 0.5, 0.5), (0.5, 0.7, 0.9), (0.6, 0.9, 0.6),
-            (0.9, 0.8, 0.5), (0.8, 0.6, 0.9), (0.5, 0.9, 0.85),
-        ]
-        for idx, guid in enumerate(sorted(guids)):
-            vName = f"Stl{guid}_vertices"
-            sName = f"Stl{guid}_surfaces"
-            if sName not in names:
-                self.addLog(f"  Skipping {guid}: no surfaces blob.")
+        for objectId in sorted(objects, key=self._stlSortKey):
+            parts = objects[objectId]
+            if f"Stl{objectId}_vertices" not in names:
+                continue
+            hasSurfaces = "surfaces" in parts
+            # Curve-only objects are handled by importCurves; skip them here.
+            if not hasSurfaces and "curves" in parts:
                 continue
 
-            vertexBytes = self._readBlob(cur, names[vName])
-            surfaceBytes = self._readBlob(cur, names[sName])
-            vertices = np.frombuffer(vertexBytes, dtype="<i4").reshape(-1, 3).astype(np.float64)
-            vertices *= self.MESH_COORD_SCALE  # -> millimeters (LPS)
-            # LPS -> RAS
-            vertices[:, 0] *= -1.0
-            vertices[:, 1] *= -1.0
-            triangles = np.frombuffer(surfaceBytes, dtype="<i4").reshape(-1, 3)
+            vertices = self._readVerticesRas(store, objectId)
+            if len(vertices) == 0:
+                # Empty placeholder object (0 vertices); nothing to import.
+                self.addLog(f"  Skipping empty object (id {objectId})")
+                continue
+            if hasSurfaces:
+                triangles = np.frombuffer(store.read(f"Stl{objectId}_surfaces"),
+                                          dtype="<i4").reshape(-1, 3)
+                polyData = self._buildPolyData(vertices, triangles)
+                detail = f"{len(vertices)} points, {len(triangles)} triangles"
+            else:
+                # Vertices only: represent as a point cloud (glyphable vertex cells).
+                polyData = self._buildPointCloud(vertices)
+                detail = f"{len(vertices)} points (point cloud)"
 
-            polyData = self._buildPolyData(vertices, triangles)
+            idx = len(modelNodes)  # consecutive object numbering (curve-only objects are skipped)
             modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
             modelNode.SetName(f"object{idx + 1}")
             modelNode.SetAndObservePolyData(polyData)
             modelNode.CreateDefaultDisplayNodes()
             displayNode = modelNode.GetDisplayNode()
-            displayNode.SetColor(*colorPalette[idx % len(colorPalette)])
+            displayNode.SetColor(*self._COLOR_PALETTE[idx % len(self._COLOR_PALETTE)])
             displayNode.SetVisibility2D(True)
             if attachMetadata:
-                modelNode.SetAttribute("Mimics.guid", guid)
+                modelNode.SetAttribute("Mimics.id", objectId)
             modelNodes.append(modelNode)
-            self.addLog(f"  Model {idx + 1}: {len(vertices)} points, {len(triangles)} triangles "
-                        f"(guid {guid})")
+            self.addLog(f"  Model {idx + 1}: {detail} (id {objectId})")
         return modelNodes
+
+    def importCurves(self, store, attachMetadata=True):
+        """Create polyline model nodes from Stl objects that have a `_curves` blob.
+
+        A `_curves` blob is an ordered list of int32 vertex indices into the object's own
+        `_vertices`, defining a contour/wireframe. If the first and last index coincide the
+        polyline is closed. The result is a model node holding a single polyline (dense sampled
+        points, so a lightweight polyline model rather than an editable markups curve).
+        """
+        names = store.names
+        objects = self._stlObjects(names)
+        curveNodes = []
+        idx = 0
+        for objectId in sorted(objects, key=self._stlSortKey):
+            if "curves" not in objects[objectId] or f"Stl{objectId}_vertices" not in names:
+                continue
+            vertices = self._readVerticesRas(store, objectId)
+            if len(vertices) == 0:
+                continue
+            indices = np.frombuffer(store.read(f"Stl{objectId}_curves"), dtype="<i4")
+            # Keep only valid indices into this object's vertices.
+            indices = indices[(indices >= 0) & (indices < len(vertices))]
+            if len(indices) < 2:
+                continue
+            closed = bool(indices[0] == indices[-1]) and len(indices) > 2
+            if closed:
+                indices = indices[:-1]
+            # Drop consecutive duplicate indices (zero-length segments).
+            keep = np.ones(len(indices), dtype=bool)
+            keep[1:] = indices[1:] != indices[:-1]
+            indices = indices[keep]
+            if len(indices) < 2:
+                continue
+            curvePoints = vertices[indices]
+
+            polyData = self._buildPolyLine(curvePoints, closed)
+            node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
+            node.SetName(f"curve{idx + 1}")
+            node.SetAndObservePolyData(polyData)
+            node.CreateDefaultDisplayNodes()
+            displayNode = node.GetDisplayNode()
+            displayNode.SetColor(1.0, 1.0, 0.4)
+            displayNode.SetLineWidth(3)
+            displayNode.SetVisibility2D(True)
+            if attachMetadata:
+                node.SetAttribute("Mimics.id", objectId)
+                node.SetAttribute("Mimics.type", "Curve")
+            curveNodes.append(node)
+            self.addLog(f"  Curve {idx + 1}: {len(curvePoints)} points, "
+                        f"{'closed' if closed else 'open'} (id {objectId})")
+            idx += 1
+        return curveNodes
 
     @staticmethod
     def _buildPolyData(vertices, triangles):
-        points = vtk.vtkPoints()
-        points.SetNumberOfPoints(len(vertices))
-        for i, (x, y, z) in enumerate(vertices):
-            points.SetPoint(i, x, y, z)
+        """Build a triangulated vtkPolyData from (N,3) float points and (M,3) int triangle indices.
 
+        Points and cells are set from numpy in bulk (meshes can have millions of triangles, so a
+        per-cell Python loop would be prohibitively slow)."""
+        from vtk.util import numpy_support
+
+        points = vtk.vtkPoints()
+        points.SetData(numpy_support.numpy_to_vtk(
+            np.ascontiguousarray(vertices, dtype=np.float64), deep=True))
+
+        nCells = len(triangles)
+        connectivity = np.empty((nCells, 4), dtype=np.int64)
+        connectivity[:, 0] = 3
+        connectivity[:, 1:] = triangles
         cells = vtk.vtkCellArray()
-        idList = vtk.vtkIdList()
-        for tri in triangles:
-            idList.Reset()
-            idList.InsertNextId(int(tri[0]))
-            idList.InsertNextId(int(tri[1]))
-            idList.InsertNextId(int(tri[2]))
-            cells.InsertNextCell(idList)
+        cells.SetCells(nCells, numpy_support.numpy_to_vtkIdTypeArray(
+            connectivity.ravel(), deep=True))
 
         polyData = vtk.vtkPolyData()
         polyData.SetPoints(points)
@@ -898,6 +1107,51 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         normals.ConsistencyOn()
         normals.Update()
         return normals.GetOutput()
+
+    @staticmethod
+    def _buildPolyLine(points, closed):
+        """Build a vtkPolyData holding a single polyline through the given (N,3) points."""
+        from vtk.util import numpy_support
+
+        arr = np.ascontiguousarray(points, dtype=np.float64)
+        if closed:
+            arr = np.vstack([arr, arr[0]])
+        vtkPoints = vtk.vtkPoints()
+        vtkPoints.SetData(numpy_support.numpy_to_vtk(arr, deep=True))
+
+        nPoints = len(arr)
+        connectivity = np.empty(nPoints + 1, dtype=np.int64)
+        connectivity[0] = nPoints
+        connectivity[1:] = np.arange(nPoints, dtype=np.int64)
+        lines = vtk.vtkCellArray()
+        lines.SetCells(1, numpy_support.numpy_to_vtkIdTypeArray(connectivity, deep=True))
+
+        polyData = vtk.vtkPolyData()
+        polyData.SetPoints(vtkPoints)
+        polyData.SetLines(lines)
+        return polyData
+
+    @staticmethod
+    def _buildPointCloud(points):
+        """Build a vtkPolyData holding vertex cells for the given (N,3) points."""
+        from vtk.util import numpy_support
+
+        arr = np.ascontiguousarray(points, dtype=np.float64)
+        vtkPoints = vtk.vtkPoints()
+        vtkPoints.SetData(numpy_support.numpy_to_vtk(arr, deep=True))
+
+        nPoints = len(arr)
+        connectivity = np.empty((nPoints, 2), dtype=np.int64)
+        connectivity[:, 0] = 1
+        connectivity[:, 1] = np.arange(nPoints, dtype=np.int64)
+        verts = vtk.vtkCellArray()
+        verts.SetCells(nPoints, numpy_support.numpy_to_vtkIdTypeArray(
+            connectivity.ravel(), deep=True))
+
+        polyData = vtk.vtkPolyData()
+        polyData.SetPoints(vtkPoints)
+        polyData.SetVerts(verts)
+        return polyData
 
     @staticmethod
     def _lpsToRas(points):
@@ -959,13 +1213,12 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             out[si] = d[degree]
         return out
 
-    def importNurbsCurves(self, con, names, attachMetadata=True):
+    def importNurbsCurves(self, store, attachMetadata=True):
         """Create closed markups curve nodes from NURBS_{guid} blobs (e.g. valve annuli)."""
-        cur = con.cursor()
-        guids = sorted(n[len("NURBS_"):] for n in names if n.startswith("NURBS_"))
+        guids = sorted(n[len("NURBS_"):] for n in store.names if n.startswith("NURBS_"))
         curveNodes = []
         for idx, guid in enumerate(guids):
-            cps, knots, degree = self._parseNurbs(self._readBlob(cur, names["NURBS_" + guid]))
+            cps, knots, degree = self._parseNurbs(store.read("NURBS_" + guid))
             if cps is None:
                 self.addLog(f"  Skipping NURBS {guid}: unsupported layout.")
                 continue
@@ -990,13 +1243,12 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ point sets
 
-    def importPointSets(self, con, names, attachMetadata=True):
+    def importPointSets(self, store, attachMetadata=True):
         """Create markups point-list nodes from the float64 point-set blobs."""
-        cur = con.cursor()
-        pointBlobs = sorted(n for n in names if n.startswith("00007FF"))
+        pointBlobs = sorted(n for n in store.names if n.startswith("00007FF"))
         pointNodes = []
         for idx, name in enumerate(pointBlobs):
-            data = self._readBlob(cur, names[name])
+            data = store.read(name)
             npts = len(data) // 24
             if npts < 1:
                 continue
@@ -1016,7 +1268,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ organization / export
 
-    def _exportFiles(self, exportDir, volumeNode, modelNodes, markupsNodes, metadata,
+    def _exportFiles(self, exportDir, volumeNode, modelNodes, curveNodes, markupsNodes, metadata,
                      saveMetadata=True):
         # Files are written to a subfolder named after the project, so node names (and hence
         # file names) do not repeat the project name.
@@ -1028,6 +1280,11 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         for modelNode in modelNodes:
             path = os.path.join(exportDir, f"{modelNode.GetName()}.ply")
             slicer.util.saveNode(modelNode, path)
+            self.addLog(f"  Saved {path}")
+        # Curve models hold polylines; .ply cannot store lines, so use .vtp (XML PolyData).
+        for curveNode in curveNodes:
+            path = os.path.join(exportDir, f"{curveNode.GetName()}.vtp")
+            slicer.util.saveNode(curveNode, path)
             self.addLog(f"  Saved {path}")
         for markupsNode in markupsNodes:
             path = os.path.join(exportDir, f"{markupsNode.GetName()}.mrk.json")
@@ -1047,7 +1304,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
 
 class ImportMimicsFileReader:
-    """File reader plugin so that .mcs projects can be opened directly (File > Add Data,
+    """File reader plugin so that .mcs / .mxp projects can be opened directly (File > Add Data,
     drag-and-drop). The project is loaded into the scene only; no converted files are written.
     Registered automatically because the class is named <ModuleName>FileReader.
     """
@@ -1056,23 +1313,24 @@ class ImportMimicsFileReader:
         self.parent = parent
 
     def description(self):
-        return _("Materialise Mimics project")
+        return _("Materialise Mimics/3-matic project")
 
     def fileType(self):
         return "MimicsProject"
 
     def extensions(self):
-        return [_("Materialise Mimics project") + " (*.mcs)"]
+        return [_("Materialise Mimics/3-matic project") + " (*.mcs *.mxp)"]
 
     def canLoadFileConfidence(self, filePath):
-        # Must have the .mcs extension...
+        # Must have a supported extension (.mcs / .mxp)...
         if not self.parent.supportedNameFilters(filePath):
             return 0.0
-        # ...and be a SQLite database (that is how Mimics stores .mcs projects).
+        # ...and be a SQLite database (.mcs) or an 'MT' archive (.mxp).
         try:
             with open(filePath, "rb") as f:
-                if f.read(16).startswith(b"SQLite format 3"):
-                    return 0.9
+                magic = f.read(16)
+            if magic.startswith(b"SQLite format 3") or magic.startswith(b"MT\x03\x04"):
+                return 0.9
         except OSError:
             pass
         return 0.0
@@ -1082,20 +1340,21 @@ class ImportMimicsFileReader:
             filePath = properties["fileName"]
             logic = ImportMimicsLogic()
             # Load into the scene only; never write converted files to a folder.
-            volumeNode, modelNodes, markupsNodes = logic.importMcs(
+            volumeNode, modelNodes, curveNodes, markupsNodes = logic.importProject(
                 filePath, loadIntoScene=True, exportDir=None, exportDicom=False)
             # Surface any warnings/errors (e.g. non-uniform slice spacing) to the user.
             for severity, text in logic.messages:
                 event = vtk.vtkCommand.ErrorEvent if severity == "error" else vtk.vtkCommand.WarningEvent
                 self.parent.userMessages().AddMessage(event, text)
-            loadedNodes = ([volumeNode] if volumeNode else []) + modelNodes + markupsNodes
+            loadedNodes = (([volumeNode] if volumeNode else [])
+                           + modelNodes + curveNodes + markupsNodes)
             if not loadedNodes:
-                raise ValueError("No data could be loaded from the Mimics project.")
+                raise ValueError("No data could be loaded from the project.")
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             self.parent.userMessages().AddMessage(
-                vtk.vtkCommand.ErrorEvent, f"Failed to read Mimics project: {e}")
+                vtk.vtkCommand.ErrorEvent, f"Failed to read Materialise project: {e}")
             return False
 
         self.parent.loadedNodes = [n.GetID() for n in loadedNodes]
