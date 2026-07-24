@@ -109,6 +109,23 @@ def getAllModuleSpecificScriptableNodes(moduleName):
                 slicer.util.getNodesByClass('vtkMRMLScriptedModuleNode'))
 
 
+def getAllMeasurementNodesForHeartValveNode(heartValveNode: slicer.vtkMRMLScriptedModuleNode):
+  from ValveQuantification import ValveQuantificationLogic
+  l = ValveQuantificationLogic()
+
+  matchingMeasurementNodes = []
+  for measurementNode in getAllHeartValveMeasurementNodes():
+    preset = l.getMeasurementPresetByMeasurementNode(measurementNode)
+    if not preset:
+      continue
+    for inputValveId in preset.inputValveIds:
+      role = 'Valve' + inputValveId
+      assocHeartValveNode = measurementNode.GetNodeReference(role)
+      if assocHeartValveNode and assocHeartValveNode is heartValveNode:
+        matchingMeasurementNodes.append(measurementNode)
+  return matchingMeasurementNodes
+
+
 def getHeartValveMeasurementNode(phase):
   for measurementNode in getAllHeartValveMeasurementNodes():
     cardiacCyclePhaseNames = getMeasurementCardiacCyclePhaseShortNames(measurementNode)
