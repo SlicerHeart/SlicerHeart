@@ -1725,29 +1725,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
   def saveNode(self, node, outputFolder, expectedTransformNode, enableTransformChange, ignoreMarkups=True):
     filename = node.GetName().replace(" ", "_")
 
-    if node.IsA("vtkMRMLTableNode"):
-      # Table is a special case for several reasons, so we write it here
-      originalToExpectedTransform = vtk.vtkGeneralTransform()
-      slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(None, expectedTransformNode, originalToExpectedTransform)
-      table = node.GetTable()
-      chordIndexArray = table.GetColumnByName("Index")
-      chordStartPositionArray = table.GetColumnByName("StartPosition")
-      chordEndPositionArray = table.GetColumnByName("EndPosition")
-      chordNameArray = table.GetColumnByName("Name")
-      # Write to file
-      filename += ".csv"
-      logging.info("Saving node "+filename)
-      fout = open(outputFolder+"/"+filename, "w")
-      for rowIndex in range(table.GetNumberOfRows()):
-        startPosition = originalToExpectedTransform.TransformPoint(chordStartPositionArray.GetTuple3(rowIndex))
-        endPosition = originalToExpectedTransform.TransformPoint(chordEndPositionArray.GetTuple3(rowIndex))
-        fout.write(f"{chordIndexArray.GetValue(rowIndex)}")
-        fout.write(f",{-startPosition[0]},{-startPosition[1]},{startPosition[2]}")
-        fout.write(f",{-endPosition[0]},{-endPosition[1]},{endPosition[2]}")
-        fout.write(f",{chordNameArray.GetValue(rowIndex)}\n")
-      fout.close()
-      return
-
     # Ensure that the node is under the expected transform node
     originalTransformNode = node.GetParentTransformNode()
     if originalTransformNode != expectedTransformNode:
