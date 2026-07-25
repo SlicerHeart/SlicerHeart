@@ -622,10 +622,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     pointLocator.SetDataSet(surface_World)
     pointLocator.BuildLocator()
 
-    # Create table node for spring import into FEBio
-    chordTableNode, chordIndexArray, chordNameArray, chordStartPositionArray, chordEndPositionArray = \
-      self.createChordTable(baseName, chordsFolderItemId)
-
     for endPointIndex in range(endPoints.GetNumberOfControlPoints()):
       endPoint_World = np.zeros(3)
       endPoints.GetNthControlPointPositionWorld(endPointIndex, endPoint_World)
@@ -655,12 +651,9 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
       line.AddControlPointWorld(vtk.vtkVector3d(endPoint_World), "{0}-{1:02d}".format(baseName, endPointIndex))
       # Put under subject hierarchy folder
       shNode.SetItemParent(shNode.GetItemByDataNode(line), folderItem)
-      # Add chord to the table
-      rowIndex = chordTableNode.AddEmptyRow()
-      chordIndexArray.SetValue(rowIndex, rowIndex+1)  # index in the table is 1-based
-      chordStartPositionArray.SetTuple3(rowIndex, closestStartPoint_World[0], closestStartPoint_World[1], closestStartPoint_World[2])
-      chordEndPositionArray.SetTuple3(rowIndex, endPoint_World[0], endPoint_World[1], endPoint_World[2])
-      chordNameArray.SetValue(rowIndex, chordName)
+
+    # Markups line nodes are not written on export, so build a model node from them
+    self.createChordsMesh(folderItem)
 
   def removeSubjectHierarchyOutputFolder(self, parameterNode):
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()

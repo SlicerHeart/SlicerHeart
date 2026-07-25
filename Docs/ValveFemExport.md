@@ -12,7 +12,6 @@ The module takes the results of valve segmentation and quantification (leaflet s
 
 - A segmented heart valve, prepared with the usual SlicerHeart workflow: `Valve Annulus Analysis` (heart valve node and annulus contour), `Valve Segmentation`, and `Leaflet Analysis` (leaflet surface models).
 - For the branching chordae workflow, a NURBS surface fitted to the leaflet, stored in a grid surface markups node. This node type is provided by the [SurfaceMarkup extension](https://github.com/SlicerHeart/SlicerSurfaceMarkup). Note that chord generation cannot run without it: if `Create chords` is enabled and no `Leaflet NURBS surface` is selected, `Generate FEM model` fails with "Invalid leaflet NURBS grid surface node". To export leaflet and annulus geometry only, disable `Create chords`.
-- The `geomdl` Python package, used for NURBS surface fitting. It is installed automatically when first needed.
 
 ## How to use
 
@@ -50,8 +49,7 @@ Chords can be generated in two ways, which can be combined.
 ### Generate and export
 
 - Click `Generate FEM model`. The generated leaflet surfaces, annulus, and chords appear in a `FEM-model` folder in the subject hierarchy, so they can be reviewed and, if needed, regenerated with adjusted parameters.
-- Click `Write FEM model to output folder`. Models are written as `.vtk` files and the chord endpoint table as a `.csv` file, all in LPS coordinate system.
-- The exported chord `.csv` file can be used in FEBio by selecting the leaflet mesh and then using `Build` / `Tools` / `Import spring`.
+- Click `Write FEM model to output folder`. Leaflet surfaces, annulus, and chords are all written as `.vtk` model files in the LPS coordinate system. Each chord bundle is written as a line mesh, for spring import into FEBio. Markups nodes (curves, region boundaries, papillary muscle tip points) are not written; they are inputs, not results.
 
 ## References
 
