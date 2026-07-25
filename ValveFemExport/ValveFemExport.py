@@ -29,21 +29,10 @@ class ValveFemExport(ScriptedLoadableModule):
     self.parent.dependencies = []
     self.parent.contributors = ["Andras Lasso (PerkLab)", "Csaba Pinter (Ebatinca)", "Matthew A Jolley (CHOP)"]
     self.parent.helpText = """
-Export leaflets and chords for FEM analysis.
-Usage:
-<ul>
-<li>Load scene that contains leaflet segmentation</li>
-<li>If a HeartValve is loaded into the scene then click "Import" to automatically populate inputs</li>
-<li>Mark Papillary muscle tips on the image</li>
-<li>For leaflet 1: create margin curve and draw that curve at the leaflet margin</li>
-<li>For leaflet 1: create secondary curve and draw that curve a bit farther from the leaflet margin</li>
-<li>For leaflet 2: margin curve that was defined for leaflet 1 can be selected</li>
-<li>For leaflet 2: create secondary curve and draw that curve a bit farther from the leaflet margin</li>
-<li>Click "Create chords"</li>
-<li>Select output folder</li>
-<li>Click Export</li>
-</ul>
-<p>See more information in <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/ValveFemExport.md">module documentation</a>.</p>
+Export heart valve leaflet surfaces and chordae tendineae as a finite element method (FEM) model,
+for simulation of valve closure in FEBio.
+<p>See the <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/ValveFemExport.md">module documentation</a>
+for prerequisites, required inputs, and a description of the workflow.</p>
 """
     self.parent.acknowledgementText = """
 This file was originally developed by Andras Lasso, PerkLab.

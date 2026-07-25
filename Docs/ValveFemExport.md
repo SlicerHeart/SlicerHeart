@@ -8,13 +8,19 @@ The module takes the results of valve segmentation and quantification (leaflet s
 - Chordae tendineae generated between the papillary muscle tips and the leaflet, with a realistic branching structure: fan branching for the chords that attach at the leaflet free edge and radial branching for the chords that attach on the leaflet body.
 - Surface meshes, chord line sets, and a chord endpoint table written to a folder in file formats that FEBio can import.
 
+## Prerequisites
+
+- A segmented heart valve, prepared with the usual SlicerHeart workflow: `Valve Annulus Analysis` (heart valve node and annulus contour), `Valve Segmentation`, and `Leaflet Analysis` (leaflet surface models).
+- For the branching chordae workflow, a NURBS surface fitted to the leaflet, stored in a grid surface markups node. This node type is provided by the [SurfaceMarkup extension](https://github.com/SlicerHeart/SlicerSurfaceMarkup). Note that chord generation cannot run without it: if `Create chords` is enabled and no `Leaflet NURBS surface` is selected, `Generate FEM model` fails with "Invalid leaflet NURBS grid surface node". To export leaflet and annulus geometry only, disable `Create chords`.
+- The `geomdl` Python package, used for NURBS surface fitting. It is installed automatically when first needed.
+
 ## How to use
 
 ### Set up inputs
 
 - Load a scene that contains a segmented heart valve (see the Valve Annulus Analysis, Valve Segmentation, and Leaflet Analysis modules).
 - In the `Import valve model` section, select the `Heart valve` node and click `Import`. This populates the annulus contour model and curve, and the leaflet models and boundaries, from the selected valve.
-- In the `Common inputs` section, create a `Papillary muscle tips` point list and place one point on each papillary muscle tip. Chords will start from these points.
+- In the `Common inputs` section, create a `Papillary muscle tips` point list and place one point on each papillary muscle tip in the slice views. Chords will start from these points.
 - Select the `Output folder` where the generated model files will be written.
 
 ### Configure the leaflet surface
