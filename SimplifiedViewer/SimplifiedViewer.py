@@ -420,12 +420,23 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         Setup the DICOM browser widget and view factory.
         """
         self.dicomVisualBrowser = ctk.ctkDICOMVisualBrowserWidget()
-        self.dicomVisualBrowser.findChild(ctk.ctkCollapsibleGroupBox, "ActionsCollapsibleGroupBox").hide()
-        self.dicomVisualBrowser.findChild(ctk.ctkCollapsibleGroupBox, "AdvancedCollapsibleGroupBox").hide()
+        for groupBoxName in ["ActionsCollapsibleGroupBox", "AdvancedCollapsibleGroupBox"]:
+            groupBox = self.dicomVisualBrowser.findChild(ctk.ctkCollapsibleGroupBox, groupBoxName)
+            if groupBox:
+                groupBox.hide()
         self.dicomVisualBrowser.setDatabaseDirectory(slicer.dicomDatabase.databaseDirectory)
-        self.dicomVisualBrowser.onShowPatients()
-        self.dicomVisualBrowser.findChild(qt.QToolButton, "patientsTabMenuToolButton").hide()
-        self.dicomVisualBrowser.findChild(qt.QTabWidget, "PatientsTabWidget").setCornerWidget(None, qt.Qt.TopLeftCorner)
+        if hasattr(self.dicomVisualBrowser, "onShowPatients"):
+            # Older CTK: patients must be shown manually. Newer CTK removed this slot;
+            # setDatabaseDirectory() already populates the patient view from the local database.
+            self.dicomVisualBrowser.onShowPatients()
+        # Older CTK displayed patients in a tab widget; newer CTK uses a model/view
+        # based patient list and these child widgets no longer exist.
+        patientsTabMenuToolButton = self.dicomVisualBrowser.findChild(qt.QToolButton, "patientsTabMenuToolButton")
+        if patientsTabMenuToolButton:
+            patientsTabMenuToolButton.hide()
+        patientsTabWidget = self.dicomVisualBrowser.findChild(qt.QTabWidget, "PatientsTabWidget")
+        if patientsTabWidget:
+            patientsTabWidget.setCornerWidget(None, qt.Qt.TopLeftCorner)
         self.dicomVisualBrowser.seriesRetrieved.connect(self.onSeriesRetrieved)
 
         self.dicomWidget = qt.QWidget()
