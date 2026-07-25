@@ -958,7 +958,11 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             ds["PixelData"].VR = "OW" if int(getattr(ds, "BitsAllocated", 16)) > 8 else "OB"
             ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
             path = os.path.join(dicomDir, f"slice_{instanceNumber:04d}.dcm")
-            ds.save_as(path, enforce_file_format=True)
+            try:
+                ds.save_as(path, enforce_file_format=True)
+            except TypeError:
+                # pydicom < 3.0
+                ds.save_as(path, write_like_original=False)
         self.addLog(f"  Saved {len(slices)} original DICOM file(s) to {dicomDir}")
         return len(slices)
 
