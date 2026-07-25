@@ -31,6 +31,8 @@ The extension currently includes the following features (new features are added 
   - Leaflet Mold Generator: tool for automatic generation of 3D-printable molds for making simulated valves out of silicone.
 - Surgical planning:
   - [Baffle planner](Docs/BafflePlanner.md): modeling tool for virtual planning of intracardiac baffle - or any other thin curved surfaces in any clinical specialties (for example, cranial flaps).
+- Simulation:
+  - [Valve FEM export](Docs/ValveFemExport.md): export heart valve leaflet surfaces and branching chordae tendineae as a finite element method (FEM) model, for simulation of valve closure in FEBio.
 - Electrophysiology:
   - [EA Map Reader](Docs/EAMapReader.md): read electroanatomical maps from NavX, Carto3, or Rhythmia mapping systems
 

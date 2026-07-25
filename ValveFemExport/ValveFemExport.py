@@ -43,9 +43,14 @@ Usage:
 <li>Select output folder</li>
 <li>Click Export</li>
 </ul>
+<p>See more information in <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/ValveFemExport.md">module documentation</a>.</p>
 """
     self.parent.acknowledgementText = """
 This file was originally developed by Andras Lasso, PerkLab.
+<p>If you use this module, please cite: Matthew A. Jolley (Corresponding Author), Nicolas R. Mangine,
+Devin W. Laurence, Patricia M. Sabin, Wensi Wu, Christian Herz, Christopher N. Zelonis, Justin S. Unger,
+Csaba Pinter, Andras Lasso, Steve A. Maas, Jeffrey A. Weiss, "Effect of Parametric Variation of Chordae
+Tendineae Structure on Simulated Atrioventricular Valve Closure", Annals of Biomedical Engineering (In Press).</p>
 """
 
 #
