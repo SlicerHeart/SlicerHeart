@@ -317,8 +317,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.leafletRegionBoundaryTreeView.visible = bool(leafletRegionsFolderId)
     self.ui.branchesFrame.visible = bool(leafletRegionsFolderId)
 
-    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
+    leafletRegionBoundaryNode = self.getCurrentLeafletRegionBoundaryNode()
     if leafletRegionBoundaryNode:
       wasBlocked = self.ui.leafletNURBSSurfaceNodeSelector.blockSignals(True)
       self.ui.leafletNURBSSurfaceNodeSelector.setCurrentNode(self._parameterNode.GetNodeReference("LeafletNURBSSurface"))
@@ -370,8 +369,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter("ChordName2", self.ui.chordBundleNameEdit2.text)
     self._parameterNode.SetParameter("ChordName3", self.ui.chordBundleNameEdit3.text)
 
-    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
+    leafletRegionBoundaryNode = self.getCurrentLeafletRegionBoundaryNode()
     if leafletRegionBoundaryNode:
       # leafletRegionBoundaryNode.SetCurveTypeToShortestDistanceOnSurface(self.ui.leafletNURBSSurfaceNodeSelector.currentNode())
       leafletRegionBoundaryNode.SetAttribute("PapillaryMuscleTipPoint", self.ui.papillaryMuscleTipPointComboBox.currentText)
@@ -454,6 +452,13 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     slicer.util.showStatusMessage(message)
     slicer.app.processEvents()
 
+  def getCurrentLeafletRegionBoundaryNode(self):
+    """Region boundary node selected in the tree view, or None if there is no valid selection."""
+    currentItem = self.ui.leafletRegionBoundaryTreeView.currentItem()
+    if not currentItem:
+      return None
+    return slicer.mrmlScene.GetSubjectHierarchyNode().GetItemDataNode(currentItem)
+
   def onAddLeafletRegionBoundary(self):
     nodeName = slicer.mrmlScene.GetUniqueNameByString("RegionBoundary")
     leafletRegionBoundaryNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode", nodeName)
@@ -473,9 +478,9 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.updateGUIFromParameterNode()
 
   def onDeleteLeafletRegionBoundary(self):
-    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-    leafletRegionBoundaryNode = shNode.GetItemDataNode(self.ui.leafletRegionBoundaryTreeView.currentItem())
-    slicer.mrmlScene.RemoveNode(leafletRegionBoundaryNode)
+    leafletRegionBoundaryNode = self.getCurrentLeafletRegionBoundaryNode()
+    if leafletRegionBoundaryNode:
+      slicer.mrmlScene.RemoveNode(leafletRegionBoundaryNode)
 
   def onLeafletRegionBoundarySelected(self, shItemId):
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
@@ -720,13 +725,26 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     regions, which translate to parametric rectangles in the NURBS surface.
     The body and edge chord creation functions also create the fan and radial chord branches as well,
     respectively.
+    Does nothing if no leaflet region boundaries are defined, as chords are then only generated from
+    the leaflet margin and secondary curves.
     """
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    leafletRegionNodes = vtk.vtkCollection()
+    leafletRegionBoundariesFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
+    if leafletRegionBoundariesFolderItem:
+      shNode.GetDataNodesInBranch(leafletRegionBoundariesFolderItem, leafletRegionNodes, "vtkMRMLMarkupsLineNode")
+    if leafletRegionNodes.GetNumberOfItems() == 0:
+      # The leaflet region based chord bundles are not used
+      return
+
     papillaryMuscleTips = parameterNode.GetNodeReference("PapillaryMuscleTips")
     if not papillaryMuscleTips or papillaryMuscleTips.GetNumberOfControlPoints() == 0:
       raise ValueError("Invalid papillary muscle tips node")
     leafletNURBSSurfaceNode = parameterNode.GetNodeReference("LeafletNURBSSurface")
     if not leafletNURBSSurfaceNode or leafletNURBSSurfaceNode.GetNumberOfControlPoints() == 0:
-      raise ValueError("Invalid leaflet NURBS grid surface node")
+      raise ValueError("Leaflet region boundaries are defined, but no valid leaflet NURBS surface is selected."
+                       " Select a 'Leaflet NURBS surface' in the 'Chord bundle inputs' section,"
+                       " or delete the leaflet region boundaries to generate chords from the leaflet curves only.")
 
     snapToSurface = parameterNode.GetParameter("SnapToSurfacePoints") == 'true'
     if snapToSurface:
@@ -739,10 +757,6 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     try:
       slicer.app.pauseRender()
       nurbsGridResolution = leafletNURBSSurfaceNode.GetGridResolution()
-      leafletRegionBoundariesFolderItem = self.getSubjectHierarchyLeafletRegionBoundariesSubfolder(parameterNode)
-      leafletRegionNodes = vtk.vtkCollection()
-      shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-      shNode.GetDataNodesInBranch(leafletRegionBoundariesFolderItem, leafletRegionNodes, "vtkMRMLMarkupsLineNode")
 
       # Collect NURBS grid (u,v) coordinates for top line points
       regionBoundaryInnerPointIndices = {}

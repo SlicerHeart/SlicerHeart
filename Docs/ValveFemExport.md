@@ -11,7 +11,7 @@ The module takes the results of valve segmentation and quantification (leaflet s
 ## Prerequisites
 
 - A segmented heart valve, prepared with the usual SlicerHeart workflow: `Valve Annulus Analysis` (heart valve node and annulus contour), `Valve Segmentation`, and `Leaflet Analysis` (leaflet surface models).
-- For the branching chordae workflow, a NURBS surface fitted to the leaflet, stored in a grid surface markups node. This node type is provided by the [SurfaceMarkup extension](https://github.com/SlicerHeart/SlicerSurfaceMarkup). Note that chord generation cannot run without it: if `Create chords` is enabled and no `Leaflet NURBS surface` is selected, `Generate FEM model` fails with "Invalid leaflet NURBS grid surface node". To export leaflet and annulus geometry only, disable `Create chords`.
+- For the branching chordae workflow, a NURBS surface fitted to the leaflet, stored in a grid surface markups node. This node type is provided by the [SurfaceMarkup extension](https://github.com/SlicerHeart/SlicerSurfaceMarkup). It is only needed if leaflet region boundaries are defined; chords generated from the leaflet margin and secondary curves do not require it.
 
 ## How to use
 
