@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>375</width>
+    <width>398</width>
     <height>428</height>
    </rect>
   </property>
@@ -280,7 +280,7 @@
          <double>5.000000000000000</double>
         </property>
         <property name="maximum">
-         <double>20.000000000000000</double>
+         <double>100.000000000000000</double>
         </property>
         <property name="value">
          <double>5.000000000000000</double>
@@ -469,6 +469,16 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLRangeWidget</class>
+   <extends>ctkRangeWidget</extends>
+   <header>qMRMLRangeWidget.h</header>
+  </customwidget>
+  <customwidget>
    <class>ctkCheckBox</class>
    <extends>QCheckBox</extends>
    <header>ctkCheckBox.h</header>
@@ -494,16 +504,6 @@
    <class>ctkSliderWidget</class>
    <extends>QWidget</extends>
    <header>ctkSliderWidget.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLNodeComboBox</class>
-   <extends>QWidget</extends>
-   <header>qMRMLNodeComboBox.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLRangeWidget</class>
-   <extends>ctkRangeWidget</extends>
-   <header>qMRMLRangeWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
