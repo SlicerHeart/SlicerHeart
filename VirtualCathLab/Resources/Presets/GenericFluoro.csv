@@ -1,4 +1,4 @@
 Model,frontalArmAngleL,frontalArmAngleP,frontalArmAngleC,frontalArmDetectorRotationAngle,frontalArmSourceToObjectDistance,frontalArmSourceToImageDistance,frontalDetectorHeightMm,frontalDetectorWidthMm,tableShiftLongitudinal,tableShiftLateral,tableShiftVertical,patientSpin
 Default,-90,0,0,90,720,1100,400.4,293.7,0,0,-145,0
 Head,0,0,0,0,720,1100,400.4,293.7,0,0,-145,0
-Spine,-90,0,0,90,720,1100,400.4,293.7,0,0,-145,180
+Spine,-90,0,0,90,720,1100,300.0,300.0,0,0,-145,180
