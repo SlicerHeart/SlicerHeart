@@ -365,7 +365,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
         annulusContourCurveNode.SetLocked(not (widget == self.ui.contouringCollapsibleButton or
                                               widget == self.ui.contourAdjustmentCollapsibleButton))
         if self.valveModel:
-          self.valveModel.setNonLabeledMarkupsVisibility(widget == self.ui.contouringCollapsibleButton or
+          self.valveModel.setAnnulusContourControlPointVisibility(widget == self.ui.contouringCollapsibleButton or
                                                          widget == self.ui.contourAdjustmentCollapsibleButton)
         # Hide annulus slice intersection in contouring mode
         # (it is confusing to see something in the slice views while still just adding points)

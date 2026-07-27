@@ -1172,7 +1172,7 @@ class ValveModel:
       slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourCurveNode, arr.reshape(-1, 3))
       self.annulusContourCurveNode.EndModify(wasModify)
 
-    def setNonLabeledMarkupsVisibility(self, visible, unselectAll = True):
+    def setAnnulusContourControlPointVisibility(self, visible, unselectAll = True):
       annulusMarkupNode = self.annulusContourCurveNode
       if not annulusMarkupNode:
         return
@@ -1184,8 +1184,7 @@ class ValveModel:
         numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
       wasModify = annulusMarkupNode.StartModify()
       for i in range(0, numberOfControlPoints):
-        if not annulusMarkupNode.GetNthControlPointLabel(i):
-          annulusMarkupNode.SetNthControlPointVisibility(i, visible)
+        annulusMarkupNode.SetNthControlPointVisibility(i, visible)
         if unselectAll and annulusMarkupNode.GetNthControlPointSelected(i):
           annulusMarkupNode.SetNthControlPointSelected(i, False)
       annulusMarkupNode.EndModify(wasModify)
