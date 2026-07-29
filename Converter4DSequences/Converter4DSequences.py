@@ -693,8 +693,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # Add this heart valve node to the sequence at the appropriate index
                     heartValveSequenceNode.SetDataNodeAtValue(heartValveNode, indexValue)
                     logging.info(f"Added {heartValveNode.GetName()} to sequence at frame {frameIndex} (index value: {indexValue})")
-                    proxyNode = valveBrowserNode.GetProxyNode(heartValveSequenceNode)
-                    self._replaceNodeReferencesInScene(heartValveNode, proxyNode)
                     convertedCount += 1
 
             # Set up the valve browser to save changes to the sequence
@@ -707,6 +705,13 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 # Get the proxy node (the current HeartValve node visible in the scene)
                 proxyNode = valveBrowserNode.GetProxyNode(heartValveSequenceNode)
                 if proxyNode:
+                    # Redirect external references (e.g. HeartValveMeasurement nodes referencing the valve
+                    # via a 'Valve<type>' role) from each per-phase valve node to the single valve proxy.
+                    # This must run AFTER UpdateProxyNodesFromSequences created the proxy above: doing it
+                    # inside the add loop passed a not-yet-created (None) proxy, so _replaceNodeReferencesInScene
+                    # was a no-op and the references were left dangling once the originals were removed.
+                    for heartValveNode in heartValveNodes:
+                        self._replaceNodeReferencesInScene(heartValveNode, proxyNode)
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points, proxy node: {proxyNode.GetName()}")
                 else:
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points")
@@ -1307,9 +1312,48 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         logging.info("Finished converting referenced nodes to sequences")
 
+    def _getAllValveNodeIdsForMeasurement(self, measurementNode):
+        """
+        Helper to find all valve node IDs referenced by a measurement node.
+
+        Most measurement presets reference a single valve/phase (e.g. via a 'Valve<inputValveId>' role
+        such as 'ValveTricuspidValve'). Some, like MeasurementPresetPhaseCompare, reference MULTIPLE
+        valve nodes at once - one per analyzed phase (roles 'ValveValue1'..'ValveValueN') - to compare
+        metrics across the cardiac cycle. Returns unique valve node IDs, in the order found.
+
+        Args:
+            measurementNode: The measurement node to search
+
+        Returns:
+            list[str]: valve node IDs referenced by the measurement (possibly empty)
+        """
+        valveNodeIds = []
+
+        # Try standard role names first (legacy convention; referenced nodes here are not guaranteed to
+        # carry the ModuleName attribute checked by the generic scan below)
+        for role in ["Valve", "HeartValve", "ValveNode"]:
+            valveNodeId = measurementNode.GetNodeReferenceID(role)
+            if valveNodeId and valveNodeId not in valveNodeIds:
+                valveNodeIds.append(valveNodeId)
+
+        # Then scan all roles for HeartValve-attributed nodes - covers 'Valve<inputValveId>' roles,
+        # including measurement types that reference multiple phases at once (e.g. PhaseCompare)
+        numRoles = measurementNode.GetNumberOfNodeReferenceRoles()
+        for roleIndex in range(numRoles):
+            role = measurementNode.GetNthNodeReferenceRole(roleIndex)
+            for refIndex in range(measurementNode.GetNumberOfNodeReferences(role)):
+                refNode = measurementNode.GetNthNodeReference(role, refIndex)
+                if refNode and refNode.GetAttribute("ModuleName") == "HeartValve" and refNode.GetID() not in valveNodeIds:
+                    valveNodeIds.append(refNode.GetID())
+
+        return valveNodeIds
+
     def _getValveNodeIdForMeasurement(self, measurementNode):
         """
-        Helper to find the valve node ID referenced by a measurement node.
+        Helper to find the primary valve node ID referenced by a measurement node.
+
+        See _getAllValveNodeIdsForMeasurement for measurement types that reference multiple valve
+        phases at once.
 
         Args:
             measurementNode: The measurement node to search
@@ -1317,21 +1361,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         Returns:
             str: The valve node ID, or None if not found
         """
-        # Try standard role names first
-        for role in ["Valve", "HeartValve", "ValveNode"]:
-            valveNodeId = measurementNode.GetNodeReferenceID(role)
-            if valveNodeId:
-                return valveNodeId
-
-        # Check all roles for a HeartValve node
-        numRoles = measurementNode.GetNumberOfNodeReferenceRoles()
-        for roleIndex in range(numRoles):
-            role = measurementNode.GetNthNodeReferenceRole(roleIndex)
-            refNode = measurementNode.GetNthNodeReference(role, 0)
-            if refNode and refNode.GetAttribute("ModuleName") == "HeartValve":
-                return refNode.GetID()
-
-        return None
+        valveNodeIds = self._getAllValveNodeIdsForMeasurement(measurementNode)
+        return valveNodeIds[0] if valveNodeIds else None
 
     def _findValveBrowserForValveNode(self, valveNode):
         """
@@ -1364,14 +1395,22 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         return None
 
     def _captureMeasurementTimepoints(self):
-        """Capture, for each old-format HeartValveMeasurement node, the time point (valve frame index)
-        and valve it belongs to.
+        """Capture, for each old-format HeartValveMeasurement node, the time point(s) (valve frame
+        index) and valve it belongs to.
+
+        Most measurements reference a single phase and are stored SPARSELY at that one frame. Some
+        measurement types (e.g. PhaseCompare) reference MULTIPLE phases of the same valve at once - all
+        referenced frames are captured here so the measurement can later be stored at every one of them.
+        Storing it only at one (arbitrarily chosen) frame left the sequence's proxy node blank -
+        including its node references - whenever the valve browser was on any of the OTHER phases,
+        since a sequence with no data node at the current index falls back to a default-constructed
+        placeholder there.
 
         This MUST run BEFORE the valve conversion, which both redirects each measurement's valve
         reference to the single valve proxy (collapsing the per-phase link) and removes the original
         per-phase valve nodes that carry the ValveVolumeSequenceIndex attribute.
 
-        Returns: {measurementNodeID: {'frameIndex', 'valveType', 'volumeNodeID'}}
+        Returns: {measurementNodeID: {'valveRefs': [{'frameIndex', 'valveType', 'volumeNodeID'}, ...]}}
         """
         result = {}
         seqLogic = slicer.modules.sequences.logic()
@@ -1379,18 +1418,21 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # Skip measurements already stored in a sequence (already new format)
             if seqLogic.GetFirstBrowserNodeForProxyNode(measurementNode):
                 continue
-            valveNodeId = self._getValveNodeIdForMeasurement(measurementNode)
-            valveNode = slicer.mrmlScene.GetNodeByID(valveNodeId) if valveNodeId else None
-            if not valveNode:
-                continue
-            frameIndexStr = valveNode.GetAttribute("ValveVolumeSequenceIndex")
-            if frameIndexStr is None or frameIndexStr == "":
-                continue
-            result[measurementNode.GetID()] = {
-                'frameIndex': int(frameIndexStr),
-                'valveType': valveNode.GetAttribute("ValveType") or "Valve",
-                'volumeNodeID': valveNode.GetNodeReferenceID("ValveVolume"),
-            }
+            valveRefs = []
+            for valveNodeId in self._getAllValveNodeIdsForMeasurement(measurementNode):
+                valveNode = slicer.mrmlScene.GetNodeByID(valveNodeId)
+                if not valveNode:
+                    continue
+                frameIndexStr = valveNode.GetAttribute("ValveVolumeSequenceIndex")
+                if frameIndexStr is None or frameIndexStr == "":
+                    continue
+                valveRefs.append({
+                    'frameIndex': int(frameIndexStr),
+                    'valveType': valveNode.GetAttribute("ValveType") or "Valve",
+                    'volumeNodeID': valveNode.GetNodeReferenceID("ValveVolume"),
+                })
+            if valveRefs:
+                result[measurementNode.GetID()] = {'valveRefs': valveRefs}
         return result
 
     def _findBrowserByValveType(self, valveType):
@@ -1422,10 +1464,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         matching time points, plus one table sequence per referenced table role, with the measurement
         proxy re-pointed at the table proxies.
 
-        measurementTimepointMap: {measurementNodeID: {'frameIndex','valveType','volumeNodeID'}} captured
-        by performFullConversion BEFORE the valve conversion collapses the per-phase valve references.
-        When not supplied it is rebuilt here on a best-effort basis (only works while the measurements
-        still reference their original per-phase valve nodes, e.g. before valves have been converted).
+        measurementTimepointMap: {measurementNodeID: {'valveRefs': [{'frameIndex','valveType',
+        'volumeNodeID'}, ...]}} captured by performFullConversion BEFORE the valve conversion collapses
+        the per-phase valve references. When not supplied it is rebuilt here on a best-effort basis
+        (only works while the measurements still reference their original per-phase valve nodes, e.g.
+        before valves have been converted).
         """
         logging.info("Converting HeartValveMeasurement nodes to sequences")
         seqLogic = slicer.modules.sequences.logic()
@@ -1447,11 +1490,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if seqLogic.GetFirstBrowserNodeForProxyNode(measurementNode):
                 continue  # already in a sequence (new format)
             info = measurementTimepointMap.get(measurementNode.GetID())
-            if not info:
+            if not info or not info['valveRefs']:
                 logging.warning(f"No time point info for measurement '{measurementNode.GetName()}', skipping")
                 continue
-            preset = measurementNode.GetAttribute("MeasurementPreset") or info['valveType'] or "Measurement"
-            groups.setdefault((info['valveType'], preset), []).append(measurementNode)
+            valveType = info['valveRefs'][0]['valveType']
+            preset = measurementNode.GetAttribute("MeasurementPreset") or valveType or "Measurement"
+            groups.setdefault((valveType, preset), []).append(measurementNode)
 
         if not groups:
             logging.info("No old-format HeartValveMeasurement nodes found to convert")
@@ -1469,19 +1513,31 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     continue
 
                 volumeSequenceNode = self._volumeSequenceForBrowser(
-                    valveBrowserNode, measurementTimepointMap[measurementNodes[0].GetID()].get('volumeNodeID'))
+                    valveBrowserNode, measurementTimepointMap[measurementNodes[0].GetID()]['valveRefs'][0].get('volumeNodeID'))
                 if not volumeSequenceNode:
                     logging.warning(f"No volume sequence for browser '{valveBrowserNode.GetName()}', skipping measurements")
                     continue
 
-                # Pair each measurement node with the index value of its phase's frame
+                # Pair each measurement node with the index value(s) of the phase frame(s) it
+                # references. Most measurements reference a single phase (one index value). Measurement
+                # types that compare multiple phases at once (e.g. PhaseCompare, referencing
+                # 'ValveValue1'..'ValveValueN') are stored at EVERY referenced phase's index value, so
+                # the sequence has valid data at each of them - not just whichever one happened to be
+                # picked as "the" timepoint. Without this, the proxy read as blank (including its node
+                # references) whenever the browser was on any of the OTHER referenced phases.
                 timedMeasurements = []
                 for measurementNode in measurementNodes:
-                    frameIndex = measurementTimepointMap[measurementNode.GetID()]['frameIndex']
-                    if frameIndex < 0 or frameIndex >= volumeSequenceNode.GetNumberOfDataNodes():
-                        logging.warning(f"Frame index {frameIndex} out of range for measurement '{measurementNode.GetName()}'")
-                        continue
-                    timedMeasurements.append((measurementNode, volumeSequenceNode.GetNthIndexValue(frameIndex)))
+                    indexValues = []
+                    for valveRef in measurementTimepointMap[measurementNode.GetID()]['valveRefs']:
+                        frameIndex = valveRef['frameIndex']
+                        if frameIndex < 0 or frameIndex >= volumeSequenceNode.GetNumberOfDataNodes():
+                            logging.warning(f"Frame index {frameIndex} out of range for measurement '{measurementNode.GetName()}'")
+                            continue
+                        indexValue = volumeSequenceNode.GetNthIndexValue(frameIndex)
+                        if indexValue not in indexValues:
+                            indexValues.append(indexValue)
+                    if indexValues:
+                        timedMeasurements.append((measurementNode, indexValues))
 
                 if not timedMeasurements:
                     continue
@@ -1496,10 +1552,37 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     volumeSequenceNode.GetIndexUnit(),
                     volumeSequenceNode.GetIndexType())
 
+                # The valve proxy (already redirected onto each measurement's valve role by the valve
+                # conversion). Storing a measurement in a sequence strips ALL its node references (the
+                # sequence's internal scene is self-contained), so the measurement->valve link is lost on
+                # the stored copy. We record which roles point at the valve proxy here and re-apply them
+                # to the measurement proxy after it is created (references between proxies of the same
+                # browser are preserved across frame changes).
+                valveProxyNode = valveBrowserNode.GetProxyNode(valveBrowserNode.GetMasterSequenceNode())
+                valveProxyID = valveProxyNode.GetID() if valveProxyNode else None
+                valveRoles = set()
+
                 # One table sequence per referenced (role, refIndex), populated across all phases
                 tableSequencesByRole = {}
-                for measurementNode, indexValue in timedMeasurements:
-                    measurementSequenceNode.SetDataNodeAtValue(measurementNode, indexValue)
+                for measurementNode, indexValues in timedMeasurements:
+                    # HeartValveMeasurement nodes are created HideFromEditors=True, which keeps them out
+                    # of Subject Hierarchy. Clear it before storing so the sequence copy (and every proxy
+                    # regenerated from it on frame changes) is visible in the Data module, mirroring what
+                    # ValveQuantification._configureMeasurementTree does when a measurement is selected.
+                    if measurementNode.GetHideFromEditors():
+                        measurementNode.SetHideFromEditors(False)
+
+                    # Record every role that references the valve proxy so it can be restored on the
+                    # measurement proxy below (the reference is dropped by SetDataNodeAtValue).
+                    if valveProxyID:
+                        vroles = []
+                        measurementNode.GetNodeReferenceRoles(vroles)
+                        for vrole in vroles:
+                            if measurementNode.GetNodeReferenceID(vrole) == valveProxyID:
+                                valveRoles.add(vrole)
+
+                    for indexValue in indexValues:
+                        measurementSequenceNode.SetDataNodeAtValue(measurementNode, indexValue)
                     convertedCount += 1
                     nodesToRemove.append(measurementNode)
 
@@ -1522,7 +1605,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                                     volumeSequenceNode.GetIndexUnit(),
                                     volumeSequenceNode.GetIndexType())
                                 tableSequencesByRole[roleKey] = tableSequenceNode
-                            tableSequenceNode.SetDataNodeAtValue(tableNode, indexValue)
+                            for indexValue in indexValues:
+                                tableSequenceNode.SetDataNodeAtValue(tableNode, indexValue)
                             nodesToRemove.append(tableNode)
 
                 # Create proxies for the new sequences, then point the measurement proxy's table
@@ -1531,6 +1615,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 seqLogic.UpdateProxyNodesFromSequences(valveBrowserNode)
                 measurementProxyNode = valveBrowserNode.GetProxyNode(measurementSequenceNode)
                 if measurementProxyNode:
+                    # Restore the measurement->valve reference(s) dropped when the measurement was stored
+                    # in the sequence, pointing them at the valve proxy. Without this the Valve
+                    # Quantification "valve" dropdown shows "None" for the converted measurement.
+                    for role in valveRoles:
+                        measurementProxyNode.SetNodeReferenceID(role, valveProxyID)
+
                     for (role, refIndex), tableSequenceNode in tableSequencesByRole.items():
                         tableProxyNode = valveBrowserNode.GetProxyNode(tableSequenceNode)
                         if tableProxyNode:
@@ -1539,7 +1629,16 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # Nest the measurement proxy (and any table proxies) under the valve's master proxy in
                     # the subject hierarchy so they do not clutter the scene root.
                     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-                    valveProxyNode = valveBrowserNode.GetProxyNode(valveBrowserNode.GetMasterSequenceNode())
+                    # Ensure the measurement proxy has a subject hierarchy item. It is created hidden (see
+                    # above) so RequestOwnerPluginSearch would otherwise never build one, leaving it out of
+                    # the Data module tree until the user selected it in Valve Quantification.
+                    if measurementProxyNode.GetHideFromEditors():
+                        measurementProxyNode.SetHideFromEditors(False)
+                    if shNode:
+                        shNode.RequestOwnerPluginSearch(measurementProxyNode)
+                        measurementProxyItemID = shNode.GetItemByDataNode(measurementProxyNode)
+                        if measurementProxyItemID:
+                            shNode.SetItemAttribute(measurementProxyItemID, "ModuleName", "HeartValveMeasurement")
                     if shNode and valveProxyNode:
                         valveItemID = shNode.GetItemByDataNode(valveProxyNode)
                         if valveItemID:
