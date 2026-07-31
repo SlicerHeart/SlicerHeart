@@ -5,6 +5,8 @@ import slicer
 
 import HeartValveLib
 from HeartValveLib.util import Signal
+from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
+from HeartValveLib import getAllSegmentIDs
 
 
 import pandas as pd
@@ -17,8 +19,43 @@ hasAnnulusContourDefined = \
 hasAnnulusLandmarksDefined = \
   lambda valveModel: valveModel.valveLabelsNode.GetNumberOfControlPoints() > 0 if valveModel.valveLabelsNode is not None else False
 
-from HeartPropagationLib.utils import hasNonEmptySegments
 hasLeafletSegmentation = lambda valveModel: hasNonEmptySegments(valveModel.leafletSegmentationNode) if valveModel.leafletSegmentationNode is not None else False
+
+
+def hasNonEmptySegments(segmentationNode, withoutKeyword=VALVE_MASK_SEGMENT_ID):
+  segmentIDs = getAllSegmentIDs(segmentationNode)
+  if withoutKeyword is not None:
+    segmentIDs = [segmentID for segmentID in segmentIDs if withoutKeyword.lower() not in segmentID.lower()]
+  return any(getVoxelCount(segmentationNode, segmentID) != 0 for segmentID in segmentIDs)
+
+
+def getVoxelCount(segmentationNode, segmentID):
+  import vtk
+  segmentLabelmap = segmentationNode.GetBinaryLabelmapInternalRepresentation(segmentID)
+
+  # We need to know exactly the value of the segment voxels, apply threshold to make force the selected label value
+  labelValue = 1
+  backgroundValue = 0
+  thresh = vtk.vtkImageThreshold()
+  thresh.SetInputData(segmentLabelmap)
+  thresh.ThresholdByLower(0)
+  thresh.SetInValue(backgroundValue)
+  thresh.SetOutValue(labelValue)
+  thresh.SetOutputScalarType(vtk.VTK_UNSIGNED_CHAR)
+  thresh.Update()
+
+  #  Use binary labelmap as a stencil
+  stencil = vtk.vtkImageToImageStencil()
+  stencil.SetInputData(thresh.GetOutput())
+  stencil.ThresholdByUpper(labelValue)
+  stencil.Update()
+
+  stat = vtk.vtkImageAccumulate()
+  stat.SetInputData(thresh.GetOutput())
+  stat.SetStencilData(stencil.GetOutput())
+  stat.Update()
+
+  return stat.GetVoxelCount()
 
 
 def analyzeSequence(valveBrowser):
