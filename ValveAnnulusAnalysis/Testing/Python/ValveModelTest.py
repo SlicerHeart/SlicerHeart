@@ -18,7 +18,7 @@ aortic valve. Each scenario walks through the full helper workflow with anatomic
 points placed on that valve's annulus.
 """
 
-import slicer
+import vtk, slicer
 from slicer.ScriptedLoadableModule import *
 
 
@@ -234,11 +234,43 @@ class ValveModelTestTest(ScriptedLoadableModuleTest):
     for segmentName in ("Anterior", "Posterior"):
       seg0.GetSegment(seg0.AddEmptySegment(segmentName)).SetName(segmentName)
 
+    # --- Regression test for issue #307 (SlicerHeartPrivate): adding a new time point must not
+    #     reset the axial slice orientation. On a freshly created valve browser (as above)
+    #     axialSliceToRasTransformNode is just a single transform node shared by all time points, so
+    #     the bug cannot occur there. It only shows up on scenes migrated from the old per-phase
+    #     format, where Converter4DSequences registers AxialSliceToRasTransform as a real
+    #     per-time-point sequence with MissingItemMode=MissingItemSetToDefault. Simulate that setup
+    #     here so ValveBrowser.addTimePoint's carry-forward of the orientation is actually exercised. ---
+    self.delayDisplay(f"{valveType}: axial slice orientation is preserved for new time points")
+    axialSequenceNode = self._makeAxialSliceToRasTransformSequence(valveBrowser)
+    self.assertEqual(axialSequenceNode.GetNumberOfDataNodes(), 1,
+                     "Time point 0 should already have an axial slice orientation sequence item")
+    nonDefaultAxialMatrix = vtk.vtkMatrix4x4()
+    nonDefaultAxialMatrix.DeepCopy((
+      0, -1, 0, 12,
+      1, 0, 0, 34,
+      0, 0, 1, 56,
+      0, 0, 0, 1))
+    # SetSaveChanges is enabled for this sequence, so mutating the proxy node writes this matrix back
+    # into the sequence's time point 0 item.
+    valveBrowser.axialSliceToRasTransformNode.SetMatrixTransformToParent(nonDefaultAxialMatrix)
+
     # --- Add a second time point (volume frame 1) AFTER the segmentation is in place, so the
     #     heartValveNode state copied to the new time point already carries the LeafletSegmentation
     #     (and LeafletVolume) references. Populate it with distinct annulus/labels. ---
     self.delayDisplay(f"{valveType}: per-time-point behavior")
     self._addValveTimePoint(valveBrowser, volumeBrowserNode, 1)
+
+    # The new time point should start out with the same axial orientation as the time point it was
+    # added from, not the sequence's default (identity) matrix.
+    self.assertEqual(axialSequenceNode.GetNumberOfDataNodes(), 2,
+                     "The new time point should get its own axial slice orientation sequence item")
+    newTimePointAxialMatrix = vtk.vtkMatrix4x4()
+    valveBrowser.axialSliceToRasTransformNode.GetMatrixTransformToParent(newTimePointAxialMatrix)
+    self._assertMatricesEqual(newTimePointAxialMatrix, nonDefaultAxialMatrix,
+                              "Axial slice orientation should carry over to a newly added time point "
+                              "instead of resetting to identity: ")
+
     labels1 = self._annulusLandmarkLabels(contourFrame1)
     valveBrowser.valveModel.setAnnulusContourPoints(contourFrame1)
     valveBrowser.valveModel.setValveLabels(labels1)
@@ -391,6 +423,34 @@ class ValveModelTestTest(ScriptedLoadableModuleTest):
     slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(valveBrowser.valveBrowserNode)
     slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(volumeBrowserNode)
 
+  def _makeAxialSliceToRasTransformSequence(self, valveBrowser):
+    """Register *valveBrowser*'s axialSliceToRasTransformNode as a real per-time-point sequence.
+
+    Mirrors how Converter4DSequences._createSequenceForNode sets up the AxialSliceToRasTransform
+    sequence when migrating a scene from the old per-phase format (synchronized sequence node,
+    MissingItemMode=MissingItemSetToDefault, browser reference repointed at the sequence's proxy). A
+    freshly created valve browser never does this on its own (axialSliceToRasTransformNode is just a
+    single transform node shared by all time points), so tests need to simulate it explicitly to
+    exercise the per-time-point orientation code path.
+    :returns: the new sequence node.
+    """
+    valveBrowserNode = valveBrowser.valveBrowserNode
+    originalAxialTransformNode = valveBrowser.axialSliceToRasTransformNode
+
+    axialSequenceNode = slicer.mrmlScene.AddNewNodeByClass(
+      "vtkMRMLSequenceNode", slicer.mrmlScene.GetUniqueNameByString("AxialSliceToRasTransform_Sequence"))
+    # Seed the sequence with an item for the currently displayed time point before registering it as
+    # synchronized: an empty sequence has no node class to create a proxy from.
+    _, indexValue = valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    axialSequenceNode.SetDataNodeAtValue(originalAxialTransformNode, indexValue)
+
+    valveBrowserNode.AddSynchronizedSequenceNode(axialSequenceNode)
+    valveBrowserNode.SetSaveChanges(axialSequenceNode, True)
+    valveBrowserNode.SetMissingItemMode(axialSequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
+    slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(valveBrowserNode)
+    valveBrowser.axialSliceToRasTransformNode = valveBrowserNode.GetProxyNode(axialSequenceNode)
+    return axialSequenceNode
+
   # -------------------------------------------------------------------------
   # Markup helpers
   # -------------------------------------------------------------------------
@@ -430,3 +490,10 @@ class ValveModelTestTest(ScriptedLoadableModuleTest):
       for j, expected in enumerate((r, a, s)):
         self.assertAlmostEqual(positions[i][j], expected, places=5,
                                msg=f"{msgPrefix}label {label}, coord {j}")
+
+  def _assertMatricesEqual(self, actual, expected, msgPrefix=""):
+    """Assert that two vtkMatrix4x4 are element-wise equal."""
+    for row in range(4):
+      for col in range(4):
+        self.assertAlmostEqual(actual.GetElement(row, col), expected.GetElement(row, col), places=5,
+                               msg=f"{msgPrefix}element ({row}, {col})")

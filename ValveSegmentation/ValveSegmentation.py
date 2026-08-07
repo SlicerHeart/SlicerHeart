@@ -78,6 +78,14 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
     self.editingSequenceValue = None
 
+    # Tracks whether the slice views are currently configured to show the leaflet volume/segmentation
+    # (set up by setupScreen(), see onWorkflowStepChanged). Unlike the segmentation editing section's
+    # collapsed state, this reflects whether the *slice views themselves* need to be kept in sync with
+    # the displayed time point: the slice views are shared, global state that stays showing whatever
+    # setupScreen() last configured even after the section is collapsed or another module/tab becomes
+    # active, so it is not correct to gate the refresh on the collapsible button's current state.
+    self._sliceViewsShowSegmentationEditing = False
+
   @property
   def valveVolumeNode(self):
     return self.valveSequenceBrowserWidget.valveVolumeNode if self.valveSequenceBrowserWidget is not None else None
@@ -251,6 +259,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
         if leafletClippingModelDisplayNode:
           leafletClippingModelDisplayNode.SetVisibility(False)
         self.ui.segmentEditorWidget.installKeyboardShortcuts()
+        self._sliceViewsShowSegmentationEditing = True
         self.setupScreen()
       else:
         self.ui.segmentEditorWidget.uninstallKeyboardShortcuts()
@@ -439,6 +448,18 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     leafletSegmentationNodeSpecified = self.valveModel.isNodeSpecifiedForCurrentTimePoint(
       self.valveModel.leafletSegmentationNode)
     self.ui.segmentEditorWidget.enabled = leafletSegmentationNodeSpecified
+
+    # The segment editor and slice view foreground/background volumes are bound to specific node
+    # instances (leafletSegmentationNode, leafletVolumeNode) and are not automatically refreshed when
+    # the displayed time point changes without those nodes' own identity changing (sequence proxy
+    # nodes keep showing their last content for time points that have no entry of their own). Without
+    # this refresh, switching to a time point with no leaflet volume/segmentation yet would leave the
+    # segment editor and slice views showing stale data from a different time point.
+    currentLeafletSegmentationNode = self.valveModel.leafletSegmentationNode
+    if self.ui.segmentEditorWidget.segmentationNode() != currentLeafletSegmentationNode:
+      self.ui.segmentEditorWidget.setSegmentationNode(currentLeafletSegmentationNode)
+    if self._sliceViewsShowSegmentationEditing:
+      self.updateSliceViewVolumes()
 
     self._updateRoiGeometryGui()
 
@@ -986,17 +1007,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     elif displayConfiguration == DUAL_SCREEN:
       HeartValveLib.setupDefaultLayout(HeartValveLib.CardiacEightUpViewLayoutId)
 
-    if self.valveModel.leafletVolumeNode:
-      volumeName = self.valveModel.leafletVolumeNode.GetName()
-      sectionTitle = f"Leaflet segmentation ({volumeName})"
-    else:
-      sectionTitle = "Leaflet segmentation"
-    self.ui.segmentationEditingCollapsibleButton.text = sectionTitle
-
     valveBrowser = self.valveModel.valveBrowser
-
-    fixedVolumeNode = self.valveModel.leafletVolumeNode
-    movingVolumeNode = valveBrowser.valveVolumeNode
 
     sequencesModule = slicer.modules.sequences
     sequencesModule.widgetRepresentation().setActiveBrowserNode(valveBrowser.valveBrowserNode)
@@ -1006,9 +1017,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     if displayConfiguration == SMALL_SCREEN:
       # Unlock
       self.setSliceViewsLink(primarySliceViewNames, False, False)
-      # Primary
-      self.setSliceViewsBackgroundVolume(primarySliceViewNames, movingVolumeNode)
-      self.setSliceViewsForegroundVolume(primarySliceViewNames, fixedVolumeNode, 0.0)
+      self.updateSliceViewVolumes()
       self.setSliceViewsLabelVolume(primarySliceViewNames)
       self.setSliceViewsDefaultOrientation(primarySliceViewNames)
       # Lock
@@ -1016,16 +1025,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     elif displayConfiguration == LARGE_SCREEN or displayConfiguration == DUAL_SCREEN:
       # Unlock
       self.setSliceViewsLink(primarySliceViewNames + secondarySliceViewNames, False, False)
-      # Primary
-      self.setSliceViewsBackgroundVolume(primarySliceViewNames, fixedVolumeNode)
-      # NB: don't show movingVolumeNode because it would slow down replay speed
-      self.setSliceViewsForegroundVolume(primarySliceViewNames, volumeNode=None)
+      self.updateSliceViewVolumes()
       self.setSliceViewsLabelVolume(primarySliceViewNames)
       self.setSliceViewsDefaultOrientation(primarySliceViewNames)
-      # Secondary
-      self.setSliceViewsBackgroundVolume(secondarySliceViewNames, movingVolumeNode)
-      # NB: don't show fixedVolumeNode to reduce confusion
-      self.setSliceViewsForegroundVolume(secondarySliceViewNames, volumeNode=None)
       self.setSliceViewsLabelVolume(secondarySliceViewNames)
       self.setSliceViewsDefaultOrientation(secondarySliceViewNames)
       self.setSliceViewsHeartOrientationmarker(secondarySliceViewNames)
@@ -1033,6 +1035,42 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       self.setSliceViewsLink(primarySliceViewNames + secondarySliceViewNames, True, True)
       # propagate FOV to secondary views
       self.touchSliceViewsFieldOfView(primarySliceViewNames)
+
+  def updateSliceViewVolumes(self):
+    """Re-apply the slice view background/foreground volumes for the currently displayed time
+    point. Unlike setupScreen(), this does not touch the layout, slice view linking, or the
+    Sequences toolbar's active browser node, so it is safe to call every time the displayed time
+    point changes (not just when the segmentation editing section is opened) without fighting the
+    user's own layout/toolbar choices.
+    """
+    if self.valveModel.leafletVolumeNode:
+      volumeName = self.valveModel.leafletVolumeNode.GetName()
+      sectionTitle = f"Leaflet segmentation ({volumeName})"
+    else:
+      sectionTitle = "Leaflet segmentation"
+    self.ui.segmentationEditingCollapsibleButton.text = sectionTitle
+
+    displayConfiguration = self.ui.displayConfigurationSelector.itemData(
+      self.ui.displayConfigurationSelector.currentIndex)
+
+    valveBrowser = self.valveModel.valveBrowser
+    fixedVolumeNode = self.valveModel.leafletVolumeNode
+    movingVolumeNode = valveBrowser.valveVolumeNode
+
+    primarySliceViewNames = ['Red', 'Yellow', 'Green']
+    secondarySliceViewNames = ['Slice4', 'Slice5', 'Slice6']
+    if displayConfiguration == SMALL_SCREEN:
+      self.setSliceViewsBackgroundVolume(primarySliceViewNames, movingVolumeNode)
+      self.setSliceViewsForegroundVolume(primarySliceViewNames, fixedVolumeNode, 0.0)
+    elif displayConfiguration == LARGE_SCREEN or displayConfiguration == DUAL_SCREEN:
+      # Primary
+      self.setSliceViewsBackgroundVolume(primarySliceViewNames, fixedVolumeNode)
+      # NB: don't show movingVolumeNode because it would slow down replay speed
+      self.setSliceViewsForegroundVolume(primarySliceViewNames, volumeNode=None)
+      # Secondary
+      self.setSliceViewsBackgroundVolume(secondarySliceViewNames, movingVolumeNode)
+      # NB: don't show fixedVolumeNode to reduce confusion
+      self.setSliceViewsForegroundVolume(secondarySliceViewNames, volumeNode=None)
 
   @staticmethod
   def setSliceViewsBackgroundVolume(viewNames, volumeNode):
