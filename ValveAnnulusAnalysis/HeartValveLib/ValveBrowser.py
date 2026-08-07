@@ -79,6 +79,18 @@ class ValveBrowser:
     def addTimePoint(self, indexValue, valveName="HeartValve"):
       heartValveSequenceNode = self.heartValveSequenceNode
 
+      # Capture the axial slice orientation as it is displayed right now (for the time point we are
+      # switching away from) so that it can be carried over to the new time point below. Without this,
+      # the new time point has no item in AxialSliceToRasTransform_Sequence, and the sequence browser's
+      # missing-item handling for this transform resets it to an identity matrix (rather than holding
+      # the last value, as most other per-time-point proxies do) -- causing the slice views to snap to
+      # an unrelated (often visibly flipped) orientation when a new time point is added.
+      previousAxialSliceToRasTransformNode = self.axialSliceToRasTransformNode
+      previousAxialSliceToRasMatrix = None
+      if previousAxialSliceToRasTransformNode and heartValveSequenceNode.GetNumberOfDataNodes() > 0:
+        previousAxialSliceToRasMatrix = vtk.vtkMatrix4x4()
+        previousAxialSliceToRasTransformNode.GetMatrixTransformToParent(previousAxialSliceToRasMatrix)
+
       if heartValveSequenceNode.GetNumberOfDataNodes() == 0:
         valveName = slicer.mrmlScene.GetUniqueNameByString(valveName)
         logging.debug("Did not find valve node, create a new one")
@@ -102,6 +114,15 @@ class ValveBrowser:
       index = heartValveSequenceNode.GetItemNumberFromIndexValue(indexValue)
       self.valveBrowserNode.SetSelectedItemNumber(index)
       slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
+
+      # Give the new time point its own item in AxialSliceToRasTransform_Sequence, carrying forward the
+      # orientation from the time point we switched from (see comment above). If there was no previous
+      # time point (this is the valve's first) leave it as the freshly-created default.
+      if previousAxialSliceToRasMatrix is not None:
+        axialSliceToRasTransformSequenceNode = self.valveBrowserNode.GetSequenceNode(self.axialSliceToRasTransformNode)
+        if axialSliceToRasTransformSequenceNode:
+          self.addCurrentTimePointToSequence(axialSliceToRasTransformSequenceNode)
+          self.axialSliceToRasTransformNode.SetMatrixTransformToParent(previousAxialSliceToRasMatrix)
 
       self.valveModel.initializeNewTimePoint()
 
