@@ -390,6 +390,8 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # These connections ensure that we update parameter node when scene is closed
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartImportEvent, self.onSceneStartImport)
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndImportEvent, self.onSceneEndImport)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -562,6 +564,17 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # If this module is shown while the scene is closed then recreate a new parameter node immediately
         if self.parent.isEntered:
             self.initializeParameterNode()
+
+    def onSceneStartImport(self, caller, event) -> None:
+        """Called just before a scene is imported."""
+        # Do not sync GUI from a half-imported parameter node (node references are only resolved at the end of the import)
+        self.setParameterNode(None)
+
+    def onSceneEndImport(self, caller, event) -> None:
+        """Called just after a scene is imported."""
+        if self.parent.isEntered:
+            self.initializeParameterNode()
+            self.updateGUIFromMRML()
 
     def initializeParameterNode(self) -> None:
         """Ensure parameter node exists and observed."""
