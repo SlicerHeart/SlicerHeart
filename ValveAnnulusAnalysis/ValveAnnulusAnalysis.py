@@ -406,6 +406,12 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
 
   def enter(self):
     logging.debug("Enter %s" % self.moduleName)
+    # This module is the entry point for creating new time points. A leaflet (segmentation) volume
+    # left in the slice views by the Valve Segmentation module (including one selected in a
+    # previously saved scene) can become an empty proxy when a time point is added, making the slice
+    # views non-responsive (SlicerHeartPrivate#307). Remove any leaflet volume and restore the
+    # original valve volume in the views.
+    HeartValveLib.HeartValves.removeLeafletVolumesFromSliceViews()
 
   def exit(self):
     logging.debug("Exit %s" % self.moduleName)

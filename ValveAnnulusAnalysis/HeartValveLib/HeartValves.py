@@ -296,6 +296,47 @@ def setSliceViewsLink(viewNames, link, hotlink):
   return oldLink, oldHotLink
 
 
+def removeLeafletVolumesFromSliceViews():
+  """Remove leaflet (segmentation) volumes from all slice views, restoring each valve's original
+  volume in their place.
+
+  A leaflet volume is only meant to be visible while a leaflet segmentation is being edited in the
+  Valve Segmentation module. If it is left referenced by the slice views of another module, then
+  switching time points on a converted 4D scene can leave the view referencing an empty proxy volume
+  (per-time-point sequences use MissingItemMode=MissingItemSetToDefault, so a time point with no
+  leaflet volume item resets the proxy to an empty default volume), which makes the slice views
+  non-responsive (SlicerHeartPrivate#307).
+
+  For every valve in the scene, any slice-view slot showing that valve's leaflet volume is switched
+  back to the valve's original (ultrasound) volume in the background, or cleared in the
+  foreground/label, so the original volume stays visible instead of a leaflet volume or a blank view.
+  """
+  # Map each leaflet volume proxy to its valve's original volume (None if the valve has no volume).
+  leafletToValveVolumeID = {}
+  for valveBrowserNode in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+    if valveBrowserNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    valveBrowser = getValveBrowser(valveBrowserNode)
+    heartValveNode = valveBrowser.heartValveNode if valveBrowser else None
+    leafletVolumeNode = heartValveNode.GetNodeReference("LeafletVolume") if heartValveNode else None
+    if not leafletVolumeNode:
+      continue
+    valveVolumeNode = valveBrowser.valveVolumeNode
+    leafletToValveVolumeID[leafletVolumeNode.GetID()] = valveVolumeNode.GetID() if valveVolumeNode else None
+  if not leafletToValveVolumeID:
+    return
+
+  for sliceCompositeNode in slicer.util.getNodesByClass("vtkMRMLSliceCompositeNode"):
+    backgroundVolumeID = sliceCompositeNode.GetBackgroundVolumeID()
+    if backgroundVolumeID in leafletToValveVolumeID:
+      # Show the original valve volume where the leaflet volume was, so the view is not left blank.
+      sliceCompositeNode.SetBackgroundVolumeID(leafletToValveVolumeID[backgroundVolumeID])
+    if sliceCompositeNode.GetForegroundVolumeID() in leafletToValveVolumeID:
+      sliceCompositeNode.SetForegroundVolumeID(None)
+    if sliceCompositeNode.GetLabelVolumeID() in leafletToValveVolumeID:
+      sliceCompositeNode.SetLabelVolumeID(None)
+
+
 def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, orthoRotationDeg=0,
                                  axialSliceName='Red', ortho1SliceName='Yellow', ortho2SliceName='Green',
                                  show3DSliceName=None, valveModel = None, valveBrowser = None):

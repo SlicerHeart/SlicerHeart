@@ -173,6 +173,7 @@ class ValveModelTestTest(ScriptedLoadableModuleTest):
     downloaded volume sequence and a coherent valve setup (valve type + probe position) is
     configured so the placed points lie on the valve annulus of the Mitral_US volume.
     """
+    import HeartValveLib
     self.delayDisplay(f"Run ValveModel workflow: {valveType}")
     contourFrame0, contourFrame1 = self.VALVE_TEST_CASES[valveType]
 
@@ -254,6 +255,37 @@ class ValveModelTestTest(ScriptedLoadableModuleTest):
     # SetSaveChanges is enabled for this sequence, so mutating the proxy node writes this matrix back
     # into the sequence's time point 0 item.
     valveBrowser.axialSliceToRasTransformNode.SetMatrixTransformToParent(nonDefaultAxialMatrix)
+
+    # --- Regression test for issue #307 (SlicerHeartPrivate): the leaflet (segmentation) volume must
+    #     not be left referenced by the slice views outside the Valve Segmentation module. On a
+    #     converted 4D scene, switching time points turns such a reference into an empty proxy volume
+    #     and makes the slice views non-responsive. removeLeafletVolumesFromSliceViews (called from
+    #     ValveAnnulusAnalysis.enter and ValveSegmentation.exit) must drop the leaflet volume and put
+    #     the original valve volume back so the view still shows anatomy instead of going blank. ---
+    self.delayDisplay(f"{valveType}: leaflet volume is removed from slice views outside segmentation")
+    leafletVolumeNode = valveModel.leafletVolumeNode
+    self.assertIsNotNone(leafletVolumeNode, "Leaflet volume should exist at time point 0")
+    valveVolumeNode = valveBrowser.valveVolumeNode
+    self.assertIsNotNone(valveVolumeNode, "Valve (ultrasound) volume should be set")
+    redCompositeNode = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceCompositeNodeRed")
+    yellowCompositeNode = slicer.mrmlScene.GetNodeByID("vtkMRMLSliceCompositeNodeYellow")
+    self.assertIsNotNone(redCompositeNode, "Red slice composite node should exist")
+    self.assertIsNotNone(yellowCompositeNode, "Yellow slice composite node should exist")
+    # Leaflet volume shown as a foreground (small-screen style) over the valve volume in one view, and
+    # as a background (large-screen style) in another view.
+    redCompositeNode.SetBackgroundVolumeID(valveVolumeNode.GetID())
+    redCompositeNode.SetForegroundVolumeID(leafletVolumeNode.GetID())
+    redCompositeNode.SetForegroundOpacity(0.0)
+    yellowCompositeNode.SetBackgroundVolumeID(leafletVolumeNode.GetID())
+
+    HeartValveLib.HeartValves.removeLeafletVolumesFromSliceViews()
+
+    self.assertIsNone(redCompositeNode.GetForegroundVolumeID(),
+                      "Leaflet volume should be removed from the slice view foreground")
+    self.assertEqual(redCompositeNode.GetBackgroundVolumeID(), valveVolumeNode.GetID(),
+                     "Valve volume should remain visible in the background")
+    self.assertEqual(yellowCompositeNode.GetBackgroundVolumeID(), valveVolumeNode.GetID(),
+                     "Leaflet volume in the background should be replaced by the original valve volume")
 
     # --- Add a second time point (volume frame 1) AFTER the segmentation is in place, so the
     #     heartValveNode state copied to the new time point already carries the LeafletSegmentation
