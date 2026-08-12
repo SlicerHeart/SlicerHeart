@@ -245,6 +245,12 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def exit(self):
     self.ui.segmentEditorWidget.uninstallKeyboardShortcuts()
     self.ui.segmentEditorWidget.setActiveEffect(None)
+    # The leaflet volume is only meant to be visible while editing a segmentation here. Remove it
+    # from the slice views on the way out (restoring the original valve volume) so it does not linger
+    # in other modules, where switching time points could leave the view referencing an empty proxy
+    # volume and make the slice views non-responsive (SlicerHeartPrivate#307).
+    HeartValveLib.HeartValves.removeLeafletVolumesFromSliceViews()
+    self._sliceViewsShowSegmentationEditing = False
 
   def setGuiEnabled(self, enable):
     self.ui.clippingCollapsibleButton.setEnabled(enable)
