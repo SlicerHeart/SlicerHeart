@@ -3,11 +3,9 @@ import string
 import vtk, qt, ctk, slicer
 import logging
 import numpy
-try:
-  import pydicom as dicom
-except:
-  # Slicer-4.10 backward compatibility
-  import dicom
+
+# Note: pydicom is not imported at the top level to make application startup faster,
+# it is imported in each method where it is needed.
 
 from DICOMLib import DICOMPlugin
 from DICOMLib import DICOMLoadable
@@ -79,8 +77,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # No problem, we'll try to parse the file and check the SOP class UID then.
       pass
 
+    import pydicom
     try:
-      ds = dicom.read_file(filePath, stop_before_pixels=True)
+      ds = pydicom.dcmread(filePath, stop_before_pixels=True)
     except Exception as e:
       if self.detailedLogging:
         logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
@@ -143,8 +142,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # No problem, we'll try to parse the file and check the SOP class UID then.
       pass
 
+    import pydicom
     try:
-      ds = dicom.read_file(filePath, stop_before_pixels=True)
+      ds = pydicom.dcmread(filePath, stop_before_pixels=True)
     except Exception as e:
       if self.detailedLogging:
         logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
@@ -211,8 +211,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # No problem, we'll try to parse the file and check the SOP class UID then.
       pass
 
+    import pydicom
     try:
-      ds = dicom.read_file(filePath, defer_size=50) # use defer_size to not load large fields
+      ds = pydicom.dcmread(filePath, defer_size=50) # use defer_size to not load large fields
     except Exception as e:
       if self.detailedLogging:
         logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
@@ -225,8 +226,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     # Check if these expected DICOM tags are available:
     # (7fe1,0011) LO [KRETZ_US]                               #   8, 1 PrivateCreator
     # (7fe1,1101) OB 4b\52\45\54\5a\46\49\4c\45\20\31\2e\30\20\20\20\00\00\01\00\02\00... # 3471038, 1 Unknown Tag & Data
-    kretzUsTag = dicom.tag.Tag('0x7fe1', '0x11')
-    kretzUsDataTag = dicom.tag.Tag('0x7fe1', '0x1101')
+    kretzUsTag = pydicom.tag.Tag('0x7fe1', '0x11')
+    kretzUsDataTag = pydicom.tag.Tag('0x7fe1', '0x1101')
 
     if kretzUsTag not in ds.keys():
       return []
@@ -296,8 +297,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # No problem, we'll try to parse the file and check the SOP class UID then.
       pass
 
+    import pydicom
     try:
-      ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
+      ds = pydicom.dcmread(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
       if self.detailedLogging:
         logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
@@ -307,7 +309,7 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # Unsupported class
       return []
 
-    geUsMovieGroupRootTag = dicom.tag.Tag('0x7fe1', '0x0010')
+    geUsMovieGroupRootTag = pydicom.tag.Tag('0x7fe1', '0x0010')
     geUsMovieGroupRootItem = ds.get(geUsMovieGroupRootTag)
 
     if not geUsMovieGroupRootItem:
@@ -361,8 +363,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # No problem, we'll try to parse the file and check the SOP class UID then.
       pass
 
+    import pydicom
     try:
-      ds = dicom.read_file(filePath, defer_size=30) # use defer_size to not load large fields
+      ds = pydicom.dcmread(filePath, defer_size=30) # use defer_size to not load large fields
     except Exception as e:
       if self.detailedLogging:
         logging.debug(f"Not GeImage3dApi file: failed to parse DICOM file {str(e)} ({filePath})")
@@ -454,8 +457,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
       # No problem, we'll try to parse the file and check the SOP class UID then.
       pass
 
+    import pydicom
     try:
-      ds = dicom.read_file(filePath, stop_before_pixels=True)
+      ds = pydicom.dcmread(filePath, stop_before_pixels=True)
     except Exception as e:
       if self.detailedLogging:
         logging.debug("Failed to parse DICOM file: {0}".format(str(e)))
@@ -578,8 +582,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     logic = slicer.modules.kretzfilereader.logic()
     nodeName = slicer.mrmlScene.GenerateUniqueName(loadable.name)
 
-    ds = dicom.read_file(loadable.files[0], defer_size=30)  # use defer_size to not load large fields
-    kretzUsDataTag = dicom.tag.Tag('0x7fe1', '0x1101')
+    import pydicom
+    ds = pydicom.dcmread(loadable.files[0], defer_size=30)  # use defer_size to not load large fields
+    kretzUsDataTag = pydicom.tag.Tag('0x7fe1', '0x1101')
     kretzUsDataItem = ds.get(kretzUsDataTag)
     volFileOffset = kretzUsDataItem.file_tell # add 12 bytes for tag, VR, and length,
 
@@ -617,7 +622,8 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     outputVolume = volumesLogic.AddArchetypeScalarVolume(filePath,name,0,fileList)
 
     # Override spacing, as GDCM cannot retreive image spacing correctly for this type of image
-    ds = dicom.read_file(filePath, stop_before_pixels=True)
+    import pydicom
+    ds = pydicom.dcmread(filePath, stop_before_pixels=True)
     outputSpacingStr = ds[findPrivateTag(ds, 0x200d, 0x03, "Philips US Imaging DD 036")]
     outputVolume.SetSpacing(float(outputSpacingStr[0]), float(outputSpacingStr[1]), float(outputSpacingStr[2]))
 
@@ -634,8 +640,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     """
 
     # get the key info from the "fake" dicom file
+    import pydicom
     filePath = loadable.files[0]
-    ds = dicom.read_file(filePath, stop_before_pixels=True)
+    ds = pydicom.dcmread(filePath, stop_before_pixels=True)
     columns = ds.Columns
     rows = ds.Rows
     slices = ds[(0x3001,0x1001)].value # private tag!
@@ -708,8 +715,9 @@ class DicomUltrasoundPluginClass(DICOMPlugin):
     """
 
     # get the key info from the "fake" dicom file
+    import pydicom
     filePath = loadable.files[0]
-    ds = dicom.read_file(filePath, stop_before_pixels=True)
+    ds = pydicom.dcmread(filePath, stop_before_pixels=True)
     columns = ds.Columns
     rows = ds.Rows
     slices = ds[(0x3001,0x1001)].value # private tag!
@@ -875,11 +883,12 @@ class DicomUltrasoundPlugin:
 
 def findPrivateTag(ds, group, element, privateCreator):
   """Helper function to get private tag from private creator name"""
+  import pydicom
   for tag, data_element in ds.items():
     if (tag.group == group) and (tag.element < 0x0100):
       data_element_value = data_element.value
       if type(data_element.value) == bytes:
         data_element_value = data_element_value.decode()
       if data_element_value.rstrip() == privateCreator:
-        return dicom.tag.Tag(group, (tag.element << 8) + element)
+        return pydicom.tag.Tag(group, (tag.element << 8) + element)
   return None

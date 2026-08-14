@@ -102,7 +102,7 @@ class Philips4dUsDicomPatcherWidget(ScriptedLoadableModuleWidget):
       self.statusLabel.plainText = ''
       self.logic.patchDicomDir(self.inputDirSelector.currentPath, self.outputDirSelector.currentPath, self.enableDicomOutputCheckBox.checked, self.anonymizeDicomCheckBox.checked, self.enableNrrdOutputCheckBox.checked)
     except Exception as e:
-      self.addLog("Unexpected error: {0}".format(e.msg))
+      self.addLog("Unexpected error: {0}".format(str(e)))
       import traceback
       traceback.print_exc()
     slicer.app.restoreOverrideCursor();
@@ -132,12 +132,8 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     self.logCallback = None
 
   def generateUid(self):
-    if slicer.app.majorVersion == 4 and slicer.app.minorVersion <= 10:
-      import dicom
-      return dicom.UID.generate_uid(None)
-    else:
-      import pydicom as dicom
-      return dicom.uid.generate_uid(None)
+    import pydicom
+    return pydicom.uid.generate_uid(None)
 
   def addLog(self, text):
     logging.info(text)
@@ -192,10 +188,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
     [1] https://github.com/commontk/CTK/blob/16aa09540dcb59c6eafde4d9a88dfee1f0948edc/Libs/DICOM/Core/ctkDICOMDatabase.cpp#L1283-L1287
     """
 
-    if slicer.app.majorVersion == 4 and slicer.app.minorVersion <= 10:
-      import dicom
-    else:
-      import pydicom as dicom
+    import pydicom
 
     if not outputDirPath:
       outputDirPath = inputDirPath
@@ -225,8 +218,8 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
         filePath = os.path.join(root,file)
         self.addLog('Examining %s...' % os.path.join(currentSubDir,file))
         try:
-          ds = dicom.read_file(filePath)
-        except (IOError, dicom.filereader.InvalidDicomError):
+          ds = pydicom.dcmread(filePath)
+        except (IOError, pydicom.errors.InvalidDicomError):
           self.addLog('  Not DICOM file. Skipped.')
           continue
 
@@ -301,7 +294,7 @@ class Philips4dUsDicomPatcherLogic(ScriptedLoadableModuleLogic):
             os.makedirs(rootOutput)
 
         self.addLog('  Writing DICOM...')
-        dicom.write_file(patchedFilePath, ds)
+        pydicom.dcmwrite(patchedFilePath, ds)
         self.addLog('  Created DICOM file: %s' % patchedFilePath)
 
         if exportUltrasoundToNrrd and self.isDicomUltrasoundFile(patchedFilePath):
