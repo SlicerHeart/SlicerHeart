@@ -604,6 +604,10 @@ def main(argv):
   parser.add_argument(PapillaryAnalysisResultsExportRule.CMD_FLAG, "--export_papillary_results", action='store_true')
   parser.add_argument(ValveVolumeExportRule.CMD_FLAG, "--export_image_volume", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG, "--export_leaflet_segmentation", action='store_true')
+  parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_LABELMAP,
+                      "--export_leaflet_segmentation_labelmap", action='store_true')
+  parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_MODEL,
+                      "--export_leaflet_segmentation_model", action='store_true')
   parser.add_argument(ValveLeafletSurfacesExportRule.CMD_FLAG, "--extracted_leaflet_surfaces", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG, "--valve_landmark_labels", action='store_true')
   parser.add_argument(ValveLandmarkLabelsExportRule.CMD_FLAG_QUADRANTS,
@@ -647,6 +651,9 @@ def main(argv):
   if args.extracted_leaflet_surfaces:
     logic.addRule(ValveLeafletSurfacesExportRule)
   if args.export_leaflet_segmentation:
+    LeafletSegmentationExportRule.EXPORT_SEGMENTS_AS_LABELMAP = \
+      args.export_leaflet_segmentation_labelmap or not args.export_leaflet_segmentation_model
+    LeafletSegmentationExportRule.EXPORT_SEGMENTS_AS_MODEL = args.export_leaflet_segmentation_model
     logic.addRule(LeafletSegmentationExportRule)
   if args.valve_annulus_contour:
     AnnulusContourModelExportRule.EXPORT_ANNULUS_AS_MODEL = args.valve_annulus_contour_model

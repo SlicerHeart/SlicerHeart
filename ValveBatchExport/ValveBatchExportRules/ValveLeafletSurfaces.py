@@ -25,5 +25,5 @@ class ValveLeafletSurfacesExportRule(ValveBatchExportRule):
         surfaceModel = leafletModel.surfaceModelNode
         valid = surfaceModel is not None and surfaceModel.GetPolyData() is not None and surfaceModel.GetPolyData().GetNumberOfPoints() > 0
         if valid:
-          filename = f"{valveModelName}_{leafletModel.getName().replace(' ', '_')}.vtk"
+          filename = f"{valveModelName}_atrial_{leafletModel.getName().replace(' ', '_')}.vtk"
           slicer.util.saveNode(surfaceModel, str(Path(self.outputDir) / filename))

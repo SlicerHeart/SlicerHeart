@@ -20,11 +20,49 @@ LEAFLET_ORDER = {
 class LeafletSegmentationExportRule(ValveBatchExportRule):
 
   BRIEF_USE = "Segmentation"
-  DETAILED_DESCRIPTION = "Export individual segments "
+  DETAILED_DESCRIPTION = "Export individual segments"
+  USER_INTERFACE = True
 
   CMD_FLAG = "-seg"
+  CMD_FLAG_LABELMAP = "-segl"
+  CMD_FLAG_MODEL = "-segm"
+  CMD_FLAG_MODEL_HOLE_SIZE = "-seghs"
 
   OTHER_FLAGS = []
+  EXPORT_SEGMENTS_AS_LABELMAP = True
+  EXPORT_SEGMENTS_AS_MODEL = False
+
+  @classmethod
+  def setupUI(cls, layout):
+    labelmapCheckbox = qt.QCheckBox("Export as segmentation")
+    modelCheckbox = qt.QCheckBox("Export as model (.vtk)")
+
+    def onLabelmapCheckboxModified(checked):
+      cls.EXPORT_SEGMENTS_AS_LABELMAP = checked
+      cls.setOptionFlag(cls.CMD_FLAG_LABELMAP, checked)
+
+    def onModelCheckboxModified(checked):
+      cls.EXPORT_SEGMENTS_AS_MODEL = checked
+      cls.setOptionFlag(cls.CMD_FLAG_MODEL, checked)
+
+    labelmapCheckbox.stateChanged.connect(onLabelmapCheckboxModified)
+    labelmapCheckbox.checked = cls.EXPORT_SEGMENTS_AS_LABELMAP
+
+    modelCheckbox.stateChanged.connect(onModelCheckboxModified)
+    modelCheckbox.checked = cls.EXPORT_SEGMENTS_AS_MODEL
+
+    cls.setOptionFlag(cls.CMD_FLAG_LABELMAP, cls.EXPORT_SEGMENTS_AS_LABELMAP)
+    cls.setOptionFlag(cls.CMD_FLAG_MODEL, cls.EXPORT_SEGMENTS_AS_MODEL)
+
+    layout.addWidget(labelmapCheckbox)
+    layout.addWidget(modelCheckbox)
+
+  @classmethod
+  def setOptionFlag(cls, flag, enabled):
+    if enabled and flag not in cls.OTHER_FLAGS:
+      cls.OTHER_FLAGS.append(flag)
+    elif not enabled and flag in cls.OTHER_FLAGS:
+      cls.OTHER_FLAGS.remove(flag)
 
   def processScene(self, sceneFileName):
 
@@ -53,19 +91,56 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
     segmentationNode = valveModel.getLeafletSegmentationNode()
     segmentationsLogic = slicer.modules.segmentations.logic()
 
-    labelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+    labelNode = None
+    if self.EXPORT_SEGMENTS_AS_LABELMAP:
+      labelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+
     for segmentID in getAllSegmentIDs(segmentationNode):
       from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
       if segmentID == VALVE_MASK_SEGMENT_ID:
         self.addLog(f"    Skipping Segmentation export for segment with id '{VALVE_MASK_SEGMENT_ID}'")
         continue
       showOnlySegmentWithSegmentID(segmentationNode, segmentID)
-      segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode,
-                                                             valveModel.getLeafletVolumeNode())
       segmentName = segmentationNode.GetSegmentation().GetSegment(segmentID).GetName()
-      filename = f"{prefix}_{segmentName.replace(' ', '_')}.{self.IMAGE_FILE_EXTENSION}"
-      slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename))
-    slicer.mrmlScene.RemoveNode(labelNode)
+      filenamePrefix = f"{prefix}_{segmentName.replace(' ', '_')}"
+      if self.EXPORT_SEGMENTS_AS_LABELMAP:
+        segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode,
+                                                               valveModel.getLeafletVolumeNode())
+        slicer.util.saveNode(labelNode, str(Path(self.outputDir) / f"{filenamePrefix}.{self.IMAGE_FILE_EXTENSION}"))
+      if self.EXPORT_SEGMENTS_AS_MODEL:
+        self._saveSegmentAsModel(segmentationNode, segmentID, valveModel.getLeafletVolumeNode(), filenamePrefix)
+
+    if labelNode:
+      slicer.mrmlScene.RemoveNode(labelNode)
+
+  def _saveSegmentAsModel(self, segmentationNode, segmentID, sourceVolumeNode, filenamePrefix):
+    modelSegmentationNode = self._createModelExportSegmentation(segmentationNode, segmentID, sourceVolumeNode)
+    try:
+      modelSegmentationNode.RemoveClosedSurfaceRepresentation()
+      modelSegmentationNode.CreateClosedSurfaceRepresentation()
+      self._saveSegmentClosedSurfaceAsModel(modelSegmentationNode, segmentID, filenamePrefix)
+    finally:
+      slicer.mrmlScene.RemoveNode(modelSegmentationNode)
+
+  def _createModelExportSegmentation(self, segmentationNode, segmentID, sourceVolumeNode):
+    modelSegmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+    modelSegmentationNode.CreateDefaultDisplayNodes()
+    modelSegmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(sourceVolumeNode)
+    modelSegmentationNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
+    modelSegmentationNode.GetSegmentation().CopySegmentFromSegmentation(segmentationNode.GetSegmentation(), segmentID)
+    return modelSegmentationNode
+
+  def _saveSegmentClosedSurfaceAsModel(self, segmentationNode, segmentID, filenamePrefix):
+    polyData = vtk.vtkPolyData()
+    if not segmentationNode.GetClosedSurfaceRepresentation(segmentID, polyData) or polyData.GetNumberOfPoints() == 0:
+      self.addLog(f"    Skipping model export for segment '{segmentID}' (closed surface is empty)")
+      return
+
+    modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", filenamePrefix)
+    modelNode.SetAndObservePolyData(polyData)
+    modelNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
+    slicer.util.saveNode(modelNode, str(Path(self.outputDir) / f"{filenamePrefix}.vtk"))
+    slicer.mrmlScene.RemoveNode(modelNode)
 
 
 def getAllSegmentNames(segmentationNode):
