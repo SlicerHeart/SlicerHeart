@@ -412,7 +412,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       self.definitionsWidget.webView().url = url
 
   def onPresetChanged(self, presetIndex=-1):
-    slicer.presetSelector = self.presetSelector
+    # slicer.presetSelector = self.presetSelector
     presetId = self.presetSelector.itemData(self.presetSelector.currentIndex)
     heartValveMeasurementNode = self.getHeartValveMeasurementNode()
     if heartValveMeasurementNode:
@@ -691,6 +691,10 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       if FIELD_VALVE_ID not in field.keys():
         continue
       if valveId != field[FIELD_VALVE_ID]:
+        continue
+      if inputFieldIndex >= len(self.inputReferenceValueSliders) \
+          or inputFieldIndex >= len(self.inputReferenceRequiredCheckBoxes) \
+          or inputFieldIndex >= len(self.inputReferencePointPlaceWidgets):
         continue
 
       positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
