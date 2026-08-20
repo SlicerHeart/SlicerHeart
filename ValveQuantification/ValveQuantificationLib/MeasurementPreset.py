@@ -140,6 +140,10 @@ class MeasurementPreset(object):
   def computeMetrics(self, inputValveModels, folderNode):
     self.folderNode = folderNode
     self.metricsMessages = []
+    if not inputValveModels:
+      # computeMetricsForMeasurementNode skips missing valve references, so an empty dict is a
+      # normal state (e.g. no valve selected yet).
+      return self.metricsMessages
     tableNode = None
     if self.metricsTable:
       tableNode = self.metricsTable.metricTableNode
@@ -367,7 +371,7 @@ class MeasurementPreset(object):
     if radius is None:
       radius = valveModel.getAnnulusContourRadius() * 1.1
 
-    curveModel = self.getOrAddMetricModelNode(pointPos1, result[KEY_NAME])
+    curveModel = self.getOrAddMetricModelNode(valveModel, result[KEY_NAME])
     curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility, currentModelNode=curveModel)
 
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, curveModel, shParentFolderId)

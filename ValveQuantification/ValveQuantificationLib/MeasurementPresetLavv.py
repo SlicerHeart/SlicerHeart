@@ -38,10 +38,10 @@ class MeasurementPresetLavv(MeasurementPreset):
     self.addAnnulusAreaMeasurements(valveModel, planePosition, planeNormal)
     self.addAnnulusHeightMeasurements(valveModel, planePosition, planeNormal)
 
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'PMC', valveModel, 'ALC', oriented=True, positiveDirection_valveModel1=planeNormal))
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'ALC', valveModel, 'SIC', oriented=True, positiveDirection_valveModel1=planeNormal))
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'SIC', valveModel, 'PMC', oriented=True, positiveDirection_valveModel1=planeNormal))
-    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'ALC', valveModel, 'PMC', oriented=True, positiveDirection_valveModel1=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'PMC', 'ALC', oriented=True, positiveDirection=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'ALC', 'SIC', oriented=True, positiveDirection=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'SIC', 'PMC', oriented=True, positiveDirection=planeNormal))
+    self.addMeasurement(self.getCurveLengthBetweenPoints(valveModel, valveModel.annulusContourCurveNode, 'ALC', 'PMC', oriented=True, positiveDirection=planeNormal))
 
     self.addSegmentedLeafletMeasurements(valveModel, planePosition, planeNormal)
 
