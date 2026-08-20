@@ -44,6 +44,7 @@ class Converter4DSequences(ScriptedLoadableModule):
         # Add scene observer for auto-conversion (active even if widget is not shown)
         self.sceneObserverTag = None
         self.logic = None
+        self._autoConversionScheduled = False
         self.addSceneObserver()
 
     def addSceneObserver(self):
@@ -74,18 +75,33 @@ class Converter4DSequences(ScriptedLoadableModule):
             logging.debug("Scene loaded - automatic conversion is suspended, skipping")
             return
         autoConvert = slicer.util.settingsValue(self.AUTO_CONVERT_SETTING_KEY, False, converter=slicer.util.toBool)
-        if autoConvert:
-            logging.info("Scene loaded - performing automatic conversion")
-            # Create logic if not already created
-            if self.logic is None:
-                self.logic = Converter4DSequencesLogic()
-            # Use QTimer to defer conversion until after scene is fully initialized
-            qt.QTimer.singleShot(100, self._performDeferredConversion)
+        if not autoConvert:
+            return
+        # Create logic if not already created
+        if self.logic is None:
+            self.logic = Converter4DSequencesLogic()
+        # EndImportEvent fires for every import (including adding data to the current scene), so
+        # skip the whole scene-wide conversion when nothing convertible is present.
+        if not self.logic.sceneHasConvertibleNodes():
+            return
+        # Two imports in quick succession must not queue two conversions of the same scene.
+        if self._autoConversionScheduled:
+            return
+        self._autoConversionScheduled = True
+        logging.info("Scene loaded - scheduling automatic conversion")
+        # Use QTimer to defer conversion until after scene is fully initialized
+        qt.QTimer.singleShot(100, self._performScheduledAutoConversion)
 
-    def _performDeferredConversion(self):
+    def _performScheduledAutoConversion(self):
+        self._autoConversionScheduled = False
         # Re-check: suspension may have been requested after this conversion was scheduled.
         if Converter4DSequences.autoConvertSuspended:
             logging.debug("Automatic conversion is suspended, skipping deferred conversion")
+            return
+        # The scene may have been cleared or replaced since the conversion was scheduled; re-check
+        # before touching it.
+        if not self.logic.sceneHasConvertibleNodes():
+            logging.info("Skipping scheduled auto-conversion: no convertible nodes in the scene")
             return
         self.logic.performFullConversion(showMessage=False)
 
@@ -179,7 +195,13 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
         with slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True):
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
-                count = self.logic.convertSingleFrameToMultiFrameSequences()['convertedCount']
+                results = self.logic.convertSingleFrameToMultiFrameSequences()
+                count = results['convertedCount']
+                # Remove the successfully converted originals: leaving them in the scene creates
+                # duplicated valve nodes that would be re-detected as old format on the next run.
+                for node in results['nodesToRemove']:
+                    if node:
+                        slicer.mrmlScene.RemoveNode(node)
                 slicer.util.infoDisplay(f"Converted {count} HeartValve node(s) to multi-frame sequence format.")
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
@@ -216,6 +238,20 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
 
 
 class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
+    def sceneHasConvertibleNodes(self):
+        """Cheap pre-flight check for auto-conversion: True if the scene contains any old-format
+        SlicerHeart node that the full conversion would migrate. Nodes that are already sequence
+        browser proxies are in the new format and do not count."""
+        sequencesLogic = slicer.modules.sequences.logic()
+        for moduleName in ("HeartValve", "HeartValveMeasurement", "CardiacDeviceAnalysis"):
+            for node in getAllModuleSpecificScriptableNodes(moduleName):
+                if not sequencesLogic.GetFirstBrowserNodeForProxyNode(node):
+                    return True
+        return False
+
+    # Guards against re-entrant conversion (e.g. an import event fired while a conversion is running)
+    _conversionInProgress = False
+
     @vtk.calldata_type(vtk.VTK_OBJECT)
     def _reserveRemovedNodeID(self, caller, event, node):
         """Keep the ID of a node removed during conversion from being assigned to a new node.
@@ -235,6 +271,16 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         With interactive=False no dialogs are shown and errors are raised to the caller instead of
         being reported in a modal dialog (which would block a batch process running without a user).
         """
+        if Converter4DSequencesLogic._conversionInProgress:
+            logging.warning("Skipping conversion request: a conversion is already in progress")
+            return
+        Converter4DSequencesLogic._conversionInProgress = True
+        try:
+            self._performFullConversion(showMessage, interactive)
+        finally:
+            Converter4DSequencesLogic._conversionInProgress = False
+
+    def _performFullConversion(self, showMessage, interactive):
         errorDisplay = slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True) \
             if interactive else contextlib.nullcontext()
         with errorDisplay:
@@ -605,12 +651,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 # Old format nodes are NOT part of a sequence browser
                 valveBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(hvNode)
                 if valveBrowserNode:
-                    # Already in a sequence browser, check if it has multiple frames
-                    heartValveSequenceNode = valveBrowserNode.GetMasterSequenceNode()
-                    if heartValveSequenceNode and heartValveSequenceNode.GetNumberOfDataNodes() > 1:
-                        # Already converted to multi-frame format, skip
-                        logging.debug(f"Skipping '{hvNode.GetName()}' - already in multi-frame sequence")
-                        continue
+                    # The node is a sequence proxy, so it is already in the new format. This must not
+                    # additionally require more than one time point: a converted single-phase valve
+                    # (the common legacy case) is still converted, and re-converting it would
+                    # re-sequence the proxy and then delete it, destroying the valve.
+                    logging.debug(f"Skipping '{hvNode.GetName()}' - already a sequence browser proxy")
+                    continue
 
                 # This is an old-format node (has ValveVolumeSequenceIndex but not in a browser)
                 oldFormatHeartValves.append(hvNode)
@@ -662,6 +708,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         # Process each valve group
         convertedCount = 0
+        # Only nodes that were verifiably written into a sequence (and whose group finished its
+        # referenced-node conversion) may be deleted afterwards; anything skipped or failed must
+        # stay in the scene, otherwise its data would be silently lost.
+        nodesToRemove = []
         for groupingKey, browserData in valvesByVolumeSequence.items():
             volumeSequenceBrowserNode = browserData['volumeSequenceBrowserNode']
             volumeNode = browserData['volumeNode']
@@ -726,10 +776,15 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 logging.info(f"Created new heart valve sequence node: {heartValveSequenceNode.GetName()}")
 
             # For each valve node, add it to the sequence at its specified frame index
+            groupConvertedNodes = []
             for heartValveNode in heartValveNodes:
                     # Get the stored frame index from the attribute
                     sequenceIndexStr = heartValveNode.GetAttribute("ValveVolumeSequenceIndex")
-                    frameIndex = int(sequenceIndexStr)
+                    try:
+                        frameIndex = int(sequenceIndexStr)
+                    except (TypeError, ValueError):
+                        logging.warning(f"Valve {heartValveNode.GetName()} has non-integer frame index ('{sequenceIndexStr}'), skipping")
+                        continue
 
                     if frameIndex < 0:
                         logging.warning(f"Valve {heartValveNode.GetName()} has invalid frame index ({frameIndex}), skipping")
@@ -737,18 +792,25 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                     # Get the index value for this frame from the volume sequence
                     masterSequenceNode = volumeSequenceBrowserNode.GetMasterSequenceNode()
-                    if frameIndex >= masterSequenceNode.GetNumberOfDataNodes():
+                    if not masterSequenceNode or frameIndex >= masterSequenceNode.GetNumberOfDataNodes():
                         logging.warning(f"Frame index {frameIndex} out of range for valve {heartValveNode.GetName()}")
                         continue
 
                     indexValue = masterSequenceNode.GetNthIndexValue(frameIndex)
 
+                    if heartValveSequenceNode.GetDataNodeAtValue(indexValue):
+                        logging.warning(f"Valve {heartValveNode.GetName()} collides with an existing time point "
+                                        f"at index value {indexValue}; keeping the original node in the scene")
+                        continue
+
                     # Add this heart valve node to the sequence at the appropriate index
                     heartValveSequenceNode.SetDataNodeAtValue(heartValveNode, indexValue)
                     logging.info(f"Added {heartValveNode.GetName()} to sequence at frame {frameIndex} (index value: {indexValue})")
+                    groupConvertedNodes.append(heartValveNode)
                     convertedCount += 1
 
             # Set up the valve browser to save changes to the sequence
+            groupConversionSucceeded = False
             if heartValveSequenceNode.GetNumberOfDataNodes() > 0:
                 valveBrowserNode.SetSaveChanges(heartValveSequenceNode, True)
                 # Select the first item to initialize the proxy node
@@ -790,11 +852,17 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                         # Convert referenced nodes (annulus curves, segmentations, etc.) to sequences
                         self._convertReferencedNodesToSequences(valveBrowserNode, heartValveSequenceNode, heartValveNodes, volumeSequenceBrowserNode)
+                    # Deleting the originals is only safe once the proxy exists and the referenced
+                    # nodes were converted without raising.
+                    groupConversionSucceeded = proxyNode is not None
                 except Exception as err:
                     logging.warning(f"Could not initialize valve model: {err}")
 
-        # Remove original heart valve nodes that have been converted
-        nodesToRemove = [node for browserData in valvesByVolumeSequence.values() for node in browserData['heartValveNodes']]
+            if groupConversionSucceeded:
+                nodesToRemove.extend(groupConvertedNodes)
+            else:
+                logging.warning(f"Conversion of valve group '{valveType}' did not complete; keeping "
+                                f"{len(groupConvertedNodes)} original valve node(s) in the scene")
 
         results['convertedCount'] = convertedCount
         results['nodesToRemove'] = nodesToRemove
