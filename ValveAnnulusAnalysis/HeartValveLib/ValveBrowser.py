@@ -437,25 +437,40 @@ class ValveBrowser:
       return sequenceNode
 
     def addCurrentTimePointToSequence(self, sequenceNode):
-      """Make a time sequence from a single node and add it to this browser node"""
+      """Ensure the sequence has an item for the currently displayed time point."""
+      browserNode = self.valveBrowserNode
+      proxyNode = browserNode.GetProxyNode(sequenceNode)
+      _, indexValue = self.getDisplayedHeartValveSequenceIndexAndValue()
 
-      # Temporarily change missing item mode to create missing items
-      oldMissingItemMode = self.valveBrowserNode.GetMissingItemMode(sequenceNode)
-      oldSaveChanges = self.valveBrowserNode.GetSaveChanges(sequenceNode)
+      if indexValue is not None and sequenceNode.GetItemNumberFromIndexValue(indexValue) >= 0:
+        # The item already exists; when SaveChanges is enabled, proxy modifications are recorded
+        # into it, so no browser-wide proxy refresh is needed. Skipping it matters: this method is
+        # called for every metric model during quantification, and each UpdateProxyNodesFromSequences
+        # re-syncs EVERY synchronized sequence of the browser, which made computing all measurements
+        # take minutes (the cost grew quadratically with the number of metric models).
+        self.addCurrentTimePointToDisplaySequences(proxyNode)
+        return
 
-      self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCreateFromDefault)
-      self.valveBrowserNode.SetSaveChanges(sequenceNode, True)
-      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
+      # Temporarily change missing item mode to create the missing item. The browser property
+      # changes are batched with StartModify/EndModify so that observers (e.g. the Sequences module
+      # logic, which reacts to every browser modification with a full proxy refresh) run once
+      # instead of once per setter call.
+      oldMissingItemMode = browserNode.GetMissingItemMode(sequenceNode)
+      oldSaveChanges = browserNode.GetSaveChanges(sequenceNode)
+      wasModifying = browserNode.StartModify()
+      browserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemCreateFromDefault)
+      browserNode.SetSaveChanges(sequenceNode, True)
+      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
 
       # Restore original missing item mode
-      self.valveBrowserNode.SetSaveChanges(sequenceNode, oldSaveChanges)
-      self.valveBrowserNode.SetMissingItemMode(sequenceNode, oldMissingItemMode)
+      browserNode.SetSaveChanges(sequenceNode, oldSaveChanges)
+      browserNode.SetMissingItemMode(sequenceNode, oldMissingItemMode)
+      browserNode.EndModify(wasModifying)
 
       # If the proxy node's display nodes are driven by display sequences (e.g. in scenes converted
       # from the old format) then those sequences need an item for this time point as well,
       # otherwise the display nodes are reset to defaults on every browser update and the user
       # cannot control visibility or any other display property.
-      proxyNode = self.valveBrowserNode.GetProxyNode(sequenceNode)
       self.addCurrentTimePointToDisplaySequences(proxyNode)
 
     def addCurrentTimePointToDisplaySequences(self, proxyNode):
@@ -472,6 +487,7 @@ class ValveBrowser:
       _, indexValue = self.getDisplayedHeartValveSequenceIndexAndValue()
       if indexValue is None:
         return
+      changed = False
       for displayNodeIndex in range(proxyNode.GetNumberOfDisplayNodes()):
         displayNode = proxyNode.GetNthDisplayNode(displayNodeIndex)
         if not displayNode:
@@ -486,8 +502,15 @@ class ValveBrowser:
           # defaults, so it cannot be used as template)
           templateDisplayNode = displaySequenceNode.GetDataNodeAtValue(indexValue, False)
           displaySequenceNode.SetDataNodeAtValue(templateDisplayNode if templateDisplayNode else displayNode, indexValue)
-        self.valveBrowserNode.SetSaveChanges(displaySequenceNode, True)
-      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
+          changed = True
+        if not self.valveBrowserNode.GetSaveChanges(displaySequenceNode):
+          self.valveBrowserNode.SetSaveChanges(displaySequenceNode, True)
+          changed = True
+      if changed:
+        # Only refresh the browser's proxies when an item was actually added: the refresh re-syncs
+        # every synchronized sequence and is by far the most expensive step here, while nodes
+        # without display sequences (every non-converted scene) need no refresh at all.
+        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
 
     def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
 
