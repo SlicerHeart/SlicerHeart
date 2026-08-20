@@ -65,7 +65,11 @@ class ValveSequenceBrowserWidget:
 
   @heartValveNode.setter
   def heartValveNode(self, heartValveNode: slicer.vtkMRMLScriptedModuleNode):
-    if self.valveModel and self.valveModel.getHeartValveNode() == heartValveNode:
+    # Compare against the node this widget already observes. Comparing against
+    # self.valveModel.getHeartValveNode() would always match here, because the valve browser node
+    # has already been reassigned by the time this setter runs, so the observer would never be
+    # installed and heartValveNodeModified would never fire.
+    if self._heartValveNode == heartValveNode:
       return
 
     self._removeHeartValveNodeObserver()
@@ -171,6 +175,8 @@ class ValveSequenceBrowserWidget:
     self._readOnly = False
 
     self.lastValveBrowserSelectedItemIndex = -1
+
+    self._inValveBrowserNodeModified = False
 
     self._linkedValveBrowserNodes = []
 
@@ -297,25 +303,46 @@ class ValveSequenceBrowserWidget:
     self.heartValveNodeModified.emit()
 
   def onValveBrowserNodeModified(self, observer=None, eventid=None):
-    # Show current valve volume if switched valve time point
-    lastValveBrowserSelectedItemIndex = -1
-    if self.valveBrowser and self.valveVolumeNode:
-      itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-      if indexValue is not None and self.lastValveBrowserSelectedItemIndex != itemIndex: # Switch volume
-          lastValveBrowserSelectedItemIndex = itemIndex
-          volumeItemIndex = self.valveBrowser.volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
-          self.valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
+    # Driving the volume browser and the linked browsers below re-enters this handler (their
+    # modified events cascade back into this widget); process only the outermost call.
+    if self._inValveBrowserNodeModified:
+      return
+    self._inValveBrowserNodeModified = True
+    try:
+      # Show current valve volume if switched valve time point.
+      # The memo must only change when a valid index is observed: resetting it on every event would
+      # make the next unrelated ModifiedEvent (attribute write, playback flag, ...) look like a
+      # time point switch and force-drive the volume browser.
+      if self.valveBrowser and self.valveVolumeNode:
+        itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+        if indexValue is None:
+          self.lastValveBrowserSelectedItemIndex = -1
+        elif self.lastValveBrowserSelectedItemIndex != itemIndex: # Switch volume
+          self.lastValveBrowserSelectedItemIndex = itemIndex
+          volumeSequenceNode = self.valveBrowser.volumeSequenceNode
+          volumeSequenceBrowserNode = self.valveBrowser.volumeSequenceBrowserNode
+          if volumeSequenceNode and volumeSequenceBrowserNode:
+            volumeItemIndex = volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
+            if volumeItemIndex >= 0:
+              volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
+      else:
+        self.lastValveBrowserSelectedItemIndex = -1
 
-    self.lastValveBrowserSelectedItemIndex = lastValveBrowserSelectedItemIndex
-    self.updateLinkedSequenceBrowsers()
-    self.updateGUIFromMRML()
-    self.valveBrowserNodeModified.emit()
+      self.updateLinkedSequenceBrowsers()
+      self.updateGUIFromMRML()
+      self.valveBrowserNodeModified.emit()
+    finally:
+      self._inValveBrowserNodeModified = False
 
   def updateLinkedSequenceBrowsers(self):
     """
     Updates the selected value of the linked valve browsers to match the selected value of the main valve browser.
     """
+    if not self.valveBrowser:
+      return
     _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+    if indexValue is None:
+      return
 
     for linkedValveBrowserNode in self.linkedValveBrowserNodes:
       if not linkedValveBrowserNode:

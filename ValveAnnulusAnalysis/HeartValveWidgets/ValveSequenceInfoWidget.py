@@ -68,14 +68,23 @@ def analyzeSequence(valveBrowser):
   }
   data = {attr: [] for attr in HEADER_NAMES}
   heartValveSequenceNode = valveBrowser.heartValveSequenceNode
-  origIndex = valveBrowser.volumeSequenceBrowserNode.GetSelectedItemNumber()
-  for idx in range(heartValveSequenceNode.GetNumberOfDataNodes()):
-    valveBrowser.valveBrowserNode.SetSelectedItemNumber(idx)
+  if heartValveSequenceNode is None:
+    return data
+  volumeSequenceBrowserNode = valveBrowser.volumeSequenceBrowserNode
+  origVolumeIndex = volumeSequenceBrowserNode.GetSelectedItemNumber() if volumeSequenceBrowserNode else -1
+  origValveIndex = valveBrowser.valveBrowserNode.GetSelectedItemNumber()
+  try:
+    for idx in range(heartValveSequenceNode.GetNumberOfDataNodes()):
+      valveBrowser.valveBrowserNode.SetSelectedItemNumber(idx)
 
-    for colName in HEADER_NAMES:
-      data[colName].append(ATTR_GETTER_FUNCTIONS[colName](valveBrowser.valveModel))
-
-  valveBrowser.volumeSequenceBrowserNode.SetSelectedItemNumber(origIndex)
+      for colName in HEADER_NAMES:
+        data[colName].append(ATTR_GETTER_FUNCTIONS[colName](valveBrowser.valveModel))
+  finally:
+    # Restore both browsers: the loop drives the valve browser directly and the volume browser
+    # indirectly (via the widgets observing the valve browser).
+    valveBrowser.valveBrowserNode.SetSelectedItemNumber(origValveIndex)
+    if volumeSequenceBrowserNode:
+      volumeSequenceBrowserNode.SetSelectedItemNumber(origVolumeIndex)
   return data
 
 
@@ -238,7 +247,7 @@ class ValveSequenceInfoWidget:
     self.selectionChanged.disconnectAll()
     selectionModel = self.ui.valveSeriesInfoView.selectionModel()
     if selectionModel:
-      selectionModel.selectionChanged.connect(self._onSelectionChanged)
+      selectionModel.selectionChanged.disconnect(self._onSelectionChanged)
 
   def show(self):
     self.ui.show()
