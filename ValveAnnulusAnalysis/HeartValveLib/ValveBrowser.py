@@ -261,6 +261,7 @@ class ValveBrowser:
           shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
           valveVolumeNodeItemId = shNode.GetItemByDataNode(valveVolumeNode)
           shNode.SetItemParent(shNode.GetItemByDataNode(probeToRasTransformNode), valveVolumeNodeItemId)
+        probeToRasTransformNodeId = valveVolumeNode.GetParentTransformNode().GetID()
 
         #slicer.vtkMRMLSubjectHierarchyNode.CreateSubjectHierarchyNode(
         #  valveVolumeNode.GetScene(), slicer.vtkMRMLSubjectHierarchyNode.GetAssociatedSubjectHierarchyNode(valveVolumeNode),
@@ -268,7 +269,9 @@ class ValveBrowser:
         self.updateProbeToRasTransform()
 
         # Make sequence browser seek widget display frame index instead of frame time
-        self.volumeSequenceBrowserNode.SetIndexDisplayMode(True)
+        volumeSequenceBrowserNode = self.volumeSequenceBrowserNode
+        if volumeSequenceBrowserNode:
+          volumeSequenceBrowserNode.SetIndexDisplayMode(True)
 
       # Apply probeToRAS transform to all nodes that move with the valve volume
 
