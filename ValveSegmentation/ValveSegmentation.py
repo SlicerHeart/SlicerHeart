@@ -415,14 +415,17 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
   def onValveBrowserNodeModified(self, observer=None, eventid=None):
     self.updateGUIFromValveBrowser()
 
-    if self.editingSequenceValue:
+    if not self.valveBrowser:
+      self.editingSequenceValue = None
+      return
+
+    # Compare against None: an empty index value string is a valid previous state and must not
+    # skip the segment ID synchronization.
+    if self.editingSequenceValue is not None:
       self.updateSegmentIDs()
 
     _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
     self.editingSequenceValue = indexValue
-
-  def updateGUIFromValveBrowser(self):
-    self.updateGUIFromHeartValveNode()
 
   def onHeartValveNodeModified(self):
     self.updateGUIFromHeartValveNode()
@@ -442,6 +445,10 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
       self.ui.removeSegmentationButton.enabled = False
       self.ui.addValveRoiButton.enabled = False
       self.ui.removeValveRoiButton.enabled = False
+      if not self.valveModel:
+        # Everything below reads from the valve model; without one there is nothing to sync.
+        self.ui.segmentEditorWidget.enabled = False
+        return
     else:
       leafletSegmentationNode = self.valveModel.leafletSegmentationNode
       self.ui.addSegmentationButton.enabled = not leafletSegmentationNode
@@ -687,7 +694,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
         # There is no terminology-based segment ID in use.
         # Try to keep the old segment ID if it doesn't conflict with another segment ID
         # in the terminology-based or existing segment IDs
-        oldIDConflict = segmentID in editingSegmentation.GetSegmentIDs()
+        oldIDConflict = oldSegmentID in editingSegmentation.GetSegmentIDs()
         for _, value in terminologyToSegmentID.items():
           if oldIDConflict:
             break
