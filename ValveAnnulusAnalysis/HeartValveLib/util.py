@@ -6,11 +6,14 @@
 class Signal:
 
   def __init__(self):
-    self._slots = set()
+    # Slots are kept in connection order so that emit() is deterministic (a set would fire
+    # slots in arbitrary order, making event-ordering bugs intermittent).
+    self._slots = []
 
   def connect(self, slot):
     if callable(slot):
-      self._slots.add(slot)
+      if slot not in self._slots:
+        self._slots.append(slot)
     else:
       raise ValueError("The provided argument is not a callable")
 
@@ -19,11 +22,17 @@ class Signal:
       self._slots.remove(slot)
 
   def disconnectAll(self):
-    self._slots = set()
+    self._slots = []
 
   def emit(self, *args):
-    for slot in self._slots:
-      slot(*args)
+    # Isolate slot failures: multiple independent modules subscribe to the same signal, and an
+    # exception in one module's handler must not cancel the updates of the others.
+    import logging, traceback
+    for slot in list(self._slots):
+      try:
+        slot(*args)
+      except Exception:
+        logging.error(f"Signal slot {slot!r} failed:\n{traceback.format_exc()}")
 
 
 def reload(packageName, submoduleNames):
