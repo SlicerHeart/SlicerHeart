@@ -267,7 +267,8 @@ class ValveModel:
         self.valveLabelsNode = self.createAnnulusLabelsMarkupNode()
 
       # Initialize to default value (if not set to some other value already)
-      self.getCardiacCyclePhase()
+      if not self.heartValveNode.GetAttribute("CardiacCyclePhase"):
+        self.setCardiacCyclePhase("unknown")
 
     def initializeNewTimePoint(self):
       """This method is called after a new time point is added."""
@@ -1286,10 +1287,11 @@ class ValveModel:
         self.valveLabelsNode.GetDisplayNode().SetColor(self.getDarkColor())
 
     def getCardiacCyclePhase(self):
+      # A missing attribute means the phase was never set (e.g. a converted or scripted node).
+      # This getter must not call initializeNewTimePoint(): that would clear the annulus contour
+      # (and overwrite its stored backup) as a side effect of merely reading the phase.
       cardiacCyclePhase = self.heartValveNode.GetAttribute("CardiacCyclePhase")
-      if not cardiacCyclePhase:
-        self.initializeNewTimePoint()
-      return cardiacCyclePhase
+      return cardiacCyclePhase if cardiacCyclePhase else "unknown"
 
     def getBaseColor(self):
       cardiacCyclePhaseColor = self.cardiacCyclePhasePresets[self.getCardiacCyclePhase()]["color"]
@@ -1646,7 +1648,7 @@ class ValveModel:
 
     def setAnnulusContourMarkupNode(self, annulusContourMarkupNode):
       """Kept for backward compatibility"""
-      self.annulusContourMarkupNode = annulusContourMarkupNode
+      self.annulusContourCurveNode = annulusContourMarkupNode
 
     def getValveRoiModelNode(self):
       """Kept for backward compatibility"""
