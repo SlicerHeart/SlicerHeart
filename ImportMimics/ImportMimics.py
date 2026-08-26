@@ -39,8 +39,9 @@ standard files, or batch-convert a whole folder.
 <ul>
 <li><b>Surface models</b> - segmentation surfaces / 3D objects.</li>
 <li><b>Curves</b> - contours and wireframes (mainly from 3-matic projects).</li>
-<li><b>Image volume</b> - the CT/MR image, when the project contains one (Mimics projects only;
-3-matic projects contain no image).</li>
+<li><b>Image volumes</b> - the CT/MR image(s) the project contains; a project may hold several
+image blocks, and each is imported as its own volume (Mimics projects only; 3-matic projects
+contain no image).</li>
 <li><b>NURBS surfaces and point sets</b> - imported as markups (Mimics projects).</li>
 <li><b>Metadata</b> - patient/study/series information, optionally saved to a JSON file.</li>
 </ul>
@@ -341,8 +342,13 @@ class _SqliteBlobStore:
             self._con.close()
             raise ValueError("Not a Mimics project file (no 'blobs' table).")
         cur = self._con.cursor()
-        cur.execute("SELECT blob_name, blob_id FROM blobs")
-        self._ids = {name: bid for name, bid in cur.fetchall()}
+        cur.execute("SELECT blob_name, blob_id FROM blobs ORDER BY blob_id")
+        blobs = cur.fetchall()
+        self._ids = dict(blobs)
+        # Blob names in the order they were written. Mimics writes each image block as a header
+        # blob immediately followed by the block's per-slice pixel blobs, and the blob names
+        # themselves carry no ordering, so this order is what groups a block together.
+        self.orderedNames = [name for name, _bid in blobs]
         self.names = set(self._ids.keys())
 
     def read(self, name):
@@ -357,6 +363,24 @@ class _SqliteBlobStore:
                 data = zlib.decompress(data)
             parts.append(data)
         return b"".join(parts)
+
+    def peek(self, name, size):
+        """Return (at most) the first `size` decompressed bytes of the named blob.
+
+        Only the first part is inspected, which is enough to identify a blob from its magic
+        without paying for decompressing hundreds of megabytes of pixel data.
+        """
+        cur = self._con.cursor()
+        cur.execute(
+            "SELECT is_blob_compressed, blob_part_data FROM blobs_parts "
+            "WHERE blob_id=? ORDER BY blob_part_number LIMIT 1", (self._ids[name],))
+        row = cur.fetchone()
+        if row is None:
+            return b""
+        compressed, data = row
+        if not compressed:
+            return bytes(data[:size])
+        return zlib.decompressobj().decompress(bytes(data), size)
 
     def close(self):
         self._con.close()
@@ -390,6 +414,7 @@ class _MxpBlobStore:
                 self._members[name] = (method, dataOffset, csize)
         if not self._members:
             raise ValueError("Not a 3-matic project file (no 'MT' archive entries).")
+        self.orderedNames = list(self._members.keys())
         self.names = set(self._members.keys())
 
     def read(self, name):
@@ -403,6 +428,20 @@ class _MxpBlobStore:
         if method == 0:  # stored uncompressed
             return data
         raise ValueError(f"Unsupported compression method {method} for member '{name}'.")
+
+    def peek(self, name, size):
+        """Return (at most) the first `size` decompressed bytes of the named member."""
+        method, dataOffset, csize = self._members[name]
+        with open(self._filename, "rb") as f:
+            f.seek(dataOffset)
+            # Read more compressed bytes than requested: even an incompressible member needs
+            # only a little more than `size` bytes to yield `size` bytes of output.
+            data = f.read(min(csize, max(4 * size, 4096)))
+        if method == 8:
+            return zlib.decompressobj(-15).decompress(data, size)
+        if method == 0:
+            return data[:size]
+        return b""
 
     def close(self):
         pass
@@ -418,10 +457,15 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     Both formats are containers of named, individually zlib/deflate-compressed binary blobs; only
     the container differs (see the blob-store classes below), while the blob contents are shared:
-      - `blob_0` contains the original DICOM files concatenated (128-byte preamble + 'DICM' +
-        dataset), one per slice, but with the pixel data removed. (Mimics .mcs only.)
-      - `blob_1`, `blob_2`, ... are the per-slice pixel data, each prefixed with a 4-byte 'MMFD'
-        magic and followed by Rows*Columns*2 bytes of little-endian 16-bit pixels. (.mcs only.)
+      - An image block is a header blob holding the original DICOM files concatenated (128-byte
+        preamble + 'DICM' + dataset), one per slice but with the pixel data removed, followed by
+        one pixel-data blob per slice, each prefixed with a 4-byte 'MMFD' magic. A project may
+        contain several image blocks. (Mimics .mcs only.)
+      - In a Mimics project the blocks are named `blob_0` (headers) + `blob_1`, `blob_2`, ...
+        (pixels); in a project exported for Mimics Viewer every blob is named with a GUID and
+        only the order of the blobs groups a block together.
+      - Pixel data is stored either as Rows*Columns*2 bytes of little-endian 16-bit pixels, or
+        row-compressed (see `_decodeCompressedPixels`).
       - `Stl{guid}_vertices` / `Stl(N)_vertices` store vertices as int32 fixed-point coordinates
         (millimeters * 10000, in LPS/patient coordinate system).
       - `Stl..._surfaces` store triangle vertex indices as int32 triplets (surface meshes).
@@ -530,7 +574,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                       loadPoints=True, loadIntoScene=True, exportDir=None, exportDicom=False,
                       saveMetadata=True):
         """Import a Mimics (.mcs) or 3-matic (.mxp) project. Returns
-        (volumeNode, modelNodes, curveNodes, markupsNodes)."""
+        (volumeNodes, modelNodes, curveNodes, markupsNodes)."""
         isMxp = os.path.splitext(filename)[1].lower() == ".mxp"
         self.addLog(f"Importing {'3-matic' if isMxp else 'Mimics'} project: {filename}")
         self.updateProgress(1)
@@ -553,20 +597,28 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                 ],
             }
 
-            volumeNode = None
-            dicomMeta = None
+            volumeNodes = []
             if loadImage:
-                volumeNode, dicomMeta = self.importImage(store)
-                if dicomMeta:
-                    metadata["image"] = dicomMeta
-                    if dicomMeta.get("sliceSpacingError"):
-                        self.messages.append(("error", f"{projectName}: {dicomMeta['sliceSpacingError']}"))
-                    elif dicomMeta.get("sliceSpacingWarning"):
-                        self.messages.append(("warning", f"{projectName}: {dicomMeta['sliceSpacingWarning']}"))
-                elif "blob_0" in names:
+                blocks = self._imageBlocks(store)
+                images = self.importImages(store, blocks)
+                volumeNodes = [volumeNode for volumeNode, _meta in images]
+                imageMetas = [meta for _volumeNode, meta in images]
+                if imageMetas:
+                    metadata["images"] = imageMetas
+                    # The image of a single-block project stays available under its old key.
+                    metadata["image"] = imageMetas[0]
+                    for meta in imageMetas:
+                        name = meta.get("name", "image")
+                        if meta.get("sliceSpacingError"):
+                            self.messages.append(
+                                ("error", f"{projectName} ({name}): {meta['sliceSpacingError']}"))
+                        elif meta.get("sliceSpacingWarning"):
+                            self.messages.append(
+                                ("warning", f"{projectName} ({name}): {meta['sliceSpacingWarning']}"))
+                if len(imageMetas) < len(blocks):
                     metadata["notes"].append(
-                        "Image data is present but could not be reconstructed "
-                        "(unsupported or compressed pixel storage).")
+                        f"{len(blocks) - len(imageMetas)} of {len(blocks)} image block(s) could "
+                        "not be reconstructed (unsupported pixel storage).")
                 self.updateProgress(50)
 
             modelNodes = []
@@ -608,7 +660,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             markupsNodes = nurbsNodes + pointNodes
 
             if exportDir:
-                self._exportFiles(exportDir, volumeNode, modelNodes, curveModelNodes,
+                self._exportFiles(exportDir, volumeNodes, modelNodes, curveModelNodes,
                                   markupsNodes, metadata, saveMetadata)
                 if exportDicom:
                     self.exportDicomFiles(store, exportDir)
@@ -617,25 +669,24 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             if loadIntoScene:
                 # Nodes are left at the scene top level: no patient/study subject-hierarchy branch
                 # is created and no patient information is added - only the geometry is used.
-                if volumeNode is not None:
-                    slicer.util.setSliceViewerLayers(background=volumeNode, fit=True)
+                if volumeNodes:
+                    slicer.util.setSliceViewerLayers(background=volumeNodes[0], fit=True)
                 self.addLog(
-                    f"Done. Loaded {'1 volume, ' if volumeNode else ''}{len(modelNodes)} model(s), "
+                    f"Done. Loaded {len(volumeNodes)} volume(s), {len(modelNodes)} model(s), "
                     f"{len(curveModelNodes)} curve(s), {len(nurbsNodes)} NURBS, "
                     f"{len(pointNodes)} point set(s) into the scene.")
             else:
                 # Not loading into the scene: remove the nodes that were created for export.
-                nVolume = 1 if volumeNode is not None else 0
-                counts = (nVolume, len(modelNodes), len(curveModelNodes), len(markupsNodes))
-                for node in [volumeNode] + modelNodes + curveModelNodes + markupsNodes:
+                counts = (len(volumeNodes), len(modelNodes), len(curveModelNodes), len(markupsNodes))
+                for node in volumeNodes + modelNodes + curveModelNodes + markupsNodes:
                     if node is not None:
                         slicer.mrmlScene.RemoveNode(node)
-                volumeNode, modelNodes, curveModelNodes, markupsNodes = None, [], [], []
+                volumeNodes, modelNodes, curveModelNodes, markupsNodes = [], [], [], []
                 self.addLog(
-                    f"Done. Exported {counts[0]} volume, {counts[1]} model(s), "
+                    f"Done. Exported {counts[0]} volume(s), {counts[1]} model(s), "
                     f"{counts[2]} curve(s), {counts[3]} markup(s) to files.")
             self.updateProgress(100)
-            return volumeNode, modelNodes, curveModelNodes, markupsNodes
+            return volumeNodes, modelNodes, curveModelNodes, markupsNodes
         finally:
             store.close()
 
@@ -650,8 +701,10 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             inventory = self._inventory(names)
             projectName = os.path.splitext(os.path.basename(filename))[0]
             self.addLog(f"  Project: {projectName}  ({len(names)} blobs)")
-            image = self._imageInfo(store)
-            if image:
+            blocks = self._imageBlocks(store)
+            images = [self._imageInfo(store, block) for block in blocks]
+            images = [image for image in images if image]
+            for image in images:
                 self.addLog(f"  Image: {image['modality']} "
                             f"{image['columns']}x{image['rows']}x{image['sliceCount']}"
                             + (f", spacing {image['pixelSpacing']} mm" if image['pixelSpacing'] else "")
@@ -665,10 +718,8 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                     self.messages.append(("error", f"{projectName}: {image['sliceSpacingError']}"))
                 elif image.get("sliceSpacingWarning"):
                     self.messages.append(("warning", f"{projectName}: {image['sliceSpacingWarning']}"))
-            elif "blob_0" in names:
-                self.addLog("  Image: present but could not be read")
-            else:
-                self.addLog("  Image: none")
+            if not images:
+                self.addLog("  Image: present but could not be read" if blocks else "  Image: none")
             self.addLog(f"  Surface models: {inventory['surfaceModelCount']}, "
                         f"curves: {inventory['curveCount']}, "
                         f"point clouds: {inventory['pointCloudCount']}, "
@@ -678,29 +729,19 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         finally:
             store.close()
 
-    def _imageInfo(self, store):
-        """Return an image summary from the DICOM headers (blob_0), including a slice-spacing
+    def _imageInfo(self, store, block):
+        """Return a summary of one image block from its DICOM headers, including a slice-spacing
         uniformity check. Only headers are parsed - no pixel data is read."""
         try:
             import pydicom
         except ImportError:
             return None
-        if "blob_0" not in store.names:
-            return None
         import io
-        blob0 = store.read("blob_0")
-        offsets = []
-        start = 0
-        while True:
-            i = blob0.find(b"DICM", start)
-            if i < 0:
-                break
-            offsets.append(i - 128)
-            start = i + 1
-        offsets = [o for o in offsets if o >= 0]
-        if not offsets:
+        blob0 = store.read(block["header"])
+        bounds = self._dicomFileBounds(blob0)
+        if not bounds:
             return None
-        bounds = offsets + [len(blob0)]
+        offsets = bounds[:-1]
         ds = pydicom.dcmread(io.BytesIO(blob0[bounds[0]:bounds[1]]), force=True)
         info = {
             "modality": str(ds.get("Modality", "")),
@@ -734,8 +775,163 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ image
 
-    def _reconstructSlices(self, store):
-        """Split blob_0 into per-slice DICOM headers, pair with MMFD pixel blobs and decode pixels.
+    # Magic that prefixes every per-slice pixel-data blob.
+    PIXEL_DATA_MAGIC = b"MMFD"
+
+    # Blob name of the DICOM headers of the single image block of a plain Mimics project.
+    _LEGACY_HEADER_BLOB = "blob_0"
+
+    # `blob_0`, `blob_1`, ... - the blob naming of a plain Mimics project.
+    _NUMBERED_BLOB_RE = re.compile(r"^blob_(\d+)$")
+
+    # How far into a blob to look for the 'DICM' marker of its first DICOM file.
+    _HEADER_SEARCH_LENGTH = 256
+
+    @staticmethod
+    def _dicomFileBounds(blob):
+        """Return the offsets that split a blob of concatenated DICOM files into single files.
+
+        Each file starts 128 bytes (the preamble) before its 'DICM' marker. The returned list
+        holds the start offset of every file plus the end of the blob, so file `k` occupies
+        `blob[bounds[k]:bounds[k + 1]]`; it is empty if the blob holds no DICOM files.
+        """
+        offsets = []
+        start = 0
+        while True:
+            i = blob.find(b"DICM", start)
+            if i < 0:
+                break
+            if i >= 128:
+                offsets.append(i - 128)
+            start = i + 1
+        return offsets + [len(blob)] if offsets else []
+
+    def _imageBlocks(self, store):
+        """Return the project's image blocks, in the order they are stored.
+
+        Each block is `{"header": name, "pixels": [name, ...]}`: the blob holding the
+        concatenated DICOM headers of the block's slices, and one pixel-data blob per slice.
+        A plain Mimics project holds a single block (`blob_0` + `blob_1`, `blob_2`, ...); a
+        project exported for Mimics Viewer names every blob with a GUID and may hold several
+        blocks (for example one per reconstruction), so those are grouped by blob order: a
+        header blob starts a block and the pixel blobs that follow it belong to it.
+
+        Only the first bytes of each blob are decompressed, so this is cheap even for projects
+        that hold hundreds of megabytes of pixel data.
+        """
+        def isPixelData(name):
+            return store.peek(name, 4) == self.PIXEL_DATA_MAGIC
+
+        def isHeader(name):
+            # The first DICOM file of the blob starts 128 bytes (the preamble) before its 'DICM'
+            # marker; a few bytes of Mimics' own may precede that preamble.
+            return store.peek(name, self._HEADER_SEARCH_LENGTH).find(b"DICM", 128) >= 0
+
+        # Plain Mimics project: a single block, whose pixel blobs are numbered rather than
+        # ordered, so they are collected by name.
+        if self._LEGACY_HEADER_BLOB in store.names and isHeader(self._LEGACY_HEADER_BLOB):
+            numbered = []
+            for name in store.names:
+                match = self._NUMBERED_BLOB_RE.match(name)
+                if match and name != self._LEGACY_HEADER_BLOB and isPixelData(name):
+                    numbered.append((int(match.group(1)), name))
+            return [{"header": self._LEGACY_HEADER_BLOB,
+                     "pixels": [name for _number, name in sorted(numbered)]}]
+
+        blocks = []
+        for name in store.orderedNames:
+            # Pixel data is recognized first: its magic is unambiguous, while raw pixel bytes
+            # could in principle contain a 'DICM' sequence of their own.
+            if isPixelData(name):
+                if blocks:
+                    blocks[-1]["pixels"].append(name)
+            elif isHeader(name):
+                blocks.append({"header": name, "pixels": []})
+        return blocks
+
+    @classmethod
+    def _decodePixels(cls, data, rows, columns):
+        """Decode a pixel-data blob into a (rows, columns) array of 16-bit pixels."""
+        if data[:4] != cls.PIXEL_DATA_MAGIC:
+            raise ValueError(f"not pixel data (magic is {data[:4]!r})")
+        body = data[4:]
+        if len(body) == rows * columns * 2:
+            return np.frombuffer(body, dtype="<u2").reshape(rows, columns)
+        return cls._decodeCompressedPixels(body, rows, columns)
+
+    @staticmethod
+    def _decodeCompressedPixels(body, rows, columns):
+        """Decode the row-compressed pixel-data variant into a (rows, columns) uint16 array.
+
+        Mimics stores a slice either uncompressed or, when that is smaller, row-compressed:
+        a table of `rows` little-endian uint16 compressed row lengths followed by the rows
+        themselves. A row is a sequence of 16-bit big-endian tokens whose top two bits select
+        the token type:
+
+        - `00` / `01` - one pixel, stored as the absolute value in the remaining 14 bits (used
+          wherever the difference from the previous pixel does not fit in a signed byte);
+        - `10` - a run of N pixels (N = the remaining 14 bits) follows as N bytes, each a
+          signed 8-bit difference from the preceding pixel;
+        - `11` - a control token holding a column index in its remaining 14 bits. A row starts
+          with two of them: the first column it covers (pixels before it stay 0) and the last.
+
+        A row always starts with an absolute value, so no state carries over between rows.
+        """
+        if len(body) < 2 * rows:
+            raise ValueError("compressed pixel data is truncated")
+        rowLengths = np.frombuffer(body, dtype="<u2", count=rows, offset=0).astype(np.int64)
+        image = np.zeros((rows, columns), dtype=np.uint16)
+        # Reused across rows to keep the per-row work to a few small array operations.
+        differences = np.zeros(columns, dtype=np.int64)
+        offset = 2 * rows
+        for r in range(rows):
+            row = body[offset:offset + int(rowLengths[r])]
+            offset += int(rowLengths[r])
+            differences[:] = 0
+            absoluteColumns = [0]
+            absoluteValues = [0]
+            pos = 0
+            column = 0
+            firstColumnSeen = False
+            while pos + 1 < len(row):
+                token = (row[pos] << 8) | row[pos + 1]
+                pos += 2
+                tag = token >> 14
+                if tag == 0b11:
+                    # The first control token is the row's first column; the second one is its
+                    # last column, which the pixel count below already verifies.
+                    if not firstColumnSeen:
+                        column = token & 0x3FFF
+                        firstColumnSeen = True
+                elif tag == 0b10:
+                    count = token & 0x3FFF
+                    if pos + count > len(row) or column + count > columns:
+                        raise ValueError(f"row {r} overruns its data")
+                    differences[column:column + count] = np.frombuffer(
+                        row, dtype=np.int8, count=count, offset=pos)
+                    pos += count
+                    column += count
+                else:
+                    if column >= columns:
+                        raise ValueError(f"row {r} overruns its data")
+                    absoluteColumns.append(column)
+                    absoluteValues.append(token & 0x3FFF)
+                    column += 1
+            if column != columns:
+                raise ValueError(f"row {r} decoded to {column} pixels instead of {columns}")
+            # Every pixel is its last preceding absolute value plus the differences in between.
+            running = np.cumsum(differences)
+            segment = np.zeros(columns, dtype=np.int64)
+            segment[absoluteColumns] = np.arange(len(absoluteColumns))
+            np.maximum.accumulate(segment, out=segment)
+            starts = np.array(absoluteColumns, dtype=np.int64)[segment]
+            image[r] = (running - running[starts]
+                        + np.array(absoluteValues, dtype=np.int64)[segment]).astype(np.uint16)
+        return image
+
+    def _reconstructSlices(self, store, block):
+        """Split an image block's header blob into per-slice DICOM headers, pair them with the
+        block's pixel blobs and decode the pixels.
 
         Returns (slices, dicomMeta) where `slices` is a list of (instanceNumber, ipp, pixels, ds)
         sorted spatially along the slice normal, or (None, None) if no image data is available.
@@ -746,43 +942,20 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             self.addLog("  WARNING: pydicom is not available; skipping image reconstruction.")
             return None, None
 
-        names = store.names
-        if "blob_0" not in names:
-            self.addLog("  No image data found (blob_0 missing).")
-            return None, None
-
-        blob0 = store.read("blob_0")
-
-        # Split concatenated DICOM files: each starts 128 bytes before its 'DICM' marker.
-        headerChunks = []
-        start = 0
-        while True:
-            i = blob0.find(b"DICM", start)
-            if i < 0:
-                break
-            headerChunks.append(i - 128)
-            start = i + 1
-        headerChunks = [o for o in headerChunks if o >= 0]
-        if not headerChunks:
+        blob0 = store.read(block["header"])
+        bounds = self._dicomFileBounds(blob0)
+        if not bounds:
             self.addLog("  No DICOM headers found in image data.")
             return None, None
-        bounds = headerChunks + [len(blob0)]
 
-        # Collect per-slice pixel data blobs (prefixed with 'MMFD').
-        pixelBlobs = []
-        for name in names:
-            if name == "blob_0" or not (name.startswith("blob_") and name[5:].isdigit()):
-                continue
-            data = store.read(name)
-            if data[:4] == b"MMFD":
-                pixelBlobs.append((int(name[5:]), data[4:]))
-        pixelBlobs.sort()
-
-        nHeaders = len(headerChunks)
-        if len(pixelBlobs) != nHeaders:
-            self.addLog(f"  WARNING: {nHeaders} DICOM headers but {len(pixelBlobs)} pixel blobs; "
-                        "pairing by order.")
-        nSlices = min(nHeaders, len(pixelBlobs))
+        nHeaders = len(bounds) - 1
+        pixelNames = block["pixels"]
+        # A block may be followed by extra blobs that are not slices (a downsampled preview of
+        # the block, for example); they come after the slices, so pairing by order ignores them.
+        if len(pixelNames) < nHeaders:
+            self.addLog(f"  WARNING: {nHeaders} DICOM headers but only {len(pixelNames)} pixel "
+                        "blobs; pairing by order.")
+        nSlices = min(nHeaders, len(pixelNames))
         self.addLog(f"  Reconstructing {nSlices} slices...")
 
         import io
@@ -791,15 +964,14 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         for k in range(nSlices):
             ds = pydicom.dcmread(io.BytesIO(blob0[bounds[k]:bounds[k + 1]]), force=True)
             rows, cols = int(ds.Rows), int(ds.Columns)
-            body = pixelBlobs[k][1]
-            if len(body) != rows * cols * 2:
-                # Unsupported pixel storage for this project (e.g. compressed or a variant
-                # layout). Skip image reconstruction rather than producing a wrong volume.
-                self.addLog(f"  WARNING: unexpected pixel data size for slice {k} "
-                            f"({len(body)} bytes, expected {rows * cols * 2}); "
+            try:
+                pixels = self._decodePixels(store.read(pixelNames[k]), rows, cols)
+            except ValueError as e:
+                # Unsupported pixel storage for this project. Skip image reconstruction rather
+                # than producing a wrong volume.
+                self.addLog(f"  WARNING: pixel data of slice {k} could not be decoded ({e}); "
                             "skipping image reconstruction.")
                 return None, None
-            pixels = np.frombuffer(body, dtype="<u2").reshape(rows, cols)
             ipp = np.array([float(x) for x in ds.ImagePositionPatient], dtype=float)
             instanceNumber = int(getattr(ds, "InstanceNumber", k + 1))
             slices.append((instanceNumber, ipp, pixels, ds))
@@ -835,9 +1007,47 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         slices.sort(key=lambda s: np.dot(s[1], sliceNormal))
         return slices, dicomMeta
 
-    def importImage(self, store):
-        """Reconstruct the image volume from DICOM headers (blob_0) + MMFD pixel blobs."""
-        slices, dicomMeta = self._reconstructSlices(store)
+    @staticmethod
+    def _imageName(index, blockCount, modality):
+        """Node (and exported file) name of an image block.
+
+        A project with a single image block keeps the plain `image` name it always had; when a
+        project holds several blocks they are numbered and tagged with their modality so that
+        they can be told apart (the block names in the project header are encrypted).
+        """
+        if blockCount <= 1:
+            return "image"
+        modality = re.sub(r"[^A-Za-z0-9]", "", modality)
+        return f"image{index + 1}_{modality}" if modality else f"image{index + 1}"
+
+    def importImages(self, store, blocks=None):
+        """Reconstruct every image block of the project.
+
+        Returns a list of (volumeNode, dicomMeta); blocks that cannot be decoded are skipped.
+        """
+        if blocks is None:
+            blocks = self._imageBlocks(store)
+        images = []
+        for index, block in enumerate(blocks):
+            if len(blocks) > 1:
+                self.addLog(f"  Image block {index + 1}/{len(blocks)}:")
+            volumeNode, dicomMeta = self.importImage(store, block, index, len(blocks))
+            if volumeNode is not None:
+                images.append((volumeNode, dicomMeta))
+        return images
+
+    def importImage(self, store, block=None, index=0, blockCount=1):
+        """Reconstruct one image block into a volume node.
+
+        Returns (volumeNode, dicomMeta), or (None, None) if the block cannot be decoded.
+        """
+        if block is None:
+            blocks = self._imageBlocks(store)
+            if not blocks:
+                self.addLog("  No image data found.")
+                return None, None
+            block, blockCount = blocks[0], len(blocks)
+        slices, dicomMeta = self._reconstructSlices(store, block)
         if not slices:
             return None, None
         nSlices = len(slices)
@@ -873,8 +1083,10 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         ijkToRas[0:3, 2] = lpsToRas @ (sliceDir * sliceSpacing)
         ijkToRas[0:3, 3] = lpsToRas @ ippFirst
 
+        imageName = self._imageName(index, blockCount, dicomMeta["modality"])
+        dicomMeta["name"] = imageName
         volumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        volumeNode.SetName("image")
+        volumeNode.SetName(imageName)
         slicer.util.updateVolumeFromArray(volumeNode, volumeArray)
         vtkMat = vtk.vtkMatrix4x4()
         for r in range(4):
@@ -886,7 +1098,8 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         # Only the geometry is used in the scene; patient/study/series identifiers are not
         # attached to the node (they remain available only for the opt-in metadata/DICOM export).
 
-        self.addLog(f"  Image: {volumeArray.shape[2]}x{volumeArray.shape[1]}x{volumeArray.shape[0]} "
+        self.addLog(f"  Image '{imageName}': "
+                    f"{volumeArray.shape[2]}x{volumeArray.shape[1]}x{volumeArray.shape[0]} "
                     f"({dicomMeta['modality']}, spacing "
                     f"{colSpacing:.3g}x{rowSpacing:.3g}x{sliceSpacing:.3g} mm)")
         return volumeNode, dicomMeta
@@ -942,29 +1155,38 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         """
         import pydicom
 
-        slices, dicomMeta = self._reconstructSlices(store)
-        if not slices:
+        blocks = self._imageBlocks(store)
+        nWritten = 0
+        for index, block in enumerate(blocks):
+            slices, dicomMeta = self._reconstructSlices(store, block)
+            if not slices:
+                continue
+            # Each image block gets its own subfolder, since instance numbers repeat between
+            # blocks; a project with a single block keeps the plain `dicom` folder.
+            dicomDir = os.path.join(outputDir, "dicom")
+            if len(blocks) > 1:
+                dicomDir = os.path.join(dicomDir,
+                                        self._imageName(index, len(blocks), dicomMeta["modality"]))
+            os.makedirs(dicomDir, exist_ok=True)
+            for instanceNumber, ipp, pixels, ds in slices:
+                # Mimics stores the DICOM headers with the pixel data removed (and, for compressed
+                # source images, leaves a compressed transfer syntax on the header). Complete each
+                # file: inject the raw pixels, use a matching uncompressed transfer syntax, and set
+                # the Pixel Data VR according to the bit depth.
+                ds.PixelData = pixels.tobytes()
+                ds["PixelData"].VR = "OW" if int(getattr(ds, "BitsAllocated", 16)) > 8 else "OB"
+                ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+                path = os.path.join(dicomDir, f"slice_{instanceNumber:04d}.dcm")
+                try:
+                    ds.save_as(path, enforce_file_format=True)
+                except TypeError:
+                    # pydicom < 3.0
+                    ds.save_as(path, write_like_original=False)
+            self.addLog(f"  Saved {len(slices)} original DICOM file(s) to {dicomDir}")
+            nWritten += len(slices)
+        if not nWritten:
             self.addLog("  No DICOM data to export.")
-            return 0
-
-        dicomDir = os.path.join(outputDir, "dicom")
-        os.makedirs(dicomDir, exist_ok=True)
-        for instanceNumber, ipp, pixels, ds in slices:
-            # Mimics stores the DICOM headers with the pixel data removed (and, for compressed
-            # source images, leaves a compressed transfer syntax on the header). Complete each
-            # file: inject the raw pixels, use a matching uncompressed transfer syntax, and set
-            # the Pixel Data VR according to the bit depth.
-            ds.PixelData = pixels.tobytes()
-            ds["PixelData"].VR = "OW" if int(getattr(ds, "BitsAllocated", 16)) > 8 else "OB"
-            ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
-            path = os.path.join(dicomDir, f"slice_{instanceNumber:04d}.dcm")
-            try:
-                ds.save_as(path, enforce_file_format=True)
-            except TypeError:
-                # pydicom < 3.0
-                ds.save_as(path, write_like_original=False)
-        self.addLog(f"  Saved {len(slices)} original DICOM file(s) to {dicomDir}")
-        return len(slices)
+        return nWritten
 
     # ------------------------------------------------------------------ models
 
@@ -1272,13 +1494,13 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ organization / export
 
-    def _exportFiles(self, exportDir, volumeNode, modelNodes, curveNodes, markupsNodes, metadata,
+    def _exportFiles(self, exportDir, volumeNodes, modelNodes, curveNodes, markupsNodes, metadata,
                      saveMetadata=True):
         # Files are written to a subfolder named after the project, so node names (and hence
         # file names) do not repeat the project name.
         os.makedirs(exportDir, exist_ok=True)
-        if volumeNode:
-            path = os.path.join(exportDir, "image.nrrd")
+        for volumeNode in volumeNodes:
+            path = os.path.join(exportDir, f"{volumeNode.GetName()}.nrrd")
             slicer.util.saveNode(volumeNode, path)
             self.addLog(f"  Saved {path}")
         for modelNode in modelNodes:
@@ -1344,14 +1566,13 @@ class ImportMimicsFileReader:
             filePath = properties["fileName"]
             logic = ImportMimicsLogic()
             # Load into the scene only; never write converted files to a folder.
-            volumeNode, modelNodes, curveNodes, markupsNodes = logic.importProject(
+            volumeNodes, modelNodes, curveNodes, markupsNodes = logic.importProject(
                 filePath, loadIntoScene=True, exportDir=None, exportDicom=False)
             # Surface any warnings/errors (e.g. non-uniform slice spacing) to the user.
             for severity, text in logic.messages:
                 event = vtk.vtkCommand.ErrorEvent if severity == "error" else vtk.vtkCommand.WarningEvent
                 self.parent.userMessages().AddMessage(event, text)
-            loadedNodes = (([volumeNode] if volumeNode else [])
-                           + modelNodes + curveNodes + markupsNodes)
+            loadedNodes = volumeNodes + modelNodes + curveNodes + markupsNodes
             if not loadedNodes:
                 raise ValueError("No data could be loaded from the project.")
         except Exception as e:  # noqa: BLE001
@@ -1377,5 +1598,159 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
 
     def runTest(self):
         self.setUp()
-        self.delayDisplay("ImportMimics has no automated test (requires a sample .mcs file).")
+        self.testImportImageBlocks()
         self.delayDisplay("Test passed")
+
+    # -------------------------------------------------------------- synthetic project builder
+
+    @staticmethod
+    def _encodeRow(values):
+        """Encode one row of pixels the way Mimics does, to test the decoder against."""
+        out = bytearray([0xC0, 0x00])                                    # first column
+        out += bytes([0xC0 | ((len(values) - 1) >> 8), (len(values) - 1) & 0xFF])  # last column
+        run = bytearray()
+
+        def flushRun():
+            if run:
+                out.extend([0x80 | (len(run) >> 8), len(run) & 0xFF])
+                out.extend(run)
+                run.clear()
+
+        previous = None
+        for value in values:
+            difference = None if previous is None else int(value) - int(previous)
+            if difference is not None and -128 <= difference <= 127:
+                run.append(difference & 0xFF)
+            else:
+                flushRun()
+                out += bytes([(int(value) >> 8) & 0x3F, int(value) & 0xFF])
+            previous = value
+        flushRun()
+        return bytes(out)
+
+    @classmethod
+    def _encodeSlice(cls, image):
+        rows = [cls._encodeRow(image[r]) for r in range(image.shape[0])]
+        table = np.array([len(row) for row in rows], dtype="<u2").tobytes()
+        return ImportMimicsLogic.PIXEL_DATA_MAGIC + table + b"".join(rows)
+
+    @staticmethod
+    def _headerBlob(sliceCount, rows, columns, modality, firstZ, leadingBytes):
+        import io
+        import pydicom
+        from pydicom.dataset import Dataset, FileMetaDataset
+        data = b"\x00" * leadingBytes
+        for k in range(sliceCount):
+            ds = Dataset()
+            ds.file_meta = FileMetaDataset()
+            ds.file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+            ds.file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+            ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+            ds.SOPClassUID = ds.file_meta.MediaStorageSOPClassUID
+            ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID
+            ds.Modality = modality
+            ds.Rows, ds.Columns = rows, columns
+            ds.PixelSpacing = [0.5, 0.5]
+            ds.SliceThickness = 1.0
+            ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+            ds.ImagePositionPatient = [-10.0, -20.0, firstZ + k]
+            ds.InstanceNumber = k + 1
+            ds.BitsAllocated, ds.BitsStored, ds.PixelRepresentation = 16, 16, 0
+            ds.SamplesPerPixel = 1
+            ds.PhotometricInterpretation = "MONOCHROME2"
+            buffer = io.BytesIO()
+            try:
+                ds.save_as(buffer, enforce_file_format=True)
+            except TypeError:
+                ds.save_as(buffer, write_like_original=False)  # pydicom < 3.0
+            data += buffer.getvalue()
+        return data
+
+    def _writeProject(self, path, blocks, legacyNames):
+        """Write a synthetic `.mcs` project holding the given image blocks (lists of slices)."""
+        import sqlite3
+        import uuid
+        if os.path.exists(path):
+            os.remove(path)
+        connection = sqlite3.connect(path)
+        connection.execute("CREATE TABLE blobs (blob_id INTEGER PRIMARY KEY, "
+                           "blob_name VARCHAR(128) NOT NULL UNIQUE, number_of_parts INT NOT NULL)")
+        connection.execute("CREATE TABLE blobs_parts (blob_part_id INTEGER PRIMARY KEY, "
+                           "blob_id INTEGER NOT NULL, blob_part_number INTEGER NOT NULL, "
+                           "blob_part_size INT NOT NULL, is_blob_compressed INT NOT NULL, "
+                           "orig_size INT, blob_part_data BLOB NOT NULL)")
+        blobId = [0]
+
+        def add(name, data):
+            blobId[0] += 1
+            payload = zlib.compress(data)
+            connection.execute("INSERT INTO blobs VALUES (?,?,1)", (blobId[0], name))
+            connection.execute("INSERT INTO blobs_parts VALUES (?,?,0,?,1,?,?)",
+                               (blobId[0], blobId[0], len(data), len(data), sqlite3.Binary(payload)))
+
+        for index, (modality, firstZ, volume) in enumerate(blocks):
+            sliceCount, rows, columns = volume.shape
+            # A Mimics Viewer project prefixes the first DICOM preamble with a few bytes of its
+            # own and names every blob with a GUID; a plain project uses `blob_0`, `blob_1`, ...
+            header = self._headerBlob(sliceCount, rows, columns, modality, firstZ,
+                                      0 if legacyNames else 8)
+            slices = [volume[k].tobytes() if k % 2 else self._encodeSlice(volume[k])
+                      for k in range(sliceCount)]
+            slices = [(ImportMimicsLogic.PIXEL_DATA_MAGIC + s if k % 2 else s)
+                      for k, s in enumerate(slices)]
+            if legacyNames:
+                # Written out of order, to check that numbered blobs are paired by their number.
+                for k in reversed(range(sliceCount)):
+                    add(f"blob_{k + 1}", slices[k])
+                add("blob_0", header)
+            else:
+                add(f"ImageBlockPngPreview-0x{index:08X}", b"\x00" * 8 + b"\x89PNG")
+                add(str(uuid.uuid4()), header)
+                for data in slices:
+                    add(str(uuid.uuid4()), data)
+                # A block is followed by extra blobs that are not slices.
+                add(str(uuid.uuid4()), ImportMimicsLogic.PIXEL_DATA_MAGIC + b"\x00" * 999)
+        connection.commit()
+        connection.close()
+
+    # -------------------------------------------------------------- tests
+
+    def testImportImageBlocks(self):
+        """Both blob layouts and both pixel storage variants reconstruct the exact pixels."""
+        import tempfile
+        try:
+            import pydicom  # noqa: F401 - only needed to know whether the test can run
+        except ImportError:
+            self.delayDisplay("pydicom is not available; skipping the image import test.")
+            return
+
+        rng = np.random.default_rng(0)
+
+        def makeVolume(sliceCount, rows, columns):
+            # Smooth along the rows so most differences fit in a byte, with jumps that force the
+            # decoder through its absolute-value escape as well.
+            volume = np.cumsum(rng.integers(-40, 40, size=(sliceCount, rows, columns)), axis=2)
+            volume[:, ::5, ::4] += 900
+            return np.clip(volume + 1500, 0, 0x3FFF).astype("<u2")
+
+        for legacyNames in (True, False):
+            self.setUp()
+            self.delayDisplay(f"Importing a synthetic project "
+                              f"({'plain Mimics' if legacyNames else 'Mimics Viewer'} layout)")
+            blocks = [("CT", 100.0, makeVolume(4, 16, 16))]
+            if not legacyNames:
+                blocks.append(("MR", 200.0, makeVolume(3, 12, 20)))
+            path = os.path.join(tempfile.gettempdir(), "ImportMimicsTest.mcs")
+            self._writeProject(path, blocks, legacyNames)
+
+            volumeNodes, _models, _curves, _markups = ImportMimicsLogic().importProject(
+                path, loadIntoScene=True, exportDir=None, exportDicom=False, saveMetadata=False)
+
+            self.assertEqual(len(volumeNodes), len(blocks))
+            expectedNames = ["image"] if legacyNames else ["image1_CT", "image2_MR"]
+            self.assertEqual([node.GetName() for node in volumeNodes], expectedNames)
+            for node, (_modality, firstZ, volume) in zip(volumeNodes, blocks):
+                self.assertTrue(np.array_equal(slicer.util.arrayFromVolume(node), volume))
+                np.testing.assert_allclose(node.GetSpacing(), (0.5, 0.5, 1.0))
+                np.testing.assert_allclose(node.GetOrigin(), (10.0, 20.0, firstZ))
+            os.remove(path)
