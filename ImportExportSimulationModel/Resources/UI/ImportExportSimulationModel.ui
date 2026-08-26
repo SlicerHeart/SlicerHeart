@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ImportExportSimulationModel</class>
+ <widget class="qMRMLWidget" name="ImportExportSimulationModel">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>420</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="ctkCollapsibleButton" name="importCollapsibleButton">
+     <property name="text">
+      <string>Import model</string>
+     </property>
+     <layout class="QVBoxLayout" name="importLayout">
+      <item>
+       <layout class="QFormLayout" name="importFormLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_inputFiles">
+          <property name="text">
+           <string>Input files:</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <layout class="QHBoxLayout" name="inputFilesLayout">
+          <item>
+           <widget class="QListWidget" name="inputFilesListWidget">
+            <property name="toolTip">
+             <string>Mesh files to import. Drag and drop files here, or use the Add button.</string>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>80</height>
+             </size>
+            </property>
+            <property name="selectionMode">
+             <enum>QAbstractItemView::ExtendedSelection</enum>
+            </property>
+            <property name="acceptDrops">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="inputFilesButtonsLayout">
+            <item>
+             <widget class="QToolButton" name="addFilesButton">
+              <property name="toolTip">
+               <string>Add mesh files to the list.</string>
+              </property>
+              <property name="text">
+               <string>Add</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QToolButton" name="removeFilesButton">
+              <property name="toolTip">
+               <string>Remove the selected files from the list. If no file is selected then all files are removed.</string>
+              </property>
+              <property name="text">
+               <string>Remove</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="inputFilesButtonsSpacer">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_inputCoordinateSystem">
+          <property name="text">
+           <string>Coordinate system in file:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="inputCoordinateSystemComboBox">
+          <property name="toolTip">
+           <string>Coordinate system that point coordinates and vectors are stored in in the input files. Meshes are always imported into the scene in RAS. If LPS is selected then the first two components of the point coordinates and of all 3-component floating-point point and cell arrays are negated.</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="label_inputUnitSystem">
+          <property name="text">
+           <string>Unit system in file:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QComboBox" name="inputUnitSystemComboBox">
+          <property name="toolTip">
+           <string>Unit system that the input files use. Meshes are always imported into the scene in the mm-g-s unit system, therefore values are scaled accordingly.</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_importTable">
+        <property name="text">
+         <string>Coordinates and data arrays:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="importTableWidget">
+        <property name="toolTip">
+         <string>Coordinates and data arrays found in the input files. The unit is guessed from the array name, select a different unit if the guess is incorrect. Scale is the factor that the values are multiplied by during import.</string>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>160</height>
+         </size>
+        </property>
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+        <property name="alternatingRowColors">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="importButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>Load the listed files into the scene, applying the scaling and coordinate system conversion shown in the table.</string>
+        </property>
+        <property name="text">
+         <string>Import</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="exportCollapsibleButton">
+     <property name="text">
+      <string>Export model</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QVBoxLayout" name="exportLayout">
+      <item>
+       <layout class="QFormLayout" name="exportFormLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_exportModel">
+          <property name="text">
+           <string>Models:</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="qMRMLSubjectHierarchyTreeView" name="exportModelTreeView">
+          <property name="toolTip">
+           <string>Models to export. Several models can be selected (with Ctrl or Shift); selecting a folder exports all models in it. Unit information stored in each model at import time is used to convert the values to the selected unit system.</string>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>150</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_outputCoordinateSystem">
+          <property name="text">
+           <string>Coordinate system in file:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="outputCoordinateSystemComboBox">
+          <property name="toolTip">
+           <string>Coordinate system to write point coordinates and vectors in. Models are always stored in the scene in RAS. If LPS is selected then the first two components of the point coordinates and of all 3-component floating-point point and cell arrays are negated.</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="label_outputUnitSystem">
+          <property name="text">
+           <string>Unit system in file:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QComboBox" name="outputUnitSystemComboBox">
+          <property name="toolTip">
+           <string>Unit system to write the values in.</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="label_outputFileFormat">
+          <property name="text">
+           <string>File format:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QComboBox" name="outputFileFormatComboBox">
+          <property name="toolTip">
+           <string>Format of the written files. Each selected model is written to a separate file, named after the model. The file extension depends on the mesh: VTK (XML) writes a surface mesh to .vtp and a volumetric mesh to .vtu. PLY, OBJ, and STL can only store a surface mesh, without data arrays.</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="label_outputFolder">
+          <property name="text">
+           <string>Output folder:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="ctkPathLineEdit" name="outputFolderPathLineEdit">
+          <property name="toolTip">
+           <string>Folder to write the converted meshes to. Each selected model is written to a separate file in this folder, named after the model.</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_exportTable">
+        <property name="text">
+         <string>Coordinates and data arrays:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="exportTableWidget">
+        <property name="toolTip">
+         <string>Coordinates and data arrays of the selected model. The unit is the unit stored in the model, expressed in the selected output unit system. Scale is the factor that the values are multiplied by during export.</string>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>160</height>
+         </size>
+        </property>
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+        <property name="alternatingRowColors">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="exportButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>Write the selected model to the output file, applying the scaling and coordinate system conversion shown in the table.</string>
+        </property>
+        <property name="text">
+         <string>Export</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="statusCollapsibleButton">
+     <property name="text">
+      <string>Status</string>
+     </property>
+     <layout class="QVBoxLayout" name="statusLayout">
+      <item>
+       <widget class="QPlainTextEdit" name="statusTextEdit">
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+        <property name="centerOnScroll">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>0</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSubjectHierarchyTreeView</class>
+   <extends>QTreeView</extends>
+   <header>qMRMLSubjectHierarchyTreeView.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>ImportExportSimulationModel</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>exportModelTreeView</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>210</x>
+     <y>350</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>210</x>
+     <y>420</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>
