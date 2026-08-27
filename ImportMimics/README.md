@@ -118,10 +118,18 @@ A **`.mcs`** file is a **SQLite** database:
 A **`.mxp`** file is a **ZIP archive in which the `PK` signatures are replaced with `MT`**
 (Materialise). Each member has a standard 30-byte local file header (`MT\x03\x04`, version,
 flags, method, crc32, compressed/uncompressed size, name length, extra length) followed by the
-name and the raw-DEFLATE (method 8) or stored (method 0) data; a trailing central directory
-(`MT\x01\x02`) and end-of-central-directory (`MT\x05\x06`) mirror ZIP but are not needed for
-reading. There is also a plaintext `log_data` member (the project's operation log, which records
-the authoring Mimics/3-matic version) and an empty `preview_256x256` placeholder.
+name and the raw-DEFLATE (method 8) or stored (method 0) data, and a trailing central directory
+(`MT\x01\x02`) plus end-of-central-directory record (`MT\x05\x06`) mirror ZIP.
+
+The members are read from the **central directory**, not by walking the local headers: 3-matic
+writes each member with general purpose flag `0x08` (data descriptor), which leaves the sizes in
+the local header set to zero and puts the real ones in a `PK\x07\x08` record *after* the data.
+Walking the local headers therefore stops at the first member; only the central directory gives
+both the sizes and the local header offsets. (Archives that do record their sizes in the local
+headers are still read by walking them, as a fallback.)
+
+There is also a plaintext `log_data` member (the project's operation log, which records the
+authoring Mimics/3-matic version) and a `preview_256x256` placeholder.
 
 Relevant blobs (shared between the formats unless noted):
 

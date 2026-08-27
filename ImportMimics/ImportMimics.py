@@ -391,31 +391,96 @@ class _MxpBlobStore:
 
     A `.mxp` file is a ZIP archive in which the usual 'PK' signatures are replaced with 'MT'
     (Materialise); each member is stored with a standard 30-byte local file header and raw
-    DEFLATE (or 'store') compression. Only the local file headers are walked (the trailing
-    central directory is ignored), so members are read by seeking to the recorded data offset.
+    DEFLATE (or 'store') compression, and members are read by seeking to the recorded data
+    offset.
+
+    The members are taken from the trailing central directory. 3-matic writes its members with
+    a data descriptor (general purpose flag 0x08), which leaves the sizes in the local file
+    headers set to zero, so the local headers alone cannot be walked. Files that have no usable
+    central directory fall back to walking the local headers.
     """
 
     LOCAL_HEADER_SIGNATURE = b"MT\x03\x04"
+    CENTRAL_HEADER_SIGNATURE = b"MT\x01\x02"
+    END_RECORD_SIGNATURE = b"MT\x05\x06"
+
+    # Largest possible end-of-central-directory record: the fixed part plus its comment.
+    _MAX_END_RECORD_SIZE = 22 + 0xFFFF
+
+    # A size of 0xFFFFFFFF means the real value is in a ZIP64 extra field, which is not read.
+    _ZIP64_SIZE = 0xFFFFFFFF
 
     def __init__(self, filename):
         self._filename = filename
-        self._members = {}  # name -> (compression_method, data_offset, compressed_size)
+        # name -> (compression_method, data_offset, compressed_size)
         with open(filename, "rb") as f:
-            while True:
-                header = f.read(30)
-                if len(header) < 30 or header[:4] != self.LOCAL_HEADER_SIGNATURE:
-                    break
-                (_ver, _flags, method, _mtime, _mdate, _crc, csize, _usize,
-                 nameLen, extraLen) = struct.unpack("<HHHHHIIIHH", header[4:30])
-                name = f.read(nameLen).decode("utf-8", "replace")
-                f.seek(extraLen, 1)
-                dataOffset = f.tell()
-                f.seek(csize, 1)
-                self._members[name] = (method, dataOffset, csize)
+            self._members = self._readCentralDirectory(f) or self._walkLocalHeaders(f)
         if not self._members:
             raise ValueError("Not a 3-matic project file (no 'MT' archive entries).")
         self.orderedNames = list(self._members.keys())
         self.names = set(self._members.keys())
+
+    @classmethod
+    def _readCentralDirectory(cls, f):
+        """Return the members listed in the archive's central directory, or None if unreadable."""
+        f.seek(0, os.SEEK_END)
+        fileSize = f.tell()
+        searchLength = min(fileSize, cls._MAX_END_RECORD_SIZE)
+        f.seek(fileSize - searchLength)
+        tail = f.read(searchLength)
+        end = tail.rfind(cls.END_RECORD_SIGNATURE)
+        if end < 0 or len(tail) - end < 22:
+            return None
+        (_disk, _startDisk, _entriesOnDisk, entryCount,
+         _size, directoryOffset, _commentLen) = struct.unpack("<HHHHIIH", tail[end + 4:end + 22])
+
+        entries = []
+        f.seek(directoryOffset)
+        for _ in range(entryCount):
+            header = f.read(46)
+            if len(header) < 46 or header[:4] != cls.CENTRAL_HEADER_SIGNATURE:
+                return None
+            (_madeBy, _needed, _flags, method, _mtime, _mdate, _crc, csize, _usize,
+             nameLen, extraLen, commentLen, _disk, _internal, _external,
+             localHeaderOffset) = struct.unpack("<HHHHHHIIIHHHHHII", header[4:46])
+            name = f.read(nameLen).decode("utf-8", "replace")
+            f.seek(extraLen + commentLen, 1)
+            if csize == cls._ZIP64_SIZE or localHeaderOffset == cls._ZIP64_SIZE:
+                return None
+            entries.append((name, method, csize, localHeaderOffset))
+
+        # The name and extra field of a local header may differ in length from the central
+        # directory entry, so where the data starts can only be read from the local header.
+        members = {}
+        for name, method, csize, localHeaderOffset in entries:
+            f.seek(localHeaderOffset)
+            header = f.read(30)
+            if len(header) < 30 or header[:4] != cls.LOCAL_HEADER_SIGNATURE:
+                return None
+            nameLen, extraLen = struct.unpack("<HH", header[26:30])
+            members[name] = (method, localHeaderOffset + 30 + nameLen + extraLen, csize)
+        return members
+
+    @classmethod
+    def _walkLocalHeaders(cls, f):
+        """Return the members found by walking the local file headers from the start of the file.
+
+        Only usable for archives that record the compressed size in the local header.
+        """
+        members = {}
+        f.seek(0)
+        while True:
+            header = f.read(30)
+            if len(header) < 30 or header[:4] != cls.LOCAL_HEADER_SIGNATURE:
+                break
+            (_ver, _flags, method, _mtime, _mdate, _crc, csize, _usize,
+             nameLen, extraLen) = struct.unpack("<HHHHHIIIHH", header[4:30])
+            name = f.read(nameLen).decode("utf-8", "replace")
+            f.seek(extraLen, 1)
+            dataOffset = f.tell()
+            f.seek(csize, 1)
+            members[name] = (method, dataOffset, csize)
+        return members
 
     def read(self, name):
         """Return the decompressed bytes of the named member."""
@@ -1599,6 +1664,7 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
     def runTest(self):
         self.setUp()
         self.testImportImageBlocks()
+        self.testMxpArchiveLayouts()
         self.delayDisplay("Test passed")
 
     # -------------------------------------------------------------- synthetic project builder
@@ -1754,3 +1820,75 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
                 np.testing.assert_allclose(node.GetSpacing(), (0.5, 0.5, 1.0))
                 np.testing.assert_allclose(node.GetOrigin(), (10.0, 20.0, firstZ))
             os.remove(path)
+
+    @staticmethod
+    def _writeMxp(path, members, withCentralDirectory):
+        """Write a synthetic `.mxp` archive holding `members` (a name -> bytes mapping).
+
+        With `withCentralDirectory`, the members are written the way 3-matic writes them: the
+        local headers carry no sizes (general purpose flag 0x08) and a data descriptor follows
+        each member, so the sizes are only in the central directory. Otherwise the sizes go in
+        the local headers and no central directory is written, which is the fallback layout.
+        """
+        import binascii
+        entries = []
+        out = bytearray()
+        for name, content in members.items():
+            deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
+            data = deflate.compress(content) + deflate.flush()
+            crc = binascii.crc32(content) & 0xFFFFFFFF
+            encodedName = name.encode("utf-8")
+            flags = 0x08 if withCentralDirectory else 0x00
+            entries.append((encodedName, data, crc, len(content), flags, len(out)))
+            out += _MxpBlobStore.LOCAL_HEADER_SIGNATURE
+            out += struct.pack("<HHHHHIIIHH", 20, flags, 8, 0, 0,
+                               0 if withCentralDirectory else crc,
+                               0 if withCentralDirectory else len(data),
+                               0 if withCentralDirectory else len(content),
+                               len(encodedName), 0)
+            out += encodedName + data
+            if withCentralDirectory:
+                out += b"PK\x07\x08" + struct.pack("<III", crc, len(data), len(content))
+
+        if withCentralDirectory:
+            directoryOffset = len(out)
+            for encodedName, data, crc, size, flags, localHeaderOffset in entries:
+                out += _MxpBlobStore.CENTRAL_HEADER_SIGNATURE
+                out += struct.pack("<HHHHHHIIIHHHHHII", 20, 20, flags, 8, 0, 0, crc, len(data),
+                                   size, len(encodedName), 0, 0, 0, 0, 0, localHeaderOffset)
+                out += encodedName
+            directorySize = len(out) - directoryOffset
+            out += _MxpBlobStore.END_RECORD_SIGNATURE
+            out += struct.pack("<HHHHIIH", 0, 0, len(entries), len(entries),
+                               directorySize, directoryOffset, 0)
+
+        with open(path, "wb") as f:
+            f.write(bytes(out))
+
+    def testMxpArchiveLayouts(self):
+        """Members are found both when the sizes are in the central directory and when they are
+        in the local headers."""
+        import tempfile
+        members = {
+            "preview_256x256": b"",
+            "log_data": b"Project created in Mimics Medical 26.0.0\n" * 40,
+            "Stl{00000000-0000-0000-0000-000000000001}_vertices":
+                np.arange(90, dtype="<i4").tobytes(),
+            "Stl{00000000-0000-0000-0000-000000000001}_surfaces":
+                np.arange(30, dtype="<i4").tobytes(),
+        }
+        path = os.path.join(tempfile.gettempdir(), "ImportMimicsTest.mxp")
+        for withCentralDirectory in (True, False):
+            self.delayDisplay("Reading a synthetic .mxp archive "
+                              f"({'central directory' if withCentralDirectory else 'local headers'})")
+            self._writeMxp(path, members, withCentralDirectory)
+            store = ImportMimicsLogic.openStore(path)
+            try:
+                self.assertEqual(store.names, set(members))
+                self.assertEqual(store.orderedNames, list(members))
+                for name, content in members.items():
+                    self.assertEqual(store.read(name), content)
+                    self.assertEqual(store.peek(name, 16), content[:16])
+            finally:
+                store.close()
+        os.remove(path)
