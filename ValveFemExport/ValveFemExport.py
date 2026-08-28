@@ -1,4 +1,5 @@
 import collections
+import csv
 import os
 import logging
 import math
@@ -135,6 +136,7 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Connections
     self.ui.parameterNodeSelector.currentNodeChanged.connect(self.setParameterNode)
     self.ui.heartValveImportButton.clicked.connect(self.onHeartValveImport)
+    self.ui.importCSVButton.clicked.connect(self.onImportCSV)
     self.ui.addLeafletRegionBoundaryButton.clicked.connect(self.onAddLeafletRegionBoundary)
     self.ui.deleteLeafletRegionBoundaryButton.clicked.connect(self.onDeleteLeafletRegionBoundary)
 
@@ -447,6 +449,50 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     self._parameterNode.Modified()
     self._parameterNode.EndModify(wasModified)
+
+  def onImportCSV(self):
+    """Import papillary muscle tip positions from a CSV file."""
+    try:
+      csvPath = self.ui.csvPathLineEdit.currentPath
+      if not csvPath:
+        raise ValueError("No CSV file selected.")
+      if os.path.splitext(csvPath)[1].lower() != ".csv":
+        raise ValueError("The selected file must have a .csv extension.")
+
+      points = []
+      with open(csvPath, "r", newline="", encoding="utf-8-sig") as csvFile:
+        reader = csv.DictReader(csvFile)
+        requiredColumns = {"point_name", "x", "y", "z"}
+        availableColumns = set(reader.fieldnames or [])
+        missingColumns = requiredColumns - availableColumns
+        if missingColumns:
+          raise ValueError("Missing required CSV column(s): " + ", ".join(sorted(missingColumns)))
+
+        for rowIndex, row in enumerate(reader, start=2):
+          pointName = row["point_name"].strip()
+          if not pointName:
+            raise ValueError(f"Missing point_name at CSV row {rowIndex}.")
+          try:
+            position = tuple(float(row[axis]) for axis in ("x", "y", "z"))
+          except (TypeError, ValueError):
+            raise ValueError(f"Invalid x, y, or z coordinate at CSV row {rowIndex}.")
+          if not all(math.isfinite(coordinate) for coordinate in position):
+            raise ValueError(f"Non-finite coordinate at CSV row {rowIndex}.")
+          points.append((pointName, position))
+
+      if not points:
+        raise ValueError("The CSV file does not contain any points.")
+
+      nodeName = slicer.mrmlScene.GetUniqueNameByString(os.path.splitext(os.path.basename(csvPath))[0])
+      papillaryMuscleTipsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", nodeName)
+      for pointName, position in points:
+        papillaryMuscleTipsNode.AddControlPointWorld(vtk.vtkVector3d(*position), pointName)
+
+      self.ui.papillaryMuscleTipsNodeSelector.setCurrentNode(papillaryMuscleTipsNode)
+      self.ui.csvPathLineEdit.addCurrentPathToHistory()
+    except Exception as e:
+      logging.exception("Failed to import papillary muscle tips from CSV")
+      slicer.util.errorDisplay("Failed to import papillary muscle tips: " + str(e))
 
   def logCallback(self, message):
     slicer.util.showStatusMessage(message)
