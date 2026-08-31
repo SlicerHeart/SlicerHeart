@@ -82,7 +82,7 @@ class VirtualCathLabWidget(CardiacDeviceSimulatorWidget):
       return
 
     if not hasattr(slicer.modules, 'volumereslicedriver'):
-      slicer.util.messageBox("This modules requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
+      slicer.util.messageBox("This module requires SlicerIGT extension. Install SlicerIGT and restart Slicer.")
       return
 
     #self.devicePositioningWidget.vesselGroupBox.hide()
@@ -781,7 +781,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
     """
     Updates the gantry_to_ras transform to account for the table motion.
     The table center point of the table coordinate system (0,0,0) should remain aligned with the table center point fiducial position in RAS
-    This ensures that that the position of the table remains the same relative to the RAS volume.
+    This ensures that the position of the table remains the same relative to the RAS volume.
     This motion shifts the entire gantry model in RAS.
     """
     tableToRAS = vtk.vtkGeneralTransform()
@@ -1648,7 +1648,7 @@ class VirtualCathLabLogic(CardiacDeviceSimulatorLogic):
         # Only apply to C-arm views
         continue
 
-      # Setup dislay settings form C-arm view
+      # Setup display settings form C-arm view
       presetName = self.getParameterNode().GetParameter(self.VOLUME_RENDERING_PRESET_PARAMETER_NAME)
       color = [1.0, 1.0, 1.0] # White
       if presetName == "CT-X-ray":
