@@ -102,6 +102,26 @@ All options are remembered between sessions (stored in the application settings)
   from sample files; unusual projects may need adjustment.
 - The module is experimental and not guaranteed to provide correct results for all input files.
 
+## Loading mesh files exported by Mimics and 3-matic
+
+Instead of importing whole project files with this module, meshes can also be exported from
+Mimics and 3-matic to standard mesh file formats and loaded into Slicer directly. Depending on
+the application and file format, manual scaling may be needed to get the correct physical size:
+
+- **3-matic OBJ export**: 3-matic writes the vertex coordinate unit into the OBJ file header as a
+  comment (`vertex coordinates are measured in units, where 1 unit = ... mm`).
+  - Slicer 5.13 and later (2026-08-18 or newer builds) reads this comment and automatically
+    scales the mesh to millimeters, so no manual adjustment is needed.
+  - In earlier Slicer versions, a manual 1000x scaling has to be applied after loading (for
+    example, by applying a linear transform with 1000 in the diagonal and hardening it).
+- **3-matic STL export**: the STL file does not store any unit information, so the correct
+  scaling cannot be determined from the file. If the mesh was exported with the coordinate
+  system unit set to millimeters then Slicer loads it correctly. If the mesh was exported in
+  inches then a transform with a scaling of 25.4 has to be applied in Slicer to achieve the
+  correct size.
+- **Mimics export**: meshes exported to OBJ, PLY, or STL are loaded into Slicer at the correct
+  size; no manual scaling is needed.
+
 ## Developers
 
 Both file types are containers of named binary blobs. `ImportMimicsLogic.openStore()` sniffs the
