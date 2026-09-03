@@ -1,3 +1,6 @@
-
 #slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)
 slicer_add_python_unittest(SCRIPT ValveModelTest.py)
+slicer_add_python_unittest(SCRIPT HeartValveLibTest.py)
+slicer_add_python_unittest(SCRIPT ValveBrowserTest.py)
+slicer_add_python_unittest(SCRIPT ValveModelSequenceTest.py)
+slicer_add_python_unittest(SCRIPT ValveSequenceWidgetTest.py)
