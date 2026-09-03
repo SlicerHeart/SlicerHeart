@@ -9,6 +9,7 @@ The extension currently includes the following features (new features are added 
   - [Reconstruct 4D cine-MRI](Docs/Reconstruct4DCineMRI.md): Reconstruct sequence of Cartesian volumes from a sparse set of cine-MRI frames.
   - Carto Export: export models to to be used in Carto EP mapping systems.
   - TomTec UCD data file importer: allows loading *.UCD.data.zip file as a model sequence. When drag-and-dropping the zip file to the application window, then choose "No" to the question "The selected file is a zip archive, open it and load contents" and then click OK in the displayed "Add data..." window.
+  - [Import Mimics](Docs/ImportMimics.md): import Materialise Mimics (`.mcs`) and 3-matic (`.mxp`) project files: image volume, surface models, curves, NURBS annulus curves, point sets, and patient/study/series metadata. Projects can be loaded into the scene, converted to standard file formats, or batch-converted from a folder.
 - Cardiac image visualization:
   - Echo Volume Render: module for display of 3D/4D cardiac ultrasound images with distance-dependent coloring.
   - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).

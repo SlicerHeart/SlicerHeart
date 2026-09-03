@@ -90,6 +90,7 @@ add_subdirectory(PDAQuantification)
 add_subdirectory(ValveMoldCreator)
 add_subdirectory(VirtualCathLab)
 add_subdirectory(ValveFemExport)
+add_subdirectory(ImportMimics)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

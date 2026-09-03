@@ -34,6 +34,8 @@ class ImportMimics(ScriptedLoadableModule):
 This module imports Materialise <b>Mimics</b> (<b>.mcs</b>) and <b>3-matic</b> (<b>.mxp</b>)
 project files into 3D Slicer. It can load a single project into the scene, convert projects to
 standard files, or batch-convert a whole folder.
+<p>See the <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/ImportMimics.md">module documentation</a>
+for supported formats, usage, and limitations.</p>
 
 <b>What is imported:</b>
 <ul>
