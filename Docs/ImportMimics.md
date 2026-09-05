@@ -158,14 +158,28 @@ Relevant blobs (shared between the formats unless noted):
   preamble + `DICM` + dataset, optionally after a few bytes of Materialise's own), one per slice
   and **with the pixel data removed**; it provides the geometry (`ImagePositionPatient`,
   `ImageOrientationPatient`, `PixelSpacing`, `Rows`/`Columns`) and the patient/study/series
-  information. Pixel blobs are paired with the headers in acquisition order, then the slices are
-  sorted spatially along the slice normal.
+  information. Projects written by older Mimics versions (around 2019) store one header blob
+  per slice instead of one blob with all the headers.
 
-  A plain Mimics project holds a single block, named `blob_0` (headers) + `blob_1`, `blob_2`,
-  ... (pixels). A project exported for **Mimics Viewer** may hold several blocks and names every
-  blob with a GUID, so only the *order* of the blobs groups a block together: a header blob
-  starts a block and the pixel blobs that follow belong to it (a block may be followed by extra
-  blobs, such as a downsampled preview of the block, which the DICOM instance count excludes).
+  The pixel blobs are stored in **slice order** (sorted by position along the slice normal),
+  but the headers are stored in the order the DICOM files were **imported**, which is not
+  always the same (files imported in file name order, for example). So the headers are sorted
+  by position before they are paired with the pixel blobs; the sort keeps the overall direction
+  of the import order. Mimics also stores the headers of every block a second time (byte-
+  identical files, in a different order); that copy is recognized by content and folded into
+  its block. It may be followed by a downsampled preview slice, which is ignored.
+
+  In a plain Mimics project every blob is named `blob_N`. The **numbers** give the structure: a
+  block's pixel blobs are numbered after its header, in slice order (the numbers of one block
+  may be split into several runs when other blobs took the numbers in between, as Mimics hands
+  out the lowest free numbers). The order in which the blobs are stored in the SQLite file is
+  *not* reliable: Mimics rewrites individual blobs on a later save, keeping their names, which
+  moves them to the end of the file. Projects with a multi-block layout, or with the headers
+  not named `blob_0`, therefore loaded with scrambled or truncated slices when the storage
+  order was used. A project exported for **Mimics Viewer** names every blob with a GUID, so
+  there only the storage order groups a block together: a header blob starts a block and the
+  pixel blobs that follow belong to it (a block may be followed by extra blobs, such as a
+  downsampled preview of the block, which the DICOM instance count excludes).
 - **Pixel data** (`.mcs`) - each pixel blob starts with a 4-byte `MMFD` magic. The pixels then
   follow either uncompressed (`Rows*Columns*2` bytes of little-endian 16-bit pixels) or, where
   that is smaller, **row-compressed**: a table of `Rows` little-endian `uint16` compressed row
