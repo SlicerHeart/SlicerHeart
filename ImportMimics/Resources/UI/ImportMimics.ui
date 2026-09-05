@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>368</width>
-    <height>327</height>
+    <width>367</width>
+    <height>489</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -138,78 +138,190 @@
          <string>Content</string>
         </property>
         <property name="collapsed">
-         <bool>true</bool>
+         <bool>false</bool>
         </property>
-        <layout class="QVBoxLayout" name="verticalLayout_options">
-         <item>
-          <widget class="QCheckBox" name="importImageCheckBox">
+        <layout class="QFormLayout" name="contentFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_importModels">
            <property name="toolTip">
-            <string>Reconstruct the image volume from the embedded DICOM headers and pixel data.</string>
+            <string>Import surface models (3D objects / segmentation surfaces), curves/wireframes, and point clouds.</string>
            </property>
            <property name="text">
-            <string>Image volume</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
+            <string>Surface models &amp; curves:</string>
            </property>
           </widget>
          </item>
-         <item>
+         <item row="0" column="1">
           <widget class="QCheckBox" name="importModelsCheckBox">
            <property name="toolTip">
             <string>Import surface models (3D objects / segmentation surfaces), curves/wireframes, and point clouds.</string>
            </property>
            <property name="text">
-            <string>Surface models &amp; curves</string>
+            <string/>
            </property>
            <property name="checked">
             <bool>true</bool>
            </property>
           </widget>
          </item>
-         <item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_importNurbs">
+           <property name="toolTip">
+            <string>Import NURBS surfaces (e.g. valve annuli) as closed markups curves.</string>
+           </property>
+           <property name="text">
+            <string>NURBS curves (markups):</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
           <widget class="QCheckBox" name="importNurbsCheckBox">
            <property name="toolTip">
             <string>Import NURBS surfaces (e.g. valve annuli) as closed markups curves.</string>
            </property>
            <property name="text">
-            <string>NURBS curves (markups)</string>
+            <string/>
            </property>
            <property name="checked">
             <bool>true</bool>
            </property>
           </widget>
          </item>
-         <item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_importPoints">
+           <property name="toolTip">
+            <string>Import point sets as markups point lists.</string>
+           </property>
+           <property name="text">
+            <string>Point sets (markups):</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
           <widget class="QCheckBox" name="importPointsCheckBox">
            <property name="toolTip">
             <string>Import point sets as markups point lists.</string>
            </property>
            <property name="text">
-            <string>Point sets (markups)</string>
+            <string/>
            </property>
            <property name="checked">
             <bool>true</bool>
            </property>
           </widget>
          </item>
-         <item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="label_importImage">
+           <property name="toolTip">
+            <string>Reconstruct the image volume from the embedded DICOM headers and pixel data.</string>
+           </property>
+           <property name="text">
+            <string>Image volume:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="QCheckBox" name="importImageCheckBox">
+           <property name="toolTip">
+            <string>Reconstruct the image volume from the embedded DICOM headers and pixel data.</string>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="label_loadWithDicom">
+           <property name="toolTip">
+            <string>Load the image volume with Slicer's DICOM module (scalar volume plugin) from the reconstructed DICOM files instead of building it directly. The DICOM reader applies the rescale slope/intercept of the headers and, if the slice positions are irregular (non-uniform spacing, in-plane shifts), adds an acquisition transform that puts every slice at its true position. Recommended when geometry issues are reported. Slower, and the image is written to a temporary folder while loading.</string>
+           </property>
+           <property name="text">
+            <string>Load image using DICOM module:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="QCheckBox" name="loadWithDicomCheckBox">
+           <property name="toolTip">
+            <string>Load the image volume with Slicer's DICOM module (scalar volume plugin) from the reconstructed DICOM files instead of building it directly. The DICOM reader applies the rescale slope/intercept of the headers and, if the slice positions are irregular (non-uniform spacing, in-plane shifts), adds an acquisition transform that puts every slice at its true position. Recommended when geometry issues are reported. Slower, and the image is written to a temporary folder while loading.</string>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="checked">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="label_hardenAcquisitionTransform">
+           <property name="toolTip">
+            <string>When the DICOM module adds an acquisition transform (the slice positions are irregular), apply it to the image: the image is resampled so that every slice is at its true position and no transform node is needed. Unchecked, the transform stays attached to the image as its parent transform and is saved next to it.</string>
+           </property>
+           <property name="text">
+            <string>Harden acquisition transform:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QCheckBox" name="hardenAcquisitionTransformCheckBox">
+           <property name="toolTip">
+            <string>When the DICOM module adds an acquisition transform (the slice positions are irregular), apply it to the image: the image is resampled so that every slice is at its true position and no transform node is needed. Unchecked, the transform stays attached to the image as its parent transform and is saved next to it.</string>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="0">
+          <widget class="QLabel" name="label_importDicom">
+           <property name="toolTip">
+            <string>Reconstruct the original DICOM files (image headers with pixel data). Written to a &quot;dicom&quot; subfolder when an output folder is selected. Note: may contain patient information.</string>
+           </property>
+           <property name="text">
+            <string>DICOM files:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="1">
           <widget class="QCheckBox" name="importDicomCheckBox">
            <property name="toolTip">
             <string>Reconstruct the original DICOM files (image headers with pixel data). Written to a &quot;dicom&quot; subfolder when an output folder is selected. Note: may contain patient information.</string>
            </property>
            <property name="text">
-            <string>DICOM files</string>
+            <string/>
            </property>
           </widget>
          </item>
-         <item>
+         <item row="7" column="0">
+          <widget class="QLabel" name="label_importMetadata">
+           <property name="toolTip">
+            <string>Save a JSON file with the project inventory and image, patient, study and series metadata. Note: may contain patient information.</string>
+           </property>
+           <property name="text">
+            <string>Metadata (JSON):</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="1">
           <widget class="QCheckBox" name="importMetadataCheckBox">
            <property name="toolTip">
             <string>Save a JSON file with the project inventory and image, patient, study and series metadata. Note: may contain patient information.</string>
            </property>
            <property name="text">
-            <string>Metadata (JSON)</string>
+            <string/>
            </property>
           </widget>
          </item>

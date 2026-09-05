@@ -79,6 +79,28 @@ could not be reconstructed).
      curves (ply / vtp), NURBS curves and point sets (markups, mrk.json), original **DICOM
      files** (in a `dicom` subfolder), and a **Metadata** JSON file. DICOM files and Metadata
      are off by default (see the patient information note above).
+   - *Load image using DICOM module* - instead of building the volume directly from the
+     headers and pixel data, write the reconstructed DICOM files to a temporary folder and
+     load them with the reader of Slicer's DICOM scalar volume plugin (the reader approach set
+     in the DICOM module settings). The DICOM reader applies the rescale slope/intercept of the
+     headers (so CT values come out in Hounsfield units, while the direct reconstruction keeps
+     the stored pixel values), and when the slice positions are irregular it adds an
+     **acquisition transform** (a grid transform) that moves every slice to its true position.
+     Off by default; slower, and the DICOM browser's database is briefly replaced by a
+     temporary one while loading. The reader (GDCM, with DCMTK as fallback) and this
+     regularization are fixed by the module; the DICOM module settings do not affect them.
+   - *Harden acquisition transform* - apply the acquisition transform to the image, so the
+     image is resampled with every slice at its true position and no transform node is needed
+     (on by default). Unchecked, the transform stays attached as the volume's parent transform
+     and is saved next to the image as `<image>_acquisitionTransform.h5`.
+
+   Every image block is checked for a regular geometry: slices of one size, pixel spacing and
+   orientation (parallel slices), no in-plane shift along or across the stack, uniform slice
+   spacing. Deviations are logged, listed in the metadata (`geometryWarnings` /
+   `geometryErrors`) and shown in a pop-up at the end, with a recommendation to enable the
+   DICOM module option, which corrects for irregular slice positions. Slices of different sizes
+   cannot be reconstructed; the other issues still produce a volume, with the geometry of the
+   first slice and a single average slice spacing.
 4. Click the action button. Its label reflects the operation:
    - **Load** / **Convert** / **Convert & Load** - single file, into the scene and/or to files.
    - **Batch convert** - folder input; converts every `.mcs` / `.mxp` to files.
@@ -100,6 +122,19 @@ All options are remembered between sessions (stored in the application settings)
   lines).
 - The mesh coordinate scale (`1e-4` mm) and the header/pixel pairing were determined empirically
   from sample files; unusual projects may need adjustment.
+- The direct image reconstruction places the slices at a uniform spacing with the geometry of
+  the first slice and does not apply the DICOM rescale slope/intercept; use the *Load image
+  using DICOM module* option for irregular geometry or calibrated intensities.
+- Loading through the DICOM module indexes the reconstructed files into a temporary DICOM
+  database that replaces the application's database while the scalar volume plugin examines
+  and loads them, exactly as the DICOM browser would; the application's database is restored
+  afterwards and the temporary one is cleared (the files carry patient information and never
+  enter the user's database). The patient/study subject hierarchy items the plugin creates are
+  removed again. In Slicer up to 5.13 the plugin fails to fill the acquisition transform when
+  the volume is not shown in a slice view (batch conversion, no main window), because its
+  displacement array is read through the transform node's from-parent transform, which is only
+  computed on demand; the module then updates the transform and fills it from the corners the
+  plugin computed.
 - The module is experimental and not guaranteed to provide correct results for all input files.
 
 ## Loading mesh files exported by Mimics and 3-matic

@@ -106,6 +106,8 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         self._settingCheckBoxes = [
             ("loadIntoScene", self.ui.loadIntoSceneCheckBox),
             ("importImage", self.ui.importImageCheckBox),
+            ("loadWithDicom", self.ui.loadWithDicomCheckBox),
+            ("hardenAcquisitionTransform", self.ui.hardenAcquisitionTransformCheckBox),
             ("importModels", self.ui.importModelsCheckBox),
             ("importNurbs", self.ui.importNurbsCheckBox),
             ("importPoints", self.ui.importPointsCheckBox),
@@ -137,6 +139,7 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         if self._restoringSettings:
             return
         self._saveSettings()
+        self._checkCanApply()
         self._checkCanApply()
 
     def _saveSettings(self) -> None:
@@ -177,6 +180,9 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
         """Update the output-folder controls and the action button label/enabled state."""
         # Custom output folder path field is only relevant when 'Custom folder' is selected.
         self.ui.exportPathLineEdit.enabled = self.ui.exportCustomFolderRadioButton.checked
+        # The acquisition transform only exists when the image is loaded with the DICOM module.
+        self.ui.hardenAcquisitionTransformCheckBox.enabled = (
+            self.ui.importImageCheckBox.checked and self.ui.loadWithDicomCheckBox.checked)
 
         inputPath = self.ui.inputPathLineEdit.currentPath
         hasInput = bool(inputPath)
@@ -245,6 +251,8 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
                 self.ui.inputsCollapsibleButton.enabled = False
 
                 loadImage = self.ui.importImageCheckBox.checked
+                useDicomReader = self.ui.loadWithDicomCheckBox.checked
+                hardenAcquisitionTransform = self.ui.hardenAcquisitionTransformCheckBox.checked
                 loadModels = self.ui.importModelsCheckBox.checked
                 loadNurbs = self.ui.importNurbsCheckBox.checked
                 loadPoints = self.ui.importPointsCheckBox.checked
@@ -272,7 +280,8 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
 
                 commonArgs = dict(loadImage=loadImage, loadModels=loadModels, loadNurbs=loadNurbs,
                                   loadPoints=loadPoints, exportDicom=exportDicom,
-                                  saveMetadata=saveMetadata)
+                                  saveMetadata=saveMetadata, useDicomReader=useDicomReader,
+                                  hardenAcquisitionTransform=hardenAcquisitionTransform)
                 # Neither loading nor saving: only report information about the selection.
                 inspectMode = not loadIntoScene and not saveToFiles
 
@@ -304,12 +313,17 @@ class ImportMimicsWidget(ScriptedLoadableModuleWidget):
                     self.logic.importProject(inputPath, loadIntoScene=loadIntoScene,
                                              exportDir=exportDirFor(inputPath, False), **commonArgs)
 
-                # Show a pop-up at the end if any project reported an error (e.g. >10% non-uniform
-                # slice spacing). Warnings are only written to the log above.
+                # Show a pop-up at the end if any project reported a geometry problem (slices
+                # that are not parallel, non-uniform slice spacing, ...); all messages are in
+                # the log above as well.
                 errors = [text for severity, text in self.logic.messages if severity == "error"]
+                warnings = [text for severity, text in self.logic.messages if severity == "warning"]
                 if errors:
-                    slicer.util.errorDisplay("\n\n".join(errors),
+                    slicer.util.errorDisplay("\n\n".join(errors + warnings),
                                              windowTitle=_("Import Mimics"))
+                elif warnings:
+                    slicer.util.warningDisplay("\n\n".join(warnings),
+                                               windowTitle=_("Import Mimics"))
 
             finally:
                 self.loadingInProgress = False
@@ -640,9 +654,14 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     def importProject(self, filename, loadImage=True, loadModels=True, loadNurbs=True,
                       loadPoints=True, loadIntoScene=True, exportDir=None, exportDicom=False,
-                      saveMetadata=True):
+                      saveMetadata=True, useDicomReader=False, hardenAcquisitionTransform=True):
         """Import a Mimics (.mcs) or 3-matic (.mxp) project. Returns
-        (volumeNodes, modelNodes, curveNodes, markupsNodes)."""
+        (volumeNodes, modelNodes, curveNodes, markupsNodes).
+
+        With `useDicomReader` the image volumes are loaded by Slicer's DICOM scalar volume
+        plugin from the reconstructed DICOM files (see `_loadImageWithDicomPlugin`). A volume
+        whose slice positions are irregular gets an acquisition transform, which is applied to
+        the image (`hardenAcquisitionTransform`) or kept as its parent transform node."""
         isMxp = os.path.splitext(filename)[1].lower() == ".mxp"
         self.addLog(f"Importing {'3-matic' if isMxp else 'Mimics'} project: {filename}")
         self.updateProgress(1)
@@ -668,25 +687,28 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             volumeNodes = []
             if loadImage:
                 blocks = self._imageBlocks(store)
-                images = self.importImages(store, blocks)
-                volumeNodes = [volumeNode for volumeNode, _meta in images]
+                images = self.importImages(store, blocks, useDicomReader, hardenAcquisitionTransform)
+                volumeNodes = [volumeNode for volumeNode, _meta in images if volumeNode is not None]
                 imageMetas = [meta for _volumeNode, meta in images]
                 if imageMetas:
                     metadata["images"] = imageMetas
                     # The image of a single-block project stays available under its old key.
                     metadata["image"] = imageMetas[0]
+                    messageCount = len(self.messages)
                     for meta in imageMetas:
-                        name = meta.get("name", "image")
-                        if meta.get("sliceSpacingError"):
-                            self.messages.append(
-                                ("error", f"{projectName} ({name}): {meta['sliceSpacingError']}"))
-                        elif meta.get("sliceSpacingWarning"):
-                            self.messages.append(
-                                ("warning", f"{projectName} ({name}): {meta['sliceSpacingWarning']}"))
-                if len(imageMetas) < len(blocks):
+                        self._collectGeometryMessages(meta, f"{projectName} ({meta.get('name', 'image')})")
+                    if len(self.messages) > messageCount and not useDicomReader:
+                        self.messages.append(("warning", (
+                            f"{projectName}: Enable 'Load image using DICOM module' in the Import "
+                            "Mimics module to load the image with Slicer's DICOM reader, which "
+                            "places every slice at its true position with an acquisition "
+                            "transform when the slice spacing or the in-plane position is "
+                            "irregular.")))
+                if len(volumeNodes) < len(blocks):
                     metadata["notes"].append(
-                        f"{len(blocks) - len(imageMetas)} of {len(blocks)} image block(s) could "
-                        "not be reconstructed (unsupported pixel storage).")
+                        f"{len(blocks) - len(volumeNodes)} of {len(blocks)} image block(s) could "
+                        "not be reconstructed (unsupported pixel storage or slices of different "
+                        "sizes).")
                 self.updateProgress(50)
 
             modelNodes = []
@@ -744,9 +766,11 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                     f"{len(curveModelNodes)} curve(s), {len(nurbsNodes)} NURBS, "
                     f"{len(pointNodes)} point set(s) into the scene.")
             else:
-                # Not loading into the scene: remove the nodes that were created for export.
+                # Not loading into the scene: remove the nodes that were created for export
+                # (including the acquisition transforms of the volumes).
                 counts = (len(volumeNodes), len(modelNodes), len(curveModelNodes), len(markupsNodes))
-                for node in volumeNodes + modelNodes + curveModelNodes + markupsNodes:
+                transformNodes = [v.GetParentTransformNode() for v in volumeNodes]
+                for node in volumeNodes + modelNodes + curveModelNodes + markupsNodes + transformNodes:
                     if node is not None:
                         slicer.mrmlScene.RemoveNode(node)
                 volumeNodes, modelNodes, curveModelNodes, markupsNodes = [], [], [], []
@@ -760,6 +784,13 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
 
     # Backwards-compatible alias (the module historically exposed importMcs).
     importMcs = importProject
+
+    def _collectGeometryMessages(self, imageMeta, prefix):
+        """Add the geometry errors/warnings recorded in an image's metadata to `self.messages`."""
+        for message in imageMeta.get("geometryErrors", []):
+            self.messages.append(("error", f"{prefix}: {message}"))
+        for message in imageMeta.get("geometryWarnings", []):
+            self.messages.append(("warning", f"{prefix}: {message}"))
 
     def inspect(self, filename):
         """Log a summary of a project without creating any nodes or writing files."""
@@ -781,11 +812,8 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                                                    image['studyDate']) if x)
                 if patientBits:
                     self.addLog(f"    {patientBits}")
-                # Record slice-spacing warnings/errors found during the header analysis.
-                if image.get("sliceSpacingError"):
-                    self.messages.append(("error", f"{projectName}: {image['sliceSpacingError']}"))
-                elif image.get("sliceSpacingWarning"):
-                    self.messages.append(("warning", f"{projectName}: {image['sliceSpacingWarning']}"))
+                # Record the geometry warnings/errors found during the header analysis.
+                self._collectGeometryMessages(image, projectName)
             if not images:
                 self.addLog("  Image: present but could not be read" if blocks else "  Image: none")
             self.addLog(f"  Surface models: {inventory['surfaceModelCount']}, "
@@ -823,23 +851,23 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             "studyDescription": str(ds.get("StudyDescription", "")),
             "studyDate": str(ds.get("StudyDate", "")),
         }
-        # Slice-spacing uniformity check from the per-slice ImagePositionPatient.
+        # Geometry check (parallel slices, uniform spacing, ...) from the per-slice headers.
         try:
-            if len(offsets) >= 3 and geometry:
-                iop = np.array(geometry["imageOrientationPatient"], dtype=float)
-                ipps = []
+            if geometry:
+                geometries, shapes = [], []
                 for k in range(len(offsets)):
                     dk = ds if k == 0 else pydicom.dcmread(
                         io.BytesIO(blob0[bounds[k]:bounds[k + 1]]), force=True,
-                        specific_tags=["ImagePositionPatient", "SharedFunctionalGroupsSequence",
+                        specific_tags=["ImagePositionPatient", "ImageOrientationPatient",
+                                       "PixelSpacing", "Rows", "Columns",
+                                       "SharedFunctionalGroupsSequence",
                                        "PerFrameFunctionalGroupsSequence"])
-                    ipps.append(self._sliceGeometry(dk)["imagePositionPatient"])
-                ipps = np.array(ipps, dtype=float)
-                normal = np.cross(iop[0:3], iop[3:6])
-                order = np.argsort(ipps @ normal)
-                sortedSlices = [(0, ipps[o], None, None) for o in order]
-                self._checkSliceSpacingUniformity(sortedSlices, info)
-        except Exception:  # noqa: BLE001 - spacing check is best-effort during inspection
+                    geometries.append(self._sliceGeometry(dk))
+                    shapes.append((int(dk.get("Rows", 0)), int(dk.get("Columns", 0))))
+                order = self._sliceOrder(geometries)
+                self._checkSliceGeometry([geometries[k] for k in order],
+                                         [shapes[k] for k in order], info)
+        except Exception:  # noqa: BLE001 - the geometry check is best-effort during inspection
             pass
         return info
 
@@ -1127,8 +1155,9 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         """Split an image block's header blob into per-slice DICOM headers, pair them with the
         block's pixel blobs and decode the pixels.
 
-        Returns (slices, dicomMeta) where `slices` is a list of (instanceNumber, ipp, pixels, ds)
-        sorted spatially along the slice normal, or (None, None) if no image data is available.
+        Returns (slices, dicomMeta) where `slices` is a list of (instanceNumber, ipp, pixels, ds,
+        geometry) sorted spatially along the slice normal, or (None, None) if no image data is
+        available.
         """
         try:
             import pydicom
@@ -1180,7 +1209,7 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                 return None, None
             ipp = np.array(geometry["imagePositionPatient"], dtype=float)
             instanceNumber = int(getattr(ds, "InstanceNumber", k + 1))
-            slices.append((instanceNumber, ipp, pixels, ds))
+            slices.append((instanceNumber, ipp, pixels, ds, geometry))
             if dicomMeta is None:
                 iop = geometry["imageOrientationPatient"]
                 ps = geometry["pixelSpacing"]
@@ -1226,10 +1255,12 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         modality = re.sub(r"[^A-Za-z0-9]", "", modality)
         return f"image{index + 1}_{modality}" if modality else f"image{index + 1}"
 
-    def importImages(self, store, blocks=None):
+    def importImages(self, store, blocks=None, useDicomReader=False, hardenAcquisitionTransform=True):
         """Reconstruct every image block of the project.
 
-        Returns a list of (volumeNode, dicomMeta); blocks that cannot be decoded are skipped.
+        Returns a list of (volumeNode, dicomMeta). Blocks that cannot be decoded are skipped;
+        a block whose slices do not form a volume is listed with volumeNode None, so that its
+        metadata (with the geometry errors) is still available.
         """
         if blocks is None:
             blocks = self._imageBlocks(store)
@@ -1237,12 +1268,14 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         for index, block in enumerate(blocks):
             if len(blocks) > 1:
                 self.addLog(f"  Image block {index + 1}/{len(blocks)}:")
-            volumeNode, dicomMeta = self.importImage(store, block, index, len(blocks))
-            if volumeNode is not None:
+            volumeNode, dicomMeta = self.importImage(store, block, index, len(blocks), useDicomReader,
+                                                     hardenAcquisitionTransform)
+            if volumeNode is not None or dicomMeta is not None:
                 images.append((volumeNode, dicomMeta))
         return images
 
-    def importImage(self, store, block=None, index=0, blockCount=1):
+    def importImage(self, store, block=None, index=0, blockCount=1, useDicomReader=False,
+                    hardenAcquisitionTransform=True):
         """Reconstruct one image block into a volume node.
 
         Returns (volumeNode, dicomMeta), or (None, None) if the block cannot be decoded.
@@ -1257,6 +1290,14 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         if not slices:
             return None, None
         nSlices = len(slices)
+        imageName = self._imageName(index, blockCount, dicomMeta["modality"])
+        dicomMeta["name"] = imageName
+
+        # Report every deviation from a regular volume; slices of different sizes cannot be
+        # reconstructed at all (the caller still gets the metadata, with the error messages).
+        if not self._checkSliceGeometry([s[4] for s in slices], [s[2].shape for s in slices],
+                                        dicomMeta):
+            return None, dicomMeta
 
         rowDir = np.array(dicomMeta["imageOrientationPatient"][0:3], dtype=float)
         colDir = np.array(dicomMeta["imageOrientationPatient"][3:6], dtype=float)
@@ -1273,7 +1314,6 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             sliceVec = ippLast - ippFirst
             sliceSpacing = np.linalg.norm(sliceVec) / (nSlices - 1)
             sliceDir = sliceVec / np.linalg.norm(sliceVec)
-            self._checkSliceSpacingUniformity(slices, dicomMeta)
         else:
             sliceSpacing = dicomMeta["sliceThickness"] or 1.0
             sliceDir = sliceNormal
@@ -1289,69 +1329,294 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         ijkToRas[0:3, 2] = lpsToRas @ (sliceDir * sliceSpacing)
         ijkToRas[0:3, 3] = lpsToRas @ ippFirst
 
-        imageName = self._imageName(index, blockCount, dicomMeta["modality"])
-        dicomMeta["name"] = imageName
-        volumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        volumeNode.SetName(imageName)
-        slicer.util.updateVolumeFromArray(volumeNode, volumeArray)
-        vtkMat = vtk.vtkMatrix4x4()
-        for r in range(4):
-            for c in range(4):
-                vtkMat.SetElement(r, c, ijkToRas[r, c])
-        volumeNode.SetIJKToRASMatrix(vtkMat)
-        volumeNode.CreateDefaultDisplayNodes()
+        volumeNode = None
+        if useDicomReader:
+            try:
+                volumeNode = self._loadImageWithDicomPlugin(slices, dicomMeta, imageName,
+                                                            hardenAcquisitionTransform)
+            except Exception as e:  # noqa: BLE001 - fall back to the direct reconstruction
+                message = (f"The image could not be loaded with the DICOM module ({e}); "
+                           "it was reconstructed directly instead.")
+                self.addLog(f"  WARNING: {message}")
+                dicomMeta.setdefault("geometryWarnings", []).append(message)
+        if volumeNode is None:
+            volumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+            volumeNode.SetName(imageName)
+            slicer.util.updateVolumeFromArray(volumeNode, volumeArray)
+            vtkMat = vtk.vtkMatrix4x4()
+            for r in range(4):
+                for c in range(4):
+                    vtkMat.SetElement(r, c, ijkToRas[r, c])
+            volumeNode.SetIJKToRASMatrix(vtkMat)
+            volumeNode.CreateDefaultDisplayNodes()
+            dicomMeta["loadedWith"] = "direct reconstruction"
 
         # Only the geometry is used in the scene; patient/study/series identifiers are not
         # attached to the node (they remain available only for the opt-in metadata/DICOM export).
 
-        self.addLog(f"  Image '{imageName}': "
-                    f"{volumeArray.shape[2]}x{volumeArray.shape[1]}x{volumeArray.shape[0]} "
+        dimensions = volumeNode.GetImageData().GetDimensions()
+        self.addLog(f"  Image '{imageName}': {dimensions[0]}x{dimensions[1]}x{dimensions[2]} "
                     f"({dicomMeta['modality']}, spacing "
-                    f"{colSpacing:.3g}x{rowSpacing:.3g}x{sliceSpacing:.3g} mm)")
+                    f"{colSpacing:.3g}x{rowSpacing:.3g}x{sliceSpacing:.3g} mm, "
+                    f"{dicomMeta['loadedWith']})")
         return volumeNode, dicomMeta
 
-    def _checkSliceSpacingUniformity(self, slices, dicomMeta):
-        """Warn/error when the slice-to-slice distances contain outliers.
+    def _loadImageWithDicomPlugin(self, slices, dicomMeta, imageName, hardenAcquisitionTransform):
+        """Load a block's slices the way the DICOM module does, with the DICOM scalar volume
+        plugin.
 
-        A single average spacing is used for the reconstructed volume, so any non-uniformity
-        makes the geometry inaccurate. Outliers are slice-to-slice distances that differ from
-        the median by more than 1%. If the worst outlier is within 10% of the median it is a
-        warning; beyond 10% it is an error (which the caller shows in a pop-up at the end).
-        Each distinct outlier value is reported with how many times it occurs.
+        The complete DICOM files of the slices are written to a temporary folder and indexed
+        into a temporary DICOM database, which replaces the application's database while the
+        plugin examines and loads them (the plugin looks the slices up in the database: their
+        instance UIDs, and their geometry for the acquisition transform); the application's
+        database is restored afterwards and the temporary one is cleared, so the files - which
+        carry patient information - never enter the user's database. The result is what the
+        DICOM module loads from the exported files: the rescale slope/intercept of the headers
+        is applied, and when the slice positions are irregular the plugin adds a grid transform
+        (the acquisition transform) that moves every slice to its true position; with
+        `hardenAcquisitionTransform` it is applied to the image (resampled), otherwise it stays
+        as the volume's parent transform. The reader and this regularization are fixed here,
+        so the result does not depend on the DICOM module settings. The patient/study subject
+        hierarchy items the plugin creates are removed again.
+
+        Returns the volume node, or raises if the plugin could not load the files.
+        """
+        import shutil
+        import tempfile
+        import DICOMScalarVolumePlugin
+        from DICOMLib import DICOMUtils
+
+        class ScalarVolumePlugin(DICOMScalarVolumePlugin.DICOMScalarVolumePluginClass):
+            """The scalar volume plugin with the acquisition geometry regularization decided
+            here instead of by the DICOM module settings."""
+
+            def acquisitionGeometryRegularizationEnabled(self):
+                return True
+
+            def hardenAcquisitionGeometryRegularization(self):
+                return hardenAcquisitionTransform
+
+        plugin = ScalarVolumePlugin()
+        volumeNodesBefore = {node.GetID() for node in slicer.util.getNodesByClass("vtkMRMLScalarVolumeNode")}
+        dicomDir = tempfile.mkdtemp(prefix="ImportMimics-")
+        # The database files cannot be deleted while the application runs, so one temporary
+        # database folder is reused (it is emptied every time it is opened).
+        databaseDir = os.path.join(slicer.app.temporaryPath, "ImportMimicsDICOMDatabase")
+        try:
+            files = self._writeDicomSlices(slices, dicomDir)
+            with DICOMUtils.TemporaryDICOMDatabase(databaseDir) as database:
+                if not DICOMUtils.importDicom(dicomDir, database):
+                    raise ValueError("the DICOM files could not be indexed")
+                loadables = plugin.examineFiles(files)
+                loadables = [loadable for loadable in loadables if loadable.selected] or loadables
+                if not loadables:
+                    raise ValueError("the DICOM module found nothing to load")
+                loadable = max(loadables, key=lambda loadable: loadable.confidence)
+                if loadable.warning:
+                    self.addLog(f"  DICOM module: {loadable.warning}")
+                self.addLog(f"  Loading {len(loadable.files)} slices with the DICOM module...")
+                try:
+                    volumeNode = plugin.load(loadable, readerApproach="GDCM with DCMTK fallback")
+                except AttributeError:
+                    volumeNode = self._completeAcquisitionTransform(plugin, volumeNodesBefore)
+        finally:
+            shutil.rmtree(dicomDir, ignore_errors=True)
+        if volumeNode is None:
+            raise ValueError("the DICOM reader failed")
+
+        volumeNode.SetName(imageName)
+        dicomMeta["loadedWith"] = "DICOM module"
+        sliceCount = volumeNode.GetImageData().GetDimensions()[2]
+        if sliceCount != len(slices):
+            message = (f"The DICOM reader loaded {sliceCount} of the {len(slices)} slices (it "
+                       "leaves out slices whose orientation differs from the first slice, for "
+                       "example).")
+            self.addLog(f"  WARNING: {message}")
+            dicomMeta.setdefault("geometryWarnings", []).append(message)
+
+        modeling = getattr(plugin, "acquisitionModeling", None)
+        maxError = None
+        if (modeling is not None and modeling.originalCorners is not None
+                and modeling.targetCorners is not None):
+            maxError = float(np.abs(modeling.originalCorners - modeling.targetCorners).max())
+            dicomMeta["acquisitionGeometryMaxErrorMm"] = round(maxError, 4)
+        transformNode = volumeNode.GetParentTransformNode()
+        if transformNode is not None:
+            transformNode.SetName(f"{imageName}_acquisitionTransform")
+            dicomMeta["acquisitionTransform"] = transformNode.GetName()
+            self.addLog(f"  Irregular slice positions (up to {maxError:.3g} mm): the DICOM module "
+                        f"added the acquisition transform '{transformNode.GetName()}'.")
+        elif maxError is not None and maxError > modeling.cornerEpsilon:
+            dicomMeta["acquisitionTransform"] = "hardened"
+            self.addLog(f"  Irregular slice positions (up to {maxError:.3g} mm): the acquisition "
+                        "transform was applied to the image.")
+
+        # The plugin files the volume under patient/study subject hierarchy items that carry
+        # patient information; only the geometry is used here, so the nodes are moved to the
+        # scene top level and the items removed (unless something else is filed under them).
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        for node in (volumeNode, transformNode):
+            if node is None:
+                continue
+            item = shNode.GetItemByDataNode(node)
+            parent = shNode.GetItemParent(item)
+            shNode.SetItemParent(item, shNode.GetSceneItemID())
+            while (parent and parent != shNode.GetSceneItemID()
+                   and shNode.GetNumberOfItemChildren(parent) == 0):
+                grandParent = shNode.GetItemParent(parent)
+                shNode.RemoveItem(parent)
+                parent = grandParent
+        return volumeNode
+
+    @staticmethod
+    def _completeAcquisitionTransform(plugin, volumeNodesBefore):
+        """Finish a `plugin.load()` that failed while filling the acquisition transform.
+
+        Up to Slicer 5.13 the plugin fails there when the volume is not shown in a slice view
+        (batch conversion, or no main window): it fills the transform through
+        `slicer.util.arrayFromGridTransform`, which reads the node's transform from the parent,
+        and that - the inverse of the stored grid, computed on demand - has no displacement
+        grid until it is updated. At that point the volume is loaded, the transform node is
+        created and attached to it, and the plugin's acquisition modeling holds the slice
+        corners; so the transform is updated and filled here (and hardened if requested).
+        Returns the volume node; raises if the failure was another.
+        """
+        newVolumeNodes = [node for node in slicer.util.getNodesByClass("vtkMRMLScalarVolumeNode")
+                          if node.GetID() not in volumeNodesBefore]
+        modeling = getattr(plugin, "acquisitionModeling", None)
+        volumeNode = newVolumeNodes[0] if len(newVolumeNodes) == 1 else None
+        transformNode = volumeNode.GetParentTransformNode() if volumeNode is not None else None
+        if transformNode is None or modeling is None or modeling.targetCorners is None:
+            for node in newVolumeNodes:
+                slicer.mrmlScene.RemoveNode(node)
+            raise
+        transformNode.GetTransformFromParent().Update()
+        displacements = slicer.util.arrayFromGridTransform(transformNode)
+        displacements[:] = modeling.targetCorners - modeling.originalCorners
+        slicer.util.arrayFromGridTransformModified(transformNode)
+        if plugin.hardenAcquisitionGeometryRegularization():
+            volumeNode.HardenTransform()
+            slicer.mrmlScene.RemoveNode(transformNode)
+        return volumeNode
+
+    def _checkSliceGeometry(self, geometries, shapes, dicomMeta):
+        """Check that the slices of a block form a regular volume and record every problem
+        found in `dicomMeta["geometryWarnings"]` / `dicomMeta["geometryErrors"]` (the caller
+        shows them to the user at the end).
+
+        `geometries` are the per-slice geometry dicts (see `_sliceGeometry`) and `shapes` the
+        per-slice (rows, columns), both in slice order. The reconstructed volume takes the
+        orientation, pixel spacing and matrix size of the first slice, and places the slices
+        at a uniform spacing along the line from the first to the last slice, so every
+        deviation from that is reported: slices that differ in size (an error - the block
+        cannot be reconstructed at all), in pixel spacing or in orientation (not parallel),
+        an in-plane offset that grows along the stack (a sheared volume, which the volume's
+        non-orthogonal axes do represent, but which not every tool handles), irregular
+        in-plane offsets, and a non-uniform slice spacing. Small deviations (up to 1%, or 1
+        degree for the orientation) are warnings, larger ones errors.
+
+        Returns True if the block can be reconstructed (the slices have one size).
         """
         import collections
 
-        ippArray = np.array([s[1] for s in slices], dtype=float)
-        gaps = np.linalg.norm(np.diff(ippArray, axis=0), axis=1)
+        errors = dicomMeta.setdefault("geometryErrors", [])
+        warnings = dicomMeta.setdefault("geometryWarnings", [])
+
+        def report(message, deviation, warningLevel, errorLevel):
+            if deviation > errorLevel:
+                self.addLog(f"  ERROR: {message}")
+                errors.append(message)
+            elif deviation > warningLevel:
+                self.addLog(f"  WARNING: {message}")
+                warnings.append(message)
+
+        def angleDegrees(a, b):
+            return float(np.degrees(np.arccos(np.clip(np.dot(a, b), -1.0, 1.0))))
+
+        n = len(geometries)
+        first = geometries[0]
+
+        # Matrix size: the slices cannot even be stacked if it differs.
+        counts = collections.Counter(shapes)
+        if len(counts) > 1:
+            report("The slices differ in size: "
+                   + ", ".join(f"{rows}x{columns} ({count} slices)"
+                               for (rows, columns), count in sorted(counts.items(),
+                                                                    key=lambda item: -item[1]))
+                   + ". The image cannot be reconstructed.", 1.0, 0.0, 0.0)
+            return False
+
+        # Pixel spacing.
+        spacing0 = np.array(first["pixelSpacing"], dtype=float)
+        spacings = np.array([g["pixelSpacing"] for g in geometries], dtype=float)
+        if spacing0.min() > 0:
+            deviation = float(np.abs(spacings - spacing0).max() / spacing0.min())
+            report(f"The pixel spacing differs between slices by up to {deviation * 100:.2g}% "
+                   f"(the first slice has {spacing0[0]:g} x {spacing0[1]:g} mm, which the "
+                   "reconstructed image uses for all slices).", deviation, 0.001, 0.01)
+
+        # Orientation: both in-plane directions must match (a rotation about the normal would
+        # keep the normal but still misalign the slices).
+        iop0 = np.array(first["imageOrientationPatient"], dtype=float)
+        rowDir, colDir = iop0[0:3], iop0[3:6]
+        normal = np.cross(rowDir, colDir)
+        maxAngle = 0.0
+        for g in geometries:
+            iop = np.array(g["imageOrientationPatient"], dtype=float)
+            maxAngle = max(maxAngle, angleDegrees(rowDir, iop[0:3]), angleDegrees(colDir, iop[3:6]))
+        report(f"The slices are not parallel: their orientation differs by up to "
+               f"{maxAngle:.3g} degrees. The reconstructed image uses the orientation of the "
+               "first slice for all slices, so its geometry is inaccurate.", maxAngle, 0.05, 1.0)
+
+        if n < 2:
+            return True
+        ipps = np.array([g["imagePositionPatient"] for g in geometries], dtype=float)
+        gaps = np.linalg.norm(np.diff(ipps, axis=0), axis=1)
         median = float(np.median(gaps))
-        if median <= 0:
-            return
-        relativeDeviation = np.abs(gaps - median) / median
         dicomMeta["sliceSpacingMedian"] = round(median, 4)
+        if median <= 0:
+            report("Several slices are at the same position; the reconstructed image cannot "
+                   "place them correctly.", 1.0, 0.0, 0.0)
+            return True
+
+        # Slice axis: the line from the first to the last slice. If it is tilted from the
+        # slice normal, the volume is sheared (its axes are not orthogonal).
+        sliceVec = (ipps[-1] - ipps[0]) / (n - 1)
+        sliceDir = sliceVec / np.linalg.norm(sliceVec) if np.linalg.norm(sliceVec) > 0 else normal
+        shearAngle = angleDegrees(sliceDir, normal)
+        shearAngle = min(shearAngle, 180.0 - shearAngle)
+        dicomMeta["sliceAxisTiltDegrees"] = round(shearAngle, 4)
+        report(f"The slices are shifted within the image plane along the stack (the slice axis "
+               f"is tilted {shearAngle:.3g} degrees from the slice normal). The reconstructed "
+               "image is sheared accordingly; its axes are not orthogonal.", shearAngle, 0.05, 90.0)
+
+        # Irregular in-plane offsets: what remains of each slice position after removing the
+        # uniform progression along the slice axis, measured within the image plane.
+        residuals = ipps - (ipps[0] + np.outer(np.arange(n), sliceVec))
+        inPlane = np.hypot(residuals @ rowDir, residuals @ colDir)
+        maxShift = float(inPlane.max())
+        dicomMeta["sliceInPlaneShiftMax"] = round(maxShift, 4)
+        report(f"The slices are shifted irregularly within the image plane, by up to "
+               f"{maxShift:.3g} mm from their expected position, which the reconstructed image "
+               "cannot represent.", maxShift / median, 0.01, 0.10)
+
+        # Slice spacing: a single average spacing is used, so outliers (slice-to-slice
+        # distances differing from the median by more than 1%) make the geometry inaccurate.
+        relativeDeviation = np.abs(gaps - median) / median
         dicomMeta["sliceSpacingMaxDeviationPercent"] = round(float(relativeDeviation.max()) * 100.0, 2)
-
         outlierMask = relativeDeviation > 0.01
-        if not outlierMask.any():
-            return
-
-        # Count how many times each distinct outlier spacing occurs.
-        counts = collections.Counter(round(float(g), 3) for g in gaps[outlierMask])
-        outlierText = ", ".join(f"{value:g} mm occurred {count}x"
-                                for value, count in sorted(counts.items()))
-        dicomMeta["sliceSpacingOutliers"] = {f"{value:g}": count
-                                             for value, count in sorted(counts.items())}
-        base = (f"Non-uniform slice spacing: the median spacing is {round(median, 3):g} mm, "
-                f"but the following outlier spacings (differing by more than 1% from the median) "
-                f"were found: {outlierText}.")
-        if float(relativeDeviation.max()) > 0.10:
-            message = (base + " The reconstructed volume uses a single average spacing, so its "
-                       "geometry is likely inaccurate.")
-            self.addLog(f"  ERROR: {message}")
-            dicomMeta["sliceSpacingError"] = message
-        else:
-            message = base + " The volume uses the average spacing."
-            self.addLog(f"  WARNING: {message}")
-            dicomMeta["sliceSpacingWarning"] = message
+        if outlierMask.any():
+            # Count how many times each distinct outlier spacing occurs.
+            counts = collections.Counter(round(float(g), 3) for g in gaps[outlierMask])
+            outlierText = ", ".join(f"{value:g} mm occurred {count}x"
+                                    for value, count in sorted(counts.items()))
+            dicomMeta["sliceSpacingOutliers"] = {f"{value:g}": count
+                                                 for value, count in sorted(counts.items())}
+            report(f"Non-uniform slice spacing: the median spacing is {round(median, 3):g} mm, "
+                   f"but the following outlier spacings (differing by more than 1% from the "
+                   f"median) were found: {outlierText}. The reconstructed image uses a single "
+                   "average spacing.", float(relativeDeviation.max()), 0.01, 0.10)
+        return True
 
     def exportDicomFiles(self, store, outputDir):
         """Reconstruct the complete original DICOM files (headers + pixel data) and save them.
@@ -1359,8 +1624,6 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         Files are written to a `dicom` subfolder, one per slice.
         Returns the number of files written.
         """
-        import pydicom
-
         blocks = self._imageBlocks(store)
         nWritten = 0
         for index, block in enumerate(blocks):
@@ -1373,26 +1636,37 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             if len(blocks) > 1:
                 dicomDir = os.path.join(dicomDir,
                                         self._imageName(index, len(blocks), dicomMeta["modality"]))
-            os.makedirs(dicomDir, exist_ok=True)
-            for instanceNumber, ipp, pixels, ds in slices:
-                # Mimics stores the DICOM headers with the pixel data removed (and, for compressed
-                # source images, leaves a compressed transfer syntax on the header). Complete each
-                # file: inject the raw pixels, use a matching uncompressed transfer syntax, and set
-                # the Pixel Data VR according to the bit depth.
-                ds.PixelData = pixels.tobytes()
-                ds["PixelData"].VR = "OW" if int(getattr(ds, "BitsAllocated", 16)) > 8 else "OB"
-                ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
-                path = os.path.join(dicomDir, f"slice_{instanceNumber:04d}.dcm")
-                try:
-                    ds.save_as(path, enforce_file_format=True)
-                except TypeError:
-                    # pydicom < 3.0
-                    ds.save_as(path, write_like_original=False)
-            self.addLog(f"  Saved {len(slices)} original DICOM file(s) to {dicomDir}")
-            nWritten += len(slices)
+            files = self._writeDicomSlices(slices, dicomDir)
+            self.addLog(f"  Saved {len(files)} original DICOM file(s) to {dicomDir}")
+            nWritten += len(files)
         if not nWritten:
             self.addLog("  No DICOM data to export.")
         return nWritten
+
+    @staticmethod
+    def _writeDicomSlices(slices, dicomDir):
+        """Write the complete DICOM file (header + pixel data) of every slice of a block into
+        `dicomDir` (created if needed), one file per slice, and return the file paths."""
+        import pydicom
+
+        os.makedirs(dicomDir, exist_ok=True)
+        files = []
+        for instanceNumber, _ipp, pixels, ds, _geometry in slices:
+            # Mimics stores the DICOM headers with the pixel data removed (and, for compressed
+            # source images, leaves a compressed transfer syntax on the header). Complete each
+            # file: inject the raw pixels, use a matching uncompressed transfer syntax, and set
+            # the Pixel Data VR according to the bit depth.
+            ds.PixelData = pixels.tobytes()
+            ds["PixelData"].VR = "OW" if int(getattr(ds, "BitsAllocated", 16)) > 8 else "OB"
+            ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+            path = os.path.join(dicomDir, f"slice_{instanceNumber:04d}.dcm")
+            try:
+                ds.save_as(path, enforce_file_format=True)
+            except TypeError:
+                # pydicom < 3.0
+                ds.save_as(path, write_like_original=False)
+            files.append(path)
+        return files
 
     # ------------------------------------------------------------------ models
 
@@ -1709,6 +1983,13 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
             path = os.path.join(exportDir, f"{volumeNode.GetName()}.nrrd")
             slicer.util.saveNode(volumeNode, path)
             self.addLog(f"  Saved {path}")
+            # A volume loaded with the DICOM module may carry an acquisition transform that
+            # puts its slices at their true positions; it belongs with the image.
+            transformNode = volumeNode.GetParentTransformNode()
+            if transformNode is not None:
+                path = os.path.join(exportDir, f"{transformNode.GetName()}.h5")
+                slicer.util.saveNode(transformNode, path)
+                self.addLog(f"  Saved {path}")
         for modelNode in modelNodes:
             path = os.path.join(exportDir, f"{modelNode.GetName()}.ply")
             slicer.util.saveNode(modelNode, path)
@@ -1805,6 +2086,7 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
     def runTest(self):
         self.setUp()
         self.testImportImageBlocks()
+        self.testGeometryIssues()
         self.testMxpArchiveLayouts()
         self.delayDisplay("Test passed")
 
@@ -1842,14 +2124,30 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
         return ImportMimicsLogic.PIXEL_DATA_MAGIC + table + b"".join(rows)
 
     @staticmethod
-    def _dicomFiles(sliceCount, rows, columns, modality, firstZ):
-        """Return the DICOM file (preamble + 'DICM' + dataset, no pixel data) of every slice."""
+    def _dicomFiles(sliceCount, rows, columns, modality, firstZ, geometry=None):
+        """Return the DICOM file (preamble + 'DICM' + dataset, no pixel data) of every slice.
+
+        `geometry(k)` may return a dict with any of `position`, `orientation`, `pixelSpacing`
+        to override the regular geometry of slice k (used to build irregular volumes)."""
         import io
         import pydicom
         from pydicom.dataset import Dataset, FileMetaDataset
         files = []
+        # Identification that the DICOM database needs to index the files (the DICOM module
+        # loading route indexes them into a temporary database).
+        studyInstanceUID = pydicom.uid.generate_uid()
+        seriesInstanceUID = pydicom.uid.generate_uid()
         for k in range(sliceCount):
+            override = geometry(k) if geometry else {}
             ds = Dataset()
+            ds.PatientName = "ImportMimics^Test"
+            ds.PatientID = "ImportMimicsTest"
+            ds.StudyInstanceUID = studyInstanceUID
+            ds.SeriesInstanceUID = seriesInstanceUID
+            ds.StudyID = "1"
+            ds.SeriesNumber = 1
+            ds.StudyDate = "20260101"
+            ds.SeriesDescription = f"{modality} test series"
             ds.file_meta = FileMetaDataset()
             ds.file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
             ds.file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
@@ -1858,10 +2156,10 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
             ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID
             ds.Modality = modality
             ds.Rows, ds.Columns = rows, columns
-            ds.PixelSpacing = [0.5, 0.5]
+            ds.PixelSpacing = override.get("pixelSpacing", [0.5, 0.5])
             ds.SliceThickness = 1.0
-            ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
-            ds.ImagePositionPatient = [-10.0, -20.0, firstZ + k]
+            ds.ImageOrientationPatient = override.get("orientation", [1, 0, 0, 0, 1, 0])
+            ds.ImagePositionPatient = override.get("position", [-10.0, -20.0, firstZ + k])
             ds.InstanceNumber = k + 1
             ds.BitsAllocated, ds.BitsStored, ds.PixelRepresentation = 16, 16, 0
             ds.SamplesPerPixel = 1
@@ -1928,9 +2226,11 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
             nextNumber[0] += count
             return list(range(first, first + count))
 
-        for index, (modality, firstZ, volume) in enumerate(blocks):
+        for index, block in enumerate(blocks):
+            modality, firstZ, volume = block[:3]
             sliceCount, rows, columns = volume.shape
-            files = self._dicomFiles(sliceCount, rows, columns, modality, firstZ)
+            files = self._dicomFiles(sliceCount, rows, columns, modality, firstZ,
+                                     block[3] if len(block) > 3 else None)
             slices = [volume[k].tobytes() if k % 2 else self._encodeSlice(volume[k])
                       for k in range(sliceCount)]
             slices = [(ImportMimicsLogic.PIXEL_DATA_MAGIC + s if k % 2 else s)
@@ -2016,6 +2316,123 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
                 self.assertTrue(np.array_equal(slicer.util.arrayFromVolume(node), volume))
                 np.testing.assert_allclose(node.GetSpacing(), (0.5, 0.5, 1.0))
                 np.testing.assert_allclose(node.GetOrigin(), (10.0, 20.0, firstZ))
+            os.remove(path)
+
+    def testGeometryIssues(self):
+        """Irregular slice geometry is reported, and loading with the DICOM module adds an
+        acquisition transform that puts the slices back at their true positions."""
+        import math
+        import tempfile
+        try:
+            import pydicom  # noqa: F401 - only needed to know whether the test can run
+        except ImportError:
+            self.delayDisplay("pydicom is not available; skipping the geometry test.")
+            return
+
+        rng = np.random.default_rng(1)
+        volume = np.clip(np.cumsum(rng.integers(-40, 40, size=(6, 16, 16)), axis=2) + 1500,
+                         0, 0x3FFF).astype("<u2")
+        tilt = math.radians(2.0)
+        axial, tiltedAboutX = [1, 0, 0, 0, 1, 0], [1, 0, 0, 0, math.cos(tilt), math.sin(tilt)]
+        tiltedAboutY, coronal = [math.cos(tilt), 0, -math.sin(tilt), 0, 1, 0], [1, 0, 0, 0, 0, -1]
+        # name -> (geometry override of slice k, expected severity, expected words, whether the
+        # DICOM module needs an acquisition transform to place the slices correctly, the slices
+        # the DICOM reader loads - it leaves out slices whose orientation differs from the
+        # first - and whether the direct reconstruction still holds every slice's pixels)
+        cases = {
+            "nonUniformSpacing": (
+                lambda k: {"position": [-10.0, -20.0, 100.0 + k + (1.0 if k >= 4 else 0.0)]},
+                "error", "Non-uniform slice spacing", True, 6, True),
+            "inPlaneShift": (
+                lambda k: {"position": [-10.0 + (0.3 if k == 3 else 0.0), -20.0, 100.0 + k]},
+                "error", "shifted irregularly within the image plane", True, 6, True),
+            "shear": (
+                lambda k: {"position": [-10.0 + 0.2 * k, -20.0, 100.0 + k]},
+                "warning", "slice axis is tilted", False, 6, True),
+            "nonParallel": (
+                lambda k: {"orientation": tiltedAboutX if k == 4 else axial},
+                "error", "not parallel", False, 5, True),
+            "twoTiltedSlices": (
+                lambda k: {"orientation": {1: tiltedAboutX, 4: tiltedAboutY}.get(k, axial)},
+                "error", "not parallel", False, 4, True),
+            # Two stacks of different orientation in one block (the slices are not a volume).
+            "twoOrientations": (
+                lambda k: {"orientation": axial if k < 3 else coronal,
+                           "position": [-10.0, -20.0, 100.0 + k] if k < 3
+                           else [-10.0, -17.0 + k, 100.0]},
+                "error", "orientation differs by up to 90 degrees", False, 3, False),
+            "pixelSpacing": (
+                lambda k: {"pixelSpacing": [0.52, 0.52] if k == 2 else [0.5, 0.5]},
+                "error", "pixel spacing differs", True, 6, True),
+        }
+
+        for name, (geometry, severity, words, needsTransform, dicomSliceCount,
+                   pixelsIntact) in cases.items():
+            path = os.path.join(tempfile.gettempdir(), "ImportMimicsTest.mcs")
+            self._writeProject(path, [("CT", 100.0, volume, geometry)], "plain")
+            truePositions = np.array([geometry(k).get("position", [-10.0, -20.0, 100.0 + k])
+                                      for k in range(6)]) * [-1, -1, 1]  # LPS -> RAS
+
+            # (loaded with the DICOM module, acquisition transform hardened)
+            for useDicomReader, harden in ((False, False), (True, False), (True, True)):
+                self.setUp()
+                self.delayDisplay(f"Importing a project with {name} ("
+                                  + ("DICOM module, hardened" if harden else
+                                     "DICOM module" if useDicomReader else "direct") + ")")
+                logic = ImportMimicsLogic()
+                exportDir = os.path.join(tempfile.gettempdir(), "ImportMimicsTestExport")
+                volumeNodes, _models, _curves, _markups = logic.importProject(
+                    path, loadIntoScene=True, exportDir=exportDir, exportDicom=False,
+                    saveMetadata=False, useDicomReader=useDicomReader,
+                    hardenAcquisitionTransform=harden)
+                self.assertEqual(len(volumeNodes), 1)
+                volumeNode = volumeNodes[0]
+                transformNode = volumeNode.GetParentTransformNode()
+                if useDicomReader and dicomSliceCount < 6:
+                    self.assertEqual(volumeNode.GetImageData().GetDimensions()[2], dicomSliceCount)
+                    self.assertTrue(any(f"loaded {dicomSliceCount} of the 6 slices" in text
+                                        for _s, text in logic.messages), logic.messages)
+                    continue
+                if pixelsIntact and not (harden and needsTransform):
+                    self.assertTrue(np.array_equal(slicer.util.arrayFromVolume(volumeNode), volume),
+                                    f"{name}: pixels differ (DICOM module: {useDicomReader})")
+
+                # The problem is reported, and the DICOM module is recommended unless it
+                # was used already.
+                self.assertTrue(any(s == severity and words in text
+                                    for s, text in logic.messages), logic.messages)
+                self.assertEqual(any("Load image using DICOM module" in text
+                                     for _s, text in logic.messages), not useDicomReader)
+
+                if not useDicomReader or not needsTransform:
+                    self.assertIsNone(transformNode, name)
+                    continue
+                if harden:
+                    # The transform has been applied to the image: no transform node, and the
+                    # image spans the true slice positions.
+                    self.assertIsNone(transformNode, name)
+                    bounds = [0.0] * 6
+                    volumeNode.GetRASBounds(bounds)
+                    self.assertLess(bounds[4], truePositions[:, 2].min() + 0.01, name)
+                    self.assertGreater(bounds[5], truePositions[:, 2].max() - 0.01, name)
+                    continue
+                self.assertIsNotNone(transformNode, name)
+                # With the transform, every slice origin lands on its true position, also
+                # after the transform has been saved next to the image and loaded back.
+                ijkToRas = vtk.vtkMatrix4x4()
+                volumeNode.GetIJKToRASMatrix(ijkToRas)
+                transformPath = os.path.join(exportDir, f"{transformNode.GetName()}.h5")
+                self.assertTrue(os.path.exists(transformPath))
+                loadedTransformNode = slicer.util.loadTransform(transformPath)
+                for node in (transformNode, loadedTransformNode):
+                    volumeNode.SetAndObserveTransformNodeID(node.GetID())
+                    for k in range(6):
+                        origin = ijkToRas.MultiplyPoint([0, 0, k, 1])[:3]
+                        world = [0.0, 0.0, 0.0]
+                        volumeNode.TransformPointToWorld(origin, world)
+                        distances = np.linalg.norm(truePositions - np.array(world), axis=1)
+                        self.assertLess(distances.min(), 1e-3,
+                                        f"{name}: slice {k} is off with {node.GetName()}")
             os.remove(path)
 
     @staticmethod
