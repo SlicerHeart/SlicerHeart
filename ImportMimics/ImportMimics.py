@@ -1134,11 +1134,26 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         order = list(range(n))
         for _pass in range(maxPasses):
             improved = False
-            # Move single slices to the slot where they fit best.
+            # Move single slices to the slot where they fit best (without the list copies of
+            # bestPlacement: this is the hot loop, run n x 2W times per pass).
             for t in range(n):
-                gain, u, reversed_ = bestPlacement(order, t, t)
-                if u is not None:
-                    relocate(order, t, t, u, reversed_)
+                s = order[t]
+                left = order[t - 1] if t > 0 else None
+                right = order[t + 1] if t < n - 1 else None
+                removal = dist(left, s) + dist(s, right) - dist(left, right)
+                bestGain, bestSlot = 1e-6, None
+                for u in range(max(0, s - W), min(n - 1, s + W) + 1):
+                    if u == t:
+                        continue
+                    # neighbours of slot u in the order with s taken out
+                    newLeft = None if u == 0 else (order[u - 1] if u - 1 < t else order[u])
+                    newRight = None if u == n - 1 else (order[u] if u < t else order[u + 1])
+                    gain = removal - (dist(newLeft, s) + dist(s, newRight) - dist(newLeft, newRight))
+                    if gain > bestGain:
+                        bestGain, bestSlot = gain, u
+                if bestSlot is not None:
+                    order.pop(t)
+                    order.insert(bestSlot, s)
                     improved = True
             # Reverse runs when that lowers the sum.
             for a in range(n - 1):
