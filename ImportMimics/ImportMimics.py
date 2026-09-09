@@ -1050,6 +1050,137 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         }
 
     @staticmethod
+    def _recoverSliceOrder(stack, window=48, maxPasses=60):
+        """Return the order (an index array into `stack`) that makes the slices of a stack
+        most similar to their neighbours, letting every slice move at most `window` positions
+        (and at most half the stack).
+
+        Projects exported for Mimics Viewer name their pixel blobs with GUIDs and store them
+        in the order they were written, which is not the slice order: the slices appear to be
+        compressed by a pool of threads and written as they complete, so every slice ends up
+        near its true position, displaced by up to about the number of threads (32 seen), and
+        the record of the true order is in the encrypted project header. The order is
+        therefore recovered from the images: the sum of the mean absolute differences between
+        consecutive slices (on a downsampled copy) is minimized over the orders that keep every
+        slice within `window` of its stored position. A slice that is out of place by two or
+        more positions shows as a jump in that difference well above the level between true
+        neighbours, so the search moves single slices to where they fit best, reverses runs,
+        and at the largest remaining jumps also reverses or relocates the whole run that
+        starts or ends there (the move that a shuffled or reversed stretch needs). The window
+        rules out far-away matches; the direction of the stack, which the differences cannot
+        tell, is taken from the stored order. On correctly ordered stacks the result is the
+        identity apart from, at most, swaps of near-identical neighbours.
+        """
+        n = stack.shape[0]
+        if n < 3:
+            return np.arange(n)
+        factor = max(1, min(stack.shape[1:]) // 128)
+        flat = stack[:, ::factor, ::factor].reshape(n, -1).astype(np.float32)
+        # A slice never needs to cross the middle of the stack; without that cap the two ends
+        # of a small stack could be joined (a near-black end slice fits at either end, and a
+        # rotating MIP series is cyclic), which shifts the whole volume by a slice.
+        W = max(1, min(window, n // 2))
+        # band[k, off + W] = distance between stored slices k and k + off
+        band = np.full((n, 2 * W + 1), np.inf, dtype=np.float32)
+        for off in range(1, W + 1):
+            d = np.mean(np.abs(flat[:-off] - flat[off:]), axis=1)
+            band[:-off, off + W] = d
+            band[off:, W - off] = d
+
+        def dist(i, j):
+            if i is None or j is None:
+                return 0.0
+            off = j - i
+            return float(band[i, off + W]) if -W <= off <= W else np.inf
+
+        def fits(segment, first):
+            # every slice of the segment stays within the window when placed from `first`
+            return all(abs(s - (first + i)) <= W for i, s in enumerate(segment))
+
+        def bestPlacement(order, start, end):
+            """The best relocation or reversal of the run order[start:end + 1]: returns
+            (gain, insertion slot in the order without the run, reversed)."""
+            segment = order[start:end + 1]
+            left = order[start - 1] if start > 0 else None
+            right = order[end + 1] if end < n - 1 else None
+            removal = dist(left, segment[0]) + dist(segment[-1], right) - dist(left, right)
+            best = (1e-6, None, False)
+            if fits(segment[::-1], start):
+                gain = removal - (dist(left, segment[-1]) + dist(segment[0], right) - dist(left, right))
+                if gain > best[0]:
+                    best = (gain, start, True)
+            rest = order[:start] + order[end + 1:]
+            for u in range(max(0, min(segment) - W), min(len(rest), max(segment) + W) + 1):
+                if u == start:
+                    continue
+                newLeft = rest[u - 1] if u > 0 else None
+                newRight = rest[u] if u < len(rest) else None
+                for reversed_ in (False, True):
+                    placed = segment[::-1] if reversed_ else segment
+                    if not fits(placed, u):
+                        continue
+                    gain = removal - (dist(newLeft, placed[0]) + dist(placed[-1], newRight)
+                                      - dist(newLeft, newRight))
+                    if gain > best[0]:
+                        best = (gain, u, reversed_)
+            return best
+
+        def relocate(order, start, end, u, reversed_):
+            segment = order[start:end + 1]
+            rest = order[:start] + order[end + 1:]
+            placed = segment[::-1] if reversed_ else segment
+            order[:] = rest[:u] + placed + rest[u:]
+
+        order = list(range(n))
+        for _pass in range(maxPasses):
+            improved = False
+            # Move single slices to the slot where they fit best.
+            for t in range(n):
+                gain, u, reversed_ = bestPlacement(order, t, t)
+                if u is not None:
+                    relocate(order, t, t, u, reversed_)
+                    improved = True
+            # Reverse runs when that lowers the sum.
+            for a in range(n - 1):
+                for b in range(a + 1, min(n, a + W)):
+                    segment = order[a:b + 1]
+                    left = order[a - 1] if a > 0 else None
+                    right = order[b + 1] if b < n - 1 else None
+                    if (dist(left, segment[-1]) + dist(segment[0], right)
+                            < dist(left, segment[0]) + dist(segment[-1], right) - 1e-6
+                            and fits(segment[::-1], a)):
+                        order[a:b + 1] = segment[::-1]
+                        improved = True
+            if improved:
+                continue
+            # No single-slice move or reversal helps: at the largest jumps between
+            # neighbours, try reversing or relocating the whole run that starts or ends there.
+            gaps = np.array([dist(order[t], order[t + 1]) for t in range(n - 1)])
+            threshold = 1.3 * float(np.median(gaps))
+            for t in np.argsort(gaps)[::-1][:10]:
+                if gaps[t] < threshold:
+                    break
+                best = (1e-6, None)
+                for start, end in ([(t + 1, t + L) for L in range(2, W + 1)]
+                                   + [(t - L + 1, t) for L in range(2, W + 1)]):
+                    if start < 0 or end > n - 1:
+                        continue
+                    gain, u, reversed_ = bestPlacement(order, start, end)
+                    if u is not None and gain > best[0]:
+                        best = (gain, (start, end, u, reversed_))
+                if best[1] is not None:
+                    relocate(order, *best[1])
+                    improved = True
+                    break
+            if not improved:
+                break
+        order = np.array(order)
+        # The differences cannot tell a stack from its mirror image; keep the stored direction.
+        if np.corrcoef(order, np.arange(n))[0, 1] < 0:
+            order = order[::-1]
+        return order
+
+    @staticmethod
     def _sliceOrder(geometries):
         """Return the indices of the headers of a block in slice order.
 
@@ -1194,19 +1325,36 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
         nSlices = min(nHeaders, len(pixelNames))
         self.addLog(f"  Reconstructing {nSlices} slices...")
 
-        slices = []
-        dicomMeta = None
+        pixelArrays = []
         for k in range(nSlices):
-            ds, geometry = headers[order[k]], geometries[order[k]]
-            rows, cols = int(ds.Rows), int(ds.Columns)
+            ds = headers[order[k]]
             try:
-                pixels = self._decodePixels(store.read(pixelNames[k]), rows, cols)
+                pixelArrays.append(self._decodePixels(store.read(pixelNames[k]),
+                                                      int(ds.Rows), int(ds.Columns)))
             except ValueError as e:
                 # Unsupported pixel storage for this project. Skip image reconstruction rather
                 # than producing a wrong volume.
                 self.addLog(f"  WARNING: pixel data of slice {k} could not be decoded ({e}); "
                             "skipping image reconstruction.")
                 return None, None
+
+        # In a plain project the blob numbers give the slice order of the pixel blobs. In a
+        # project exported for Mimics Viewer nothing does: the blobs are stored in the order
+        # they were written, which is only roughly the slice order (see _recoverSliceOrder).
+        recoveredOrder = None
+        if (not all(self._blobNumber(name) is not None for name in pixelNames)
+                and len({pixels.shape for pixels in pixelArrays}) == 1):
+            recoveredOrder = self._recoverSliceOrder(np.stack(pixelArrays))
+            if np.array_equal(recoveredOrder, np.arange(nSlices)):
+                recoveredOrder = None
+            else:
+                pixelArrays = [pixelArrays[k] for k in recoveredOrder]
+
+        slices = []
+        dicomMeta = None
+        for k in range(nSlices):
+            ds, geometry, pixels = headers[order[k]], geometries[order[k]], pixelArrays[k]
+            rows, cols = int(ds.Rows), int(ds.Columns)
             ipp = np.array(geometry["imagePositionPatient"], dtype=float)
             instanceNumber = int(getattr(ds, "InstanceNumber", k + 1))
             slices.append((instanceNumber, ipp, pixels, ds, geometry))
@@ -1233,6 +1381,18 @@ class ImportMimicsLogic(ScriptedLoadableModuleLogic):
                     "imagePositionPatientFirst": geometry["imagePositionPatient"],
                     "sliceThickness": geometry["sliceThickness"],
                 }
+
+        if recoveredOrder is not None:
+            displacement = np.abs(recoveredOrder - np.arange(nSlices))
+            moved = int(np.sum(displacement > 0))
+            message = (f"The pixel data of {moved} of the {nSlices} slices was stored out of "
+                       "order (the blobs carry no slice numbers). The slice order was recovered "
+                       "from the similarity of neighbouring slices, moving slices by up to "
+                       f"{int(displacement.max())} positions; please verify the image.")
+            self.addLog(f"  WARNING: {message}")
+            dicomMeta.setdefault("geometryWarnings", []).append(message)
+            dicomMeta["sliceOrderRecovered"] = {"movedSlices": moved,
+                                                "maxDisplacement": int(displacement.max())}
 
         # Order slices spatially by projection onto the slice normal.
         iop = np.array(dicomMeta["imageOrientationPatient"], dtype=float)
@@ -2086,6 +2246,7 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
     def runTest(self):
         self.setUp()
         self.testImportImageBlocks()
+        self.testRecoveredSliceOrder()
         self.testGeometryIssues()
         self.testMxpArchiveLayouts()
         self.delayDisplay("Test passed")
@@ -2186,7 +2347,8 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
 
         - `viewer`: a project exported for Mimics Viewer - every blob named with a GUID, a
           header blob (with a few bytes of Mimics' own before the first DICOM preamble)
-          followed by the pixel blobs of the block and an extra blob that is not a slice;
+          followed by the pixel blobs of the block (in the order given as the block's fifth
+          element, if any) and an extra blob that is not a slice;
         - `plain`: a plain Mimics project - `blob_N` names, the headers stored in import order
           (which is not the slice order) and again in slice order, the pixel blobs numbered in
           slice order after the header but stored out of order (one of them was rewritten on
@@ -2231,6 +2393,9 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
             sliceCount, rows, columns = volume.shape
             files = self._dicomFiles(sliceCount, rows, columns, modality, firstZ,
                                      block[3] if len(block) > 3 else None)
+            # The order in which the pixel blobs are stored (viewer layout): slice order unless
+            # the block says otherwise.
+            storedOrder = block[4] if len(block) > 4 else range(sliceCount)
             slices = [volume[k].tobytes() if k % 2 else self._encodeSlice(volume[k])
                       for k in range(sliceCount)]
             slices = [(ImportMimicsLogic.PIXEL_DATA_MAGIC + s if k % 2 else s)
@@ -2239,8 +2404,8 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
             if layout == "viewer":
                 add(f"ImageBlockPngPreview-0x{index:08X}", b"\x00" * 8 + b"\x89PNG")
                 add(str(uuid.uuid4()), b"\x00" * 8 + b"".join(files))
-                for data in slices:
-                    add(str(uuid.uuid4()), data)
+                for k in storedOrder:
+                    add(str(uuid.uuid4()), slices[k])
                 # A block is followed by extra blobs that are not slices.
                 add(str(uuid.uuid4()), ImportMimicsLogic.PIXEL_DATA_MAGIC + b"\x00" * 999)
             elif layout == "plain":
@@ -2292,9 +2457,12 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
 
         def makeVolume(sliceCount, rows, columns):
             # Smooth along the rows so most differences fit in a byte, with jumps that force the
-            # decoder through its absolute-value escape as well.
-            volume = np.cumsum(rng.integers(-40, 40, size=(sliceCount, rows, columns)), axis=2)
-            volume[:, ::5, ::4] += 900
+            # decoder through its absolute-value escape as well; every slice is the previous one
+            # shifted by a column, so that neighbouring slices resemble each other (the slice
+            # order of a Mimics Viewer project is recovered from that resemblance).
+            base = np.cumsum(rng.integers(-40, 40, size=(rows, columns)), axis=1)
+            base[::5, ::4] += 900
+            volume = np.stack([np.roll(base, k, axis=1) + 7 * k for k in range(sliceCount)])
             return np.clip(volume + 1500, 0, 0x3FFF).astype("<u2")
 
         for layout in ("viewer", "plain", "perSlice"):
@@ -2317,6 +2485,40 @@ class ImportMimicsTest(ScriptedLoadableModuleTest):
                 np.testing.assert_allclose(node.GetSpacing(), (0.5, 0.5, 1.0))
                 np.testing.assert_allclose(node.GetOrigin(), (10.0, 20.0, firstZ))
             os.remove(path)
+
+    def testRecoveredSliceOrder(self):
+        """A Mimics Viewer project whose pixel blobs are stored out of order (as written by a
+        thread pool) is reconstructed with the slices back in place."""
+        import tempfile
+        try:
+            import pydicom  # noqa: F401 - only needed to know whether the test can run
+        except ImportError:
+            self.delayDisplay("pydicom is not available; skipping the slice order test.")
+            return
+        rng = np.random.default_rng(2)
+        # Slices that resemble their neighbours more than any other slice: a blob that drifts
+        # along the stack and an intensity ramp (nothing periodic).
+        sliceCount, size = 24, 32
+        y, x = np.mgrid[0:size, 0:size]
+        volume = np.stack([1000 + 800 * np.exp(-((x - 8 - k * 0.6) ** 2 + (y - 12 - k * 0.3) ** 2) / 40.0)
+                           + 25 * k + rng.integers(0, 20, (size, size))
+                           for k in range(sliceCount)]).astype("<u2")
+        # Stored order: completion order of a pool of 6 threads.
+        stored = np.argsort(np.arange(sliceCount) + rng.uniform(0, 6, sliceCount))
+        self.assertGreater(np.abs(stored - np.arange(sliceCount)).max(), 1)
+
+        self.setUp()
+        self.delayDisplay("Importing a Mimics Viewer project with scrambled pixel blobs")
+        path = os.path.join(tempfile.gettempdir(), "ImportMimicsTest.mcs")
+        self._writeProject(path, [("CT", 100.0, volume, None, stored)], "viewer")
+        logic = ImportMimicsLogic()
+        volumeNodes, _models, _curves, _markups = logic.importProject(
+            path, loadIntoScene=True, exportDir=None, exportDicom=False, saveMetadata=False)
+        self.assertEqual(len(volumeNodes), 1)
+        self.assertTrue(np.array_equal(slicer.util.arrayFromVolume(volumeNodes[0]), volume))
+        self.assertTrue(any("stored out of order" in text for _s, text in logic.messages),
+                        logic.messages)
+        os.remove(path)
 
     def testGeometryIssues(self):
         """Irregular slice geometry is reported, and loading with the DICOM module adds an

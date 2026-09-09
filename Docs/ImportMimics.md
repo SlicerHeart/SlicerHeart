@@ -122,6 +122,10 @@ All options are remembered between sessions (stored in the application settings)
   lines).
 - The mesh coordinate scale (`1e-4` mm) and the header/pixel pairing were determined empirically
   from sample files; unusual projects may need adjustment.
+- In projects exported for Mimics Viewer the slice order of the pixel data is recovered from
+  image similarity (see the format notes below), which is a heuristic: it recovered every
+  slice exactly in tests, but a stack whose neighbouring slices do not resemble each other more
+  than distant ones could be ordered wrongly; the warning asks to verify the image.
 - The direct image reconstruction places the slices at a uniform spacing with the geometry of
   the first slice and does not apply the DICOM rescale slope/intercept; use the *Load image
   using DICOM module* option for irregular geometry or calibrated intensities.
@@ -214,7 +218,15 @@ Relevant blobs (shared between the formats unless noted):
   order was used. A project exported for **Mimics Viewer** names every blob with a GUID, so
   there only the storage order groups a block together: a header blob starts a block and the
   pixel blobs that follow belong to it (a block may be followed by extra blobs, such as a
-  downsampled preview of the block, which the DICOM instance count excludes).
+  downsampled preview of the block, which the DICOM instance count excludes). The storage
+  order of those pixel blobs is only roughly the slice order: the slices appear to be
+  compressed by a pool of threads and written as they complete, so a slice can be displaced
+  by up to about the number of threads (32 seen), and the true order is recorded only in the
+  encrypted project header. The module therefore **recovers the slice order from the images**
+  for GUID-named blocks: it finds the order that minimizes the differences between
+  neighbouring slices, letting every slice move at most 48 positions from where it is stored
+  (which keeps the direction of the stack). A recovered order is reported as a geometry
+  warning with the number of slices moved.
 - **Pixel data** (`.mcs`) - each pixel blob starts with a 4-byte `MMFD` magic. The pixels then
   follow either uncompressed (`Rows*Columns*2` bytes of little-endian 16-bit pixels) or, where
   that is smaller, **row-compressed**: a table of `Rows` little-endian `uint16` compressed row
