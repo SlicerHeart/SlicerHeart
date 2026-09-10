@@ -91,6 +91,7 @@ add_subdirectory(ValveMoldCreator)
 add_subdirectory(VirtualCathLab)
 add_subdirectory(ValveFemExport)
 add_subdirectory(ImportMimics)
+add_subdirectory(ImportExportSimulationModel)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

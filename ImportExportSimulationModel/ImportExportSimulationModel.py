@@ -446,6 +446,8 @@ This module imports simulation meshes (surface or volumetric) into the scene and
 from the scene, converting between coordinate systems and unit systems. Several files can be
 imported at once, and several models can be selected for export in the subject hierarchy tree:
 each of them is written to a separate file in the output folder, named after the model.
+<p>See the <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/ImportExportSimulationModel.md">module documentation</a>
+for details on unit guessing, conversion rules, stored unit information, and supported file formats.</p>
 
 <b>Coordinate system:</b> models are always stored in the scene in <b>RAS</b>. If the file uses
 <b>LPS</b> (the default assumption, unless the file specifies the coordinate system) then the

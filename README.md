@@ -34,6 +34,7 @@ The extension currently includes the following features (new features are added 
   - [Baffle planner](Docs/BafflePlanner.md): modeling tool for virtual planning of intracardiac baffle - or any other thin curved surfaces in any clinical specialties (for example, cranial flaps).
 - Simulation:
   - [Valve FEM export](Docs/ValveFemExport.md): export heart valve leaflet surfaces and branching chordae tendineae as a finite element method (FEM) model, for simulation of valve closure in FEBio.
+  - [Import/export simulation model](Docs/ImportExportSimulationModel.md): import simulation meshes (surface or volumetric) into the scene and export models to simulation software (svFSI/SimVascular, FEBio, ...), converting between coordinate systems (RAS/LPS) and unit systems (CGS/mm-g-s), including rotation of vector and tensor arrays and scaling of every data array by its unit.
 - Electrophysiology:
   - [EA Map Reader](Docs/EAMapReader.md): read electroanatomical maps from NavX, Carto3, or Rhythmia mapping systems
 
