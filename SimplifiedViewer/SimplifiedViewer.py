@@ -700,7 +700,7 @@ class SimplifiedViewerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             playbackActive = True
 
         palette = slicer.app.palette()
-        sizePx = 192
+        sizePx = 32
         color = palette.color(qt.QPalette.Text)
 
         # Vectors and icons by Css.gg: https://github.com/astrit/css.gg?ref=svgrepo.com
