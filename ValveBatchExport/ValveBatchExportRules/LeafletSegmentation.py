@@ -107,6 +107,8 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
         continue
       showOnlySegmentWithSegmentID(segmentationNode, segmentID)
       segmentName = segmentationNode.GetSegmentation().GetSegment(segmentID).GetName()
+      # NB: hardcoded to make sure "/"" is replaced in segment names
+      segmentName = segmentName.replace("/", "")
       filenamePrefix = f"{prefix}_{segmentName.replace(' ', '_')}"
       if self.EXPORT_SEGMENTS_AS_LABELMAP:
         segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode,
