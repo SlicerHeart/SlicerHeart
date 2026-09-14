@@ -105,6 +105,8 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
       showOnlySegmentWithSegmentID(segmentationNode, segmentID)
       segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode)
       segmentName = segmentationNode.GetSegmentation().GetSegment(segmentID).GetName()
+      # NB: hardcoded to make sure "/"" is replaced in segment names
+      segmentName = segmentName.replace("/", "")
       filename = f"{prefix}_{segmentName.replace(' ', '_')}.nii.gz"
       slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename))
 
