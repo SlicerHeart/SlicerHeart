@@ -1,3 +1,4 @@
+import contextlib
 import logging
 
 import slicer
@@ -24,6 +25,11 @@ class Converter4DSequences(ScriptedLoadableModule):
     """Minimal module exposing HeartValve migration utilities."""
     AUTO_CONVERT_SETTING_KEY = "Converter4DSequences/AutoConvert"
 
+    # Set while another module (e.g. ValveBatchExport) loads scenes and runs the conversion itself.
+    # The observer below defers the conversion to the event loop, so without this it would run
+    # after - or in the middle of - the loader's own processing of the scene.
+    autoConvertSuspended = False
+
     def __init__(self, parent):
         super().__init__(parent)
         self.parent.title = "Converter4DSequences"
@@ -47,8 +53,26 @@ class Converter4DSequences(ScriptedLoadableModule):
                 slicer.mrmlScene.EndImportEvent, self.onSceneLoaded
             )
 
+    @staticmethod
+    @contextlib.contextmanager
+    def suspendAutoConvert():
+        """Disable the automatic conversion on scene load for the duration of the block.
+
+        Use this when loading scenes programmatically and converting them explicitly, so that the
+        deferred auto-conversion cannot run concurrently with the caller's own scene processing.
+        """
+        previous = Converter4DSequences.autoConvertSuspended
+        Converter4DSequences.autoConvertSuspended = True
+        try:
+            yield
+        finally:
+            Converter4DSequences.autoConvertSuspended = previous
+
     def onSceneLoaded(self, caller, event):
         """Called when a scene has been loaded."""
+        if Converter4DSequences.autoConvertSuspended:
+            logging.debug("Scene loaded - automatic conversion is suspended, skipping")
+            return
         autoConvert = slicer.util.settingsValue(self.AUTO_CONVERT_SETTING_KEY, False, converter=slicer.util.toBool)
         if autoConvert:
             logging.info("Scene loaded - performing automatic conversion")
@@ -56,7 +80,14 @@ class Converter4DSequences(ScriptedLoadableModule):
             if self.logic is None:
                 self.logic = Converter4DSequencesLogic()
             # Use QTimer to defer conversion until after scene is fully initialized
-            qt.QTimer.singleShot(100, lambda: self.logic.performFullConversion(showMessage=False))
+            qt.QTimer.singleShot(100, self._performDeferredConversion)
+
+    def _performDeferredConversion(self):
+        # Re-check: suspension may have been requested after this conversion was scheduled.
+        if Converter4DSequences.autoConvertSuspended:
+            logging.debug("Automatic conversion is suspended, skipping deferred conversion")
+            return
+        self.logic.performFullConversion(showMessage=False)
 
 
 class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
@@ -185,9 +216,15 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
 
 
 class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
-    def performFullConversion(self, showMessage=True):
-        """Perform full conversion of all nodes. Orchestrates individual conversion methods."""
-        with slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True):
+    def performFullConversion(self, showMessage=True, interactive=True):
+        """Perform full conversion of all nodes. Orchestrates individual conversion methods.
+
+        With interactive=False no dialogs are shown and errors are raised to the caller instead of
+        being reported in a modal dialog (which would block a batch process running without a user).
+        """
+        errorDisplay = slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True) \
+            if interactive else contextlib.nullcontext()
+        with errorDisplay:
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
                 # Capture each measurement's phase/time point BEFORE the valve conversion below

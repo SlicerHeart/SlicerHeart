@@ -351,6 +351,14 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       self.completedCallback()
 
   def exportMRBFile(self, filePath, outputDirPath):
+    from Converter4DSequences import Converter4DSequences
+    # The export rules expect the multi-frame sequence format, and the scene is converted explicitly
+    # below. Suspend the automatic conversion on scene load, which is deferred to the event loop and
+    # would otherwise run while (or after) the rules process the scene.
+    with Converter4DSequences.suspendAutoConvert():
+      self._exportMRBFile(filePath, outputDirPath)
+
+  def _exportMRBFile(self, filePath, outputDirPath):
     if not isMRBFile(filePath):
       self.addLog(f'  {filePath} is not a mrb file. Skipped.')
       return
@@ -392,6 +400,8 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       # slicer.mrmlScene.Clear(False)
       # return
 
+    self.convertSceneToSequenceFormat()
+
     self.addLog('  Collecting data...')
 
     for rule in self._exportRules:
@@ -405,6 +415,19 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self.addLog('Writing results...')
     for rule in self._exportRules:
       rule.processEnd()
+
+  def convertSceneToSequenceFormat(self):
+    """Convert legacy (single frame) HeartValve nodes of the loaded scene to the multi-frame sequence
+    format expected by the export rules. Already converted scenes are left unchanged.
+    """
+    from Converter4DSequences import Converter4DSequencesLogic
+    self.addLog('  Converting scene to sequence format...')
+    try:
+      Converter4DSequencesLogic().performFullConversion(showMessage=False, interactive=False)
+    except Exception as e:
+      self.addLog(f'  Warning: conversion to sequence format failed: {e}')
+      import traceback
+      traceback.print_exc()
 
 
 class ProcessesLogic(object):
