@@ -1581,23 +1581,21 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                 affectedBrowserIDs.add(valveBrowserNode.GetID())
 
-                # One measurement sequence for this valve/preset
+                # MissingItemIgnore: a measurement only covers the analyzed phase(s), and the default
+                # mode would blank the proxy (losing its attributes) on every other frame.
                 measurementSequenceNode = self._createSequenceForNode(
                     valveBrowserNode,
                     f"{preset}-Measurement_Sequence",
                     volumeSequenceNode.GetIndexName(),
                     volumeSequenceNode.GetIndexUnit(),
-                    volumeSequenceNode.GetIndexType())
+                    volumeSequenceNode.GetIndexType(),
+                    missingItemMode=slicer.vtkMRMLSequenceBrowserNode.MissingItemIgnore)
 
-                # The valve proxy (already redirected onto each measurement's valve role by the valve
-                # conversion). Storing a measurement in a sequence strips ALL its node references (the
-                # sequence's internal scene is self-contained), so the measurement->valve link is lost on
-                # the stored copy. We record which roles point at the valve proxy here and re-apply them
-                # to the measurement proxy after it is created (references between proxies of the same
-                # browser are preserved across frame changes).
+                # Storing in a sequence strips all node references, so record every valve role here
+                # and re-apply it to the proxy below. Multi-valve presets (e.g. RightVentricle) also
+                # reference valves owned by other browsers, so match on any HeartValve node.
                 valveProxyNode = valveBrowserNode.GetProxyNode(valveBrowserNode.GetMasterSequenceNode())
-                valveProxyID = valveProxyNode.GetID() if valveProxyNode else None
-                valveRoles = set()
+                valveRoleTargets = {}
 
                 # One table sequence per referenced (role, refIndex), populated across all phases
                 tableSequencesByRole = {}
@@ -1609,14 +1607,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     if measurementNode.GetHideFromEditors():
                         measurementNode.SetHideFromEditors(False)
 
-                    # Record every role that references the valve proxy so it can be restored on the
+                    # Record every role that references a heart valve so it can be restored on the
                     # measurement proxy below (the reference is dropped by SetDataNodeAtValue).
-                    if valveProxyID:
-                        vroles = []
-                        measurementNode.GetNodeReferenceRoles(vroles)
-                        for vrole in vroles:
-                            if measurementNode.GetNodeReferenceID(vrole) == valveProxyID:
-                                valveRoles.add(vrole)
+                    vroles = []
+                    measurementNode.GetNodeReferenceRoles(vroles)
+                    for vrole in vroles:
+                        referencedNode = measurementNode.GetNodeReference(vrole)
+                        if referencedNode and referencedNode.GetAttribute("ModuleName") == "HeartValve":
+                            valveRoleTargets[vrole] = referencedNode.GetID()
 
                     for indexValue in indexValues:
                         measurementSequenceNode.SetDataNodeAtValue(measurementNode, indexValue)
@@ -1635,12 +1633,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                             roleKey = (role, refIndex)
                             tableSequenceNode = tableSequencesByRole.get(roleKey)
                             if tableSequenceNode is None:
+                                # MissingItemIgnore, as for the measurement sequence above.
                                 tableSequenceNode = self._createSequenceForNode(
                                     valveBrowserNode,
                                     f"{tableNode.GetName()}_Sequence",
                                     volumeSequenceNode.GetIndexName(),
                                     volumeSequenceNode.GetIndexUnit(),
-                                    volumeSequenceNode.GetIndexType())
+                                    volumeSequenceNode.GetIndexType(),
+                                    missingItemMode=slicer.vtkMRMLSequenceBrowserNode.MissingItemIgnore)
                                 tableSequencesByRole[roleKey] = tableSequenceNode
                             for indexValue in indexValues:
                                 tableSequenceNode.SetDataNodeAtValue(tableNode, indexValue)
@@ -1655,8 +1655,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # Restore the measurement->valve reference(s) dropped when the measurement was stored
                     # in the sequence, pointing them at the valve proxy. Without this the Valve
                     # Quantification "valve" dropdown shows "None" for the converted measurement.
-                    for role in valveRoles:
-                        measurementProxyNode.SetNodeReferenceID(role, valveProxyID)
+                    for role, valveNodeID in valveRoleTargets.items():
+                        measurementProxyNode.SetNodeReferenceID(role, valveNodeID)
 
                     for (role, refIndex), tableSequenceNode in tableSequencesByRole.items():
                         tableProxyNode = valveBrowserNode.GetProxyNode(tableSequenceNode)
