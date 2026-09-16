@@ -405,16 +405,25 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self.addLog('  Collecting data...')
 
     for rule in self._exportRules:
-      rule.processScene(filePath)
+      self._runRuleStep(rule, rule.processScene, filePath)
 
     for rule in self._exportRules:
-      rule.afterProcessScene(filePath)
+      self._runRuleStep(rule, rule.afterProcessScene, filePath)
 
     slicer.mrmlScene.Clear(False)
 
     self.addLog('Writing results...')
     for rule in self._exportRules:
-      rule.processEnd()
+      self._runRuleStep(rule, rule.processEnd)
+
+  def _runRuleStep(self, rule, method, *args):
+    """Run one export rule step. A failing rule must not prevent the remaining rules from running."""
+    try:
+      method(*args)
+    except Exception as e:
+      self.addLog(f'  Error: {type(rule).__name__}.{method.__name__} failed: {e}')
+      import traceback
+      traceback.print_exc()
 
   def convertSceneToSequenceFormat(self):
     """Convert legacy (single frame) HeartValve nodes of the loaded scene to the multi-frame sequence
