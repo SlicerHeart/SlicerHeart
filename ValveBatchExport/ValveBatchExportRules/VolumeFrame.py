@@ -37,7 +37,7 @@ class ValveVolumeFrameExportRule(ValveBatchExportRule):
     for valveModel in self.getHeartValveModelNodes():
 
       sequenceBrowserNode = valveModel.valveBrowserNode
-      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+      for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
         sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
 
         filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
