@@ -11,13 +11,12 @@ def getBinaryLabelmapRepresentation(segmentationNode, segmentID: str):
 
 
 def getSpecificHeartValveModelNodes(phases: list):
-  heartValveModelNodes = []
+  """ Generator: see getValveModelNodesMatchingPhase for why results must be consumed one at a time. """
   for phase in phases:
     try:
-      heartValveModelNodes.extend(list(getValveModelNodesMatchingPhase(phase)))
+      yield from getValveModelNodesMatchingPhase(phase)
     except ValueError as exc:
       logging.warning(exc)
-  return heartValveModelNodes
 
 
 def getSpecificHeartValveModelNodesMatchingPhaseAndType(phases: list, valveType: str, sort:bool=True):
@@ -70,10 +69,50 @@ def getFirstValveModelNodeMatchingSequenceIndexAndValveType(seqIdx: int, valveTy
   raise ValueError(f"Could not find valve of type '{valveType}' for sequence index {seqIdx}")
 
 
+def getValveBrowserNode(valveNode):
+  """ Sequence browser driving valveNode, or None if the scene is not in sequence format. """
+  return slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(valveNode)
+
+
+def getValveTimePointsMatchingPhase(valveNode, phase):
+  """ Browser item numbers whose stored valve is annotated with the given phase short name. """
+  from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
+  browserNode = getValveBrowserNode(valveNode)
+  if not browserNode:
+    return []
+  sequenceNode = browserNode.GetSequenceNode(valveNode)
+  masterSequenceNode = browserNode.GetMasterSequenceNode()
+  if not sequenceNode or not masterSequenceNode:
+    return []
+  itemNumbers = []
+  for index in range(sequenceNode.GetNumberOfDataNodes()):
+    cardiacCyclePhase = sequenceNode.GetNthDataNode(index).GetAttribute("CardiacCyclePhase")
+    preset = CARDIAC_CYCLE_PHASE_PRESETS.get(cardiacCyclePhase) if cardiacCyclePhase else None
+    if preset and preset["shortname"] == phase:
+      itemNumber = masterSequenceNode.GetItemNumberFromIndexValue(sequenceNode.GetNthIndexValue(index), False)
+      if itemNumber >= 0:
+        itemNumbers.append(itemNumber)
+  return itemNumbers
+
+
 def getValveModelNodesMatchingPhase(phase):
+  """ Yield a valve model for every valve annotated with the given phase short name.
+
+  In sequence scenes a valve type has a single proxy node whose CardiacCyclePhase reflects the frame
+  the browser is on, so the browser is moved to the matching time point before yielding. Results must
+  therefore be consumed one at a time - the proxy node is reused across iterations.
+  """
+  import HeartValves
   for valveModelNode in getAllHeartValveModelNodes():
-    if getValvePhaseShortName(valveModelNode) == phase:
-      yield valveModelNode
+    valveNode = valveModelNode.heartValveNode
+    browserNode = getValveBrowserNode(valveNode)
+    if not browserNode:
+      if getValvePhaseShortName(valveModelNode) == phase:
+        yield valveModelNode
+      continue
+    for itemNumber in getValveTimePointsMatchingPhase(valveNode, phase):
+      browserNode.SetSelectedItemNumber(itemNumber)
+      yield HeartValves.getValveModel(valveNode)
 
 
 def getFirstValveModelNodeMatchingPhaseAndType(phase, valveType):

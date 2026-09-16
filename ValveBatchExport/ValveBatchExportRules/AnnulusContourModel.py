@@ -54,7 +54,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
     for valveModel in self.getHeartValveModelNodes():
 
       sequenceBrowserNode = valveModel.valveBrowserNode
-      for annotatedFrameNumber in range(sequenceBrowserNode.GetNumberOfItems()):
+      for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
         sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
 
         frameNumber = self.getAssociatedFrameNumber(valveModel)
