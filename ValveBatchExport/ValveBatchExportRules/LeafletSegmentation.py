@@ -108,7 +108,9 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
       # NB: hardcoded to make sure "/"" is replaced in segment names
       segmentName = segmentName.replace("/", "")
       filename = f"{prefix}_{segmentName.replace(' ', '_')}.nii.gz"
-      slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename))
+      if not slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename)):
+        self.addLog(f"  Leaflet segment export skipped (file writing failed) - {filename}")
+      slicer.mrmlScene.RemoveNode(labelNode)
 
 
 def getAllSegmentNames(segmentationNode):
@@ -149,15 +151,25 @@ def getLeafletOrderDefinition(valveType):
 
 
 def checkAndSortSegments(segmentationNode, valveType):
+  """Sort segments into the expected leaflet order. Returns a log message (empty if nothing to report).
+
+  Segments that cannot be matched to the expected leaflet order are left untouched so that the
+  segmentation can still be exported.
+  """
   from HeartValveLib.util import getAllSegmentIDs
-  expectedOrder = getLeafletOrderDefinition(valveType)
+  try:
+    expectedOrder = getLeafletOrderDefinition(valveType)
+  except ValueError as exc:
+    return f"  Segments not sorted: {exc}"
   segmentIDs = getAllSegmentIDs(segmentationNode)
   segmentNames = getAllSegmentNames(segmentationNode)
-  message = ""
-  if not isSorted(expectedOrder, segmentIDs) or not isSorted(expectedOrder, segmentNames):
-    message = "Leaflet names don't match up with segment IDs. Sorting segments."
+  if isSorted(expectedOrder, segmentIDs) and isSorted(expectedOrder, segmentNames):
+    return ""
+  try:
     sortSegments(segmentationNode, valveType)
-  return message
+  except ValueError as exc:
+    return f"  Segments not sorted: {exc}"
+  return "Leaflet names don't match up with segment IDs. Sorting segments."
 
 
 def isSorted(expectedOrder : list, currentOrder : list) -> bool:
@@ -167,6 +179,8 @@ def isSorted(expectedOrder : list, currentOrder : list) -> bool:
   :param currentOrder: list of strings to check for order
   :return: true if ordered, otherwise false
   """
+  if len(currentOrder) < len(expectedOrder):
+    return False
   return all(expectedOrder[i] in currentOrder[i] for i in range(len(expectedOrder)))
 
 
