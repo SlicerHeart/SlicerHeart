@@ -52,17 +52,17 @@ class ValveVolumeFrameExportRule(ValveBatchExportRule):
         volumeSequenceBrowserNode = HeartValveLib.HeartValves.getSequenceBrowserNodeForMasterOutputNode(volumeNode)
         volumeSequenceNode = \
           volumeSequenceBrowserNode.GetMasterSequenceNode() if volumeSequenceBrowserNode is not None else None
-        storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLNRRDStorageNode")
+        storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVolumeArchetypeStorageNode")
         if volumeSequenceNode is None:
           # valve volume is not part of a sequence
-          storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nrrd"))
+          storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nii.gz"))
           nodeToWrite = volumeNode
         else:  # save specific frame of the current valve model
           frameNumber = self.getAssociatedFrameNumber(valveModel)
           self.setSequenceFrameNumber(valveModel, frameNumber)
           valveModelName = \
             self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, suffix="volume")
-          storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nrrd"))
+          storageNode.SetFileName(os.path.join(self.outputDir, f"{valveModelName}.nii.gz"))
           nodeToWrite = valveModel.getValveVolumeNode()
 
         if not storageNode.WriteData(nodeToWrite):
