@@ -3,7 +3,7 @@ import qt
 import vtk
 import logging
 import slicer
-from HeartValveLib.helpers import getAllHeartValveModelNodes, getSpecificHeartValveModelNodes
+from HeartValveLib.helpers import getAllHeartValveModelNodes, getValveTimePointsMatchingPhase
 from typing import Union
 
 
@@ -181,11 +181,27 @@ class ValveBatchExportRule(object):
     raise NotImplementedError("Method needs to be implemented if class member `USER_INTERFACE` set to True")
 
   def getHeartValveModelNodes(self):
-    valveModels = getSpecificHeartValveModelNodes(self.EXPORT_PHASES) if self.EXPORT_PHASES else getAllHeartValveModelNodes()
+    # Phase is not filtered here: in sequence scenes a valve type has one proxy node, and the phase
+    # belongs to the individual time points (see getExportedTimePoints).
+    valveModels = getAllHeartValveModelNodes()
     if self.EXPORT_VALVE_TYPES:
-      return list(filter(lambda vm: vm.getValveType() in self.EXPORT_VALVE_TYPES, valveModels))
+      return (vm for vm in valveModels if vm.getValveType() in self.EXPORT_VALVE_TYPES)
     else:
       return valveModels
+
+  def getExportedTimePoints(self, valveModel):
+    """ Browser item numbers to export: every time point annotated with one of EXPORT_PHASES, or all
+    time points when no phase is selected. """
+    browserNode = valveModel.valveBrowserNode
+    if browserNode is None:
+      logging.warning(f"Valve {valveModel.getValveType()} has no sequence browser, skipping")
+      return []
+    if not self.EXPORT_PHASES:
+      return list(range(browserNode.GetNumberOfItems()))
+    itemNumbers = set()
+    for phase in self.EXPORT_PHASES:
+      itemNumbers.update(getValveTimePointsMatchingPhase(valveModel.heartValveNode, phase))
+    return sorted(itemNumbers)
 
   def addLog(self, text):
     logging.info(text)
