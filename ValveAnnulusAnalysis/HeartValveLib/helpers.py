@@ -86,7 +86,12 @@ def getValveTimePointsMatchingPhase(valveNode, phase):
     return []
   itemNumbers = []
   for index in range(sequenceNode.GetNumberOfDataNodes()):
-    cardiacCyclePhase = sequenceNode.GetNthDataNode(index).GetAttribute("CardiacCyclePhase")
+    dataNode = sequenceNode.GetNthDataNode(index)
+    if dataNode is None:
+      # Sequence reports the item but its stored node is missing, e.g. data that failed to load.
+      logging.warning(f"{sequenceNode.GetName()} has no data node at item {index}, skipping")
+      continue
+    cardiacCyclePhase = dataNode.GetAttribute("CardiacCyclePhase")
     preset = CARDIAC_CYCLE_PHASE_PRESETS.get(cardiacCyclePhase) if cardiacCyclePhase else None
     if preset and preset["shortname"] == phase:
       itemNumber = masterSequenceNode.GetItemNumberFromIndexValue(sequenceNode.GetNthIndexValue(index), False)
