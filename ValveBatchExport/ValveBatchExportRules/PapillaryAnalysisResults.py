@@ -85,18 +85,17 @@ class PapillaryAnalysisResultsExportRule(ValveBatchExportRule):
     if measurementNodes:
       self._processScene(sceneFileName, measurementNodes)
     else:
+      # One temporary measurement node per valve: its time points are iterated in _processScene
       for valveModel in getAllHeartValveModelNodes():
-        for timePoint in self.iterateExportedTimePoints(valveModel):
-          cardiacCyclePhase = valveModel.getCardiacCyclePhase()
-          shortname = valveModel.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
-          if shortname in self.EXPORT_PHASES:
-            logging.info(f"Creating temporary papillary measurement node for {shortname}")
-            try:
-              tempMeasurementNode = self.createTemporaryPMHeartValveNode(valveModel)
-            except Exception as exc:
-              logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
-              continue
-            measurementNodes.append(tempMeasurementNode)
+        if not self.getExportedTimePoints(valveModel):
+          continue
+        logging.info(f"Creating temporary papillary measurement node for {valveModel.getValveType()} valve")
+        try:
+          tempMeasurementNode = self.createTemporaryPMHeartValveNode(valveModel)
+        except Exception as exc:
+          logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
+          continue
+        measurementNodes.append(tempMeasurementNode)
 
       self._processScene(sceneFileName, measurementNodes)
 
@@ -105,40 +104,28 @@ class PapillaryAnalysisResultsExportRule(ValveBatchExportRule):
 
   def _processScene(self, sceneFileName, measurementNodes):
     for measurementNode in measurementNodes:
-      cardiacCyclePhaseNames = self.valveQuantificationLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode)
-      cardiacCyclePhaseName = ''
-      if len(cardiacCyclePhaseNames) == 1:
-        cardiacCyclePhaseName = cardiacCyclePhaseNames[0]
-        if not cardiacCyclePhaseName in self.EXPORT_PHASES:
-          continue
-      elif len(cardiacCyclePhaseNames) > 1:
-        cardiacCyclePhaseName = "multiple"
-        if not all(phaseName in self.EXPORT_PHASES for phaseName in cardiacCyclePhaseNames):
-          logging.debug(
-            "Multiple phases compare measurement node found but selected phases don't match those. Skipping")
+      for cardiacCyclePhaseName in self.iterateMeasurementTimePoints(measurementNode):
+        # Recompute all measurements
+        try:
+          self.valveQuantificationLogic.computeMetrics(measurementNode)
+        except Exception as exc:
+          logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
           continue
 
-      # Recompute all measurements
-      try:
-        self.valveQuantificationLogic.computeMetrics(measurementNode)
-      except Exception as exc:
-        logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
-        continue
+        measurementResultsTableNode = self.getTableNode(measurementNode, self.QUANTIFICATION_RESULTS_IDENTIFIER)
+        measurementPresetId = self.valveQuantificationLogic.getMeasurementPresetId(measurementNode)
+        valve = measurementPresetId.replace(self.MEASUREMENT_PRESET_ID_SUFFIX, "")
 
-      measurementResultsTableNode = self.getTableNode(measurementNode, self.QUANTIFICATION_RESULTS_IDENTIFIER)
-      measurementPresetId = self.valveQuantificationLogic.getMeasurementPresetId(measurementNode)
-      valve = measurementPresetId.replace(self.MEASUREMENT_PRESET_ID_SUFFIX, "")
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        resultsTableRowIndex = \
+          self.addRowData(self.resultsTableNode, filename, cardiacCyclePhaseName, valve)
 
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      resultsTableRowIndex = \
-        self.addRowData(self.resultsTableNode, filename, cardiacCyclePhaseName, valve)
-
-      if measurementResultsTableNode:
-        numberOfMetrics = measurementResultsTableNode.GetNumberOfRows()
-        for metricIndex in range(numberOfMetrics):
-          metricName, metricValue, metricUnit = self.getColData(measurementResultsTableNode, metricIndex, range(3))
-          self.setValueInTable(self.resultsTableNode, resultsTableRowIndex, metricName, metricValue)
-          self._unitsDictionary[metricName] = metricUnit
+        if measurementResultsTableNode:
+          numberOfMetrics = measurementResultsTableNode.GetNumberOfRows()
+          for metricIndex in range(numberOfMetrics):
+            metricName, metricValue, metricUnit = self.getColData(measurementResultsTableNode, metricIndex, range(3))
+            self.setValueInTable(self.resultsTableNode, resultsTableRowIndex, metricName, metricValue)
+            self._unitsDictionary[metricName] = metricUnit
 
   def processEnd(self):
     self._writeUnitsTable()
