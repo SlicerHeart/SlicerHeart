@@ -103,7 +103,8 @@ class ValveRoi:
         closestPointDistance = closestPointFinder.EvaluateFunctionAndGetClosestPoint(point1Pos, point2Pos)
         if abs(closestPointDistance) < maxDistanceOfBoundaryPoint:
           numberOfBoundaryPoints += 1
-      if float(numberOfBoundaryPoints)/float(numberOfPoints) > 0.75:
+      # The coaptation line may have no points (e.g. it is not specified at the displayed time point)
+      if numberOfPoints and float(numberOfBoundaryPoints)/float(numberOfPoints) > 0.75:
         # If at least 75% of points are near the leaflet surface then we consider this coaptation line
         # as a boundary of this leaflet.
         boundaryCoaptationModels.append(coaptationModel)

@@ -134,6 +134,12 @@ class MeasurementPreset(object):
       heartValveNode = measurementNode.GetNodeReference(role)
       if heartValveNode:
         valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
+        # The leaflet and coaptation models must reflect the displayed time point (they are only updated
+        # by the modules that show them, so they may still describe a previously displayed time point)
+        if valveModel.leafletSegmentationNode:
+          valveModel.updateLeafletModelsFromSegmentation()
+        if heartValveNode.GetNumberOfNodeReferences("CoaptationBaseLineMarkup") > 0:
+          valveModel.updateCoaptationModels()
         inputValveModels[inputValveId] = valveModel
     return self.computeMetrics(inputValveModels, measurementNode)
 

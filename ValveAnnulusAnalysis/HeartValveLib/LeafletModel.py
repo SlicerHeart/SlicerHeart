@@ -28,7 +28,9 @@ class LeafletModel:
     self.segmentId = None
 
   def getName(self):
-    return self.segmentationNode.GetSegmentation().GetSegment(self.segmentId).GetName()
+    segment = self.segmentationNode.GetSegmentation().GetSegment(self.segmentId) if self.segmentationNode else None
+    # The segment may be missing at the displayed time point
+    return segment.GetName() if segment else self.segmentId
 
   def setSegmentationNode(self, segmentationNode):
     self.segmentationNode = segmentationNode
