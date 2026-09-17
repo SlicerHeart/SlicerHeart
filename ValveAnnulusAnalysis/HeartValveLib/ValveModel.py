@@ -459,15 +459,7 @@ class ValveModel:
       return sequenceNode
 
     def moveNodeToHeartValveFolder(self, node, subfolderName=None):
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
-      if subfolderName:
-        folderItemId = shNode.GetItemChildWithName(valveNodeItemId, subfolderName)
-        if not folderItemId:
-          folderItemId = shNode.CreateFolderItem(valveNodeItemId, subfolderName)
-      else:
-        folderItemId = valveNodeItemId
-      shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
+      HeartValves.moveNodeToHeartValveFolder(HeartValves.getSubjectHierarchyItemId(self.heartValveNode), node, subfolderName)
 
     def getDisplayedValveVolumeSequenceIndex(self):
       """Get currently displayed item index of valve volume sequence"""

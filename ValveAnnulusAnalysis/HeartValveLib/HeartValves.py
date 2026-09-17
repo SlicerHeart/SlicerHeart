@@ -27,6 +27,41 @@ except NameError:
   SceneEndImportEventObserver = None
 
 
+def removeDeletedNodesFromCaches():
+  """Remove the cached ValveBrowser / ValveModel objects of nodes that are not in the scene anymore.
+  The caches hold references to the MRML nodes, so without this the nodes of a closed scene (and
+  the Python objects that operate on them) would be kept alive and could be returned again."""
+  for cache in (ValveBrowsers, ValveModels):
+    for node in list(cache.keys()):
+      if not slicer.mrmlScene.IsNodePresent(node):
+        del cache[node]
+
+
+@vtk.calldata_type(vtk.VTK_OBJECT)
+def _onSceneNodeRemoved(caller, event, node):
+  ValveBrowsers.pop(node, None)
+  ValveModels.pop(node, None)
+
+
+def _onSceneEndClose(caller, event):
+  # Nodes are not removed one by one when the scene is closed, so NodeRemovedEvent is not invoked
+  removeDeletedNodesFromCaches()
+
+
+try:
+  _CacheCleanupObservers
+except NameError:
+  _CacheCleanupObservers = []
+
+# The observers are re-created when the module is reloaded, so that they call the current functions
+for _observerTag in _CacheCleanupObservers:
+  slicer.mrmlScene.RemoveObserver(_observerTag)
+_CacheCleanupObservers = [
+  slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.NodeRemovedEvent, _onSceneNodeRemoved),
+  slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.EndCloseEvent, _onSceneEndClose),
+]
+
+
 def setup(usPresetsScenePath):
   global SceneEndImportEventObserver
   registerCustomLayouts()
@@ -913,6 +948,22 @@ def ensureLeafletVolumeAssociatedWithSegmentations(scriptedModuleNodes):
     logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
                   f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
 
+def getSubjectHierarchyItemId(node):
+  """Get the subject hierarchy item of a node. The item is created if the node does not have one yet:
+  some nodes (sequence browser nodes, scripted module nodes) do not get an item automatically when
+  they are added to the scene, and parenting other items under them silently failed without one."""
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  if not node or not shNode:
+    return 0
+  itemId = shNode.GetItemByDataNode(node)
+  if not itemId:
+    shNode.RequestOwnerPluginSearch(node)
+    itemId = shNode.GetItemByDataNode(node)
+  if not itemId:
+    itemId = shNode.CreateItem(shNode.GetSceneItemID(), node)
+  return itemId
+
+
 def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   if subfolderName:
@@ -921,7 +972,7 @@ def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
       folderItemId = shNode.CreateFolderItem(valveNodeItemId, subfolderName)
   else:
     folderItemId = valveNodeItemId
-  shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
+  shNode.SetItemParent(getSubjectHierarchyItemId(node), folderItemId)
 
 
 def getPlaneIntersectionPoint(axialNode, ortho1Node, ortho2Node):
