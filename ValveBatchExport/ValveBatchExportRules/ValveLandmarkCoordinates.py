@@ -7,7 +7,7 @@ class ValveLandmarkCoordinatesExportRule(ValveBatchExportRule):
   BRIEF_USE = "Valve landmark points 3D coordinates (.csv)"
   DETAILED_DESCRIPTION = "Export 3D coordinates of valve landmark points."
   COLUMNS = \
-    ['Filename', 'Phase', 'Valve', 'FrameNumber', 'LandmarkLabel', 'LandmarkR', 'LandmarkA', 'LandmarkS']
+    ['Filename', 'Phase', 'FrameNumber', 'Valve', 'LandmarkLabel', 'LandmarkR', 'LandmarkA', 'LandmarkS']
   CSV_OUTPUT_FILENAME = 'ValveLandmarkPoints.csv'
 
   OUTPUT_CSV_FILES = [
