@@ -216,6 +216,19 @@ class Converter4DSequencesWidget(ScriptedLoadableModuleWidget):
 
 
 class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
+    @vtk.calldata_type(vtk.VTK_OBJECT)
+    def _reserveRemovedNodeID(self, caller, event, node):
+        """Keep the ID of a node removed during conversion from being assigned to a new node.
+
+        Displayable managers skip actor cleanup while the scene is batch processing and afterwards
+        only drop actors whose display node ID no longer resolves. Legacy nodes are removed during
+        the conversion (e.g. each phase's AnnulusContourModel) and their IDs were then recycled by
+        the proxy display nodes created later on: the removed node's actor stayed in the 3D view
+        under the recycled ID, showing an annulus contour that belongs to no node in the scene.
+        """
+        if node and node.GetID() and (node.IsA("vtkMRMLDisplayNode") or node.IsA("vtkMRMLDisplayableNode")):
+            slicer.mrmlScene.AddReservedID(node.GetID())
+
     def performFullConversion(self, showMessage=True, interactive=True):
         """Perform full conversion of all nodes. Orchestrates individual conversion methods.
 
@@ -225,6 +238,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         errorDisplay = slicer.util.tryWithErrorDisplay("Conversion failed.", waitCursor=True) \
             if interactive else contextlib.nullcontext()
         with errorDisplay:
+            removedNodeObserverTag = slicer.mrmlScene.AddObserver(
+                slicer.vtkMRMLScene.NodeAboutToBeRemovedEvent, self._reserveRemovedNodeID)
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
                 # Capture each measurement's phase/time point BEFORE the valve conversion below
@@ -266,6 +281,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     )
             finally:
                 slicer.mrmlScene.EndState(slicer.mrmlScene.BatchProcessState)
+                slicer.mrmlScene.RemoveObserver(removedNodeObserverTag)
 
             # Find and remove orphan display nodes in the scene
             for displayNode in slicer.util.getNodesByClass('vtkMRMLDisplayNode'):
