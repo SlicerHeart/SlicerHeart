@@ -45,59 +45,48 @@ class QuantificationResultsExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
     for measurementNode in getSpecificHeartValveMeasurementNodes(self.QUANTIFICATION_RESULTS_IDENTIFIER):
 
-      cardiacCyclePhaseNames = self.valveQuantificationLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode)
-      cardiacCyclePhaseName = ''
-      if len(cardiacCyclePhaseNames) == 1:
-        cardiacCyclePhaseName = cardiacCyclePhaseNames[0]
-        if not cardiacCyclePhaseName in self.EXPORT_PHASES:
+      for cardiacCyclePhaseName in self.iterateMeasurementTimePoints(measurementNode):
+        # Recompute all measurements
+        try:
+          self.addLog(f"Computing metrics for '{cardiacCyclePhaseName}'")
+          self.valveQuantificationLogic.computeMetrics(measurementNode)
+        except Exception as exc:
+          logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
+          import traceback
+          traceback.print_exc()
           continue
-      elif len(cardiacCyclePhaseNames) > 1:
-        cardiacCyclePhaseName = "multiple"
-        if not all(phaseName in self.EXPORT_PHASES for phaseName in cardiacCyclePhaseNames):
-          logging.debug("Multiple phases compare measurement node found but selected phases don't match those. Skipping")
-          continue
 
-      # Recompute all measurements
-      try:
-        self.addLog(f"Computing metrics for '{cardiacCyclePhaseName}'")
-        self.valveQuantificationLogic.computeMetrics(measurementNode)
-      except Exception as exc:
-        logging.warning(f"{sceneFileName} failed with error message: \n{exc}")
-        import traceback
-        traceback.print_exc()
-        continue
+        quantificationResultsTableNode = \
+          self.getTableNode(measurementNode, self.QUANTIFICATION_RESULTS_IDENTIFIER)
 
-      quantificationResultsTableNode = \
-        self.getTableNode(measurementNode, self.QUANTIFICATION_RESULTS_IDENTIFIER)
-
-      measurementPresetId = self.valveQuantificationLogic.getMeasurementPresetId(measurementNode)
-      if quantificationResultsTableNode:
-        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-        # long data table
-        self.addRowData(self.longResultsTableNode, filename, cardiacCyclePhaseName, "ValveType", measurementPresetId)
-
-        # wide table
-        resultsTableRowIndex = \
-          self.addRowData(self.wideResultsTableNode, filename, cardiacCyclePhaseName, measurementPresetId)
-
-        numberOfMetrics = quantificationResultsTableNode.GetNumberOfRows()
-        for metricIndex in range(numberOfMetrics):
-          metricName, metricValue, metricUnit = self.getColData(quantificationResultsTableNode, metricIndex, range(3))
-
-          # wide data table
-          self.setValueInTable(self.wideResultsTableNode, resultsTableRowIndex, metricName, metricValue)
-
+        measurementPresetId = self.valveQuantificationLogic.getMeasurementPresetId(measurementNode)
+        if quantificationResultsTableNode:
+          filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
           # long data table
-          self.addRowData(self.longResultsTableNode, filename, cardiacCyclePhaseName, metricName, metricValue)
+          self.addRowData(self.longResultsTableNode, filename, cardiacCyclePhaseName, "ValveType", measurementPresetId)
 
-          # hybrid data table
-          if not metricName in list(self.hybridTempValues.keys()):
-            self.hybridTempValues[metricName] = dict()
-          if not filename in list(self.hybridTempValues[metricName].keys()):
-            self.hybridTempValues[metricName][filename] = dict()
-          self.hybridTempValues[metricName][filename][cardiacCyclePhaseName] = metricValue
+          # wide table
+          resultsTableRowIndex = \
+            self.addRowData(self.wideResultsTableNode, filename, cardiacCyclePhaseName, measurementPresetId)
 
-          self.unitsDictionary[metricName] = metricUnit
+          numberOfMetrics = quantificationResultsTableNode.GetNumberOfRows()
+          for metricIndex in range(numberOfMetrics):
+            metricName, metricValue, metricUnit = self.getColData(quantificationResultsTableNode, metricIndex, range(3))
+
+            # wide data table
+            self.setValueInTable(self.wideResultsTableNode, resultsTableRowIndex, metricName, metricValue)
+
+            # long data table
+            self.addRowData(self.longResultsTableNode, filename, cardiacCyclePhaseName, metricName, metricValue)
+
+            # hybrid data table
+            if not metricName in list(self.hybridTempValues.keys()):
+              self.hybridTempValues[metricName] = dict()
+            if not filename in list(self.hybridTempValues[metricName].keys()):
+              self.hybridTempValues[metricName][filename] = dict()
+            self.hybridTempValues[metricName][filename][cardiacCyclePhaseName] = metricValue
+
+            self.unitsDictionary[metricName] = metricUnit
 
   def processEnd(self):
     self._writeUnitsTable()
