@@ -69,29 +69,37 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
           self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
           continue
 
-        if deleteValveMask(leafletSegmentationNode) is True:
-          self.addLog(
-            f"Found segment with id {HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID}. Deleted segment for export")
+        # Export a temporary copy: removing the valve mask and sorting the segments must not alter the scene
+        exportedSegmentationNode = cloneSegmentationNode(leafletSegmentationNode)
+        try:
+          self._exportSegmentation(exportedSegmentationNode, valveType, valveModelName)
+        finally:
+          slicer.mrmlScene.RemoveNode(exportedSegmentationNode)
 
-        if self.ONE_FILE_PER_SEGMENT:
-          self._saveSegmentsIntoSeparateFiles(leafletSegmentationNode, valveModelName)
-        else:
-          if leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 1:
-            self.addLog("Sorting individual leaflets")
-            m = checkAndSortSegments(leafletSegmentationNode, valveModel.getValveType()) # sort segments
-            if m:
-              self.addLog(m)
-            outputFileName = f"{valveModelName}_leaflets.seg.nrrd"
-          else:
-            self.addLog("Only single segmentation found")
-            outputFileName = f"{valveModelName}_whole_valve.seg.nrrd"
+  def _exportSegmentation(self, leafletSegmentationNode, valveType, valveModelName):
+    if deleteValveMask(leafletSegmentationNode) is True:
+      self.addLog(
+        f"Found segment with id {HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID}. Deleted segment for export")
 
-          storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationStorageNode")
-          storageNode.SetFileName(os.path.join(self.outputDir, outputFileName))
+    if self.ONE_FILE_PER_SEGMENT:
+      self._saveSegmentsIntoSeparateFiles(leafletSegmentationNode, valveModelName)
+    else:
+      if leafletSegmentationNode.GetSegmentation().GetNumberOfSegments() > 1:
+        self.addLog("Sorting individual leaflets")
+        m = checkAndSortSegments(leafletSegmentationNode, valveType) # sort segments
+        if m:
+          self.addLog(m)
+        outputFileName = f"{valveModelName}_leaflets.seg.nrrd"
+      else:
+        self.addLog("Only single segmentation found")
+        outputFileName = f"{valveModelName}_whole_valve.seg.nrrd"
 
-          if not storageNode.WriteData(leafletSegmentationNode):
-            self.addLog(f"  Leaflet segmentation export skipped (file writing failed) - {valveModelName}")
-          slicer.mrmlScene.RemoveNode(storageNode)
+      storageNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationStorageNode")
+      storageNode.SetFileName(os.path.join(self.outputDir, outputFileName))
+
+      if not storageNode.WriteData(leafletSegmentationNode):
+        self.addLog(f"  Leaflet segmentation export skipped (file writing failed) - {valveModelName}")
+      slicer.mrmlScene.RemoveNode(storageNode)
 
   def _saveSegmentsIntoSeparateFiles(self, segmentationNode, prefix):
     segmentationsLogic = slicer.modules.segmentations.logic()
@@ -129,6 +137,15 @@ def hideAllSegments(segmentationNode):
   from HeartValveLib.util import getAllSegmentIDs
   for segmentID in getAllSegmentIDs(segmentationNode):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, False)
+
+
+def cloneSegmentationNode(segmentationNode):
+  """Returns a temporary deep copy of the segmentation node (the caller must remove it from the scene)."""
+  clonedNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentationNode.GetName())
+  clonedNode.CopyContent(segmentationNode)
+  clonedNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
+  clonedNode.CreateDefaultDisplayNodes()
+  return clonedNode
 
 
 def deleteValveMask(segmentationNode):
