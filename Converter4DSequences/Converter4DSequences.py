@@ -243,10 +243,31 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         SlicerHeart node that the full conversion would migrate. Nodes that are already sequence
         browser proxies are in the new format and do not count."""
         sequencesLogic = slicer.modules.sequences.logic()
-        for moduleName in ("HeartValve", "HeartValveMeasurement", "CardiacDeviceAnalysis"):
+        for moduleName in ("HeartValve", "CardiacDeviceAnalysis"):
             for node in getAllModuleSpecificScriptableNodes(moduleName):
                 if not sequencesLogic.GetFirstBrowserNodeForProxyNode(node):
                     return True
+        # HeartValveMeasurement nodes are plain (non-proxy) nodes in BOTH formats -
+        # ValveQuantification creates them directly in the scene - so "not a proxy" does not mean
+        # old format. A measurement is only convertible if it references an old-format valve node.
+        for node in getAllModuleSpecificScriptableNodes("HeartValveMeasurement"):
+            if sequencesLogic.GetFirstBrowserNodeForProxyNode(node):
+                continue
+            if self._measurementReferencesOldFormatValve(node):
+                return True
+        return False
+
+    def _measurementReferencesOldFormatValve(self, measurementNode):
+        """True if the measurement references at least one old-format valve node: a valve that
+        carries the per-phase ValveVolumeSequenceIndex attribute and is NOT a sequence proxy.
+        Valve proxies converted from old scenes still carry that attribute (it was copied into the
+        sequence with the valve), so the attribute alone is not an old-format marker."""
+        sequencesLogic = slicer.modules.sequences.logic()
+        for valveNodeId in self._getAllValveNodeIdsForMeasurement(measurementNode):
+            valveNode = slicer.mrmlScene.GetNodeByID(valveNodeId)
+            if (valveNode and valveNode.GetAttribute("ValveVolumeSequenceIndex")
+                    and not sequencesLogic.GetFirstBrowserNodeForProxyNode(valveNode)):
+                return True
         return False
 
     # Guards against re-entrant conversion (e.g. an import event fired while a conversion is running)
@@ -1543,6 +1564,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             for valveNodeId in self._getAllValveNodeIdsForMeasurement(measurementNode):
                 valveNode = slicer.mrmlScene.GetNodeByID(valveNodeId)
                 if not valveNode:
+                    continue
+                # A valve that is already a sequence proxy is new format. A measurement referencing
+                # only proxies was created in the new format and must NOT be converted - converting
+                # it would re-sequence the user's measurement node on every scene load and drop its
+                # valve references. (The proxy still carries the legacy ValveVolumeSequenceIndex
+                # attribute copied over during valve conversion, so the attribute alone does not
+                # identify old-format valves.)
+                if seqLogic.GetFirstBrowserNodeForProxyNode(valveNode):
                     continue
                 frameIndexStr = valveNode.GetAttribute("ValveVolumeSequenceIndex")
                 if frameIndexStr is None or frameIndexStr == "":
