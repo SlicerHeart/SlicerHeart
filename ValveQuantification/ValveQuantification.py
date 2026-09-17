@@ -760,10 +760,13 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
 
     originalIndex = valveBrowserNode.GetSelectedItemNumber()
     messages = []
-    for timePointIndex in range(valveBrowserNode.GetNumberOfItems()):
-      valveBrowserNode.SetSelectedItemNumber(timePointIndex)
-      messages += self.logic.computeMetrics(heartValveMeasurementNode)
-    valveBrowserNode.SetSelectedItemNumber(originalIndex)
+    try:
+      for timePointIndex in range(valveBrowserNode.GetNumberOfItems()):
+        valveBrowserNode.SetSelectedItemNumber(timePointIndex)
+        messages += self.logic.computeMetrics(heartValveMeasurementNode)
+    finally:
+      # Restore the original time point even if computation fails for a time point
+      valveBrowserNode.SetSelectedItemNumber(originalIndex)
 
     self.computeStatusTextEdit.plainText = '\n'.join(messages)
 
