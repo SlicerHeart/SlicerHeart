@@ -88,7 +88,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
     numberOfAnnulusContourPoints = curvePoints.GetNumberOfPoints()
     startingRowIndex = self.curveResultsTableNode.GetNumberOfRows()
     filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-    valveType = valveModel.heartValveNode.GetAttribute('ValveType')
+    valveType = valveModel.getValveType()
     cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
     frameNumber = self.getAssociatedFrameNumber(valveModel)
     for i in range(numberOfAnnulusContourPoints):
@@ -117,7 +117,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
     markupsNode = valveModel.annulusContourCurveNode
     numberOfAnnulusContourPoints = markupsNode.GetNumberOfControlPoints()
     startingRowIndex = self.controlResultsTableNode.GetNumberOfRows()
-    valveType = valveModel.heartValveNode.GetAttribute('ValveType')
+    valveType = valveModel.getValveType()
     cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
     frameNumber = self.getAssociatedFrameNumber(valveModel)
     for i in range(numberOfAnnulusContourPoints):
