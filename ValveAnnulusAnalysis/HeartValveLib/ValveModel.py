@@ -20,6 +20,8 @@ class ValveModel:
 
     def __init__(self):
       self._heartValveNode = None
+      self._observedValveBrowserNode = None
+      self._valveBrowserNodeObserverTag = None
 
       # Computes a cylindrical ROI based on the annulus contour.
       # When annulus contour is created then it will be set in the valveRoi
@@ -48,15 +50,26 @@ class ValveModel:
       if self._heartValveNode == node:
         # no change
         return
+      if self._observedValveBrowserNode and self._valveBrowserNodeObserverTag is not None:
+        self._observedValveBrowserNode.RemoveObserver(self._valveBrowserNodeObserverTag)
+      self._observedValveBrowserNode = None
+      self._valveBrowserNodeObserverTag = None
       self._heartValveNode = node
       if self._heartValveNode:
+        # The cardiac cycle phase (that the node colors indicate) may be different at each time point,
+        # therefore colors have to be updated when another time point is displayed. The heart valve
+        # proxy node does not invoke a modified event then, so observe the valve browser node.
+        self._observedValveBrowserNode = self.valveBrowserNode
+        if self._observedValveBrowserNode:
+          self._valveBrowserNodeObserverTag = self._observedValveBrowserNode.AddObserver(
+            vtk.vtkCommand.ModifiedEvent, lambda caller, event: self.updateColorsFromCardiacCyclePhase())
         self.setHeartValveNodeDefaults()
         # Update parameters and references
 
         self.annulusContourCurveNode = self._heartValveNodeReferencedProxyNode("AnnulusContourPoints", forDisplayedHeartValvePhase=False)
         self.annulusContourRadius = self.annulusContourRadius
 
-        self.valveLabelsNode = self.valveLabelsNode
+        self.valveLabelsNode = self.valveLabelsProxyNode
         self.valveRoiModelNode = self.valveRoiModelNode
 
     @property
@@ -121,8 +134,17 @@ class ValveModel:
 
     @property
     def valveLabelsNode(self):
-      """:returns Markup point list storing labeled landmark points. The points may or may not be on the annulus contour."""
-      return self.heartValveNode.GetNodeReference("AnnulusLabelsPoints") if self.heartValveNode else None
+      """:returns Markup point list storing labeled landmark points of the displayed time point. The points may or
+      may not be on the annulus contour. None if no labels are specified for the displayed time point (use
+      addValveLabels to get a node that can be edited)."""
+      return self._heartValveNodeReferencedProxyNode("AnnulusLabelsPoints", forDisplayedHeartValvePhase=True)
+
+    @property
+    def valveLabelsProxyNode(self):
+      """:returns Markup point list proxy node that is shared between all time points, regardless of labels
+      being specified for the displayed time point. Use this for observing the node; to read or edit the
+      labels of the displayed time point use valveLabelsNode / addValveLabels."""
+      return self._heartValveNodeReferencedProxyNode("AnnulusLabelsPoints", forDisplayedHeartValvePhase=False)
 
     @valveLabelsNode.setter
     def valveLabelsNode(self, labelsMarkupPointsNode):
@@ -263,7 +285,7 @@ class ValveModel:
       if self.getValveVolumeSequenceIndex() < 0:
         self.setValveVolumeSequenceIndex(-1)  # by default it is set to -1 (undefined)
 
-      if self.valveLabelsNode is None:
+      if self.valveLabelsProxyNode is None:
         self.valveLabelsNode = self.createAnnulusLabelsMarkupNode()
 
       # Initialize to default value (if not set to some other value already)
@@ -355,6 +377,26 @@ class ValveModel:
       self.storeAnnulusContour()
       return annulusContourCurveNode
 
+    def addValveLabels(self):
+      """Get the valve labels node for the displayed time point, adding it if it does not exist yet.
+
+      If no valve labels sequence exists yet, the labels node is created. If a sequence exists but has
+      no entry for the displayed time point, a new entry is added so that edits to the proxy node are
+      saved for this time point instead of being discarded on the next sync.
+
+      :returns: valve labels markups node for the displayed time point.
+      """
+      valveLabelsNode = self.valveLabelsNode
+      if valveLabelsNode:
+        return valveLabelsNode
+      valveLabelsSequenceNode = self.valveLabelsSequenceNode
+      if valveLabelsSequenceNode:
+        self.valveBrowser.addCurrentTimePointToSequence(valveLabelsSequenceNode)
+        return self.valveLabelsProxyNode
+      valveLabelsNode = self.createAnnulusLabelsMarkupNode()
+      self.valveLabelsNode = valveLabelsNode
+      return valveLabelsNode
+
     def setValveLabels(self, labeledPoints):
       """Set valve label fiducial points for the current time point, replacing any existing labels.
 
@@ -367,16 +409,7 @@ class ValveModel:
       :param labeledPoints: list of (label_str, R, A, S) tuples.
       :returns: valve labels markups node for the current time point.
       """
-      # If a sequence already exists, make sure the current time point has an entry so that edits to
-      # the proxy node are saved for this time point instead of being discarded on the next sync.
-      valveLabelsSequenceNode = self.valveLabelsSequenceNode
-      if valveLabelsSequenceNode:
-        self.valveBrowser.addCurrentTimePointToSequence(valveLabelsSequenceNode)
-
-      valveLabelsNode = self.valveLabelsNode
-      if not valveLabelsNode:
-        valveLabelsNode = self.createAnnulusLabelsMarkupNode()
-        self.valveLabelsNode = valveLabelsNode
+      valveLabelsNode = self.addValveLabels()
       valveLabelsNode.SetLocked(False)
       wasModify = valveLabelsNode.StartModify()
       valveLabelsNode.RemoveAllControlPoints()
@@ -483,12 +516,16 @@ class ValveModel:
       if not self.heartValveNode:
         return
 
-      # Put valve under probeToRas transform (Probe coordinate system)
-      self.applyProbeToRasTransformToNode(self.annulusContourCurveNode)
-      self.applyProbeToRasTransformToNode(self.valveLabelsNode)
-      self.applyProbeToRasTransformToNode(self.valveRoiModelNode)
-      self.applyProbeToRasTransformToNode(self.leafletSegmentationNode)
-      self.applyProbeToRasTransformToNode(self.leafletVolumeNode)
+      # Put valve under probeToRas transform (Probe coordinate system).
+      # The proxy nodes are shared between time points, so they have to be updated even if they are
+      # not specified for the displayed time point.
+      for referenceRole in ["AnnulusContourPoints", "AnnulusLabelsPoints", "ValveRoiModel", "LeafletSegmentation",
+                            "LeafletVolume"]:
+        self.applyProbeToRasTransformToNode(
+          self._heartValveNodeReferencedProxyNode(referenceRole, forDisplayedHeartValvePhase=False))
+      for papillaryModelIndex in range(self.heartValveNode.GetNumberOfNodeReferences("PapillaryLineMarkup")):
+        self.applyProbeToRasTransformToNode(
+          self.heartValveNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex))
 
       # Update parent transform in leaflet surface models
       self.updateLeafletModelsFromSegmentation()
@@ -825,9 +862,10 @@ class ValveModel:
 
       papillaryLineMarkupNode.SetName(f"{papillaryMuscleName} papillary muscle")
       self.applyProbeToRasTransformToNode(papillaryLineMarkupNode)
-      annulusContourMarkupsNode = self.annulusContourCurveNode
       ValveModel.setGlyphSize(papillaryLineMarkupNode, papillaryModel.markupGlyphScale)
-      papillaryLineMarkupNode.GetDisplayNode().SetSelectedColor(annulusContourMarkupsNode.GetDisplayNode().GetSelectedColor())
+      # Same color as the annulus contour. The contour may not be defined for the displayed time point
+      # (or at all), so get the color from the cardiac cycle phase instead of from the contour node.
+      papillaryLineMarkupNode.GetDisplayNode().SetSelectedColor(self.getBaseColor())
       papillaryModel.setPapillaryLineMarkupNode(papillaryLineMarkupNode)
 
       papillaryLineSequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryLineMarkupNode)
@@ -1186,6 +1224,9 @@ class ValveModel:
       """Get a list of all annulus point labels"""
       labels = []
       annulusMarkupNode = self.valveLabelsNode
+      if not annulusMarkupNode:
+        # no labels are specified for the displayed time point
+        return labels
       numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
       for i in range(0, numberOfControlPoints):
         try:
@@ -1200,6 +1241,9 @@ class ValveModel:
 
     def getAnnulusLabelsMarkupIndexByLabel(self, label):
       annulusMarkupNode = self.valveLabelsNode
+      if not annulusMarkupNode:
+        # no labels are specified for the displayed time point
+        return -1
       try:
         # Slicer-4.13 (February 2022) and later
         numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
@@ -1244,11 +1288,12 @@ class ValveModel:
       self.valveLabelsNode.Modified()
 
     def setAnnulusMarkupLabel(self, label, position):
+      valveLabelsNode = self.addValveLabels()
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
       if annulusMarkupIndex>=0:
-        self.valveLabelsNode.SetNthControlPointPosition(annulusMarkupIndex, position[0], position[1], position[2])
+        valveLabelsNode.SetNthControlPointPosition(annulusMarkupIndex, position[0], position[1], position[2])
       else:
-        self.valveLabelsNode.AddControlPoint(vtk.vtkVector3d(position), label)
+        valveLabelsNode.AddControlPoint(vtk.vtkVector3d(position), label)
 
     def updateValveNodeNames(self):
       # Placeholder for now, we'll see if sequence browser can fully take care of node renames
@@ -1270,13 +1315,39 @@ class ValveModel:
         return
       self.heartValveNode.SetAttribute("CardiacCyclePhase", cardiacCyclePhase)
       self.updateValveNodeNames()
+      self.updateColorsFromCardiacCyclePhase()
 
-      if self.annulusContourCurveNode and self.annulusContourCurveNode.GetDisplayNode():
-        self.annulusContourCurveNode.GetDisplayNode().SetSelectedColor(self.getBaseColor())
-        self.annulusContourCurveNode.GetDisplayNode().SetColor(self.getBaseColor())
-      if self.valveLabelsNode and self.valveLabelsNode.GetDisplayNode():
-        self.valveLabelsNode.GetDisplayNode().SetSelectedColor(self.getBaseColor())
-        self.valveLabelsNode.GetDisplayNode().SetColor(self.getDarkColor())
+    def updateColorsFromCardiacCyclePhase(self):
+      """Color of the annulus contour and the labels indicates the cardiac cycle phase. The nodes are
+      shared between time points, so this has to be updated whenever the displayed time point changes."""
+      if not self.heartValveNode:
+        return
+      valveBrowserNode = self.valveBrowserNode
+      if not valveBrowserNode:
+        return
+      # Get the phase from the sequence item of the displayed time point and not from the proxy node:
+      # this may be called before the proxy node is updated for a newly selected time point.
+      cardiacCyclePhase = None
+      heartValveSequenceNode = valveBrowserNode.GetMasterSequenceNode()
+      itemNumber = valveBrowserNode.GetSelectedItemNumber()
+      if heartValveSequenceNode and 0 <= itemNumber < heartValveSequenceNode.GetNumberOfDataNodes():
+        storedHeartValveNode = heartValveSequenceNode.GetNthDataNode(itemNumber)
+        if storedHeartValveNode:
+          cardiacCyclePhase = storedHeartValveNode.GetAttribute("CardiacCyclePhase")
+      if not cardiacCyclePhase:
+        cardiacCyclePhase = self.getCardiacCyclePhase()
+      if cardiacCyclePhase not in self.cardiacCyclePhasePresets:
+        return
+      baseColor = self.cardiacCyclePhasePresets[cardiacCyclePhase]["color"]
+      darkColor = [component / 2.0 for component in baseColor]
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if annulusContourCurveNode and annulusContourCurveNode.GetDisplayNode():
+        annulusContourCurveNode.GetDisplayNode().SetSelectedColor(baseColor)
+        annulusContourCurveNode.GetDisplayNode().SetColor(baseColor)
+      valveLabelsNode = self.valveLabelsNode
+      if valveLabelsNode and valveLabelsNode.GetDisplayNode():
+        valveLabelsNode.GetDisplayNode().SetSelectedColor(baseColor)
+        valveLabelsNode.GetDisplayNode().SetColor(darkColor)
 
     def getCardiacCyclePhase(self):
       # A missing attribute means the phase was never set (e.g. a converted or scripted node).
@@ -1291,7 +1362,7 @@ class ValveModel:
 
     def getDarkColor(self):
       cardiacCyclePhaseColor = self.cardiacCyclePhasePresets[self.getCardiacCyclePhase()]["color"]
-      return [cardiacCyclePhaseColor[0]/2.0, cardiacCyclePhaseColor[1]/2.0, cardiacCyclePhaseColor[1]/2.0]
+      return [cardiacCyclePhaseColor[0]/2.0, cardiacCyclePhaseColor[1]/2.0, cardiacCyclePhaseColor[2]/2.0]
 
     def getAnnulusMarkupLabels(self):
       import numpy as np

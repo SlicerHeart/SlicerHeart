@@ -182,6 +182,9 @@ def isMRBFile(mrb_file):
 
 
 def getValveModelForSegmentationNode(segmentationNode):
+  if segmentationNode is None:
+    # would match any valve that has no leaflet segmentation
+    return None
   for valveModel in getAllHeartValveModelNodes():
     if valveModel.getLeafletSegmentationNode() is segmentationNode:
       return valveModel
