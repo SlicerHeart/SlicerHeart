@@ -6,6 +6,63 @@ import HeartValveLib
 from ValveQuantificationLib.MeasurementPreset import *
 
 
+class ValveModelTimePointSnapshot(object):
+  """Valve model with the annulus contour and the labeled points frozen at a chosen time point.
+
+  A ValveModel always provides the nodes of the time point that is displayed by the valve browser,
+  so two time points of a valve cannot be compared using the ValveModel alone. This class copies
+  the annulus contour and labels of the chosen time point into temporary nodes and runs the
+  ValveModel methods on them. Everything else is forwarded to the ValveModel.
+  removeNodes() must be called when the snapshot is no longer needed.
+  """
+
+  def __init__(self, valveModel, indexValue):
+    """:raises ValueError: if the annulus contour or the labels are not defined at the time point"""
+    self._valveModel = valveModel
+    self._temporaryNodes = []
+    try:
+      self.annulusContourCurveNode = self._cloneNodeAtTimePoint(
+        valveModel.annulusContourCurveNode, valveModel.annulusContourCurveSequenceNode, indexValue, "annulus contour")
+      self.valveLabelsNode = self._cloneNodeAtTimePoint(
+        valveModel.valveLabelsNode, valveModel.valveLabelsSequenceNode, indexValue, "annulus labels")
+    except ValueError:
+      self.removeNodes()
+      raise
+
+  def _cloneNodeAtTimePoint(self, proxyNode, sequenceNode, indexValue, description):
+    dataNode = sequenceNode.GetDataNodeAtValue(indexValue) if sequenceNode else None
+    if not proxyNode or not dataNode:
+      raise ValueError("{0} is not defined at time point {1}".format(description, indexValue))
+    clonedNode = slicer.mrmlScene.CreateNodeByClass(proxyNode.GetClassName())
+    clonedNode.UnRegister(None)
+    clonedNode.SetHideFromEditors(True)
+    clonedNode.SetSaveWithScene(False)
+    slicer.mrmlScene.AddNode(clonedNode)
+    self._temporaryNodes.append(clonedNode)
+    clonedNode.CopyContent(dataNode)
+    # The data node is stored in the scene of the sequence, where the parent transform is not available
+    clonedNode.SetAndObserveTransformNodeID(proxyNode.GetTransformNodeID())
+    return clonedNode
+
+  def removeNodes(self):
+    for node in self._temporaryNodes:
+      slicer.mrmlScene.RemoveNode(node)
+    self._temporaryNodes = []
+
+  def __getattr__(self, name):
+    # Only called for attributes that are not defined in this class
+    if name in ("_valveModel", "_temporaryNodes"):
+      # not initialized yet
+      raise AttributeError(name)
+    import inspect
+    import types
+    classAttribute = inspect.getattr_static(type(self._valveModel), name, None)
+    if inspect.isfunction(classAttribute):
+      # Run the ValveModel method on this object so that it uses the nodes of the snapshot
+      return types.MethodType(classAttribute, self)
+    return getattr(self._valveModel, name)
+
+
 class MeasurementPresetPhaseCompare(MeasurementPreset):
 
   def __init__(self):
@@ -357,9 +414,65 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
     valvePairsToCompare.append([valve1Id, valve2Id])
 
 
+  @staticmethod
+  def getTimePointIndexValueForCardiacCyclePhase(valveModel, cardiacCyclePhaseShortName):
+    """Find the time point of a valve that was annotated in the specified cardiac cycle phase.
+    :return: tuple of (found, indexValue). indexValue is None if the currently displayed time point
+      is in the requested phase (the valve model can be used as is).
+    """
+    def isRequestedPhase(heartValveNode):
+      phasePreset = valveModel.cardiacCyclePhasePresets.get(heartValveNode.GetAttribute("CardiacCyclePhase"))
+      return phasePreset is not None and phasePreset["shortname"] == cardiacCyclePhaseShortName
+
+    if isRequestedPhase(valveModel.heartValveNode):
+      return True, None
+    heartValveSequenceNode = valveModel.valveBrowser.heartValveSequenceNode
+    for itemIndex in range(heartValveSequenceNode.GetNumberOfDataNodes()):
+      if isRequestedPhase(heartValveSequenceNode.GetNthDataNode(itemIndex)):
+        return True, heartValveSequenceNode.GetNthIndexValue(itemIndex)
+    return False, None
+
+  def getValveModelsAtPhaseTimePoints(self, inputValveModels, valveModelSnapshots):
+    """A valve stores all of its time points, therefore the same valve may be selected for several
+    phases. For each input valve, get the valve as it is at the time point that was annotated in the
+    cardiac cycle phase of that input.
+    :param valveModelSnapshots: created snapshots are appended to this list, the caller must call
+      removeNodes() on each of them when the computation is completed.
+    """
+    valveModelsAtPhases = {}
+    for valveId, valveModel in inputValveModels.items():
+      valveModelsAtPhases[valveId] = valveModel
+      if valveId not in self.inputValveShortNames:
+        continue
+      phaseShortName = self.inputValveShortNames[valveId]
+      found, indexValue = self.getTimePointIndexValueForCardiacCyclePhase(valveModel, phaseShortName)
+      if not found:
+        self.addMessage("{0}: the valve has no time point in {1} phase, the displayed time point is used.".format(
+          self.inputValveNames[valveId], phaseShortName))
+        continue
+      if indexValue is None:
+        # the displayed time point is in the requested phase
+        continue
+      try:
+        valveModelSnapshot = ValveModelTimePointSnapshot(valveModel, indexValue)
+      except ValueError as e:
+        self.addMessage("{0}: {1}, the displayed time point is used.".format(self.inputValveNames[valveId], e))
+        continue
+      valveModelSnapshots.append(valveModelSnapshot)
+      valveModelsAtPhases[valveId] = valveModelSnapshot
+    return valveModelsAtPhases
+
   def computeMetrics(self, inputValveModels, outputTableNode):
     super(MeasurementPresetPhaseCompare, self).computeMetrics(inputValveModels, outputTableNode)
+    valveModelSnapshots = []
+    try:
+      valveModelsAtPhases = self.getValveModelsAtPhaseTimePoints(inputValveModels, valveModelSnapshots)
+      return self.computePhaseCompareMetrics(valveModelsAtPhases)
+    finally:
+      for valveModelSnapshot in valveModelSnapshots:
+        valveModelSnapshot.removeNodes()
 
+  def computePhaseCompareMetrics(self, inputValveModels):
     # Determine which pairs of valves we can compare
     # Get list of available valve IDs
     availableValveIds = []
@@ -403,7 +516,7 @@ class MeasurementPresetPhaseCompare(MeasurementPreset):
       planeNormal2 = valvePlanes[valvePairToCompare[1]][1]
 
       self.addMeasurement(self.getAngleBetweenPlanes(valveModel1, planePosition1, planeNormal1,
-                                                      valveModel1, planePosition2, planeNormal2,
+                                                      valveModel2, planePosition2, planeNormal2,
                                                       '{0}-{1} plane angle'.format(valve1ShortName , valve2ShortName)))
 
       # Distances between each labeled points
