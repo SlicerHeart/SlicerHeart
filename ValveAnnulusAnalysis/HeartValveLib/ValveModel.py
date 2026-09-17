@@ -640,6 +640,9 @@ class ValveModel:
           # The missing sequence item was created as an empty default node. Write the cloned
           # volume content into the sequence item, otherwise it would remain empty.
           slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(self.valveBrowserNode, leafletVolumeNode)
+          # Remove the temporary clone along with its display nodes (they would be left in the scene otherwise)
+          for displayNodeIndex in reversed(range(newLeafletVolumeNode.GetNumberOfDisplayNodes())):
+            slicer.mrmlScene.RemoveNode(newLeafletVolumeNode.GetNthDisplayNode(displayNodeIndex))
           slicer.mrmlScene.RemoveNode(newLeafletVolumeNode)
         else:
           self.leafletVolumeNode = newLeafletVolumeNode
@@ -829,6 +832,9 @@ class ValveModel:
       # Generate a new valve mask segment from this time point's valve ROI
       self.updateValveMaskSegment()
 
+      # Leaflet models must reflect the new set of segments
+      self.updateLeafletModelsFromSegmentation()
+
       return leafletSegmentationNode
 
     def removePapillaryModel(self, papillaryModelIndex):
@@ -893,6 +899,23 @@ class ValveModel:
       for papillaryModelIndex in range(numberOfPapillaryModels):
         self.updatePapillaryModel(papillaryModelIndex)
 
+    def getLeafletNodeSegmentId(self, leafletNode):
+      """Get ID of the leaflet segment that a leaflet surface node belongs to.
+      The ID is stored in a node attribute, but nodes stored in a sequence are reset to default (losing
+      their attributes) when a time point is displayed where they are not specified. In that case the
+      ID is retrieved from the items of the node's sequence."""
+      segmentId = leafletNode.GetAttribute('SegmentID')
+      if segmentId:
+        return segmentId
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(leafletNode)
+      if sequenceNode:
+        for itemIndex in range(sequenceNode.GetNumberOfDataNodes()):
+          storedNode = sequenceNode.GetNthDataNode(itemIndex)
+          segmentId = storedNode.GetAttribute('SegmentID') if storedNode else None
+          if segmentId:
+            return segmentId
+      return None
+
     def removeLeafletNodeReference(self, referenceRole, segmentId):
       if not self.heartValveNode:
         logging.error("removeLeafletNodeReference failed: invalid heartValveNode")
@@ -900,7 +923,7 @@ class ValveModel:
       numberOfReferences = self.heartValveNode.GetNumberOfNodeReferences(referenceRole)
       for referenceIndex in range(numberOfReferences):
         referencedNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
-        if referencedNode is not None and referencedNode.GetAttribute('SegmentID') == segmentId:
+        if referencedNode is not None and self.getLeafletNodeSegmentId(referencedNode) == segmentId:
           self.heartValveNode.RemoveNthNodeReferenceID(referenceRole, referenceIndex)
 
     def getLeafletNodeReference(self, referenceRole, segmentId):
@@ -910,7 +933,7 @@ class ValveModel:
       numberOfReferences = self.heartValveNode.GetNumberOfNodeReferences(referenceRole)
       for referenceIndex in range(numberOfReferences):
         referencedNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
-        if referencedNode is not None and referencedNode.GetAttribute('SegmentID') == segmentId:
+        if referencedNode is not None and self.getLeafletNodeSegmentId(referencedNode) == segmentId:
           return referencedNode
       # not found
       return None
@@ -924,7 +947,7 @@ class ValveModel:
       existingReferenceUpdated = False
       for referenceIndex in range(numberOfReferences):
         referencedNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
-        if referencedNode is not None and referencedNode.GetAttribute('SegmentID') == segmentId:
+        if referencedNode is not None and self.getLeafletNodeSegmentId(referencedNode) == segmentId:
           self.heartValveNode.SetNthNodeReferenceID(referenceRole, referenceIndex, node.GetID() if node else None)
           existingReferenceUpdated = True
           break
@@ -940,13 +963,40 @@ class ValveModel:
           return leafletModel
       return None
 
-    def removeLeafletModel(self, segmentId):
+    def removeLeafletModel(self, segmentId, removeNodes=True):
+      """Remove the leaflet model of a segment.
+      :param removeNodes: if True then the leaflet surface nodes (and their sequences) are removed from the
+        scene, too. The nodes are shared between all time points, so they must be kept if the leaflet is
+        still segmented at another time point.
+      """
+      if removeNodes:
+        for referenceRole in ["LeafletSurfaceModel", "LeafletSurfaceBoundaryMarkup"]:
+          leafletNode = self.getLeafletNodeReference(referenceRole, segmentId)
+          self.removeLeafletNodeReference(referenceRole, segmentId)
+          self.valveBrowser.removeNodeWithSequence(leafletNode)
       for leafletModel in self.leafletModels:
         if leafletModel.segmentId == segmentId:
-          self.removeLeafletNodeReference("LeafletSurfaceModel", segmentId)
-          self.removeLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId)
           self.leafletModels.remove(leafletModel)
           return
+
+    def getLeafletSegmentIdsAtOtherTimePoints(self):
+      """Get IDs of leaflet segments that are specified at any time point other than the displayed one."""
+      import HeartValveLib
+      from HeartValveLib.util import getAllSegmentIDs
+      segmentIds = set()
+      leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+      if not leafletSegmentationSequenceNode:
+        return segmentIds
+      _, displayedIndexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      for itemIndex in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+        if leafletSegmentationSequenceNode.GetNthIndexValue(itemIndex) == displayedIndexValue:
+          # the proxy node is more up-to-date for the displayed time point than the sequence item
+          continue
+        segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(itemIndex)
+        if segmentationNode:
+          segmentIds.update(getAllSegmentIDs(segmentationNode))
+      segmentIds.discard(HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      return segmentIds
 
     def addLeafletModel(self, segmentId):
       leafletModel = self.findLeafletModel(segmentId)
@@ -1017,20 +1067,30 @@ class ValveModel:
       for leafletModel in self.leafletModels:
         segmentIdsInLeafletModels.append(leafletModel.segmentId)
 
+      # The leaflet surface nodes are shared between all time points. A leaflet that is not segmented at
+      # the displayed time point may still be segmented at another one: its nodes (and the heart valve
+      # node's references to them) must then be kept, otherwise displaying a time point with fewer
+      # leaflets would destroy the leaflet surfaces of all the other time points.
+      segmentIdsAtOtherTimePoints = self.getLeafletSegmentIdsAtOtherTimePoints()
+
       # Keep only those leaflet models that have an ID that matches one of the current segments
       for segmentIdInLeafletModel in segmentIdsInLeafletModels:
         if segmentIdInLeafletModel not in segmentIds:
           # segment is deleted, remove associated leaflet model
-          self.removeLeafletModel(segmentIdInLeafletModel)
+          self.removeLeafletModel(segmentIdInLeafletModel,
+                                  removeNodes=segmentIdInLeafletModel not in segmentIdsAtOtherTimePoints)
 
-      # cleanup legacy leaflet surface nodes
-      numSurfaceBoundaryMarkups = self.heartValveNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
-      for boundaryMarkupIndex in reversed(range(numSurfaceBoundaryMarkups)):
-        boundaryMarkupNode = self.heartValveNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryMarkupIndex)
-        surfaceModelNode = self.heartValveNode.GetNthNodeReference("LeafletSurfaceModel", boundaryMarkupIndex)
-        if not boundaryMarkupNode.GetAttribute('SegmentID') in segmentIds:
-          slicer.mrmlScene.RemoveNode(boundaryMarkupNode)
-          slicer.mrmlScene.RemoveNode(surfaceModelNode)
+      # cleanup leaflet surface nodes that do not belong to any leaflet model (e.g., in legacy scenes)
+      for referenceRole in ["LeafletSurfaceBoundaryMarkup", "LeafletSurfaceModel"]:
+        for referenceIndex in reversed(range(self.heartValveNode.GetNumberOfNodeReferences(referenceRole))):
+          leafletNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
+          if not leafletNode:
+            continue
+          segmentId = self.getLeafletNodeSegmentId(leafletNode)
+          if segmentId in segmentIds or segmentId in segmentIdsAtOtherTimePoints:
+            continue
+          self.heartValveNode.RemoveNthNodeReferenceID(referenceRole, referenceIndex)
+          self.valveBrowser.removeNodeWithSequence(leafletNode)
 
       # Add any missing leaflet models
       for segmentId in segmentIds:
@@ -1053,9 +1113,10 @@ class ValveModel:
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex)
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationSurfaceModel", coaptationModelIndex)
       self.coaptationModels.remove(coaptationModel)
-      slicer.mrmlScene.RemoveNode(coaptationSurfaceModelNode)
-      slicer.mrmlScene.RemoveNode(baseLineMarkupNode)
-      slicer.mrmlScene.RemoveNode(marginLineMarkupNode)
+      # Remove the nodes along with their sequences, otherwise the sequences would be left behind
+      self.valveBrowser.removeNodeWithSequence(coaptationSurfaceModelNode)
+      self.valveBrowser.removeNodeWithSequence(baseLineMarkupNode)
+      self.valveBrowser.removeNodeWithSequence(marginLineMarkupNode)
 
     def getCoaptationModelSequenceNode(self, coaptationModelNode):
       return self.valveBrowserNode.GetSequenceNode(coaptationModelNode)
