@@ -17,10 +17,7 @@ class ValveVolumeExportRule(ValveBatchExportRule):
     outputFilePath = os.path.join(self.outputDir, f"{filename}.seq.nrrd")
     for valveModel in self.getHeartValveModelNodes():
 
-      sequenceBrowserNode = valveModel.valveBrowserNode
-      for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
-        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
-
+      for timePoint in self.iterateExportedTimePoints(valveModel):
         volumeNode = valveModel.getValveVolumeNode()
         if volumeNode is None:
           self.addLog(f"  Valve volume export skipped (valve volume is missing) - {filename}")
