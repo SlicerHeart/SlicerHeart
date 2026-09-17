@@ -16,6 +16,7 @@ from HeartValveLib.HeartValves import (
     updateLegacyAnnulusCurveNode,
     updateLegacyPapillaryMuscleNodes,
     updateLegacyLeafletSurfaceBoundaryNodes,
+    updateLegacyCoaptationModelNodes,
     getSequenceBrowserNodeForMasterOutputNode,
 )
 from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
@@ -307,6 +308,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         with errorDisplay:
             removedNodeObserverTag = slicer.mrmlScene.AddObserver(
                 slicer.vtkMRMLScene.NodeAboutToBeRemovedEvent, self._reserveRemovedNodeID)
+            emptyFolderItemIDsBeforeConversion = self._getEmptyValveFolderItemIDs()
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
                 # Capture each measurement's phase/time point BEFORE the valve conversion below
@@ -364,7 +366,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # place leaflet/coaptation nodes into named folders under the (old) heart valve node;
             # once that node and its contents are converted and removed, the folders are orphaned
             # (reparented to the scene root) and empty. Clean them up so the hierarchy stays tidy.
-            self._removeEmptyValveFolders()
+            self._removeEmptyValveFolders(folderItemIDsToKeep=emptyFolderItemIDsBeforeConversion)
 
     def _organizeValvesUnderBrowsers(self):
         """Parent each HeartValve master proxy node under its sequence browser node in the subject
@@ -387,12 +389,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if browserItemID and proxyItemID:
                 shNode.SetItemParent(proxyItemID, browserItemID)
 
-    def _removeEmptyValveFolders(self):
-        """Remove empty HeartValveLib subject-hierarchy folders (e.g. leftover 'LeafletSurface'
-        folders orphaned to the scene root after legacy nodes are converted and removed)."""
+    def _getEmptyValveFolderItemIDs(self):
+        """Get the empty subject hierarchy folders that have a name that HeartValveLib uses for valve
+        subfolders."""
         shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
         if not shNode:
-            return
+            return []
         folderLevel = slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyLevelFolder()
         knownValveFolderNames = {"LeafletSurface", "LeafletSurfaceEdit", "Coaptation",
                                  "CoaptationEdit", "PapillaryMuscles"}
@@ -407,6 +409,19 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 shNode.GetItemChildren(itemID, childItems)
                 if childItems.GetNumberOfIds() == 0:
                     emptyFolderItemIDs.append(itemID)
+        return emptyFolderItemIDs
+
+    def _removeEmptyValveFolders(self, folderItemIDsToKeep=()):
+        """Remove empty HeartValveLib subject-hierarchy folders (e.g. leftover 'LeafletSurface'
+        folders orphaned to the scene root after legacy nodes are converted and removed).
+
+        :param folderItemIDsToKeep: folders that were empty already before the conversion. They were
+          not emptied by the conversion (e.g. a folder of the user that merely has the same name as
+          a valve subfolder), so they must not be removed."""
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        if not shNode:
+            return
+        emptyFolderItemIDs = [itemID for itemID in self._getEmptyValveFolderItemIDs() if itemID not in folderItemIDsToKeep]
         for itemID in emptyFolderItemIDs:
             logging.info(f"Removing empty leftover folder: '{shNode.GetItemName(itemID)}'")
             shNode.RemoveItem(itemID)
@@ -484,12 +499,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     remainder = lastPart[len(frameMatch):]
                     baseName = '_'.join(parts[:-1]) + remainder
 
-        # Strip phase indicators (e.g., "-ES", "-ED", "-MD") from anywhere in the name
-        phaseSuffixes = ['-ES', '-ED', '-MD', '-MS', '-CT', '-CD', '-CS']
-        for suffix in phaseSuffixes:
-            if suffix in baseName:
-                baseName = baseName.replace(suffix, '', 1)  # Remove first occurrence
-                break
+        # Strip the phase indicator (e.g., "-ES", "-ED", "-UN", "-P1"). The short names of all cardiac
+        # cycle phase presets are used, so that the unknown and custom phases are stripped as well.
+        import re
+        from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
+        phaseShortNames = sorted({preset["shortname"] for preset in CARDIAC_CYCLE_PHASE_PRESETS.values()},
+                                 key=len, reverse=True)
+        phasePattern = "-(?:" + "|".join(re.escape(shortName) for shortName in phaseShortNames) + ")(?=$|[-_ ])"
+        baseName = re.sub(phasePattern, "", baseName, count=1)
 
         return baseName
 
@@ -593,6 +610,13 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             updateLegacyLeafletSurfaceBoundaryNodes(allHeartValves)
         except Exception as err:
             logging.warning(f"updateLegacyLeafletSurfaceBoundaryNodes failed: {err}")
+
+        try:
+            # Upgrade coaptation line fiducials (+ tube models) to markups curves, like
+            # HeartValves.updateLegacyHeartValveNodes does when a legacy scene is loaded
+            updateLegacyCoaptationModelNodes(allHeartValves)
+        except Exception as err:
+            logging.warning(f"updateLegacyCoaptationModelNodes failed: {err}")
 
         # Restore transforms to all updated nodes
         for hvNode in allHeartValves:
@@ -760,6 +784,20 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     break
 
             if not valveBrowserNode:
+                # A valve of this type on this volume may have been converted already (e.g. a legacy
+                # phase was imported after the conversion): the new time points belong to that valve,
+                # so join its browser instead of creating a second valve of the same type.
+                for existingBrowser in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+                    if (existingBrowser.GetAttribute("ModuleName") == "HeartValve"
+                            and existingBrowser.GetAttribute("ValveType") == valveType
+                            and existingBrowser.GetNodeReferenceID("ValveVolume") == volumeNode.GetID()
+                            and existingBrowser.GetMasterSequenceNode()):
+                        valveBrowserNode = existingBrowser
+                        logging.info(f"Adding time points to existing valve browser node: {valveBrowserNode.GetName()}")
+                        break
+
+            isNewValveBrowser = valveBrowserNode is None
+            if not valveBrowserNode:
                 # Create a new valve browser node with a descriptive name based on valve type
                 valveBrowserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
                 browserName = f"{valveType}_Browser"
@@ -846,13 +884,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # This must run AFTER UpdateProxyNodesFromSequences created the proxy above: doing it
                     # inside the add loop passed a not-yet-created (None) proxy, so _replaceNodeReferencesInScene
                     # was a no-op and the references were left dangling once the originals were removed.
-                    for heartValveNode in heartValveNodes:
+                    for heartValveNode in groupConvertedNodes:
                         self._replaceNodeReferencesInScene(heartValveNode, proxyNode)
-                    # Name the valve proxy the way new-format scenes name heart valve nodes
-                    # (e.g. "TricuspidValve"), instead of inheriting the sequence node's
-                    # "<x>_Sequence" name, which showed up confusingly in the Data module.
-                    valveProxyName = f"{valveType[0].upper()}{valveType[1:]}Valve"
-                    proxyNode.SetName(slicer.mrmlScene.GetUniqueNameByString(valveProxyName))
+                    if isNewValveBrowser:
+                        # Name the valve proxy the way new-format scenes name heart valve nodes
+                        # (e.g. "TricuspidValve"), instead of inheriting the sequence node's
+                        # "<x>_Sequence" name, which showed up confusingly in the Data module.
+                        valveProxyName = f"{valveType[0].upper()}{valveType[1:]}Valve"
+                        proxyNode.SetName(slicer.mrmlScene.GetUniqueNameByString(valveProxyName))
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points, proxy node: {proxyNode.GetName()}")
                 else:
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points")
@@ -864,25 +903,42 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 # ValveBrowser.setValveBrowserNodeDefaults() finds no transform on the browser and creates a
                 # default one (leaking an extra transform node per valve).
                 if not valveBrowserNode.GetNodeReference("AxialSliceToRasTransform"):
-                    for hvNode in heartValveNodes:
+                    for hvNode in groupConvertedNodes:
                         axialSliceToRasTransformNode = hvNode.GetNodeReference("AxialSliceToRasTransform")
                         if axialSliceToRasTransformNode:
                             valveBrowserNode.SetNodeReferenceID("AxialSliceToRasTransform", axialSliceToRasTransformNode.GetID())
                             break
 
-                # Initialize the valve model for the first timepoint
                 try:
-                    valveModel = getValveModel(proxyNode if proxyNode else heartValveNodes[0])
-                    if valveModel:
-                        logging.debug(f"Initialized valve model for first timepoint")
+                    # Convert referenced nodes (annulus curves, segmentations, etc.) to sequences.
+                    # Only the nodes of valves that were added to the valve sequence are converted: a
+                    # valve that was skipped above (invalid frame index, ...) stays in the scene in the
+                    # old format and must keep its annotations.
+                    if groupConvertedNodes:
+                        self._convertReferencedNodesToSequences(valveBrowserNode, heartValveSequenceNode, groupConvertedNodes, volumeSequenceBrowserNode)
 
-                        # Convert referenced nodes (annulus curves, segmentations, etc.) to sequences
-                        self._convertReferencedNodesToSequences(valveBrowserNode, heartValveSequenceNode, heartValveNodes, volumeSequenceBrowserNode)
+                    # Create the valve model only now that the valve proxy references the converted
+                    # proxy nodes. Creating it earlier (when the proxy had no references yet) made
+                    # ValveModel add default nodes - a second, empty labels markup with its own
+                    # sequence - and left it with a stale valve ROI and no leaflet models.
+                    if proxyNode:
+                        valveModel = getValveModel(proxyNode)
+                        # Set up the leaflet / coaptation / papillary models from the converted nodes.
+                        # Only if the legacy valve had such nodes: these calls add the nodes of missing
+                        # models, and the conversion must not add content that was not in the scene.
+                        if proxyNode.GetNumberOfNodeReferences("LeafletSurfaceModel") > 0:
+                            valveModel.updateLeafletModelsFromSegmentation()
+                        if proxyNode.GetNumberOfNodeReferences("CoaptationSurfaceModel") > 0:
+                            valveModel.updateCoaptationModels()
+                        if proxyNode.GetNumberOfNodeReferences("PapillaryLineMarkup") > 0:
+                            valveModel.updatePapillaryModels()
                     # Deleting the originals is only safe once the proxy exists and the referenced
                     # nodes were converted without raising.
                     groupConversionSucceeded = proxyNode is not None
                 except Exception as err:
-                    logging.warning(f"Could not initialize valve model: {err}")
+                    import traceback
+                    logging.warning(f"Could not convert the nodes of valve group '{valveType}': {err}")
+                    logging.warning(traceback.format_exc())
 
             if groupConversionSucceeded:
                 nodesToRemove.extend(groupConvertedNodes)
@@ -895,6 +951,19 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         logging.info(f"Conversion complete. Converted {convertedCount} heart valve node(s)")
         return results
+
+    def _getExistingReferencedProxyNode(self, valveBrowserNode, heartValveSequenceNode, role, refIndex):
+        """Get the proxy node of an already converted valve for the given reference role, if there is any.
+        In the new format the axial slice transform and the clipped volume are referenced from the valve
+        browser node, everything else from the heart valve proxy node."""
+        if role in ("AxialSliceToRasTransform", "ClippedVolume"):
+            referencedNode = valveBrowserNode.GetNodeReference(role)
+        else:
+            heartValveProxyNode = valveBrowserNode.GetProxyNode(heartValveSequenceNode)
+            referencedNode = heartValveProxyNode.GetNthNodeReference(role, refIndex) if heartValveProxyNode else None
+        if referencedNode and valveBrowserNode.GetSequenceNode(referencedNode):
+            return referencedNode
+        return None
 
     def _convertReferencedNodesToSequences(self, valveBrowserNode, heartValveSequenceNode, heartValveNodes, volumeSequenceBrowserNode):
         """
@@ -1028,14 +1097,22 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 logging.warning(f"  WARNING: Same node being added at multiple time points for role={role}, refIndex={refIndex}!")
 
             try:
-                # Create a single sequence node for this role
-                sequenceNode = self._createSequenceForNode(
-                    valveBrowserNode,
-                    f"{sequenceBaseName}_Sequence",
-                    volumeSequenceNode.GetIndexName(),
-                    volumeSequenceNode.GetIndexUnit(),
-                    volumeSequenceNode.GetIndexType()
-                )
+                # If time points are added to an already converted valve then the sequence of this
+                # role exists already, add the new items to that.
+                existingProxyNode = self._getExistingReferencedProxyNode(valveBrowserNode, heartValveSequenceNode, role, refIndex)
+                sequenceNode = valveBrowserNode.GetSequenceNode(existingProxyNode) if existingProxyNode else None
+                existingDisplaySequenceNode = None
+                if sequenceNode and existingProxyNode.IsA("vtkMRMLDisplayableNode") and existingProxyNode.GetDisplayNode():
+                    existingDisplaySequenceNode = valveBrowserNode.GetSequenceNode(existingProxyNode.GetDisplayNode())
+                if not sequenceNode:
+                    # Create a single sequence node for this role
+                    sequenceNode = self._createSequenceForNode(
+                        valveBrowserNode,
+                        f"{sequenceBaseName}_Sequence",
+                        volumeSequenceNode.GetIndexName(),
+                        volumeSequenceNode.GetIndexUnit(),
+                        volumeSequenceNode.GetIndexType()
+                    )
 
                 if role == "AxialSliceToRasTransform":
                     axialSequenceNode = sequenceNode
@@ -1103,13 +1180,15 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 displayNodeEntries = [(entry['indexValue'], entry['displayNode']) for entry in nodeEntries if entry.get('displayNode')]
                 if displayNodeEntries:
                     try:
-                        displaySequenceNode = self._createSequenceForNode(
-                            valveBrowserNode,
-                            f"{sequenceBaseName}_Display_Sequence",
-                            volumeSequenceNode.GetIndexName(),
-                            volumeSequenceNode.GetIndexUnit(),
-                            volumeSequenceNode.GetIndexType()
-                        )
+                        displaySequenceNode = existingDisplaySequenceNode
+                        if not displaySequenceNode:
+                            displaySequenceNode = self._createSequenceForNode(
+                                valveBrowserNode,
+                                f"{sequenceBaseName}_Display_Sequence",
+                                volumeSequenceNode.GetIndexName(),
+                                volumeSequenceNode.GetIndexUnit(),
+                                volumeSequenceNode.GetIndexType()
+                            )
 
                         addedDisplayNodes = {}
                         for indexValue, displayNode in displayNodeEntries:
@@ -1260,7 +1339,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             nthReferenceRoles = ["PapillaryLineMarkup", "LeafletSurfaceBoundaryMarkup",
                                 "CoaptationBaseLineMarkup", "CoaptationMarginLineMarkup",
                                 "CoaptationBaseLineModel", "CoaptationMarginLineModel",
-                                "LeafletSurfaceModel"]
+                                "CoaptationSurfaceModel", "LeafletSurfaceModel"]
 
             # Track which Nth reference indices we've set for each role
             nthReferenceIndices = {}  # role -> list of (index, proxyNode)
@@ -1314,6 +1393,15 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         axialItemID,
                         slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(),
                         "1")
+
+        # The clipped valve volume is referenced from the valve browser node in the new format (see
+        # HeartValveLib.ValveBrowser.clippedValveVolumeNode), not from each HeartValve node.
+        clippedVolumeSequenceNode = createdSequences.get(("ClippedVolume", 0))
+        clippedVolumeProxyNode = valveBrowserNode.GetProxyNode(clippedVolumeSequenceNode) if clippedVolumeSequenceNode else None
+        if clippedVolumeProxyNode:
+            valveBrowserNode.SetNodeReferenceID("ClippedVolume", clippedVolumeProxyNode.GetID())
+            if heartValveProxyNode:
+                heartValveProxyNode.RemoveNodeReferenceIDs("ClippedVolume")
 
         # Collect all proxy nodes to avoid accidentally removing their display nodes
         proxyNodeIDs = set()
@@ -1897,6 +1985,28 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         except Exception as err:
             logging.warning(f"Error converting measurement table nodes: {err}")
 
+    @staticmethod
+    def _getNodeReferenceIDs(node):
+        """Get all node references of a node as {role: [referenced node IDs]}."""
+        references = {}
+        roles = []
+        node.GetNodeReferenceRoles(roles)
+        for role in roles:
+            references[role] = [node.GetNthNodeReferenceID(role, referenceIndex)
+                                for referenceIndex in range(node.GetNumberOfNodeReferences(role))]
+        return references
+
+    @staticmethod
+    def _setNodeReferenceIDs(node, references):
+        """Restore node references (see _getNodeReferenceIDs). Storing a node in a sequence strips all its
+        node references, so the proxy node that is created from the sequence has none."""
+        if not node or not references:
+            return
+        for role, referencedNodeIDs in references.items():
+            for referenceIndex, referencedNodeID in enumerate(referencedNodeIDs):
+                if referencedNodeID and slicer.mrmlScene.GetNodeByID(referencedNodeID):
+                    node.SetNthNodeReferenceID(role, referenceIndex, referencedNodeID)
+
     def convertCardiacDeviceNodesToSequences(self):
         """
         Convert CardiacDeviceAnalysis nodes to sequences.
@@ -2007,10 +2117,18 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 volumeSequenceNode.GetIndexType()
             )
 
-            # Add devices to sequence at first timepoint
-            for deviceNode in deviceNodes:
+            # Add each device as a separate item. A legacy device node has no frame information, so
+            # the devices are stored at consecutive frames: adding all of them at the first frame made
+            # each device overwrite the previous one, so only the last device survived.
+            deviceReferences = None
+            for deviceIndex, deviceNode in enumerate(deviceNodes):
                 try:
-                    indexValue = volumeSequenceNode.GetNthIndexValue(0)
+                    if deviceIndex < volumeSequenceNode.GetNumberOfDataNodes():
+                        indexValue = volumeSequenceNode.GetNthIndexValue(deviceIndex)
+                    else:
+                        indexValue = str(deviceIndex)
+                    if deviceReferences is None:
+                        deviceReferences = self._getNodeReferenceIDs(deviceNode)
                     deviceSequenceNode.SetDataNodeAtValue(deviceNode, indexValue)
                     logging.info(f"Added {deviceNode.GetName()} to device sequence")
                     convertedCount += 1
@@ -2024,6 +2142,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 deviceBrowserNode.SetSaveChanges(deviceSequenceNode, True)
                 deviceBrowserNode.SetSelectedItemNumber(0)
                 slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(deviceBrowserNode)
+                self._setNodeReferenceIDs(deviceBrowserNode.GetProxyNode(deviceSequenceNode), deviceReferences)
                 logging.info(f"Created device browser with {deviceSequenceNode.GetNumberOfDataNodes()} device(s)")
 
         # Process standalone devices
@@ -2050,8 +2169,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             deviceSequenceNode.SetIndexName("time")
             deviceSequenceNode.SetIndexUnit("frame")
 
+            deviceReferences = None
             for idx, deviceNode in enumerate(standaloneDevices):
                 try:
+                    if deviceReferences is None:
+                        deviceReferences = self._getNodeReferenceIDs(deviceNode)
                     deviceSequenceNode.SetDataNodeAtValue(deviceNode, str(idx))
                     logging.info(f"Added {deviceNode.GetName()} to standalone device sequence")
                     convertedCount += 1
@@ -2064,6 +2186,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 deviceBrowserNode.SetSaveChanges(deviceSequenceNode, True)
                 deviceBrowserNode.SetSelectedItemNumber(0)
                 slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(deviceBrowserNode)
+                self._setNodeReferenceIDs(deviceBrowserNode.GetProxyNode(deviceSequenceNode), deviceReferences)
 
         # Remove original device nodes
         for node in nodesToRemove:
