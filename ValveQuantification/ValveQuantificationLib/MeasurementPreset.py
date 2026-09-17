@@ -455,13 +455,21 @@ class MeasurementPreset(object):
         planeNormal1_ValveModel1 = -planeNormal1_ValveModel1
 
       # Make the angle signed so that the sign is positive if plane normal intersection point is on the positive side of plane 1.
-      [intersectionPoint1, intersectionPoint1] = HeartValveLib.getLinesIntersectionPoints(
-        planePosition1_ValveModel1, planePosition1_ValveModel1+planeNormal1_ValveModel1,
-        planePosition2_ValveModel1, planePosition2_ValveModel1+planeNormal2_ValveModel1)
+      # If the planes are parallel (e.g., a valve is compared to itself or to a nearly identical time point)
+      # then the plane normal lines do not intersect: the angle is zero and it has no sign.
+      unitNormal1 = planeNormal1_ValveModel1 / np.linalg.norm(planeNormal1_ValveModel1)
+      unitNormal2 = planeNormal2_ValveModel1 / np.linalg.norm(planeNormal2_ValveModel1)
+      planesParallel = np.linalg.norm(np.cross(unitNormal1, unitNormal2)) < 1e-6
+      if planesParallel:
+        angleDeg = 0.0
+      else:
+        [intersectionPoint1, intersectionPoint2] = HeartValveLib.getLinesIntersectionPoints(
+          planePosition1_ValveModel1, planePosition1_ValveModel1+planeNormal1_ValveModel1,
+          planePosition2_ValveModel1, planePosition2_ValveModel1+planeNormal2_ValveModel1)
 
-      # Planes intersect on the negative side
-      if np.dot(planeNormal1_ValveModel1, (intersectionPoint1-planePosition1_ValveModel1)) < 0:
-        angleDeg = -angleDeg
+        # Planes intersect on the negative side
+        if np.dot(planeNormal1_ValveModel1, (intersectionPoint1-planePosition1_ValveModel1)) < 0:
+          angleDeg = -angleDeg
 
     if invertDirection:
       angleDeg = -angleDeg
