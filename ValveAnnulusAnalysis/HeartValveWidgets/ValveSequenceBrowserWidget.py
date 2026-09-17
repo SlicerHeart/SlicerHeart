@@ -253,10 +253,18 @@ class ValveSequenceBrowserWidget:
     self.updateGUIFromMRML()
 
   def onRemoveTimePointButtonClicked(self):
-    itemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    if indexValue is not None:
+    # Remove the time point of the displayed volume frame, as indicated by the enabled state of the button.
+    # The displayed heart valve time point may belong to another frame (the valve browser keeps showing
+    # the last time point when the volume is moved to a frame that has no time point).
+    volumeItemIndex, volumeIndexValue = self.valveBrowser.getDisplayedValveVolumeSequenceIndexAndValue()
+    if volumeIndexValue and self.valveBrowser.heartValveSequenceNode.GetItemNumberFromIndexValue(volumeIndexValue) >= 0:
       # TODO: add confirm dialog
-      self.valveBrowser.removeTimePoint(indexValue)
+      self.valveBrowser.removeTimePoint(volumeIndexValue)
+      # The valve browser switches to another time point, which moves the linked volume browser to that
+      # time point's frame. Stay on the frame that the user was looking at.
+      volumeSequenceBrowserNode = self.valveBrowser.volumeSequenceBrowserNode
+      if volumeSequenceBrowserNode:
+        volumeSequenceBrowserNode.SetSelectedItemNumber(volumeItemIndex)
 
     self.updateGUIFromMRML()
 
