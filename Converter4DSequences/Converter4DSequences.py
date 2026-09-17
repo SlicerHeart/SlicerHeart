@@ -1124,6 +1124,16 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                                 slicer.mrmlScene.RemoveNode(displayNodeCopy)
                                 addedDisplayNodes[indexValue] = displayNode.GetID()
 
+                        # Make sure a display item exists at EVERY time point that has a data item:
+                        # at a time point without a display item the display proxy is reset to
+                        # defaults on every browser update, so user changes (visibility, color, ...)
+                        # are immediately reverted there. Fill gaps from the closest existing item.
+                        for indexValue in addedNodes:
+                            if displaySequenceNode.GetItemNumberFromIndexValue(indexValue) < 0:
+                                templateDisplayNode = displaySequenceNode.GetDataNodeAtValue(indexValue, False)
+                                if templateDisplayNode:
+                                    displaySequenceNode.SetDataNodeAtValue(templateDisplayNode, indexValue)
+
                         logging.info(f"  Created display node sequence: {displaySequenceNode.GetName()} with {displaySequenceNode.GetNumberOfDataNodes()} time points")
 
                         # Store the mapping between data sequence and display sequence
