@@ -60,8 +60,8 @@ class ValveBrowser:
 
     def moveNodeToValveBrowserFolder(self, node):
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      valveBrowserNodeItemId = shNode.GetItemByDataNode(self.valveBrowserNode)
-      shNode.SetItemParent(shNode.GetItemByDataNode(node), valveBrowserNodeItemId)
+      valveBrowserNodeItemId = HeartValves.getSubjectHierarchyItemId(self.valveBrowserNode)
+      shNode.SetItemParent(HeartValves.getSubjectHierarchyItemId(node), valveBrowserNodeItemId)
 
     @property
     def heartValveSequenceNode(self):
@@ -156,7 +156,14 @@ class ValveBrowser:
       return volumeSequenceIndexValue
 
     def removeTimePoint(self, indexValue):
-      self.heartValveSequenceNode.RemoveDataNodeAtValue(indexValue)
+      # Remove the time point from all the sequences of the valve (annulus contour, labels, ROI,
+      # segmentation, ...), not just from the heart valve sequence: the items left behind would
+      # reappear as the content of a time point that is added later at the same index value.
+      synchronizedSequenceNodes = vtk.vtkCollection()
+      self.valveBrowserNode.GetSynchronizedSequenceNodes(synchronizedSequenceNodes, True)  # include master
+      for sequenceNode in synchronizedSequenceNodes:
+        if sequenceNode.GetItemNumberFromIndexValue(indexValue, True) >= 0:
+          sequenceNode.RemoveDataNodeAtValue(indexValue)
 
       itemIndex = self.valveBrowserNode.GetSelectedItemNumber()
       numberOfDataNodes = self.heartValveSequenceNode.GetNumberOfDataNodes()
@@ -271,7 +278,7 @@ class ValveBrowser:
         # Make sequence browser seek widget display frame index instead of frame time
         volumeSequenceBrowserNode = self.volumeSequenceBrowserNode
         if volumeSequenceBrowserNode:
-          volumeSequenceBrowserNode.SetIndexDisplayMode(True)
+          volumeSequenceBrowserNode.SetIndexDisplayMode(slicer.vtkMRMLSequenceBrowserNode.IndexDisplayAsIndex)
 
       # Apply probeToRAS transform to all nodes that move with the valve volume
 
