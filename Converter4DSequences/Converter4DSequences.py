@@ -1000,8 +1000,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             "LeafletSurfaceBoundaryMarkup": "LeafletSurfaceEdit",
         }
         seqIdToSubfolder = {}
-        # The axial-transform sequence, captured directly at creation (below). The generic
-        # name-matching used elsewhere is unreliable, so keep an explicit handle to wire the browser's
+        # Map from (role, refIndex) to the sequence node, recorded directly when each sequence is
+        # created below. This is the authoritative mapping used for proxy renaming and for
+        # re-pointing the heart valve proxy's references.
+        createdSequences = {}
+        # The axial-transform sequence, captured directly at creation (below), to wire the browser's
         # AxialSliceToRasTransform reference to this sequence's proxy afterwards.
         axialSequenceNode = None
 
@@ -1031,6 +1034,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                 if role == "AxialSliceToRasTransform":
                     axialSequenceNode = sequenceNode
+
+                # Record the mapping directly at creation time. It is used below to rename the
+                # proxies and to re-point the heart valve proxy's references; reconstructing it
+                # afterwards by name matching picked the wrong sequence whenever names were similar,
+                # leaving proxies with their default '<name>_Sequence' names.
+                createdSequences[(role, refIndex)] = sequenceNode
 
                 # Add all nodes for this role to the sequence at their respective time points
                 # Track which nodes we've added to avoid true duplicates (same node at same time)
@@ -1127,29 +1136,9 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         # Update proxy nodes to reflect the new sequences
         slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(valveBrowserNode)
 
-        # Ensure proxy nodes have the correct parent transforms and descriptive names
-        # Map from (role, refIndex) to the actual sequence node that was created
-        createdSequences = {}  # (role, refIndex) -> sequenceNode
-
-        # Get all synchronized sequences
-        synchronizedSequenceNodes = vtk.vtkCollection()
-        valveBrowserNode.GetSynchronizedSequenceNodes(synchronizedSequenceNodes, False)
-
-        for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
-            seqNode = synchronizedSequenceNodes.GetItemAsObject(i)
-            if not seqNode:
-                continue
-
-            # Try to match this sequence to one of our (role, refIndex) keys by checking sequence name
-            seqName = seqNode.GetName()
-            for (role, refIndex) in referencedNodesByRole.keys():
-                # Match by checking if the descriptive name is in the sequence name
-                # The sequence is named like "<descriptiveName>_Sequence"
-                if role in seqName or self._stripFrameAndPhaseFromName(seqName.replace('_Sequence', '')) in seqName:
-                    createdSequences[(role, refIndex)] = seqNode
-                    break
-
-        # Now configure each proxy node
+        # Now configure each proxy node, using the (role, refIndex) -> sequence mapping recorded at
+        # creation time. (This was previously reconstructed here by name matching, which regularly
+        # picked the wrong sequence and left proxies with their default '<name>_Sequence' names.)
         for (role, refIndex), nodeEntries in referencedNodesByRole.items():
             if len(nodeEntries) == 0:
                 continue
@@ -1257,32 +1246,28 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # Track which Nth reference indices we've set for each role
             nthReferenceIndices = {}  # role -> list of (index, proxyNode)
 
-            # Map from (role, refIndex) to the sequence node
             for (role, refIndex), nodeEntries in referencedNodesByRole.items():
                 if len(nodeEntries) == 0:
                     continue
 
-                # Find the sequence we created for this (role, refIndex) pair
-                sequenceBaseName = self._stripFrameAndPhaseFromName(nodeEntries[0]['node'].GetName())
-                sequenceName = f"{sequenceBaseName}_Sequence"
-
-                # Find the sequence node by name
-                for i in range(synchronizedSequenceNodes.GetNumberOfItems()):
-                    seqNode = synchronizedSequenceNodes.GetItemAsObject(i)
-                    if seqNode and sequenceName in seqNode.GetName():
-                        proxyNode = valveBrowserNode.GetProxyNode(seqNode)
-                        if proxyNode:
-                            # Check if this is a simple reference or Nth reference
-                            if role in singleReferenceRoles:
-                                # Simple single reference
-                                heartValveProxyNode.SetNodeReferenceID(role, proxyNode.GetID())
-                                logging.info(f"  Updated heart valve proxy reference '{role}' to proxy node '{proxyNode.GetName()}'")
-                            elif role in nthReferenceRoles:
-                                # Nth reference - need to track indices
-                                if role not in nthReferenceIndices:
-                                    nthReferenceIndices[role] = []
-                                nthReferenceIndices[role].append(proxyNode)
-                        break
+                # Look up the sequence created for this (role, refIndex) pair. Searching the
+                # synchronized sequences by name here matched the wrong sequence whenever names
+                # were similar (e.g. multiple leaflets), cross-wiring the valve proxy's references.
+                seqNode = createdSequences.get((role, refIndex))
+                if not seqNode:
+                    continue
+                proxyNode = valveBrowserNode.GetProxyNode(seqNode)
+                if proxyNode:
+                    # Check if this is a simple reference or Nth reference
+                    if role in singleReferenceRoles:
+                        # Simple single reference
+                        heartValveProxyNode.SetNodeReferenceID(role, proxyNode.GetID())
+                        logging.info(f"  Updated heart valve proxy reference '{role}' to proxy node '{proxyNode.GetName()}'")
+                    elif role in nthReferenceRoles:
+                        # Nth reference - need to track indices
+                        if role not in nthReferenceIndices:
+                            nthReferenceIndices[role] = []
+                        nthReferenceIndices[role].append(proxyNode)
 
             # Now set all the Nth references
             for role, proxyNodes in nthReferenceIndices.items():
