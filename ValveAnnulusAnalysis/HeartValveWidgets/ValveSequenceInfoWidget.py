@@ -121,7 +121,7 @@ class ValveSeriesInfo(qt.QAbstractTableModel):
     self._valveBrowserNode = None
     self._df = None
 
-  def rowCount(self):
+  def rowCount(self, parent=qt.QModelIndex()):
     return len(self._df) if self._df is not None else 0
 
   def columnCount(self, parent=qt.QModelIndex()):
