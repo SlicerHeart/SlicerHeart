@@ -632,7 +632,10 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
 
     terminologyToSegmentID = {}
 
-    # Iterate over all the segmentation nodes in the sequence
+    # Iterate over all the segmentation nodes in the sequence.
+    # The browser may have no heart valve time point (e.g. after the scene was cleared).
+    if not self.valveModel:
+      return
     leafletSegmentationSequenceNode = self.valveModel.leafletSegmentationSequenceNode
     if leafletSegmentationSequenceNode is None:
       return
@@ -1327,8 +1330,12 @@ class ValveSegmentationLogic(ScriptedLoadableModuleLogic):
     vtk.vtkMatrix4x4.Multiply4x4(axialSliceToVolume, axisAlignedVolumeIjkToAxialSlice, axisAlignedVolumeIjkToVolume)
     leafletVolumeClippedAxisAligned.SetGeometryFromImageToWorldMatrix(axisAlignedVolumeIjkToVolume)
 
+    # The image is defined in the valve volume's (Probe) coordinate system. The segmentation is not needed
+    # for computing it, and it may not exist yet at this time point.
+    probeToRasTransformNode = valveVolumeNode.GetParentTransformNode()
     segmentationNode = valveModel.getLeafletSegmentationNode()
-    segmentationNode.SetAndObserveTransformNodeID(valveVolumeNode.GetParentTransformNode().GetID())
+    if segmentationNode:
+      segmentationNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
 
     # self.copySegmentation(valveVolumeNode, leafletVolumeClippedAxisAlignedNode, 'uchar', 'Linear', False)
     vtkSegmentationCore.vtkOrientedImageDataResample.FillImage(leafletVolumeClippedAxisAligned, 1,
@@ -1336,9 +1343,9 @@ class ValveSegmentationLogic(ScriptedLoadableModuleLogic):
 
     if clippingEnabled:
       valveModel.valveRoi.clipOrientedImageWithModel(leafletVolumeClippedAxisAligned,
-                                                     segmentationNode.GetParentTransformNode(),
+                                                     probeToRasTransformNode,
                                                      leafletVolumeClippedAxisAligned,
-                                                     segmentationNode.GetParentTransformNode())
+                                                     probeToRasTransformNode)
 
     # Match window/level of the full volume
     # windowLevelMin = valveVolumeNode.GetDisplayNode().GetWindowLevelMin()

@@ -714,10 +714,9 @@ class LeafletAnalysisWidget(ScriptedLoadableModuleWidget):
     selectedCoaptationModel = self.getSelectedCoaptationModel()
     if not selectedCoaptationModel:
       return
+    # Removes the coaptation nodes along with their sequences. (The valve ROI must not be touched: it
+    # used to be removed from the displayed time point here.)
     self.valveModel.removeCoaptationModel(self.valveModel.coaptationModels.index(selectedCoaptationModel))
-    valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
-    valveItemIndex, indexValue = valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
-    self.valveModel.valveRoiSequenceNode.RemoveDataNodeAtValue(indexValue)
 
   def onReload(self):
     from HeartValveLib.util import reload
