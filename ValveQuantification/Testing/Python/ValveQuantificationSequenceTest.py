@@ -354,7 +354,10 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
     rows = self._tableRows(preset.metricsTable.metricTableNode)
     displacementRows = {k: v for k, v in rows.items() if "annulus displacement" in k or "point ED-MS distance" in k}
     self.assertTrue(displacementRows, f"phase compare must report MS/ED differences (messages: {messages})")
-    self.assertTrue(any(float(v) > 0.5 for v in displacementRows.values() if v not in ("", "nan")),
+    # The contours of frames 1 and 3 are the same ellipse (radii 2.5 and 2.0 mm) with points shifted by
+    # 0.2 rad, so landmarks are displaced by 0.4-0.5 mm (at most 2 * 2.5 * sin(0.1) = 0.499 mm).
+    # A self-comparison would report 0.0 everywhere.
+    self.assertTrue(any(float(v) > 0.2 for v in displacementRows.values() if v not in ("", "nan")),
                     f"MS and ED contours differ, so the phase comparison must not be a self-comparison: {displacementRows}")
 
 
