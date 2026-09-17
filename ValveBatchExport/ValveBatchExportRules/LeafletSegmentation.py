@@ -87,10 +87,15 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
           self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
           continue
 
-        self._saveSegmentsIntoSeparateFiles(valveModel, valveModelName)
+        # Export a temporary copy: showing one segment at a time must not alter the scene (the display
+        # properties of the valve's segmentation are stored per time point)
+        exportedSegmentationNode = cloneSegmentationNode(leafletSegmentationNode)
+        try:
+          self._saveSegmentsIntoSeparateFiles(exportedSegmentationNode, valveModel, valveModelName)
+        finally:
+          slicer.mrmlScene.RemoveNode(exportedSegmentationNode)
 
-  def _saveSegmentsIntoSeparateFiles(self, valveModel, prefix):
-    segmentationNode = valveModel.getLeafletSegmentationNode()
+  def _saveSegmentsIntoSeparateFiles(self, segmentationNode, valveModel, prefix):
     segmentationsLogic = slicer.modules.segmentations.logic()
 
     labelNode = None
@@ -168,6 +173,15 @@ def hideAllSegments(segmentationNode):
   from HeartValveLib.util import getAllSegmentIDs
   for segmentID in getAllSegmentIDs(segmentationNode):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, False)
+
+
+def cloneSegmentationNode(segmentationNode):
+  """Returns a temporary deep copy of the segmentation node (the caller must remove it from the scene)."""
+  clonedNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentationNode.GetName())
+  clonedNode.CopyContent(segmentationNode)
+  clonedNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
+  clonedNode.CreateDefaultDisplayNodes()
+  return clonedNode
 
 
 def deleteValveMask(segmentationNode):
