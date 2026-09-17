@@ -76,10 +76,7 @@ class AnnulusContourCoordinatesExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
 
-      sequenceBrowserNode = valveModel.valveBrowserNode
-      for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
-        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
-
+      for timePoint in self.iterateExportedTimePoints(valveModel):
         if self.EXPORT_CURVE_POINT_COORDINATES:
           self.addAnnulusContourCurvePoints(sceneFileName, valveModel)
         if self.EXPORT_CONTROL_POINT_COORDINATES:
