@@ -22,10 +22,7 @@ class ValveLandmarkCoordinatesExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
 
-      sequenceBrowserNode = valveModel.valveBrowserNode
-      for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
-        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
-
+      for timePoint in self.iterateExportedTimePoints(valveModel):
         frameNumber = self.getAssociatedFrameNumber(valveModel)
         annulusMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
         numberOfMarkups = annulusMarkupNode.GetNumberOfFiducials()

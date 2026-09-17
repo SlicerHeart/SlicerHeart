@@ -203,6 +203,23 @@ class ValveBatchExportRule(object):
       itemNumbers.update(getValveTimePointsMatchingPhase(valveModel.heartValveNode, phase))
     return sorted(itemNumbers)
 
+  def iterateExportedTimePoints(self, valveModel):
+    """ Select each exported time point (see getExportedTimePoints) in the valve browser, one after
+    the other, yielding its item number. The time point that was selected before the export is
+    restored when the iteration ends (also if it is left early or by an exception), so that exporting
+    does not change what the scene shows. """
+    itemNumbers = self.getExportedTimePoints(valveModel)
+    if not itemNumbers:
+      return
+    browserNode = valveModel.valveBrowserNode
+    originalItemNumber = browserNode.GetSelectedItemNumber()
+    try:
+      for itemNumber in itemNumbers:
+        browserNode.SetSelectedItemNumber(itemNumber)
+        yield itemNumber
+    finally:
+      browserNode.SetSelectedItemNumber(originalItemNumber)
+
   def addLog(self, text):
     logging.info(text)
     if self.logCallback:

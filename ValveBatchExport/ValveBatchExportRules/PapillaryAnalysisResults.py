@@ -86,9 +86,7 @@ class PapillaryAnalysisResultsExportRule(ValveBatchExportRule):
       self._processScene(sceneFileName, measurementNodes)
     else:
       for valveModel in getAllHeartValveModelNodes():
-        sequenceBrowserNode = valveModel.valveBrowserNode
-        for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
-          sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
+        for timePoint in self.iterateExportedTimePoints(valveModel):
           cardiacCyclePhase = valveModel.getCardiacCyclePhase()
           shortname = valveModel.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
           if shortname in self.EXPORT_PHASES:

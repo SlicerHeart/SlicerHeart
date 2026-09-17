@@ -53,10 +53,7 @@ class AnnulusContourModelExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
 
-      sequenceBrowserNode = valveModel.valveBrowserNode
-      for annotatedFrameNumber in self.getExportedTimePoints(valveModel):
-        sequenceBrowserNode.SetSelectedItemNumber(annotatedFrameNumber)
-
+      for timePoint in self.iterateExportedTimePoints(valveModel):
         frameNumber = self.getAssociatedFrameNumber(valveModel)
         filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
         valveType = valveModel.getValveType()
