@@ -862,6 +862,8 @@ class ValveModel:
         papillaryMuscleName = self.valveTypePreset["papillaryNames"][papillaryModelIndex]
       if not papillaryLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode')
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         #markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'PapillaryMuscles')
@@ -1036,6 +1038,8 @@ class ValveModel:
       leafletSurfaceBoundaryMarkupNode = self.getLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId)
       if not leafletSurfaceBoundaryMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode')
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         markupNode.SetNumberOfPointsPerInterpolatingSegment(20)
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + "SurfaceBoundaryMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
@@ -1176,6 +1180,8 @@ class ValveModel:
       baseLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
       if not baseLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"BaseLineMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
@@ -1192,6 +1198,8 @@ class ValveModel:
       marginLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
       if not marginLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"MarginLineMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
