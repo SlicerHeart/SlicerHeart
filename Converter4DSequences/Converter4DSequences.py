@@ -848,6 +848,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # was a no-op and the references were left dangling once the originals were removed.
                     for heartValveNode in heartValveNodes:
                         self._replaceNodeReferencesInScene(heartValveNode, proxyNode)
+                    # Name the valve proxy the way new-format scenes name heart valve nodes
+                    # (e.g. "TricuspidValve"), instead of inheriting the sequence node's
+                    # "<x>_Sequence" name, which showed up confusingly in the Data module.
+                    valveProxyName = f"{valveType[0].upper()}{valveType[1:]}Valve"
+                    proxyNode.SetName(slicer.mrmlScene.GetUniqueNameByString(valveProxyName))
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points, proxy node: {proxyNode.GetName()}")
                 else:
                     logging.info(f"Valve browser configured with {heartValveSequenceNode.GetNumberOfDataNodes()} time points")
@@ -1224,6 +1229,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         if currentDisplayID != displayProxyNode.GetID():
                             proxyNode.SetAndObserveDisplayNodeID(displayProxyNode.GetID())
                             logging.info(f"  Linked display sequence '{displaySequenceNode.GetName()}' to proxy '{proxyNode.GetName()}'")
+                        # Name the display proxy after its data proxy instead of the sequence's
+                        # "_Sequence" name
+                        displayProxyNode.SetName(
+                            slicer.mrmlScene.GetUniqueNameByString(f"{proxyNode.GetName()}_Display"))
                     else:
                         logging.warning(f"  Could not get display proxy node for sequence '{displaySequenceNode.GetName()}'")
                 else:
@@ -1755,6 +1764,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                     # Quantification "valve" dropdown shows "None" for the converted measurement.
                     for role, valveNodeID in valveRoleTargets.items():
                         measurementProxyNode.SetNodeReferenceID(role, valveNodeID)
+
+                    # Drop the sequence node's "_Sequence" suffix from the proxy shown in the Data module
+                    measurementProxyNode.SetName(
+                        slicer.mrmlScene.GetUniqueNameByString(f"{preset}-Measurement"))
 
                     for (role, refIndex), tableSequenceNode in tableSequencesByRole.items():
                         tableProxyNode = valveBrowserNode.GetProxyNode(tableSequenceNode)
