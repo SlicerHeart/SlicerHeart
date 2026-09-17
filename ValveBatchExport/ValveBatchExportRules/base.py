@@ -3,6 +3,7 @@ import qt
 import vtk
 import logging
 import slicer
+import HeartValveLib
 from HeartValveLib.helpers import getAllHeartValveModelNodes, getValveTimePointsMatchingPhase
 from typing import Union
 
@@ -219,6 +220,29 @@ class ValveBatchExportRule(object):
         yield itemNumber
     finally:
       browserNode.SetSelectedItemNumber(originalItemNumber)
+
+  def iterateMeasurementTimePoints(self, measurementNode):
+    """ Select each exported time point of the measured valve, one after the other (see
+    iterateExportedTimePoints), yielding the cardiac cycle phase short name of the measurement at that
+    time point ("multiple" if the input valves of the measurement are in different phases).
+    As in the Valve quantification module, time points are those of the first input valve. """
+    valveQuantificationLogic = slicer.modules.valvequantification.widgetRepresentation().self().logic
+    measurementPreset = valveQuantificationLogic.getMeasurementPreset(measurementNode)
+    heartValveNodes = [measurementNode.GetNodeReference('Valve' + inputValveId)
+                       for inputValveId in measurementPreset.inputValveIds]
+    heartValveNodes = [heartValveNode for heartValveNode in heartValveNodes if heartValveNode]
+    if not heartValveNodes:
+      return
+    valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNodes[0])
+    for timePoint in self.iterateExportedTimePoints(valveModel):
+      phaseNames = valveQuantificationLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode)
+      if len(phaseNames) > 1:
+        if self.EXPORT_PHASES and not all(phaseName in self.EXPORT_PHASES for phaseName in phaseNames):
+          logging.debug("Multiple phases compare measurement node found but selected phases don't match those. Skipping")
+          continue
+        yield "multiple"
+      else:
+        yield phaseNames[0] if phaseNames else ''
 
   def addLog(self, text):
     logging.info(text)
