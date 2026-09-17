@@ -144,9 +144,7 @@ class MeasurementPreset(object):
       # computeMetricsForMeasurementNode skips missing valve references, so an empty dict is a
       # normal state (e.g. no valve selected yet).
       return self.metricsMessages
-    tableNode = None
-    if self.metricsTable:
-      tableNode = self.metricsTable.metricTableNode
+    tableNode = self.getResultsTableNode(folderNode)
 
     valveModel = inputValveModels[next(iter(inputValveModels))]
     tableSequenceNode = None
@@ -163,6 +161,32 @@ class MeasurementPreset(object):
 
     self.moveNodeToMeasurementFolder(self.metricsTable.metricTableNode)
     return self.metricsMessages
+
+  def getResultsTableNode(self, folderNode):
+    """Get the existing results table of a measurement.
+    Presets are shared objects (one instance per preset for the whole application), therefore the
+    table of the previous computation cannot be blindly reused: it may belong to another measurement
+    node or to a scene that has been closed since. The table is looked up under the measurement
+    in the subject hierarchy, which also finds the table after the scene is saved and reloaded.
+    :return: table node, None if the measurement has no results table yet
+    """
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    folderItemId = shNode.GetItemByDataNode(folderNode) if folderNode else 0
+    if folderItemId:
+      tableItemIds = vtk.vtkIdList()
+      shNode.GetItemChildren(folderItemId, tableItemIds, "vtkMRMLTableNode")
+      for tableItemIndex in range(tableItemIds.GetNumberOfIds()):
+        tableItemId = tableItemIds.GetId(tableItemIndex)
+        if shNode.GetItemName(tableItemId) == self.QUANTIFICATION_RESULTS_IDENTIFIER:
+          return shNode.GetItemDataNode(tableItemId)
+      return None
+    # The measurement is not in the subject hierarchy (results cannot be nested under it):
+    # reuse the table of the previous computation if it is still in the current scene.
+    if self.metricsTable:
+      tableNode = self.metricsTable.metricTableNode
+      if tableNode and slicer.mrmlScene.IsNodePresent(tableNode):
+        return tableNode
+    return None
 
   def addMeasurement(self, measurement):
     """ puts results into metricsTable and self.metricsMessages """
