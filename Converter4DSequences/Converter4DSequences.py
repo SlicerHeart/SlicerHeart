@@ -568,8 +568,12 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         for sequenceBrowserNode in slicer.util.getNodesByClass('vtkMRMLSequenceBrowserNode'):
             slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(sequenceBrowserNode)
 
-        # Collect all HeartValve nodes
-        allHeartValves = list(getAllModuleSpecificScriptableNodes("HeartValve"))
+        # Collect the old-format HeartValve nodes. Valves that are already sequence browser proxies are in
+        # the new format: the legacy updates must not touch them (reading their references would already
+        # add empty reference roles to them).
+        sequencesLogic = slicer.modules.sequences.logic()
+        allHeartValves = [node for node in getAllModuleSpecificScriptableNodes("HeartValve")
+                          if not sequencesLogic.GetFirstBrowserNodeForProxyNode(node)]
 
         if not allHeartValves:
             logging.info("No HeartValve nodes found to convert.")
@@ -952,6 +956,27 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         logging.info(f"Conversion complete. Converted {convertedCount} heart valve node(s)")
         return results
 
+    @staticmethod
+    def _getUniqueProxyNodeName(name, proxyNode):
+        """Get a name that no other proxy node of any sequence browser has. Proxies of different valves
+        (e.g. the annulus contour of the mitral and of the aortic valve) would otherwise get the same name.
+        Legacy nodes are ignored: they are removed at the end of the conversion."""
+        sequencesLogic = slicer.modules.sequences.logic()
+        usedNames = set()
+        for browserNode in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+            sequenceNodes = vtk.vtkCollection()
+            browserNode.GetSynchronizedSequenceNodes(sequenceNodes, True)
+            for sequenceNode in sequenceNodes:
+                otherProxyNode = browserNode.GetProxyNode(sequenceNode)
+                if otherProxyNode and otherProxyNode is not proxyNode:
+                    usedNames.add(otherProxyNode.GetName())
+        uniqueName = name
+        suffix = 1
+        while uniqueName in usedNames:
+            uniqueName = f"{name}_{suffix}"
+            suffix += 1
+        return uniqueName
+
     def _getExistingReferencedProxyNode(self, valveBrowserNode, heartValveSequenceNode, role, refIndex):
         """Get the proxy node of an already converted valve for the given reference role, if there is any.
         In the new format the axial slice transform and the clipped volume are referenced from the valve
@@ -1247,7 +1272,8 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             proxyNode = valveBrowserNode.GetProxyNode(seqNode)
             if proxyNode:
                 # Give the proxy node a descriptive name (remove _Sequence suffix)
-                descriptiveName = self._stripFrameAndPhaseFromName(nodeEntries[0]['node'].GetName())
+                descriptiveName = self._getUniqueProxyNodeName(
+                    self._stripFrameAndPhaseFromName(nodeEntries[0]['node'].GetName()), proxyNode)
                 proxyNode.SetName(descriptiveName)
                 logging.info(f"Renamed proxy node to: {descriptiveName}")
 
@@ -1804,6 +1830,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                 # One table sequence per referenced (role, refIndex), populated across all phases
                 tableSequencesByRole = {}
+                measurementChildNodes = []
                 for measurementNode, indexValues in timedMeasurements:
                     # HeartValveMeasurement nodes are created HideFromEditors=True, which keeps them out
                     # of Subject Hierarchy. Clear it before storing so the sequence copy (and every proxy
@@ -1825,6 +1852,9 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         measurementSequenceNode.SetDataNodeAtValue(measurementNode, indexValue)
                     convertedCount += 1
                     nodesToRemove.append(measurementNode)
+                    # Legacy modules attached results (tables, models) to the measurement only as
+                    # subject hierarchy children. They would be lost with the measurement node's item.
+                    measurementChildNodes.extend(self._getSubjectHierarchyChildDataNodes(measurementNode))
 
                     roles = []
                     measurementNode.GetNodeReferenceRoles(roles)
@@ -1885,6 +1915,13 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         measurementProxyItemID = shNode.GetItemByDataNode(measurementProxyNode)
                         if measurementProxyItemID:
                             shNode.SetItemAttribute(measurementProxyItemID, "ModuleName", "HeartValveMeasurement")
+                            # Keep the legacy results that were attached only in the subject hierarchy
+                            for childNode in measurementChildNodes:
+                                if childNode in nodesToRemove or not slicer.mrmlScene.IsNodePresent(childNode):
+                                    continue
+                                childItemID = shNode.GetItemByDataNode(childNode)
+                                if childItemID:
+                                    shNode.SetItemParent(childItemID, measurementProxyItemID)
                     if shNode and valveProxyNode:
                         valveItemID = shNode.GetItemByDataNode(valveProxyNode)
                         if valveItemID:
@@ -1913,6 +1950,22 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
         logging.info(f"Converted {convertedCount} HeartValveMeasurement node(s)")
         return convertedCount
+
+    @staticmethod
+    def _getSubjectHierarchyChildDataNodes(node):
+        """Get the data nodes of all subject hierarchy items under the item of a node."""
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        itemID = shNode.GetItemByDataNode(node) if shNode else 0
+        if not itemID:
+            return []
+        childItemIDs = vtk.vtkIdList()
+        shNode.GetItemChildren(itemID, childItemIDs, True)
+        childNodes = []
+        for index in range(childItemIDs.GetNumberOfIds()):
+            childNode = shNode.GetItemDataNode(childItemIDs.GetId(index))
+            if childNode:
+                childNodes.append(childNode)
+        return childNodes
 
     def _convertMeasurementTableNodes(self, measurementNode, valveBrowserNode, masterSequenceNode):
         """
