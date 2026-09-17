@@ -443,6 +443,17 @@ class ValveBrowser:
       self.valveBrowserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
       return sequenceNode
 
+    def removeNodeWithSequence(self, proxyNode):
+      """Remove a node from the scene along with the sequence that stores its time points.
+      Removing only the proxy node would leave its sequence behind in the browser and in the scene."""
+      if not proxyNode:
+        return
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(proxyNode) if self.valveBrowserNode else None
+      if sequenceNode:
+        self.valveBrowserNode.RemoveSynchronizedSequenceNode(sequenceNode.GetID())
+        slicer.mrmlScene.RemoveNode(sequenceNode)
+      slicer.mrmlScene.RemoveNode(proxyNode)
+
     def addCurrentTimePointToSequence(self, sequenceNode):
       """Ensure the sequence has an item for the currently displayed time point."""
       browserNode = self.valveBrowserNode
