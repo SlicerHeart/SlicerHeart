@@ -149,7 +149,8 @@ class MasterSceneBuilder:
     pump()
 
   def addValve(self, valveType, phase, frameIndex, contourPoints, roi=True, segmentation=True, leaflets=True,
-               coaptation=True, papillary=True, labels=("A", "P", "AL", "PM")):
+               coaptation=True, papillary=True, labels=("A", "P", "AL", "PM"),
+               leafletNames=("anterior leaflet", "posterior leaflet")):
     import HeartValveLib
     self.selectFrame(frameIndex)
     heartValveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
@@ -190,10 +191,14 @@ class MasterSceneBuilder:
       planePosition, planeNormal = valveModel.getAnnulusContourPlane()
       inPlane = np.cross(planeNormal, [0.0, 0.0, 1.0])
       inPlane = inPlane / np.linalg.norm(inPlane)
-      for segmentName, offset, color in (("anterior leaflet", 5.0, (1.0, 0.5, 0.5)),
-                                         ("posterior leaflet", -5.0, (0.5, 0.5, 1.0))):
+      inPlane2 = np.cross(planeNormal, inPlane)
+      colors = ((1.0, 0.5, 0.5), (0.5, 0.5, 1.0), (0.5, 1.0, 0.5))
+      for leafletIndex, segmentName in enumerate(leafletNames):
+        # Two leaflets on opposite sides of the annulus center (as before), more evenly around it
+        angle = 2.0 * np.pi * leafletIndex / len(leafletNames)
+        color = colors[leafletIndex % len(colors)]
         sphere = vtk.vtkSphereSource()
-        sphere.SetCenter(*(center + offset * inPlane))
+        sphere.SetCenter(*(center + 5.0 * (np.cos(angle) * inPlane + np.sin(angle) * inPlane2)))
         sphere.SetRadius(5.0)
         sphere.SetPhiResolution(30)
         sphere.SetThetaResolution(30)
@@ -238,7 +243,8 @@ class MasterSceneBuilder:
           markupsNode = papillaryModel.getPapillaryLineMarkupNode()
           markupsNode.SetLocked(False)
           markupsNode.RemoveAllControlPoints()
-          start = np.array(contourPoints[(muscleIndex * 2 + 1) * len(contourPoints) // 4])
+          numberOfMuscles = len(valveModel.papillaryModels)
+          start = np.array(contourPoints[(muscleIndex * 2 + 1) * len(contourPoints) // (2 * numberOfMuscles)])
           for depth in (5.0, 12.0, 20.0):
             markupsNode.AddControlPoint(vtk.vtkVector3d(start - depth * np.array(planeNormal)))
           papillaryModel.updateModel()
@@ -354,6 +360,40 @@ def buildScenario(name):
     builder.addMeasurement("MitralValve", {"MitralValve": mitralP1, "AorticValve": aorticUn}, key="MitralValve-P1")
     builder.addMeasurement("GenericValve", {"Valve": aorticUn}, key="GenericValve-aortic-UN")
 
+  elif name == "three_valves_three_phases":
+    # Mitral, tricuspid and aortic valves, each analyzed at the same three cardiac phases in one
+    # scene, with leaflet segmentations for all three, per-phase measurements (including a
+    # measurement referencing two valves) and phase comparisons.
+    # The tricuspid and aortic contours are the mitral contours moved (and the aortic one shrunk)
+    # to other positions within the volume; they are not anatomical.
+    phases = (("mid-systole", 5, contour5), ("end-systole", 14, contour14), ("end-diastole", 24, contour24))
+
+    def moved(contour, offset, scale=1.0):
+      contourCenter = np.mean(np.array(contour), axis=0)
+      return [list(contourCenter + scale * (np.array(p) - contourCenter) + offset) for p in contour]
+
+    valves = {}
+    for phase, frameIndex, contour in phases:
+      valves[("mitral", phase)] = builder.addValve("mitral", phase, frameIndex, contour)
+      valves[("tricuspid", phase)] = builder.addValve(
+        "tricuspid", phase, frameIndex, moved(contour, [-45.0, 5.0, 0.0]), labels=("A", "P", "S", "L"),
+        leafletNames=("anterior leaflet", "posterior leaflet", "septal leaflet"))
+      valves[("aortic", phase)] = builder.addValve(
+        "aortic", phase, frameIndex, moved(contour, [0.0, 30.0, 20.0], scale=0.7), coaptation=False,
+        papillary=False, labels=("R", "L", "N"),
+        leafletNames=("right coronary leaflet", "left coronary leaflet", "non-coronary leaflet"))
+    for phase, frameIndex, contour in phases:
+      builder.addMeasurement("MitralValve", {"MitralValve": valves[("mitral", phase)],
+                                             "AorticValve": valves[("aortic", phase)]}, key=f"MitralValve-{phase}")
+      builder.addMeasurement("TricuspidValve", {"TricuspidValve": valves[("tricuspid", phase)]},
+                             key=f"TricuspidValve-{phase}")
+      builder.addMeasurement("GenericValve", {"Valve": valves[("aortic", phase)]}, key=f"GenericValve-aortic-{phase}")
+    for valveType in ("mitral", "tricuspid"):
+      builder.addMeasurement("PhaseCompare", {"Valve1": valves[(valveType, "mid-systole")],
+                                              "Valve2": valves[(valveType, "end-systole")],
+                                              "Valve4": valves[(valveType, "end-diastole")]},
+                             key=f"PhaseCompare-{valveType}")
+
   elif name == "single_phase_minimal":
     # Contour and labels only (no ROI/segmentation), a single phase: the minimal legacy valve.
     valve = builder.addValve("tricuspid", "end-diastole", 24, contour24, roi=False, segmentation=False,
@@ -365,7 +405,7 @@ def buildScenario(name):
   return builder
 
 
-SCENARIOS = ["mitral_three_phases", "two_valves_custom_phases", "single_phase_minimal"]
+SCENARIOS = ["mitral_three_phases", "two_valves_custom_phases", "three_valves_three_phases", "single_phase_minimal"]
 
 log = {"errors": []}
 try:
