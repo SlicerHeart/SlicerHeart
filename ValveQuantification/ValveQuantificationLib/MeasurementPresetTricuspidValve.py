@@ -68,7 +68,7 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
 
     # Add markup and mean position
     if coaptationCenterPoints is not None:
-      meanCoaptationCenterPoint = coaptationCenterPoints.mean(axis=1)
+      meanCoaptationCenterPoint = coaptationCenterPoints.mean(axis=1) if coaptationCenterPoints.ndim > 1 else coaptationCenterPoints
       valveModel.setAnnulusMarkupLabel(pointName, meanCoaptationCenterPoint)
 
   def computeMetrics(self, inputValveModels, outputTableNode):
