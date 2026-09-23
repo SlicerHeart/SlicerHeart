@@ -249,7 +249,10 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
   def cleanup(self):
     self.removeGUIObservers()
     self.removeNodeObservers()
-    self.parameterNode = None
+    # Not set through the parameterNode property, which sets up the views: the application may be
+    # shutting down (views already removed).
+    self.removeParameterNodeObserver()
+    self._parameterNode = None
 
   def addGUIObservers(self):
     for parameterName in self.nodeSelectorWidgets:
@@ -607,7 +610,7 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     selectedSurfaceId = self.papillaryMusclesTreeView.currentItem()
     selectedSurface = shNode.GetItemDataNode(selectedSurfaceId)
-    selectedPapillaryModel = self.valveModel.findPapillaryModel(selectedSurface)
+    selectedPapillaryModel = self.valveModel.findPapillaryModel(selectedSurface) if self.valveModel else None
     self.updateQuantification(selectedPapillaryModel)
 
   def onPapillaryLineMarkupPlaceModeChanged(self, placeActive):

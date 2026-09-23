@@ -533,6 +533,9 @@ class ValveBrowser:
     def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
 
       axialSliceToRasTransformNode = self.axialSliceToRasTransformNode
+      if not axialSliceToRasTransformNode:
+        # e.g. the scene was cleared while the valve browser is still selected
+        return
       axialSliceToRas = vtk.vtkMatrix4x4()
       axialSliceToRasTransformNode.GetMatrixTransformToParent(axialSliceToRas)
 

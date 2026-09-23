@@ -141,6 +141,9 @@ def registerCustomLayouts():
   before opening the module GUI."""
 
   layoutManager = slicer.app.layoutManager()
+  if not layoutManager:
+    # no main window
+    return
 
   customLayout = (
     "<layout type=\"vertical\">"
@@ -290,16 +293,18 @@ def setupDefaultLayout(layoutId=CardiacFourUpViewLayoutId):
     sliceCompositeNode = sliceLogic.GetSliceCompositeNode()
     sliceViewNode = sliceLogic.GetSliceNode()
 
-    # Show slice intersections
-    sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
+    # Show slice intersections (the display node does not exist yet right after the scene is cleared)
+    sliceDisplayNode = sliceLogic.GetSliceDisplayNode()
+    if sliceDisplayNode:
+      sliceDisplayNode.SetIntersectingSlicesVisibility(True)
 
     sliceViewNode.SetSliceVisible(sliceViewName == DEFAULT_SLICE_VIEW_SHOWN_IN_3D)
 
   setSliceViewsLink(sliceViewNames, oldLink, oldHotLink)
 
 def showSlices(show):
-  if not slicer.app.errorLogModel():
-    # shutting down
+  if not slicer.app.errorLogModel() or not slicer.app.layoutManager():
+    # shutting down, or no main window
     return
 
   # If slice views are linked then changing properties would repeatedly change
@@ -399,8 +404,10 @@ def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, ortho
     sliceCompositeNode = sliceLogic.GetSliceCompositeNode()
     sliceViewNode = sliceLogic.GetSliceNode()
 
-    # Show slice intersections
-    sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
+    # Show slice intersections (the display node does not exist yet right after the scene is cleared)
+    sliceDisplayNode = sliceLogic.GetSliceDisplayNode()
+    if sliceDisplayNode:
+      sliceDisplayNode.SetIntersectingSlicesVisibility(True)
 
     # Show only red slice in 3D view
     sliceViewNode.SetSliceVisible(sliceViewName == show3DSliceName)

@@ -104,6 +104,9 @@ class ValveClipDeviceSimulatorWidget(CardiacDeviceSimulatorWidget):
     self.ui.curvatureColorInterpolationCheckbox.toggled.connect(self.onCurvatureColorInterpolationToggled)
 
   def disconnect(self):
+    if not hasattr(self, "ui"):
+      # setup() returned before the device control section was created
+      return
     self.ui.curvatureCalculationCheckBox.toggled.disconnect()
     self.ui.curvatureColorInterpolationCheckbox.toggled.disconnect()
 
