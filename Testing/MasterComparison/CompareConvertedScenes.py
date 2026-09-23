@@ -14,6 +14,7 @@ Usage: Slicer --python-script CompareConvertedScenes.py -- <directory with the g
 import glob
 import json
 import os
+import shutil
 import sys
 import time
 import traceback
@@ -274,6 +275,14 @@ def compareScenario(scenarioName, reference, checker):
     legacyValveNames = [v["name"] for v in reference["valves"]]
     Converter4DSequences.Converter4DSequencesLogic().performFullConversion(showMessage=False, interactive=False)
     pump()
+  # The converted (4D) scene, before any comparison changes it, as sample data for other tests.
+  # Saved as a directory, not an .mrb: sequences of models are staged in nested directories named after
+  # long metric names, which exceeds the Windows path length limit under the .mrb staging directory.
+  # Slicer does not save a scene into a non-empty directory, so the scene of a previous run is removed.
+  convertedDir = os.path.join(DATA_DIR, f"{scenarioName}-converted")
+  shutil.rmtree(convertedDir, ignore_errors=True)
+  os.makedirs(convertedDir)
+  checker.check(scenarioName, "converted scene saved", slicer.util.saveScene(convertedDir))
   scene = ConvertedScene()
   logic = Converter4DSequences.Converter4DSequencesLogic()
   ctx = scenarioName
