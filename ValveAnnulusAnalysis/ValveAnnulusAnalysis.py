@@ -334,8 +334,9 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, True)
 
   def cleanup(self):
-    # Exit from any special workflow step
-    self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, True)
+    # Exit from any special workflow step. The views are not set up: the application may be shutting
+    # down (modules and views already removed).
+    self.onWorkflowStepChanged(self.ui.viewCollapsibleButton, True, updateViews=False)
     self.removeNodeObservers()
     self.setAndObserveParameterNode(None)
     if self.annulusContourPreviewCurve:
@@ -364,7 +365,7 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     self.ui.contourAdjustmentCollapsibleButton.setEnabled(valveModelSelected)
     self.ui.restoreContourButton.setEnabled(valveModelSelected and self.valveModel.hasStoredAnnulusContour())
 
-  def onWorkflowStepChanged(self, widget, toggle):
+  def onWorkflowStepChanged(self, widget, toggle, updateViews=True):
     # On activating any step
     if toggle:
       # Deactivate smoothing preview if not in contour adjustment
@@ -390,7 +391,8 @@ class ValveAnnulusAnalysisWidget(ScriptedLoadableModuleWidget):
     if widget == self.ui.viewCollapsibleButton:
       if toggle:
         # set up viewers
-        self.onDisplayFourUpView(resetViewOrientations=True)
+        if updateViews:
+          self.onDisplayFourUpView(resetViewOrientations=True)
       else:
         # re-center and re-orient view based on axialSliceToRas transform
         self.updateAxialSliceToRasCenterFromSliceViewIntersections()
