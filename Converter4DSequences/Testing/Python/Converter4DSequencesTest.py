@@ -803,6 +803,38 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     for model in measurement["resultModels"]:
       self.assertInScene(model, "result model")
 
+  def test_measurement_results_leave_no_generated_proxies_behind(self):
+    """Result tables/models attached to a legacy measurement become proxies of their new sequences.
+    The browser generated its own proxy node for each of those sequences as soon as they were filled
+    (before the result node was made the proxy), and those generated nodes were left in the scene."""
+    builder = LegacySceneBuilder()
+    records = builder.addLegacyValves("mitral", self.THREE_PHASES[:2], leaflets=False)
+    builder.addLegacyMeasurement("GenericValve", {"ValveValve": records[0]}, tableAsReference=False, resultModelCount=2)
+    builder.addLegacyMeasurement("GenericValve", {"ValveValve": records[1]}, tableAsReference=False, resultModelCount=2)
+    self._convert()
+    generated = [n.GetName() for className in ("vtkMRMLModelNode", "vtkMRMLTableNode")
+                 for n in slicer.util.getNodesByClass(className) if n.GetName().endswith("_Sequence")]
+    self.assertEqual(generated, [], "nodes named after a sequence are generated proxies that were left behind")
+    self._assertSceneIsCleanNewFormat(builder)
+    valveBrowser = self._browserForValveType("mitral")
+    proxy = scene.measurementNodes()[0]
+    for record in records:
+      self._goTo(valveBrowser, record.indexValue)
+      table = self._resultsTableOf(proxy)
+      self.assertIsNotNone(table, f"{record.phase}: results table")
+      self.assertEqual(table.GetCellText(1, 1), "45.6", f"{record.phase}: table content")
+
+  @staticmethod
+  def _resultsTableOf(measurementNode):
+    sh = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    children = vtk.vtkIdList()
+    sh.GetItemChildren(sh.GetItemByDataNode(measurementNode), children, True)
+    for i in range(children.GetNumberOfIds()):
+      node = sh.GetItemDataNode(children.GetId(i))
+      if node and node.IsA("vtkMRMLTableNode"):
+        return node
+    return None
+
   def test_measurement_referencing_two_phases(self):
     builder = LegacySceneBuilder()
     records = builder.addLegacyValves("mitral", self.THREE_PHASES, leaflets=False)
