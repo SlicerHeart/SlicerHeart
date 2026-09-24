@@ -417,6 +417,13 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
 
     cavcValveModel = inputValveModels["Cavc"]
 
+    requiredLabels = ["R", "L", "LA", "LP", "RA", "RP"]
+    if not self.areRequiredLandmarksAvailable(cavcValveModel, requiredLabels):
+      missingLabels = [label for label, point in zip(requiredLabels, cavcValveModel.getAnnulusMarkupPositionsByLabels(requiredLabels))
+                       if point is None]
+      self.addMessage("The {} landmarks are required for the CAVC papillary muscle measurements".format(", ".join(missingLabels)))
+      return self.metricsMessages
+
     # LC point
     pointR, pointL, pointLA, pointLP = cavcValveModel.getAnnulusMarkupPositionsByLabels(["R", "L", "LA", "LP"])
     [pointLC, _] = HeartValveLib.getLinesIntersectionPoints(pointR, pointL, pointLA, pointLP)

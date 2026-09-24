@@ -150,6 +150,7 @@ class MeasurementPreset(object):
       # computeMetricsForMeasurementNode skips missing valve references, so an empty dict is a
       # normal state (e.g. no valve selected yet).
       return self.metricsMessages
+    self.removeNonSequencedResults()
     tableNode = self.getResultsTableNode(folderNode)
 
     valveModel = inputValveModels[next(iter(inputValveModels))]
@@ -220,6 +221,38 @@ class MeasurementPreset(object):
   def clearFolder(self):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     shNode.RemoveItemChildren(shNode.GetItemByDataNode(self.folderNode))
+
+  def removeNonSequencedResults(self):
+    """Remove the results of a previous computation that are not stored per time point.
+
+    Results that are stored in sequences of the valve browser (metric models, results table) are
+    reused by the presets and hold the results of the other time points, so they are kept. Every
+    other node under the measurement (e.g. the displacement tables, chord models and folders of the
+    phase comparison, color tables) belongs to the previous computation only and would accumulate
+    with every computation otherwise (the old format cleared the whole measurement folder).
+    """
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    folderItemId = shNode.GetItemByDataNode(self.folderNode) if (shNode and self.folderNode) else 0
+    if not folderItemId:
+      return
+    sequencesLogic = slicer.modules.sequences.logic()
+    childItemIds = vtk.vtkIdList()
+    shNode.GetItemChildren(folderItemId, childItemIds, True)
+    nodesToRemove = []
+    for index in range(childItemIds.GetNumberOfIds()):
+      dataNode = shNode.GetItemDataNode(childItemIds.GetId(index))
+      if dataNode is None or sequencesLogic.GetFirstBrowserNodeForProxyNode(dataNode):
+        continue
+      nodesToRemove.append(dataNode)
+    for dataNode in nodesToRemove:
+      slicer.mrmlScene.RemoveNode(dataNode)
+    # Remove the subfolders that are empty now (deepest first)
+    childItemIds = vtk.vtkIdList()
+    shNode.GetItemChildren(folderItemId, childItemIds, True)
+    for index in reversed(range(childItemIds.GetNumberOfIds())):
+      itemId = childItemIds.GetId(index)
+      if shNode.GetItemDataNode(itemId) is None and shNode.GetNumberOfItemChildren(itemId) == 0:
+        shNode.RemoveItem(itemId)
 
   def getAnnulusCircumference(self, valveModel, name='Annulus'):
     return {
@@ -612,13 +645,17 @@ class MeasurementPreset(object):
       distanceRange = [-magnitude, magnitude]
 
     baseColorNodeId = 'vtkMRMLColorTableNodeFilePlasma.txt'
-    colorNode = slicer.modules.colors.logic().CopyNode(
-      slicer.mrmlScene.GetNodeByID(baseColorNodeId), 'Annulus height')
+    colorNodeName = 'Annulus height'
+    # The model node is reused between computations (and time points), so its private color table
+    # is reused as well: a new color table per computation accumulated in the scene (color nodes
+    # have no subject hierarchy item, so they are not removed with the measurement's other results).
+    colorNode = displayNode.GetColorNode()
+    if colorNode is None or colorNode.GetID() == baseColorNodeId or colorNode.GetName() != colorNodeName:
+      colorNode = slicer.modules.colors.logic().CopyNode(slicer.mrmlScene.GetNodeByID(baseColorNodeId), colorNodeName)
+      slicer.mrmlScene.AddNode(colorNode)
+      colorNode.UnRegister(slicer.mrmlScene)
+      displayNode.SetAndObserveColorNodeID(colorNode.GetID())
     colorNode.GetLookupTable().SetRange(distanceRange)
-    slicer.mrmlScene.AddNode(colorNode)
-    colorNode.UnRegister(slicer.mrmlScene)
-    self.moveNodeToMeasurementFolder(colorNode)
-    displayNode.SetAndObserveColorNodeID(colorNode.GetID())
 
     # Use the color exactly as defined in the colormap
     displayNode.AutoScalarRangeOff()
@@ -1162,6 +1199,10 @@ class MeasurementPreset(object):
     import math
     from HeartValveLib.util import getPointsOnPlane
     curveIntersectionPoints = getPointsOnPlane(planePosition, planeNormal, valveModel.annulusContourCurveNode.GetCurve())
+
+    if curveIntersectionPoints.shape[1] < 2:
+      raise ValueError(f"the annulus contour of {valveModel.heartValveNode.GetName()} intersects the cutting plane in "
+                       f"{curveIntersectionPoints.shape[1]} point(s), 2 are needed")
 
     # TODO: handle cases when number of intersection points != 2
     # TODO: it would be more robust to sort based on sortDirectionVector position and pick first and last points

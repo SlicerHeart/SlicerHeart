@@ -80,7 +80,8 @@ def getPointsOnPlane(planePosition, planeNormal, curvePoly):
   cutEdges.Update()
   intersection = cutEdges.GetOutput()
   intersectionPoints = intersection.GetPoints()
-  n = intersectionPoints.GetNumberOfPoints()
+  # The cutter output has no points at all if the curve does not intersect the plane
+  n = intersectionPoints.GetNumberOfPoints() if intersectionPoints else 0
   points = np.zeros([3,n])
   pos = [0.0, 0.0, 0.0]
   for i in range(n):

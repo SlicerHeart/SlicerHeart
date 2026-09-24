@@ -92,28 +92,42 @@ class MeasurementPresetMitralValve(MeasurementPreset):
 
     # Label aortic valve automatically (based on closest point to mitral centroid and orthogonal directions)
     if aorticValveModel:
-      mitralCentroid_AorticValve = self.transformPointFromValve2ToValve1(aorticValveModel, mitralValveModel, planePosition)
-      paDirection_AorticValve = aorticPlanePosition - mitralCentroid_AorticValve
-      paDirection_AorticValve = paDirection_AorticValve/np.linalg.norm(paDirection_AorticValve)
-      lrDirection_AorticValve = np.cross(paDirection_AorticValve, aorticPlaneNormal)
-      # Determine R-L intersection points
-      cutPlaneNormal = paDirection_AorticValve / np.linalg.norm(paDirection_AorticValve)
-      cutPlanePosition = aorticPlanePosition
-      [pointL_AorticValve, pointR_AorticValve] = self.getCurveIntersectionApPointsWithPlane(aorticValveModel, cutPlanePosition, cutPlaneNormal, lrDirection_AorticValve)
-      # Determine A-P intersection points
-      cutPlaneNormal = pointR_AorticValve - aorticPlanePosition
-      cutPlaneNormal = cutPlaneNormal / np.linalg.norm(cutPlaneNormal)
-      [pointP_AorticValve, pointA_AorticValve] = self.getCurveIntersectionApPointsWithPlane(aorticValveModel, cutPlanePosition, cutPlaneNormal, paDirection_AorticValve)
-      # Add landmarks
-      aorticValveModel.setAnnulusMarkupLabel('L', pointL_AorticValve)
-      aorticValveModel.setAnnulusMarkupLabel('R', pointR_AorticValve)
-      aorticValveModel.setAnnulusMarkupLabel('P', pointP_AorticValve)
-      aorticValveModel.setAnnulusMarkupLabel('A', pointA_AorticValve)
+      try:
+        self.addAorticValveLandmarks(mitralValveModel, aorticValveModel, planePosition, aorticPlanePosition, aorticPlaneNormal)
+      except ValueError as e:
+        # e.g. the aortic annulus contour does not intersect the cutting plane: the other metrics are
+        # still valid, so report the problem instead of aborting the whole computation
+        self.addMessage(f"Aortic valve landmarks could not be determined: {e}")
 
     # Coaptation measurements
     self.addCoaptationMeasurements(mitralValveModel)
 
     return self.metricsMessages
+
+  def addAorticValveLandmarks(self, mitralValveModel, aorticValveModel, mitralPlanePosition, aorticPlanePosition,
+                              aorticPlaneNormal):
+    """Label the aortic valve automatically (based on closest point to mitral centroid and orthogonal
+    directions). Raises ValueError if the landmarks cannot be determined."""
+    mitralCentroid_AorticValve = self.transformPointFromValve2ToValve1(aorticValveModel, mitralValveModel, mitralPlanePosition)
+    paDirection_AorticValve = aorticPlanePosition - mitralCentroid_AorticValve
+    paDirectionLength = np.linalg.norm(paDirection_AorticValve)
+    if paDirectionLength == 0.0:
+      raise ValueError("the mitral and the aortic annulus centroids coincide")
+    paDirection_AorticValve = paDirection_AorticValve/paDirectionLength
+    lrDirection_AorticValve = np.cross(paDirection_AorticValve, aorticPlaneNormal)
+    # Determine R-L intersection points
+    cutPlaneNormal = paDirection_AorticValve / np.linalg.norm(paDirection_AorticValve)
+    cutPlanePosition = aorticPlanePosition
+    [pointL_AorticValve, pointR_AorticValve] = self.getCurveIntersectionApPointsWithPlane(aorticValveModel, cutPlanePosition, cutPlaneNormal, lrDirection_AorticValve)
+    # Determine A-P intersection points
+    cutPlaneNormal = pointR_AorticValve - aorticPlanePosition
+    cutPlaneNormal = cutPlaneNormal / np.linalg.norm(cutPlaneNormal)
+    [pointP_AorticValve, pointA_AorticValve] = self.getCurveIntersectionApPointsWithPlane(aorticValveModel, cutPlanePosition, cutPlaneNormal, paDirection_AorticValve)
+    # Add landmarks
+    aorticValveModel.setAnnulusMarkupLabel('L', pointL_AorticValve)
+    aorticValveModel.setAnnulusMarkupLabel('R', pointR_AorticValve)
+    aorticValveModel.setAnnulusMarkupLabel('P', pointP_AorticValve)
+    aorticValveModel.setAnnulusMarkupLabel('A', pointA_AorticValve)
 
   def onInputFieldChanged(self, fieldId, inputValveModels, inputFieldValues, computeDependentValues = False):
     mitralValveModel = inputValveModels["MitralValve"] if "MitralValve" in inputValveModels.keys() else None
