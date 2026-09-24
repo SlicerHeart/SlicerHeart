@@ -1843,7 +1843,14 @@ class MeasurementPreset(object):
                                                        segmentId)
       try:
         metricName = "Leaflet area - {0}".format(segment.GetName())
-        leafletSurfaceModelNode = self.getOrAddMetricModelNode(valveModel, metricName)
+        leafletModel = valveModel.findLeafletModel(segmentId)
+        leafletSurfaceModelNode = None
+        if (leafletModel is not None and leafletModel.surfaceModelNode is not None
+            and leafletModel.surfaceModelNode.GetPolyData() is not None
+            and leafletModel.surfaceModelNode.GetPolyData().GetNumberOfPoints() > 0):
+          # Only create the metric model when there is a surface to store: a leaflet without a
+          # surface left an empty model without transform or folder behind
+          leafletSurfaceModelNode = self.getOrAddMetricModelNode(valveModel, metricName)
         leafletSurfacePolyData, leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId, metricName,
                                                                                   currentModelNode=leafletSurfaceModelNode)
 
