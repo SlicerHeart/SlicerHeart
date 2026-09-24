@@ -461,6 +461,50 @@ def getSequenceBrowserNodeForMasterOutputNode(masterOutputNode):
   return None
 
 
+def getOrCreateVolumeSequenceBrowserNode(volumeNode):
+  """Get the sequence browser node that drives a valve volume, creating a single-frame volume
+  sequence for a volume that is not part of a sequence.
+
+  The valve time points are stored by the index values of the volume sequence, so a valve needs a
+  volume sequence browser. Static 3D images (CT, a single 3D ultrasound volume) are supported by
+  wrapping the volume node into a sequence with one item: the volume node itself becomes the proxy
+  node of the new browser, so nodes that reference or display it are not affected.
+  :returns: the sequence browser node, or None if volumeNode is None
+  """
+  if volumeNode is None:
+    return None
+  browserNode = getSequenceBrowserNodeForMasterOutputNode(volumeNode)
+  if browserNode:
+    return browserNode
+  sequencesLogic = slicer.modules.sequences.logic()
+  if sequencesLogic.GetFirstBrowserNodeForProxyNode(volumeNode):
+    # The volume is a proxy of a browser without being the master proxy (e.g. it is synchronized
+    # with another sequence): its browser is not a valve volume browser, do not wrap it again
+    return None
+  logging.info(f"Creating a single-frame volume sequence for {volumeNode.GetName()}")
+  sequenceNode = slicer.mrmlScene.AddNewNodeByClass(
+    "vtkMRMLSequenceNode", slicer.mrmlScene.GetUniqueNameByString(f"{volumeNode.GetName()}_Sequence"))
+  sequenceNode.SetIndexName("frame")
+  sequenceNode.SetIndexUnit("")
+  sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+  sequenceNode.SetDataNodeAtValue(volumeNode, "0")
+  browserNode = slicer.mrmlScene.AddNewNodeByClass(
+    "vtkMRMLSequenceBrowserNode", slicer.mrmlScene.GetUniqueNameByString(f"{volumeNode.GetName()}_Browser"))
+  # The volume node itself is used as the proxy node. The sequence is synchronized and the proxy
+  # registered in one modification: the Sequences logic reacts to every browser modification by
+  # generating a proxy for a synchronized sequence without one, which would leave a generated
+  # volume node behind.
+  wasModified = browserNode.StartModify()
+  browserNode.AddSynchronizedSequenceNodeID(sequenceNode.GetID())
+  browserNode.AddProxyNode(volumeNode, sequenceNode, False)
+  browserNode.SetSaveChanges(sequenceNode, True)
+  browserNode.SetIndexDisplayMode(slicer.vtkMRMLSequenceBrowserNode.IndexDisplayAsIndex)
+  browserNode.SetSelectedItemNumber(0)
+  browserNode.EndModify(wasModified)
+  sequencesLogic.UpdateProxyNodesFromSequences(browserNode)
+  return browserNode
+
+
 def getBrowserNodesForSequenceNode(masterSequenceNode):
   browserNodes = slicer.mrmlScene.GetNodesByClass('vtkMRMLSequenceBrowserNode')
   browserNodes.UnRegister(None)

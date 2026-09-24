@@ -510,6 +510,45 @@ class ValveBrowserTestTest(SlicerHeartTestCase):
     self.assertEqual(labelEvents.count, 0, "unrelated proxies must not be re-synced")
     self.assertEqual(browserEvents.count, 0, "browser must not be modified")
 
+  def test_valveVolumeNode_static_volume_gets_a_single_frame_sequence(self):
+    """A valve can be created on a static (non-sequence) volume, e.g. a CT or a single 3D ultrasound
+    frame: the volume is wrapped into a single-frame sequence (the volume node itself becomes the
+    proxy) and the valve gets its time point at that frame."""
+    import HeartValveLib
+    volumeNode = scene.createVolumeNode("StaticCT", voxelValue=5)
+    browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", "MitralValveBrowser")
+    browserNode.SetAttribute("ModuleName", "HeartValve")
+    valveBrowser = HeartValveLib.HeartValves.getValveBrowser(browserNode)
+    valveBrowser.valveVolumeNode = volumeNode
+    volumeBrowserNode = valveBrowser.volumeSequenceBrowserNode
+    self.assertIsNotNone(volumeBrowserNode, "static volume must be wrapped into a volume sequence")
+    self.assertEqual(volumeBrowserNode.GetProxyNode(volumeBrowserNode.GetMasterSequenceNode()).GetID(), volumeNode.GetID(),
+                     "the volume node itself is the proxy of the new sequence")
+    self.assertEqual(volumeBrowserNode.GetMasterSequenceNode().GetNumberOfDataNodes(), 1)
+    self.assertEqual(scene.volumeVoxelValue(volumeNode), 5, "volume content unchanged")
+    self.assertEqual([n.GetName() for n in scene.nodesByClass("vtkMRMLScalarVolumeNode")], ["StaticCT"],
+                     "no generated proxy volume must be left behind")
+    self.assertIsNotNone(valveBrowser.probeToRasTransformNode)
+    valveBrowser.probePosition = "TTE_APICAL"
+    self.assertEqual(valveBrowser.probePosition, "TTE_APICAL")
+    indexValue = valveBrowser.addTimePointAtCurrentFrame()
+    self.assertIsNotNone(indexValue, "a time point can be added on the static volume")
+    valveModel = valveBrowser.valveModel
+    self.assertEqual(valveModel.getValveVolumeSequenceIndex(), 0)
+    self.assertIsNotNone(valveModel.setAnnulusContourPoints(NewFormatValveFactory.contourPoints(0)))
+    self.assertEqual(valveModel.annulusContourCurveNode.GetNumberOfControlPoints(), 12)
+    # Setting the same volume again (e.g. re-selecting it in the module) must not wrap it twice
+    valveBrowser.valveVolumeNode = volumeNode
+    self.assertEqual(len(scene.nodesByClass("vtkMRMLSequenceBrowserNode")), 2, "valve browser + one volume browser")
+    self.assertEqual(valveBrowser.volumeSequenceBrowserNode.GetID(), volumeBrowserNode.GetID())
+    # Everything survives save and reload
+    scene.saveAndReloadScene(self.tempDirectory(), resetCaches=self.resetHeartValveLibCaches)
+    valveBrowser = HeartValveLib.HeartValves.getValveBrowser(scene.valveBrowserNodes()[0])
+    self.assertEqual(valveBrowser.valveModel.getValveVolumeSequenceIndex(), 0)
+    self.assertEqual(valveBrowser.valveModel.annulusContourCurveNode.GetNumberOfControlPoints(), 12)
+    self.assertEqual(scene.volumeVoxelValue(valveBrowser.valveVolumeNode), 5)
+    self.assertEqual(valveBrowser.valveVolumeNode.GetName(), "StaticCT")
+
   def test_addCurrentTimePointToDisplaySequences(self):
     factory = NewFormatValveFactory()
     valveBrowser = factory.createValveBrowser("mitral")

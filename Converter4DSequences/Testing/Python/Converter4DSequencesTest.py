@@ -540,6 +540,47 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     self.assertParentTransformIs(clipped, valveBrowser.probeToRasTransformNode)
     self._assertPhaseData(valveBrowser, records[0])
 
+  def test_static_volume_valves_are_converted(self):
+    """Old scenes may annotate a static 3D volume (CT, a single 3D ultrasound frame): the valve node
+    then references a plain volume node that is not part of a sequence. Such valves are converted
+    onto a single-frame volume sequence (the volume node stays the same node)."""
+    builder = LegacySceneBuilder(numFrames=3)
+    mitral = builder.addLegacyValve("mitral", frameIndex=0, phase="mid-systole", leaflets=False)
+    # Master sets the analyzed frame of a valve on a static volume to 0; a valve whose frame was never
+    # set has -1
+    aortic = builder.addLegacyValve("aortic", frameIndex=0, phase="mid-systole", leaflets=False, frameIndexAttribute="-1")
+    staticVolume = scene.createVolumeNode("StaticCT", voxelValue=9)
+    staticVolume.SetAndObserveTransformNodeID(builder.probeToRasTransformNode.GetID())
+    for record in (mitral, aortic):
+      record.node.SetNodeReferenceID("ValveVolume", staticVolume.GetID())
+    measurement = builder.addLegacyMeasurement("GenericValve", {"ValveValve": mitral}, tableAsReference=True)
+    for node in (builder.volumeBrowserNode, builder.volumeSequenceNode, builder.volumeProxyNode):
+      slicer.mrmlScene.RemoveNode(node)
+
+    logic = self._convert()
+    self.assertFalse(logic.sceneHasConvertibleNodes(), "valves on a static volume must be converted")
+    mitralBrowser = self._browserForValveType("mitral")
+    aorticBrowser = self._browserForValveType("aortic")
+    self.assertEqual(mitralBrowser.valveVolumeNode.GetID(), staticVolume.GetID(), "the volume node is kept")
+    self.assertEqual(scene.volumeVoxelValue(staticVolume), 9, "volume content unchanged")
+    volumeBrowserNode = mitralBrowser.volumeSequenceBrowserNode
+    self.assertIsNotNone(volumeBrowserNode, "static volume wrapped into a single-frame sequence")
+    self.assertEqual(volumeBrowserNode.GetMasterSequenceNode().GetNumberOfDataNodes(), 1)
+    self.assertEqual(aorticBrowser.volumeSequenceBrowserNode.GetID(), volumeBrowserNode.GetID(), "both valves share the volume sequence")
+    for record, valveBrowser in ((mitral, mitralBrowser), (aortic, aorticBrowser)):
+      record.frameIndex = 0
+      record.indexValue = volumeBrowserNode.GetMasterSequenceNode().GetNthIndexValue(0)
+      self._assertPhaseData(valveBrowser, record, f"static {record.valveType}")
+    proxy = scene.measurementNodes()[0]
+    self.assertTrue(self._isProxy(proxy), "measurement of the static-volume valve is converted too")
+    self.assertEqual(proxy.GetNodeReference("ValveValve").GetID(), mitralBrowser.heartValveNode.GetID())
+    self._assertSceneIsCleanNewFormat(builder, extraAllowedNodes=(staticVolume,))
+    scene.saveAndReloadScene(self.tempDirectory(), resetCaches=self.resetHeartValveLibCaches)
+    self.assertFalse(self._logic().sceneHasConvertibleNodes())
+    mitralBrowser = self._browserForValveType("mitral")
+    self._assertPhaseData(mitralBrowser, mitral, "static mitral after reload")
+    self.assertEqual(mitralBrowser.valveVolumeNode.GetName(), "StaticCT")
+
   # ---------------------------------------------------------------------------------------------
   # Sparse and irregular data
   # ---------------------------------------------------------------------------------------------
