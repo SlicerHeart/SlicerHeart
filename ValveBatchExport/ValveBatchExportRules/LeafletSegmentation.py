@@ -20,14 +20,17 @@ LEAFLET_ORDER = {
 class LeafletSegmentationExportRule(ValveBatchExportRule):
 
   BRIEF_USE = "Leaflet segmentation (.nrrd)"
-  DETAILED_DESCRIPTION = "Export leaflet segmentation as 4D nrrd file (each 3D volume is one segment)"
+  DETAILED_DESCRIPTION = "Export leaflet segmentation as 4D nrrd file (each 3D volume is one segment). " \
+                         "Optionally export each segment as model (.vtk)"
   USER_INTERFACE = True
 
   CMD_FLAG = "-seg"
   CMD_FLAG_1 = "-ssep"  # individual segmentation file per segment
+  CMD_FLAG_MODEL = "-segm"  # additionally export each segment as model
 
   OTHER_FLAGS = []
   ONE_FILE_PER_SEGMENT = False
+  EXPORT_AS_MODEL = False
 
   @classmethod
   def setupUI(cls, layout):
@@ -44,7 +47,20 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
     checkbox.stateChanged.connect(onModified)
     checkbox.checked = cls.ONE_FILE_PER_SEGMENT
 
+    def onModelCheckboxModified(checked):
+      cls.EXPORT_AS_MODEL = checked
+      if checked:
+        cls.OTHER_FLAGS.append(cls.CMD_FLAG_MODEL)
+      else:
+        if cls.CMD_FLAG_MODEL in cls.OTHER_FLAGS:
+          cls.OTHER_FLAGS.remove(cls.CMD_FLAG_MODEL)
+
+    modelCheckbox = qt.QCheckBox("Export as model (.vtk)")
+    modelCheckbox.stateChanged.connect(onModelCheckboxModified)
+    modelCheckbox.checked = cls.EXPORT_AS_MODEL
+
     layout.addWidget(checkbox)
+    layout.addWidget(modelCheckbox)
 
   def processScene(self, sceneFileName):
 
@@ -101,6 +117,9 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
         self.addLog(f"  Leaflet segmentation export skipped (file writing failed) - {valveModelName}")
       slicer.mrmlScene.RemoveNode(storageNode)
 
+    if self.EXPORT_AS_MODEL:
+      self._saveSegmentsAsModels(leafletSegmentationNode, valveModelName)
+
   def _saveSegmentsIntoSeparateFiles(self, segmentationNode, prefix):
     segmentationsLogic = slicer.modules.segmentations.logic()
 
@@ -116,6 +135,26 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
       if not slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename)):
         self.addLog(f"  Leaflet segment export skipped (file writing failed) - {filename}")
       slicer.mrmlScene.RemoveNode(labelNode)
+
+  def _saveSegmentsAsModels(self, segmentationNode, prefix):
+    segmentationNode.CreateClosedSurfaceRepresentation()
+
+    from HeartValveLib.util import getAllSegmentIDs
+    for segmentID in getAllSegmentIDs(segmentationNode):
+      polyData = vtk.vtkPolyData()
+      segmentationNode.GetClosedSurfaceRepresentation(segmentID, polyData)
+      segmentName = segmentationNode.GetSegmentation().GetSegment(segmentID).GetName()
+      # NB: hardcoded to make sure "/"" is replaced in segment names
+      segmentName = segmentName.replace("/", "")
+      filename = f"{prefix}_{segmentName.replace(' ', '_')}.vtk"
+      if polyData.GetNumberOfPoints() == 0:
+        self.addLog(f"  Leaflet model export skipped (empty surface) - {filename}")
+        continue
+      modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode")
+      modelNode.SetAndObservePolyData(polyData)
+      if not slicer.util.saveNode(modelNode, str(Path(self.outputDir) / filename)):
+        self.addLog(f"  Leaflet model export skipped (file writing failed) - {filename}")
+      slicer.mrmlScene.RemoveNode(modelNode)
 
 
 def getAllSegmentNames(segmentationNode):
