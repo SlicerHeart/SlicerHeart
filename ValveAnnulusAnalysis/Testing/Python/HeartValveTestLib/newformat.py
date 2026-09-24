@@ -177,10 +177,14 @@ class NewFormatValveFactory:
     coaptationModel = valveModel.addCoaptationModel(coaptationIndex)
     basePoints = [[-1.0, -1.5, 0.0], [0.0, -1.5, 0.0], [1.0, -1.5, 0.0]]
     marginPoints = [[-1.0, -1.5, -1.0], [0.0, -1.5, -1.0], [1.0, -1.5, -1.0]]
-    for markupNode, points in ((coaptationModel.baseLine, basePoints), (coaptationModel.marginLine, marginPoints)):
-      sequenceNode = valveBrowser.valveBrowserNode.GetSequenceNode(markupNode)
+    # The time point has to be added to every sequence BEFORE the proxy nodes are edited (like the
+    # LeafletAnalysis module does in onAddCoaptationTimePoint): with SaveChanges the Sequences logic
+    # reverts an edit of a proxy at a time point without item immediately.
+    for node in (coaptationModel.baseLine, coaptationModel.marginLine, coaptationModel.surfaceModelNode):
+      sequenceNode = valveBrowser.valveBrowserNode.GetSequenceNode(node)
       if sequenceNode:
         valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+    for markupNode, points in ((coaptationModel.baseLine, basePoints), (coaptationModel.marginLine, marginPoints)):
       markupNode.SetLocked(False)
       wasModify = markupNode.StartModify()
       markupNode.RemoveAllControlPoints()
@@ -189,9 +193,6 @@ class NewFormatValveFactory:
       markupNode.EndModify(wasModify)
       markupNode.SetLocked(True)
     coaptationModel.updateSurface()
-    surfaceSequence = valveBrowser.valveBrowserNode.GetSequenceNode(coaptationModel.surfaceModelNode)
-    if surfaceSequence:
-      valveBrowser.addCurrentTimePointToSequence(surfaceSequence)
     return coaptationModel
 
   # ---------------------------------------------------------------------------------------------
