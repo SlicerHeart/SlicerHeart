@@ -1040,45 +1040,127 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 keys[segmentId] = ("name", segmentation.GetSegment(segmentId).GetName())
         return keys
 
+    @staticmethod
+    def _getSegmentDefinition(segment):
+        """Name, color and terminology of a segment (what is needed to add an empty copy of it)."""
+        terminologyEntry = vtk.reference("")
+        segment.GetTag("TerminologyEntry", terminologyEntry)
+        return {"name": segment.GetName(), "color": list(segment.GetColor()), "terminology": terminologyEntry.get() or ""}
+
     def _getLeafletSegmentIdHarmonization(self, heartValveNodes):
         """Map the segment IDs of each valve's leaflet segmentation to the IDs that the same leaflet has in
         the segmentation of the first valve that has it.
-        :return: ({valveNodeId: {oldSegmentId: newSegmentId}}, list of harmonized segment IDs)
+
+        A segment is matched to an already known one by its terminology entry when that identifies
+        the segment within its own segmentation (a generic entry, such as the default "Tissue", may be
+        shared by all leaflets), otherwise by its name. The two ways of matching are tried one after
+        the other for every segment: one phase may carry specific terminologies (e.g. segmented by an
+        AI model) while another phase carries generic ones for the same leaflets.
+        :return: ({valveNodeId: {oldSegmentId: newSegmentId}}, list of harmonized segment IDs,
+          {segmentId: definition} of the harmonized segments and of the valve mask, if any phase has one)
         """
         import HeartValveLib
-        canonicalSegmentIdByKey = {}
-        canonicalSegmentIds = []
+        canonicalSegments = []  # [{"id", "name", "terminology" (None if not identifying)}]
+        segmentDefinitions = {}
         remapByValveId = {}
         for heartValveNode in heartValveNodes:
             segmentationNode = heartValveNode.GetNodeReference("LeafletSegmentation")
             remap = {}
             if segmentationNode:
                 segmentation = segmentationNode.GetSegmentation()
+                if segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID) and HeartValveLib.VALVE_MASK_SEGMENT_ID not in segmentDefinitions:
+                    segmentDefinitions[HeartValveLib.VALVE_MASK_SEGMENT_ID] = self._getSegmentDefinition(
+                        segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID))
                 segmentIds = [segmentId for segmentId in segmentation.GetSegmentIDs()
                               if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID]
                 segmentKeys = self._getSegmentKeys(segmentation, segmentIds)
+                names = [segmentation.GetSegment(segmentId).GetName() for segmentId in segmentIds]
                 usedSegmentIds = {HeartValveLib.VALVE_MASK_SEGMENT_ID}
-                keyList = list(segmentKeys.values())
+                matchedCanonicalIds = set()
                 for segmentId in segmentIds:
-                    key = segmentKeys[segmentId]
-                    if keyList.count(key) > 1:
-                        # The segment cannot be identified (e.g. two segments with the same name): keep its ID
+                    segment = segmentation.GetSegment(segmentId)
+                    name = segment.GetName()
+                    keyType, keyValue = segmentKeys[segmentId]
+                    terminology = keyValue if keyType == "terminology" else None
+                    if terminology is None and names.count(name) > 1:
+                        # The segment cannot be identified (two segments with the same name and no
+                        # identifying terminology): keep its ID
                         usedSegmentIds.add(segmentId)
                         continue
-                    canonicalSegmentId = canonicalSegmentIdByKey.get(key)
+                    canonical = None
+                    if terminology is not None:
+                        canonical = next((c for c in canonicalSegments
+                                          if c["terminology"] == terminology and c["id"] not in matchedCanonicalIds), None)
+                    if canonical is None:
+                        canonical = next((c for c in canonicalSegments
+                                          if c["name"] == name and c["id"] not in matchedCanonicalIds), None)
+                    canonicalSegmentId = canonical["id"] if canonical else None
                     if (canonicalSegmentId and canonicalSegmentId not in usedSegmentIds
                             and (canonicalSegmentId == segmentId or canonicalSegmentId not in segmentIds)):
                         targetSegmentId = canonicalSegmentId
+                        if canonical["terminology"] is None and terminology is not None:
+                            canonical["terminology"] = terminology
                     else:
                         targetSegmentId = segmentId
-                        if key not in canonicalSegmentIdByKey and segmentId not in canonicalSegmentIds:
-                            canonicalSegmentIdByKey[key] = segmentId
-                            canonicalSegmentIds.append(segmentId)
+                        if segmentId not in [c["id"] for c in canonicalSegments]:
+                            canonicalSegments.append({"id": segmentId, "name": name, "terminology": terminology})
+                            segmentDefinitions[segmentId] = self._getSegmentDefinition(segment)
+                    matchedCanonicalIds.add(targetSegmentId)
                     usedSegmentIds.add(targetSegmentId)
                     if targetSegmentId != segmentId:
                         remap[segmentId] = targetSegmentId
             remapByValveId[heartValveNode.GetID()] = remap
-        return remapByValveId, canonicalSegmentIds
+        return remapByValveId, [c["id"] for c in canonicalSegments], segmentDefinitions
+
+    @staticmethod
+    def _addMissingSegments(segmentationNode, segmentDefinitions):
+        """Add an empty segment for every segment of segmentDefinitions that the segmentation lacks, so
+        that all time points of a valve have the same segments (as time points created in the new
+        format do). A proxy node whose segments changed from time point to time point left the
+        display properties and the subject hierarchy items of the other time points' segments
+        dangling, which logged warnings on every displayed frame."""
+        segmentation = segmentationNode.GetSegmentation()
+        for segmentId, definition in segmentDefinitions.items():
+            if segmentation.GetSegment(segmentId):
+                continue
+            newSegmentId = segmentation.AddEmptySegment(segmentId, definition["name"], definition["color"])
+            segment = segmentation.GetSegment(newSegmentId)
+            if segment and definition["terminology"]:
+                segment.SetTag("TerminologyEntry", definition["terminology"])
+
+    @staticmethod
+    def _copySegmentDisplayProperties(sourceDisplayNode, sourceSegmentationNode, targetDisplayNode, segmentIdRemap):
+        """Copy the per-segment display properties of a legacy phase's display node to the display
+        node of the harmonized copy of its segmentation, under the harmonized segment IDs. Properties
+        of the segments that the phase did not have get their defaults.
+
+        Both display nodes must be attached to their segmentation (the source to the legacy
+        segmentation, the target to the harmonized copy): the property accessors create missing
+        properties silently only when the segmentation is available, and log a warning per call
+        otherwise. Legacy display nodes that were never shown have no per-segment properties at all.
+        """
+        sourceSegmentIds = list(sourceSegmentationNode.GetSegmentation().GetSegmentIDs())
+        for oldSegmentId in sourceSegmentIds:
+            newSegmentId = segmentIdRemap.get(oldSegmentId, oldSegmentId)
+            targetDisplayNode.SetSegmentVisibility(newSegmentId, sourceDisplayNode.GetSegmentVisibility(oldSegmentId))
+            targetDisplayNode.SetSegmentVisibility3D(newSegmentId, sourceDisplayNode.GetSegmentVisibility3D(oldSegmentId))
+            targetDisplayNode.SetSegmentVisibility2DFill(newSegmentId, sourceDisplayNode.GetSegmentVisibility2DFill(oldSegmentId))
+            targetDisplayNode.SetSegmentVisibility2DOutline(newSegmentId, sourceDisplayNode.GetSegmentVisibility2DOutline(oldSegmentId))
+            targetDisplayNode.SetSegmentOpacity3D(newSegmentId, sourceDisplayNode.GetSegmentOpacity3D(oldSegmentId))
+            targetDisplayNode.SetSegmentOpacity2DFill(newSegmentId, sourceDisplayNode.GetSegmentOpacity2DFill(oldSegmentId))
+            targetDisplayNode.SetSegmentOpacity2DOutline(newSegmentId, sourceDisplayNode.GetSegmentOpacity2DOutline(oldSegmentId))
+            targetDisplayNode.SetSegmentPickable(newSegmentId, sourceDisplayNode.GetSegmentPickable(oldSegmentId))
+            overrideColor = sourceDisplayNode.GetSegmentOverrideColor(oldSegmentId)
+            if overrideColor[0] >= 0:
+                targetDisplayNode.SetSegmentOverrideColor(newSegmentId, overrideColor[0], overrideColor[1], overrideColor[2])
+            else:
+                targetDisplayNode.UnsetSegmentOverrideColor(newSegmentId)
+        for oldSegmentId, newSegmentId in segmentIdRemap.items():
+            if oldSegmentId != newSegmentId:
+                targetDisplayNode.RemoveSegmentDisplayProperties(oldSegmentId)
+        # Properties of the segments this phase did not have (added as empty segments)
+        for segmentId in targetDisplayNode.GetDisplayableNode().GetSegmentation().GetSegmentIDs():
+            targetDisplayNode.GetSegmentVisibility(segmentId)
 
     @staticmethod
     def _renameSegments(segmentationNode, segmentIdRemap):
@@ -1139,7 +1221,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
         # leaflet. In the new format a leaflet has the same segment ID at all time points (its surface
         # nodes are shared between time points and identified by the segment ID), so the IDs are
         # harmonized here.
-        segmentIdRemapByValveId, canonicalSegmentIds = self._getLeafletSegmentIdHarmonization(heartValveNodes)
+        segmentIdRemapByValveId, canonicalSegmentIds, segmentDefinitions = self._getLeafletSegmentIdHarmonization(heartValveNodes)
         leafletRoles = ("LeafletSurfaceModel", "LeafletSurfaceBoundaryMarkup", "LeafletSurfaceBoundaryModel")
 
         for heartValveNode in heartValveNodes:
@@ -1326,19 +1408,33 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         nodeCopy.Copy(nodeToAdd)
                         nodeCopy.SetName(nodeToAdd.GetName())
                         self._renameSegments(nodeCopy, entry.get('segmentIdRemap') or {})
+                        if role == "LeafletSegmentation":
+                            self._addMissingSegments(nodeCopy, segmentDefinitions)
 
                         # Apply parent transform if the node is transformable
                         if nodeCopy.IsA("vtkMRMLTransformableNode") and entry['originalTransformID']:
                             nodeCopy.SetAndObserveTransformNodeID(entry['originalTransformID'])
 
+                        # The display node of this phase is copied now, while the harmonized
+                        # segmentation copy is available to attach it to (see
+                        # _copySegmentDisplayProperties); it is stored in the display sequence below.
+                        displayNode = entry.get('displayNode')
+                        if displayNode is not None:
+                            displayNodeCopy = slicer.mrmlScene.AddNewNodeByClass(displayNode.GetClassName())
+                            displayNodeCopy.Copy(displayNode)
+                            nodeCopy.SetAndObserveDisplayNodeID(displayNodeCopy.GetID())
+                            if displayNodeCopy.IsA("vtkMRMLSegmentationDisplayNode"):
+                                self._copySegmentDisplayProperties(displayNode, nodeToAdd, displayNodeCopy,
+                                                                   entry.get('segmentIdRemap') or {})
+                            entry['displayNodeCopy'] = displayNodeCopy
+                        else:
+                            nodeCopy.SetAndObserveDisplayNodeID(None)
+
                         # Add to sequence - SetDataNodeAtValue stores a copy of the node's data internally
                         sequenceNode.SetDataNodeAtValue(nodeCopy, indexValue)
 
-                        # Remove the temporary copy and its display node from the scene
-                        # The data is now stored in the sequence
-                        tempDisplayNode = nodeCopy.GetDisplayNode()
-                        if tempDisplayNode:
-                            slicer.mrmlScene.RemoveNode(tempDisplayNode)
+                        # Remove the temporary copy from the scene (the data is now stored in the
+                        # sequence); its display node is removed once the display sequence is built
                         slicer.mrmlScene.RemoveNode(nodeCopy)
                     else:
                         # For other node types, SetDataNodeAtValue will create a copy automatically
@@ -1358,7 +1454,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 logging.info(f"Created sequence for role '{role}': {sequenceNode.GetName()} with {sequenceNode.GetNumberOfDataNodes()} time points")
 
                 # Create a display node sequence if any of the nodes have display nodes
-                displayNodeEntries = [(entry['indexValue'], entry['displayNode']) for entry in nodeEntries if entry.get('displayNode')]
+                displayNodeEntries = [(entry['indexValue'], entry['displayNode'], entry) for entry in nodeEntries if entry.get('displayNode')]
                 if displayNodeEntries:
                     try:
                         displaySequenceNode = existingDisplaySequenceNode
@@ -1372,16 +1468,22 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                             )
 
                         addedDisplayNodes = {}
-                        for indexValue, displayNode in displayNodeEntries:
+                        for indexValue, displayNode, entry in displayNodeEntries:
                             if indexValue in addedDisplayNodes:
                                 continue
 
                             if displayNode:
-                                # Create a copy of the display node
-                                displayNodeCopy = slicer.mrmlScene.AddNewNodeByClass(displayNode.GetClassName())
-                                displayNodeCopy.Copy(displayNode)
+                                displayNodeCopy = entry.get('displayNodeCopy')
+                                if displayNodeCopy is None:
+                                    # Create a copy of the display node
+                                    displayNodeCopy = slicer.mrmlScene.AddNewNodeByClass(displayNode.GetClassName())
+                                    displayNodeCopy.Copy(displayNode)
                                 displaySequenceNode.SetDataNodeAtValue(displayNodeCopy, indexValue)
-                                slicer.mrmlScene.RemoveNode(displayNodeCopy)
+                                # A display node prepared with the segmentation copy may have been
+                                # removed from the scene together with it already
+                                if slicer.mrmlScene.IsNodePresent(displayNodeCopy):
+                                    slicer.mrmlScene.RemoveNode(displayNodeCopy)
+                                entry['displayNodeCopy'] = None
                                 addedDisplayNodes[indexValue] = displayNode.GetID()
 
                         # Make sure a display item exists at EVERY time point that has a data item:
@@ -1404,6 +1506,11 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                             seqIdToSubfolder[displaySequenceNode.GetID()] = subfolderName
                     except Exception as err:
                         logging.warning(f"  Error creating display node sequence: {err}")
+                for entry in nodeEntries:
+                    if entry.get('displayNodeCopy') is not None:
+                        if slicer.mrmlScene.IsNodePresent(entry['displayNodeCopy']):
+                            slicer.mrmlScene.RemoveNode(entry['displayNodeCopy'])
+                        entry['displayNodeCopy'] = None
 
             except Exception as err:
                 logging.warning(f"Error creating sequence for role '{role}': {err}")

@@ -471,6 +471,65 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     anteriorBoundary = valveModel.getLeafletNodeReference("LeafletSurfaceBoundaryMarkup", "Anterior")
     self.assertControlPointsEqual(anteriorBoundary, two.boundaryPoints["Anterior"], msg="anterior boundary, phase 1")
 
+  def test_segments_harmonized_by_terminology_or_name_and_completed_at_every_phase(self):
+    """Phases segmented by different tools: one phase with specific terminology entries and plain
+    IDs, the others with UID-style IDs and a generic terminology shared by all segments, and the
+    valve mask only in the first phase (the layout of a real 15-phase scene). Every leaflet must get
+    one segment ID at all time points, the display properties must follow the IDs, and time points
+    that lack a segment get an empty one, so that displaying a time point never logs "no display
+    properties found" or "segmentation does not contain segment"; that warning flood blocked the
+    application on a console write while replaying the sequence."""
+    specific = {"Segment_1": "Cat~SCT^1^Blood pool~SCT^2^Blood pool~^^~^^~^^",
+                "Segment_2": "Cat~SCT^1^RV~SCT^3^Right ventricle~^^~^^~^^",
+                "Segment_4": "Cat~SCT^1^Myocardium~SCT^4^Myocardium~^^~^^~^^"}
+    names = {"Segment_1": "Blood Pool", "Segment_2": "RV", "Segment_4": "Myocardium"}
+    generic = "Segmentation category and type - 3D Slicer General Anatomy list~SCT^85756007^Tissue~SCT^85756007^Tissue~^^~^^~^^"
+    builder = LegacySceneBuilder()
+    first = builder.addLegacyValve("tricuspid", frameIndex=1, phase="end-diastole", leaflets=False,
+                                   segmentIds=("Segment_1", "Segment_2", "Segment_4"), segmentNames=names,
+                                   segmentTerminologies=specific)
+    uidNames = {"2.25.11": "Blood Pool", "2.25.12": "RV", "2.25.13": "Myocardium"}
+    second = builder.addLegacyValve("tricuspid", frameIndex=3, phase="custom1", leaflets=False,
+                                    segmentIds=tuple(uidNames), segmentNames=uidNames,
+                                    segmentTerminologies={k: generic for k in uidNames}, valveMask=False)
+    uidNames3 = {"2.25.21": "Blood Pool", "2.25.22": "RV", "2.25.23": "Myocardium"}
+    third = builder.addLegacyValve("tricuspid", frameIndex=5, phase="custom2", leaflets=False,
+                                   segmentIds=tuple(uidNames3), segmentNames=uidNames3,
+                                   segmentTerminologies={k: generic for k in uidNames3}, valveMask=False)
+    self._convert()
+    valveBrowser = self._browserForValveType("tricuspid")
+    valveModel = valveBrowser.valveModel
+    sequenceNode = valveModel.leafletSegmentationSequenceNode
+    expectedIds = ["Segment_1", "Segment_2", "Segment_4", "ValveMask"]
+    for record in (first, second, third):
+      storedNode = sequenceNode.GetDataNodeAtValue(record.indexValue)
+      self.assertEqual(sorted(storedNode.GetSegmentation().GetSegmentIDs()), expectedIds, f"{record.phase}: segment IDs")
+      for segmentId, name in names.items():
+        self.assertEqual(storedNode.GetSegmentation().GetSegment(segmentId).GetName(), name, f"{record.phase}: {segmentId}")
+    # Segment content follows the harmonized IDs; segments a phase did not have are empty
+    self._goTo(valveBrowser, second.indexValue)
+    segmentationNode = valveModel.leafletSegmentationNode
+    self.assertGreater(self._segmentVoxelCount(segmentationNode, "Segment_4"), 0, "Myocardium of the second phase")
+    self.assertEqual(self._segmentVoxelCount(segmentationNode, "ValveMask"), 0, "the second phase had no valve mask")
+    self.assertEqual(segmentationNode.GetSegmentation().GetSegment("ValveMask").GetName(), "Annulus mask")
+    self._goTo(valveBrowser, first.indexValue)
+    self.assertGreater(self._segmentVoxelCount(valveModel.leafletSegmentationNode, "ValveMask"), 0)
+    # Display properties exist for every segment at every time point: displaying a time point twice
+    # over must not log anything about segments or display properties
+    logModel = slicer.app.errorLogModel()
+    displayNode = segmentationNode.GetDisplayNode()
+    self.assertIsNotNone(valveBrowser.valveBrowserNode.GetSequenceNode(displayNode), "display node is sequenced")
+    for record in (first, second, third, first, second, third):
+      before = logModel.logEntryCount()
+      self._goTo(valveBrowser, record.indexValue)
+      for segmentId in expectedIds:
+        displayNode.GetSegmentVisibility(segmentId)
+      slicer.app.processEvents()
+      messages = [logModel.logEntryDescription(i) for i in range(before, logModel.logEntryCount())]
+      offending = [m for m in messages if "display properties" in m or "does not contain segment" in m]
+      self.assertEqual(offending, [], f"{record.phase}: displaying the time point must not log segment warnings")
+    self._assertSceneIsCleanNewFormat(builder)
+
   def test_coaptation_preserved(self):
     builder = LegacySceneBuilder()
     records = builder.addLegacyValves("mitral", self.THREE_PHASES[:2], coaptation=True)
