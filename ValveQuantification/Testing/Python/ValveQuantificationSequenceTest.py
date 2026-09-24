@@ -260,6 +260,134 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
     messages = quantLogic.computeMetrics(measurementNode)
     self.assertTrue(any("doesn't have enough points" in m for m in messages), messages)
 
+  @staticmethod
+  def _segmentVoxelCounts(segmentationNode):
+    counts = {}
+    for segmentId in segmentationNode.GetSegmentation().GetSegmentIDs():
+      labelmap = slicer.vtkOrientedImageData()
+      if segmentationNode.GetBinaryLabelmapRepresentation(segmentId, labelmap) and labelmap.GetNumberOfPoints():
+        from vtk.util import numpy_support
+        counts[segmentId] = int(np.count_nonzero(numpy_support.vtk_to_numpy(labelmap.GetPointData().GetScalars())))
+      else:
+        counts[segmentId] = 0
+    return counts
+
+  def _createMitralValve(self, factory, frames, segmentation=True):
+    valveBrowser = factory.createValveBrowser("mitral")
+    for frame, phase in zip(frames, ("mid-systole", "end-systole", "end-diastole")):
+      factory.addTimePoint(valveBrowser, frame, phase=phase)
+      contour = factory.setContour(valveBrowser, frame)
+      valveBrowser.valveModel.setValveLabels([("A", *contour[0]), ("AL", *contour[3]), ("P", *contour[6]), ("PM", *contour[9])])
+      if segmentation:
+        factory.addRoi(valveBrowser)
+        factory.addSegmentation(valveBrowser)
+    return valveBrowser
+
+  def test_leaflet_metrics_do_not_depend_on_computation_order(self):
+    """The leaflet metrics of a time point must be the same whether or not the metrics were computed
+    at that time point before, and computing them must not modify the leaflet segmentation. The
+    valve surface used to be built by adding a temporary segment to the leaflet segmentation, which
+    lost the first merged leaflet on a segmentation that had not been converted to closed surfaces
+    yet (so the atrial leaflet area doubled on the second computation) and rewrote the sequence item."""
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createMitralValve(factory, (1, 3))
+    valveModel = self._quantificationValveModel(valveBrowser)
+    quantLogic = self._quantLogic()
+    measurementNode = self._createMeasurementNode("MitralValve", {"ValveMitralValve": valveBrowser.heartValveNode})
+    preset = quantLogic.getMeasurementPresetById("MitralValve")
+    firstResults = {}
+    for frame in (1, 3):
+      factory.switchTo(valveBrowser, frame)
+      segmentationNode = valveModel.leafletSegmentationNode
+      segmentIds = sorted(segmentationNode.GetSegmentation().GetSegmentIDs())
+      countsBefore = self._segmentVoxelCounts(segmentationNode)
+      quantLogic.computeMetrics(measurementNode)
+      firstResults[frame] = self._tableRows(preset.metricsTable.metricTableNode)
+      self.assertIn("Leaflet area (atrial) - all (3D)", firstResults[frame], f"frame {frame}")
+      self.assertGreater(float(firstResults[frame]["Leaflet area (atrial) - all (3D)"]), 0.0)
+      self.assertEqual(sorted(segmentationNode.GetSegmentation().GetSegmentIDs()), segmentIds, f"frame {frame}: no temporary segment left")
+      self.assertEqual(self._segmentVoxelCounts(segmentationNode), countsBefore, f"frame {frame}: quantification must not modify the segmentation")
+    for frame in (3, 1):
+      factory.switchTo(valveBrowser, frame)
+      quantLogic.computeMetrics(measurementNode)
+      self.assertEqual(self._tableRows(preset.metricsTable.metricTableNode), firstResults[frame],
+                       f"frame {frame}: results must not depend on the order of computation")
+
+  def test_recompute_does_not_accumulate_result_nodes(self):
+    """Results that are not stored per time point (phase comparison tables, chord models, color
+    tables) belong to the last computation only: recomputing must replace them, not add to them."""
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createMitralValve(factory, (1, 3), segmentation=False)
+    quantLogic = self._quantLogic()
+    phaseCompare = self._createMeasurementNode("PhaseCompare", {"ValveValve1": valveBrowser.heartValveNode,
+                                                                "ValveValve4": valveBrowser.heartValveNode})
+    generic = self._createMeasurementNode("GenericValve", {"ValveValve": valveBrowser.heartValveNode})
+
+    def census():
+      return {className: len(slicer.util.getNodesByClass(className))
+              for className in ("vtkMRMLTableNode", "vtkMRMLModelNode", "vtkMRMLColorTableNode", "vtkMRMLSequenceNode",
+                                "vtkMRMLMarkupsNode")}
+
+    factory.switchTo(valveBrowser, 1)
+    quantLogic.computeMetrics(phaseCompare)
+    quantLogic.computeMetrics(generic)
+    afterFirst = census()
+    self.assertGreater(afterFirst["vtkMRMLTableNode"], 2, "phase compare stores displacement tables")
+    quantLogic.computeMetrics(phaseCompare)
+    quantLogic.computeMetrics(generic)
+    self.assertEqual(census(), afterFirst, "recomputing must replace the previous results, not add to them")
+    # Recomputing at another time point adds items to the sequenced results, not nodes
+    factory.switchTo(valveBrowser, 3)
+    quantLogic.computeMetrics(generic)
+    quantLogic.computeMetrics(phaseCompare)
+    self.assertEqual(census(), afterFirst, "results at another time point are stored as sequence items")
+    # Results of every time point are still there
+    preset = quantLogic.getMeasurementPresetById("GenericValve")
+    tableSequence = valveBrowser.valveBrowserNode.GetSequenceNode(preset.metricsTable.metricTableNode)
+    self.assertSequenceIndexValues(tableSequence, [factory.indexValue(1), factory.indexValue(3)])
+    # A save/reload round trip does not resurrect removed results
+    scene.saveAndReloadScene(self.tempDirectory(), resetCaches=self.resetHeartValveLibCaches)
+    self.assertEqual(census(), afterFirst, "no result nodes are duplicated by saving and loading")
+
+  def test_mitral_preset_reports_undeterminable_aortic_landmarks(self):
+    """An aortic annulus whose centroid coincides with the mitral one (or does not intersect the
+    cutting plane) must be reported as a message; it used to raise and abort the computation."""
+    factory = NewFormatValveFactory()
+    mitral = self._createMitralValve(factory, (1,), segmentation=False)
+    aortic = factory.createAnnotatedValve("aortic", frames=(1,))  # same synthetic contour, same position
+    quantLogic = self._quantLogic()
+    measurementNode = self._createMeasurementNode("MitralValve", {"ValveMitralValve": mitral.heartValveNode,
+                                                                  "ValveAorticValve": aortic.heartValveNode})
+    factory.switchTo(mitral, 1)
+    factory.switchTo(aortic, 1)
+    messages = quantLogic.computeMetrics(measurementNode)
+    self.assertTrue(any("Aortic valve landmarks could not be determined" in m for m in messages), messages)
+    preset = quantLogic.getMeasurementPresetById("MitralValve")
+    rows = self._tableRows(preset.metricsTable.metricTableNode)
+    self.assertTrue(any("circumference" in name for name in rows), rows)
+    self.assertIn("Mitral-Aortic valve plane angle", rows)
+
+  def test_cavc_presets_report_missing_inputs(self):
+    """Missing coaptations or landmarks must produce messages, not exceptions."""
+    factory = NewFormatValveFactory()
+    valveBrowser = factory.createValveBrowser("cavc")
+    factory.addTimePoint(valveBrowser, 1)
+    contour = factory.setContour(valveBrowser, 1)
+    valveModel = valveBrowser.valveModel
+    valveModel.setValveLabels([("MA", *contour[0]), ("R", *contour[3]), ("MP", *contour[6]), ("L", *contour[9])])
+    factory.addRoi(valveBrowser)
+    factory.addSegmentation(valveBrowser)
+    factory.addCoaptation(valveBrowser)  # leaflets are not named superior/inferior
+    quantLogic = self._quantLogic()
+    cavc = self._createMeasurementNode("Cavc", {"ValveCavc": valveBrowser.heartValveNode})
+    messages = quantLogic.computeMetrics(cavc)
+    self.assertTrue(any("superior and the inferior" in m for m in messages), messages)
+    preset = quantLogic.getMeasurementPresetById("Cavc")
+    self.assertTrue(any("circumference" in name for name in self._tableRows(preset.metricsTable.metricTableNode)))
+    papillary = self._createMeasurementNode("CavcPM", {"ValveCavc": valveBrowser.heartValveNode})
+    messages = quantLogic.computeMetrics(papillary)
+    self.assertTrue(any("landmarks are required" in m for m in messages), messages)
+
   # ---------------------------------------------------------------------------------------------
   # Widget
   # ---------------------------------------------------------------------------------------------

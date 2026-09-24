@@ -220,7 +220,12 @@ class MeasurementPresetCavc(MeasurementPreset):
     leftCoaptationModels = [["left", "superior"], ["left", "inferior"]]
     coaptationModels = self.getMatchingCoaptations(valveModel, leftCoaptationModels)
 
-    centerCoaptationModel = self.getMatchingCoaptations(valveModel, [["superior", "inferior"]])[0]
+    centerCoaptationModels = self.getMatchingCoaptations(valveModel, [["superior", "inferior"]])
+    if not centerCoaptationModels:
+      self.addMessage("A coaptation between the superior and the inferior leaflets is required for the "
+                      "left side coaptation measurements")
+      return
+    centerCoaptationModel = centerCoaptationModels[0]
     centerCoaptationModel.updateSurface()
 
     newBaseLine = getLeftCoaptationPointsIncludingIntersection(centerCoaptationModel.baseLine, planeNode)
