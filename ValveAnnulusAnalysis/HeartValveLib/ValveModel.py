@@ -1530,35 +1530,97 @@ class ValveModel:
 
       return segmentInfoSorted
 
+    def getMergedLeafletLabelmap(self, segmentIds=None):
+      """Get the union of the leaflet segments as a binary labelmap (vtkOrientedImageData in the
+      segmentation's Probe coordinate system), without modifying the segmentation.
+      :param segmentIds: segment IDs to merge; all leaflet models by default
+      :returns: vtkOrientedImageData with 0/1 voxels, or None if there is nothing to merge
+      """
+      segmentationNode = self.leafletSegmentationNode
+      if not segmentationNode:
+        return None
+      if segmentIds is None:
+        segmentIds = [leafletModel.segmentId for leafletModel in self.leafletModels]
+      segmentIds = [segmentId for segmentId in segmentIds if segmentationNode.GetSegmentation().GetSegment(segmentId)]
+      if not segmentIds:
+        return None
+      import vtkSegmentationCorePython as vtkSegmentationCore
+      segmentIdsArray = vtk.vtkStringArray()
+      for segmentId in segmentIds:
+        segmentIdsArray.InsertNextValue(segmentId)
+      mergedLabelmap = vtkSegmentationCore.vtkOrientedImageData()
+      if not segmentationNode.GenerateMergedLabelmapForAllSegments(
+          mergedLabelmap, vtkSegmentationCore.vtkSegmentation.EXTENT_UNION_OF_EFFECTIVE_SEGMENTS, None, segmentIdsArray):
+        return None
+      extent = mergedLabelmap.GetExtent()
+      if extent[0] > extent[1] or extent[2] > extent[3] or extent[4] > extent[5]:
+        return None
+      # The merged labelmap has a different label value for each segment: make it binary
+      threshold = vtk.vtkImageThreshold()
+      threshold.SetInputData(mergedLabelmap)
+      threshold.ThresholdByLower(0)
+      threshold.SetInValue(0)
+      threshold.SetOutValue(1)
+      threshold.SetOutputScalarType(vtk.VTK_UNSIGNED_CHAR)
+      threshold.Update()
+      imageToWorldMatrix = vtk.vtkMatrix4x4()
+      mergedLabelmap.GetImageToWorldMatrix(imageToWorldMatrix)
+      binaryLabelmap = vtkSegmentationCore.vtkOrientedImageData()
+      binaryLabelmap.ShallowCopy(threshold.GetOutput())
+      binaryLabelmap.SetImageToWorldMatrix(imageToWorldMatrix)
+      return binaryLabelmap
+
     def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0, mergeMode=None):
       # TODO: kernelSizeMm maybe determine this using the size (diameter?) of the annulus
       """
       Create valve surface from the union of all segmented leaflets.
-      """
-      if not mergeMode:
-        mergeMode = slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MAX
-      import vtkSegmentationCorePython as vtkSegmentationCore
 
-      # Create a temporary segment that is a union of all existing segments
+      The union is computed in a temporary segmentation that is not added to the scene. The leaflet
+      segmentation of the valve is not modified: adding a temporary segment to it (as was done
+      before) wrote into the shared labelmap of the leaflet segments, which lost the first merged
+      leaflet and corrupted the valve mask segment in some segmentations, and every modification was
+      also stored in the valve's sequence item.
+      :param mergeMode: unused, kept for backward compatibility (the segments are always merged with
+        the maximum operation, i.e. as a union)
+      """
+      import vtkSegmentationCorePython as vtkSegmentationCore
       segmentationNode = self.leafletSegmentationNode
-      allLeafletsSegId = segmentationNode.GetSegmentation().AddEmptySegment()
-      for leafletModel in self.leafletModels:
-        leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletModel.segmentId)
-        slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
-          leafletSegmentLabelmap, segmentationNode, allLeafletsSegId, mergeMode
-        )
+      if not segmentationNode:
+        return None
+
+      allLeafletsLabelmap = self.getMergedLeafletLabelmap()
+      if allLeafletsLabelmap is None:
+        return None
 
       # Apply smoothing to make sure leaflets are closed
-      self.smoothSegment(self.leafletSegmentationNode, allLeafletsSegId, kernelSizeMm, smoothInZDirection=False)
+      allLeafletsLabelmap = ValveModel.smoothLabelmap(allLeafletsLabelmap, kernelSizeMm=kernelSizeMm, smoothInZDirection=False)
 
-      allLeafletsNumPoints = segmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId).GetNumberOfPoints()
+      # Temporary segmentation (not added to the scene) that holds the union segment. It uses the
+      # conversion parameters of the leaflet segmentation so that the closed surface is generated the
+      # same way as the leaflet surfaces.
+      allLeafletsSegmentationNode = slicer.vtkMRMLSegmentationNode()
+      allLeafletsSegmentationNode.GetSegmentation().CopyConversionParameters(segmentationNode.GetSegmentation())
+      allLeafletsSegmentationNode.GetSegmentation().SetSourceRepresentationName(
+        vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName())
+      allLeafletsSegId = allLeafletsSegmentationNode.AddSegmentFromBinaryLabelmapRepresentation(allLeafletsLabelmap, "All leaflets")
+      if not allLeafletsSegId:
+        return None
+
+      # The closed surface representation has to be created explicitly (it is not generated on demand)
+      if not allLeafletsSegmentationNode.CreateClosedSurfaceRepresentation():
+        logging.warning("createValveSurface: could not create the closed surface of the merged leaflets")
+        return None
+      allLeafletsClosedSurface = allLeafletsSegmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId)
+      if allLeafletsClosedSurface is None:
+        return None
+      allLeafletsNumPoints = allLeafletsClosedSurface.GetNumberOfPoints()
 
       # Temporary node, we don't add it to the scene
       allLeafletsSurfaceModelNode = slicer.vtkMRMLModelNode()
       allLeafletsSurfaceBoundaryMarkupNode = slicer.vtkMRMLMarkupsClosedCurveNode()
 
       allLeafletsModel = LeafletModel.LeafletModel()
-      allLeafletsModel.setSegmentationNode(self.leafletSegmentationNode)
+      allLeafletsModel.setSegmentationNode(allLeafletsSegmentationNode)
       allLeafletsModel.setSegmentId(allLeafletsSegId)
       allLeafletsModel.setSurfaceModelNode(allLeafletsSurfaceModelNode)
       allLeafletsModel.setSurfaceBoundaryMarkupNode(allLeafletsSurfaceBoundaryMarkupNode)
@@ -1568,9 +1630,6 @@ class ValveModel:
       allLeafletsModel.updateSurface()
 
       allLeafletsSurfacePolyData = allLeafletsSurfaceModelNode.GetPolyData()
-
-      # Delete temporary segment
-      segmentationNode.RemoveSegment(allLeafletsSegId)
 
       if allLeafletsSurfacePolyData is None:
         return None
@@ -1597,16 +1656,28 @@ class ValveModel:
       :param smoothInZDirection Useful for closing leaflets without smoothing their surface
       :param method Smoothing method: closing, median
       """
+      selectedSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segmentId)
+      modifierLabelmap = ValveModel.smoothLabelmap(selectedSegmentLabelmap, kernelSizeMm, kernelSizePixel,
+                                                   smoothInZDirection, method)
+      if modifierLabelmap is None:
+        # segment is empty, nothing to do
+        return
+      slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(modifierLabelmap, segmentationNode, segmentId)
+
+    @staticmethod
+    def smoothLabelmap(selectedSegmentLabelmap, kernelSizeMm=None, kernelSizePixel=None, smoothInZDirection=True,
+                       method='closing'):
+      """
+      Smooth a binary labelmap by applying morphological closing (or median filtering).
+      :param selectedSegmentLabelmap: vtkOrientedImageData (not modified)
+      :param kernelSizeMm Diameter of the kernel in mm
+      :param smoothInZDirection Useful for closing leaflets without smoothing their surface
+      :param method Smoothing method: closing, median
+      :returns: smoothed vtkOrientedImageData (padded by the kernel size), or None if the input is empty
+      """
       # based on SegmentEditorSmoothingEffects/smoothSelectedSegment.py
 
       import vtkSegmentationCorePython as vtkSegmentationCore
-
-      selectedSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segmentId)
-
-      #segmentation = segmentationNode.GetSegmentation()
-      #selectedSegment = segmentation.GetSegment(selectedSegmentID)
-      #selectedSegmentLabelmap = selectedSegment.GetRepresentation(
-      #  vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName())
 
       if kernelSizeMm:
         selectedSegmentLabelmapSpacing = [1.0, 1.0, 1.0]
@@ -1615,6 +1686,8 @@ class ValveModel:
         # size rounded to nearest odd number. If kernel size is even then image gets shifted.
         kernelSizePixel = [int(round((kernelSizeMm / selectedSegmentLabelmapSpacing[componentIndex] + 1) / 2) * 2 - 1) for
                            componentIndex in range(3)]
+      else:
+        kernelSizePixel = list(kernelSizePixel)
 
       if not smoothInZDirection:
         kernelSizePixel[2] = 1
@@ -1625,7 +1698,7 @@ class ValveModel:
         originalExtent[2] > originalExtent[3] or
         originalExtent[4] > originalExtent[5]):
         # segment is empty, nothing to do
-        return
+        return None
 
       newExtent = [0, 0, 0, 0, 0, 0]
       newExtent[0] = originalExtent[0] - kernelSizePixel[0]
@@ -1667,8 +1740,7 @@ class ValveModel:
       modifierLabelmap = vtkSegmentationCore.vtkOrientedImageData()
       modifierLabelmap.ShallowCopy(smoothingFilter.GetOutput())
       modifierLabelmap.SetImageToWorldMatrix(imageToWorldMatrix)
-
-      slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(modifierLabelmap, segmentationNode, segmentId)
+      return modifierLabelmap
 
     #######################################################
     # Deprecated methods
