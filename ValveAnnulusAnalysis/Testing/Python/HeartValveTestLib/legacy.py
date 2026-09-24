@@ -336,6 +336,9 @@ class LegacySceneBuilder:
       segNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", slicer.mrmlScene.GetUniqueNameByString(segName))
       segNode.CreateDefaultDisplayNodes()
       segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), leafletVolume.GetID())
+      # Without a reference geometry the closed surfaces below are rasterized at a default resolution
+      # (250 voxels per axis), which is neither what the old modules produced nor practical
+      segNode.SetReferenceImageGeometryParameterFromVolumeNode(leafletVolume)
       self._applyProbe(segNode)
       colors = {"Anterior": (1.0, 0.0, 0.0), "Posterior": (0.0, 1.0, 0.0), "Septal": (0.0, 0.0, 1.0),
                 "Lateral": (1.0, 1.0, 0.0)}
