@@ -223,7 +223,8 @@ class LegacySceneBuilder:
                      roi=True, segmentation=True, leaflets=True, coaptation=False, papillary=False,
                      clippedVolume=False, segmentIds=("Anterior", "Posterior"), leafletOrder=None,
                      legacyFiducialContour=True, probePosition="TTE_APICAL", frameIndexAttribute=None,
-                     uniquifyNames=True, extraAttributes=None):
+                     uniquifyNames=True, extraAttributes=None, segmentNames=None, segmentTerminologies=None,
+                     valveMask=True):
     """Create one old-format HeartValve node (one analyzed phase) with its referenced nodes.
 
     :param legacyFiducialContour: True -> annulus contour stored as vtkMRMLMarkupsFiducialNode plus
@@ -232,6 +233,9 @@ class LegacySceneBuilder:
     :param leafletOrder: order in which leaflet references are added (defaults to *segmentIds*)
     :param frameIndexAttribute: override the ValveVolumeSequenceIndex attribute string (e.g. "-1",
       "abc"); the volume frame used for the leaflet volume is still *frameIndex* when valid.
+    :param segmentNames: ``{segmentId: name}`` (default ``"<segmentId> leaflet"``)
+    :param segmentTerminologies: ``{segmentId: terminology entry string}`` set as ``TerminologyEntry`` tag
+    :param valveMask: add the "Annulus mask" (ValveMask) segment
     :returns: LegacyValveRecord
     """
     record = LegacyValveRecord()
@@ -344,15 +348,20 @@ class LegacySceneBuilder:
                 "Lateral": (1.0, 1.0, 0.0)}
       centers = {"Anterior": (1.2, 0.0, 0.0), "Posterior": (-1.2, 0.0, 0.0), "Septal": (0.0, 1.2, 0.0),
                  "Lateral": (0.0, -1.2, 0.0)}
-      for segmentId in segmentIds:
-        color = colors.get(segmentId, (0.5, 0.5, 0.5))
-        center = centers.get(segmentId, (0.0, 0.0, 0.0))
+      for index, segmentId in enumerate(segmentIds):
+        color = colors.get(segmentId, [(0.5, 0.5, 0.5), (0.9, 0.6, 0.2), (0.2, 0.6, 0.9), (0.6, 0.2, 0.9)][index % 4])
+        center = centers.get(segmentId, [(1.2, 0.0, 0.0), (-1.2, 0.0, 0.0), (0.0, 1.2, 0.0), (0.0, -1.2, 0.0)][index % 4])
         center = (center[0], center[1], center[2] + 0.2 * frameIndex)  # per-phase shift
-        scene.addSphereSegment(segNode, segmentId, f"{segmentId} leaflet", center, radius=1.2, color=color)
+        name = (segmentNames or {}).get(segmentId, f"{segmentId} leaflet")
+        segment = scene.addSphereSegment(segNode, segmentId, name, center, radius=1.2, color=color)
+        terminology = (segmentTerminologies or {}).get(segmentId)
+        if terminology:
+          segment.SetTag("TerminologyEntry", terminology)
         record.segmentIds.append(segmentId)
-        record.segmentNames[segmentId] = f"{segmentId} leaflet"
+        record.segmentNames[segmentId] = name
         record.segmentColors[segmentId] = color
-      scene.addSphereSegment(segNode, VALVE_MASK_SEGMENT_ID, "Annulus mask", (0, 0, 0), radius=3.0, color=(0, 0, 1))
+      if valveMask:
+        scene.addSphereSegment(segNode, VALVE_MASK_SEGMENT_ID, "Annulus mask", (0, 0, 0), radius=3.0, color=(0, 0, 1))
       self._moveToValveFolder(valveNode, segNode)
       valveNode.SetNodeReferenceID("LeafletSegmentation", segNode.GetID())
       record.nodes["LeafletSegmentation"] = segNode
