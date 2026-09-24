@@ -681,6 +681,73 @@ class ValveModelSequenceTestTest(SlicerHeartTestCase):
     self.assertEqual(self._sequenceCount(), sequencesBefore, "sequences of a removed coaptation must not be left behind")
     self.assertNodeCountsEqual(censusBefore, scene.nodeCensus(), "no orphan nodes after removing a coaptation")
 
+  def test_createValveSurface_does_not_modify_the_segmentation(self):
+    """The valve surface (union of the leaflets) is derived data: computing it must not change the
+    leaflet segmentation, its sequence item or the result of a repeated computation. It used to add
+    a temporary segment to the leaflet segmentation, which wrote into the shared labelmap of the
+    leaflets (the first merged leaflet was lost on a fresh segmentation, so the result depended on
+    whether the surface had been computed before) and stored every change in the sequence item."""
+    factory = NewFormatValveFactory()
+    valveBrowser = factory.createValveBrowser("mitral")
+    for frame in (1, 3):
+      factory.addTimePoint(valveBrowser, frame)
+      factory.setContour(valveBrowser, frame)
+      factory.addRoi(valveBrowser)
+      factory.addSegmentation(valveBrowser)
+    valveModel = valveBrowser.valveModel
+    segmentationNode = valveModel.leafletSegmentationNode
+    sequenceNode = valveModel.leafletSegmentationSequenceNode
+    indexValue = factory.indexValue(3)
+
+    def voxelCounts(node):
+      return {segmentId: self._segmentVoxelCount(node, segmentId) for segmentId in self._segmentIds(node)}
+
+    countsBefore = voxelCounts(segmentationNode)
+    self.assertGreater(countsBefore["Anterior"], 0)
+    itemCountsBefore = voxelCounts(sequenceNode.GetDataNodeAtValue(indexValue))
+    itemMTime = sequenceNode.GetDataNodeAtValue(indexValue).GetMTime()
+
+    planePosition, planeNormal = valveModel.getAnnulusContourPlane()
+    surface = valveModel.createValveSurface(planePosition, planeNormal)
+    self.assertIsNotNone(surface, "valve surface")
+    self.assertGreater(surface.GetNumberOfPoints(), 0)
+    self.assertEqual(voxelCounts(segmentationNode), countsBefore, "segments must not be changed")
+    self.assertEqual(voxelCounts(sequenceNode.GetDataNodeAtValue(indexValue)), itemCountsBefore, "sequence item must not be changed")
+    self.assertEqual(sequenceNode.GetDataNodeAtValue(indexValue).GetMTime(), itemMTime, "sequence item must not be rewritten")
+    self.assertEqual(len(slicer.util.getNodesByClass("vtkMRMLSegmentationNode")), 1, "no temporary segmentation left in the scene")
+
+    surfaceAgain = valveModel.createValveSurface(planePosition, planeNormal)
+    self.assertEqual(surfaceAgain.GetNumberOfPoints(), surface.GetNumberOfPoints(), "the result must not depend on previous computations")
+
+    # The union really contains both leaflets
+    from vtk.util import numpy_support
+    unionLabelmap = valveModel.getMergedLeafletLabelmap()
+    unionVoxels = int(np.count_nonzero(numpy_support.vtk_to_numpy(unionLabelmap.GetPointData().GetScalars())))
+    self.assertGreaterEqual(unionVoxels, max(countsBefore["Anterior"], countsBefore["Posterior"]))
+    self.assertLessEqual(unionVoxels, countsBefore["Anterior"] + countsBefore["Posterior"])
+    self.assertGreater(unionVoxels, countsBefore["Anterior"], "union is larger than a single leaflet")
+
+  def test_coaptation_surface_at_every_time_point(self):
+    """A coaptation added at a second time point (item added to its sequences before the lines are
+    placed, as the LeafletAnalysis module does) has its surface stored at that time point too."""
+    factory = NewFormatValveFactory()
+    valveBrowser = factory.createValveBrowser("mitral")
+    for frame in (1, 3):
+      factory.addTimePoint(valveBrowser, frame)
+      factory.setContour(valveBrowser, frame)
+      factory.addRoi(valveBrowser)
+      factory.addSegmentation(valveBrowser)
+      factory.addCoaptation(valveBrowser, coaptationIndex=0)
+    valveModel = valveBrowser.valveModel
+    self.assertEqual(len(valveModel.coaptationModels), 1)
+    surface = valveModel.coaptationModels[0].surfaceModelNode
+    for frame in (1, 3):
+      factory.switchTo(valveBrowser, frame)
+      self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(surface), f"frame {frame}: surface item")
+      self.assertIsNotNone(surface.GetPolyData(), f"frame {frame}: surface polydata")
+      self.assertGreater(surface.GetPolyData().GetNumberOfPoints(), 0, f"frame {frame}: surface between base and margin lines")
+      self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(valveModel.coaptationModels[0].baseLine))
+
   # ---------------------------------------------------------------------------------------------
   # Transforms and ROI
   # ---------------------------------------------------------------------------------------------
