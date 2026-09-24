@@ -19,6 +19,7 @@ from HeartValveLib.HeartValves import (
     updateLegacyLeafletSurfaceBoundaryNodes,
     updateLegacyCoaptationModelNodes,
     getSequenceBrowserNodeForMasterOutputNode,
+    getOrCreateVolumeSequenceBrowserNode,
 )
 from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
 
@@ -312,6 +313,9 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             emptyFolderItemIDsBeforeConversion = self._getEmptyValveFolderItemIDs()
             try:
                 slicer.mrmlScene.StartState(slicer.mrmlScene.BatchProcessState)
+                # Valves on static (non-sequence) volumes get a single-frame volume sequence first,
+                # so that their measurements are captured with a valid frame index below.
+                self._prepareStaticVolumeValves()
                 # Capture each measurement's phase/time point BEFORE the valve conversion below
                 # redirects measurement->valve references to the single valve proxy and removes the
                 # per-phase valve nodes that carry the ValveVolumeSequenceIndex attribute.
@@ -368,6 +372,28 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             # once that node and its contents are converted and removed, the folders are orphaned
             # (reparented to the scene root) and empty. Clean them up so the hierarchy stays tidy.
             self._removeEmptyValveFolders(folderItemIDsToKeep=emptyFolderItemIDsBeforeConversion)
+
+    def _prepareStaticVolumeValves(self):
+        """Wrap the static (non-sequence) valve volumes of old-format valves into single-frame
+        sequences (see HeartValveLib.HeartValves.getOrCreateVolumeSequenceBrowserNode) and set the
+        valves' frame index to that single frame."""
+        sequencesLogic = slicer.modules.sequences.logic()
+        # Collect first, wrap afterwards: several valves may share one static volume, and the valves
+        # of an already wrapped volume must get the frame index as well
+        staticVolumeValves = []
+        for heartValveNode in getAllModuleSpecificScriptableNodes("HeartValve"):
+            if sequencesLogic.GetFirstBrowserNodeForProxyNode(heartValveNode):
+                continue
+            volumeNode = heartValveNode.GetNodeReference("ValveVolume")
+            if not volumeNode or getSequenceBrowserNodeForMasterOutputNode(volumeNode):
+                continue
+            staticVolumeValves.append((heartValveNode, volumeNode))
+        for heartValveNode, volumeNode in staticVolumeValves:
+            if not getOrCreateVolumeSequenceBrowserNode(volumeNode):
+                continue
+            if heartValveNode.GetAttribute("ValveVolumeSequenceIndex") != "0":
+                logging.info(f"Valve {heartValveNode.GetName()} is on a static volume, using frame 0")
+                heartValveNode.SetAttribute("ValveVolumeSequenceIndex", "0")
 
     def _organizeValvesUnderBrowsers(self):
         """Parent each HeartValve master proxy node under its sequence browser node in the subject
@@ -737,8 +763,16 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                 volumeSequenceBrowserNode = getSequenceBrowserNodeForMasterOutputNode(volumeNode)
                 if not volumeSequenceBrowserNode:
-                    logging.warning(f"Valve {heartValveNode.GetName()} volume is not part of a sequence, skipping")
-                    continue
+                    # A valve on a static (non-sequence) volume, e.g. a CT or a single 3D ultrasound
+                    # volume: the volume is wrapped into a single-frame sequence (the volume node
+                    # stays the same node) and the valve becomes its only time point.
+                    volumeSequenceBrowserNode = getOrCreateVolumeSequenceBrowserNode(volumeNode)
+                    if not volumeSequenceBrowserNode:
+                        logging.warning(f"Valve {heartValveNode.GetName()} volume is not part of a sequence, skipping")
+                        continue
+                    if heartValveNode.GetAttribute("ValveVolumeSequenceIndex") != "0":
+                        logging.info(f"Valve {heartValveNode.GetName()} is on a static volume, using frame 0")
+                        heartValveNode.SetAttribute("ValveVolumeSequenceIndex", "0")
 
                 # Create a unique key combining browser and valve type
                 browserNodeId = volumeSequenceBrowserNode.GetID()
@@ -875,7 +909,13 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
             # Set up the valve browser to save changes to the sequence
             groupConversionSucceeded = False
-            if heartValveSequenceNode.GetNumberOfDataNodes() > 0:
+            if heartValveSequenceNode.GetNumberOfDataNodes() == 0 and isNewValveBrowser:
+                # None of the valves of this group could be added (e.g. invalid frame indices): do not
+                # leave an empty valve browser behind
+                logging.warning(f"No valve of type '{valveType}' could be converted, removing the empty valve browser")
+                slicer.mrmlScene.RemoveNode(heartValveSequenceNode)
+                slicer.mrmlScene.RemoveNode(valveBrowserNode)
+            elif heartValveSequenceNode.GetNumberOfDataNodes() > 0:
                 valveBrowserNode.SetSaveChanges(heartValveSequenceNode, True)
                 # Select the first item to initialize the proxy node
                 valveBrowserNode.SetSelectedItemNumber(0)
