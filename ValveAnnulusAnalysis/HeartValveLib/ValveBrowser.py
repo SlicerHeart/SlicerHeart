@@ -258,6 +258,9 @@ class ValveBrowser:
       # Create probeToRasTransformNode if does not exist yet
       probeToRasTransformNodeId = None
       if valveVolumeNode:
+        # A static (non-sequence) volume is wrapped into a single-frame volume sequence so that
+        # time points can be added to the valve
+        HeartValves.getOrCreateVolumeSequenceBrowserNode(valveVolumeNode)
         if not valveVolumeNode.GetParentTransformNode():
           probeToRasTransformNode = slicer.vtkMRMLLinearTransformNode()
           probeToRasTransformNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ProbeToRasTransform"))
@@ -455,7 +458,13 @@ class ValveBrowser:
       slicer.mrmlScene.RemoveNode(proxyNode)
 
     def addCurrentTimePointToSequence(self, sequenceNode):
-      """Ensure the sequence has an item for the currently displayed time point."""
+      """Ensure the sequence has an item for the currently displayed time point.
+
+      The item has to exist BEFORE the proxy node is edited for this time point: with SaveChanges
+      enabled, the Sequences logic writes proxy modifications into the item of the displayed time
+      point, and at a time point without item it resets the proxy to its default content instead
+      (MissingItemSetToDefault), i.e. the edit is discarded immediately.
+      """
       browserNode = self.valveBrowserNode
       proxyNode = browserNode.GetProxyNode(sequenceNode)
       _, indexValue = self.getDisplayedHeartValveSequenceIndexAndValue()
