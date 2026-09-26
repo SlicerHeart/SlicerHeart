@@ -9,14 +9,6 @@ set(MODULE_PYTHON_SCRIPTS
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
   Resources/UI/${MODULE_NAME}.ui
-  Resources/Models/LV_Flange.stl
-  Resources/Models/Mold_Base.stl
-  Resources/Models/Mold_Top.stl
-  Resources/Models/Mold_Lid.stl
-  Resources/Models/PM_Papillary_Post.stl
-  Resources/Models/AL_Papillary_Post.stl
-  Resources/Models/Atrial_Flange.stl
-  Resources/Models/Negative.stl
   )
 
 #-----------------------------------------------------------------------------
