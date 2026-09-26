@@ -1,4 +1,5 @@
 import logging
+import os
 import vtk, qt, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
@@ -46,6 +47,20 @@ MOLD_ASSEMBLY_ATRIAL_FLANGE_NAME = "Atrial_Flange"
 MOLD_ASSEMBLY_NEGATIVE_NAME = "Negative"
 
 MOLD_ASSEMBLY_LID_REGISTRATION_VERTICES = [4209, 4878, 3835, 4722]
+
+# Mold assembly part models are downloaded on demand to keep the extension package small
+MOLD_ASSEMBLY_MODELS_URL = "https://github.com/SlicerHeart/SlicerHeart/releases/download/Resources/"
+MOLD_ASSEMBLY_MODELS_REVISION = "rev01"
+MOLD_ASSEMBLY_MODELS_CHECKSUMS = {
+  MOLD_ASSEMBLY_LID_NAME: "SHA256:437ce8723443344d78f29522b46a1069e40937dc77151884d6c6622171841eac",
+  MOLD_ASSEMBLY_TOP_NAME: "SHA256:e0d9f54ff76876c044313315a4ea00d24012d65c35f9bda9dba8de8d60c9478f",
+  MOLD_ASSEMBLY_BASE_NAME: "SHA256:7e06006f39a783988c9a6f857e0a32fb9f1e2ad03e545a9d461dfce6ccc1f21a",
+  MOLD_ASSEMBLY_LV_FLANGE_NAME: "SHA256:fb65d175bf08a08baf4c1e73a60806dad8fa9867769b10fa4ed9cd602a0f15c6",
+  MOLD_ASSEMBLY_PM_PAP_POST_NAME: "SHA256:3da999cd692a2a070f1f826a3b3bf707fc53eff09a6b68e612d59929d360d92b",
+  MOLD_ASSEMBLY_AL_PAP_POST_NAME: "SHA256:87afe99ff1ffba05051ee75e9c8be19d87d396d03a4e0ec9c793b02ead2f7ee5",
+  MOLD_ASSEMBLY_ATRIAL_FLANGE_NAME: "SHA256:9e488950e538e2c7ba1e6c7284487373e52b964bd79dfac346c3516973267ced",
+  MOLD_ASSEMBLY_NEGATIVE_NAME: "SHA256:60f7bc4dc49f220c2682c85be7b95669c0dad5197bf3d1078f05ae510fb92dac",
+}
 
 MOLD_ASSEMBLY_PARTS = [
   MOLD_ASSEMBLY_LID_NAME,
@@ -1190,11 +1205,26 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
       movingMarkupsNode.AddControlPoint(pos)
     return lidModelNode, movingMarkupsNode
 
+  @staticmethod
+  def getMoldAssemblyPartFile(name):
+    """Download mold assembly part model file into the cache (if not downloaded already) and return its path.
+    If the file in the cache is missing or its checksum is incorrect then it is downloaded again.
+    """
+    import SampleData
+    fileName = f"ValveMoldCreator-{name}-{MOLD_ASSEMBLY_MODELS_REVISION}.stl"
+    uri = MOLD_ASSEMBLY_MODELS_URL + fileName
+    result = SampleData.SampleDataLogic().downloadFromURL(
+      uris=uri, fileNames=fileName, checksums=MOLD_ASSEMBLY_MODELS_CHECKSUMS[name], loadFiles=False)
+    filePath = result[0] if result else None
+    if not filePath or not os.path.isfile(filePath):
+      raise RuntimeError(f"Failed to download mold assembly part model from {uri}")
+    return filePath
+
   def loadMoldAssemblyPart(self, name, valveModel):
     modelNode = self.getValveModelChildItemByName(valveModel, name)
     if modelNode:
       slicer.mrmlScene.RemoveNode(modelNode)
-    modelFile = self.resourcePath(f"Models/{name}.stl")
+    modelFile = self.getMoldAssemblyPartFile(name)
     modelNode = slicer.util.loadModel(modelFile)
     modelNode.SetName(name)
     dNode = modelNode.GetDisplayNode()
