@@ -158,6 +158,9 @@ class PDAQuantificationWidget(ScriptedLoadableModuleWidget, VTKObservationMixin)
     if slicer.app.majorVersion * 10 + slicer.app.minorVersion < 53:
       slicer.util.errorDisplay('To use the PDA Quantification module, Slicer 5.3 or later is needed')
       return
+    if not self.logic:
+      # setup() did not create the GUI because a required extension is missing
+      return
 
     # Make sure parameter node exists and observed
     self.initializeParameterNode()
