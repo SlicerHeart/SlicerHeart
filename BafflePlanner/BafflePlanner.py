@@ -75,6 +75,8 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # These connections ensure that we update parameter node when scene is closed
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+    # Update the GUI and the logic from the parameter node when a scene is loaded
+    self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndImportEvent, self.onSceneEndImport)
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
@@ -137,6 +139,13 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.parent.isEntered:
       self.initializeParameterNode()
 
+  def onSceneEndImport(self, caller, event):
+    """
+    Called just after a scene is loaded.
+    """
+    if self.parent.isEntered:
+      self.initializeParameterNode()
+
   def initializeParameterNode(self):
     """
     Ensure parameter node exists and observed.
@@ -146,6 +155,11 @@ class BafflePlannerWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if not self.logic:
       # the module was unloaded, ignore initialization request
       return
+    # The input curve is stored in the parameter node (e.g., in a scene that was loaded), but the logic
+    # may not have been set up for it yet (observing the curve for auto-update)
+    inputCurveNode = self.logic.getParameterNode().GetNodeReference('InputCurve')
+    if inputCurveNode and inputCurveNode != self.logic.getInputCurveNode():
+      self.logic.setInputCurveNode(inputCurveNode)
     self.setParameterNode(self.logic.getParameterNode())
     # Here we could select default input nodes to save a few clicks for the user
 
