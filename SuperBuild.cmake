@@ -18,9 +18,12 @@ endforeach()
 set(proj ${SUPERBUILD_TOPLEVEL_PROJECT})
 
 # Project dependencies
-set(${proj}_DEPENDS
-  lscm
-  )
+set(${proj}_DEPENDS)
+if(SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING)
+  list(APPEND ${proj}_DEPENDS
+    lscm
+    )
+endif()
 if (SlicerHeart_BUILD_ITK_FILTERS)
   list(APPEND ${proj}_DEPENDS
     ITKPhaseSymmetry

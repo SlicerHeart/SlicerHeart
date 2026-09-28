@@ -34,6 +34,17 @@ if(${ITK_VERSION_MAJOR}.${ITK_VERSION_MINOR} VERSION_LESS 5.0)
   set(SlicerHeart_BUILD_ITK_FILTERS OFF)
 endif()
 
+# The Conformal Texture Mapping module runs the lscm program, which the superbuild builds. In a web
+# browser (WebAssembly) lscm could be run in a web worker, but that is not implemented yet, so it
+# is not built there by default.
+set(SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING_DEFAULT ON)
+if(EMSCRIPTEN)
+  set(SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING_DEFAULT OFF)
+endif()
+option(SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING "Build the Conformal Texture Mapping module and the lscm program it runs."
+  ${SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING_DEFAULT})
+mark_as_superbuild(SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING)
+
 #-----------------------------------------------------------------------------
 # SuperBuild setup
 option(${EXTENSION_NAME}_SUPERBUILD "Build ${EXTENSION_NAME} and the projects it depends on." ON)
@@ -70,7 +81,9 @@ add_subdirectory(OrificeArea)
 if (SlicerHeart_BUILD_ITK_FILTERS)
   add_subdirectory(PhaseSymmetryFilter)
 endif()
-add_subdirectory(ConformalTextureMapping)
+if(SlicerHeart_BUILD_CONFORMAL_TEXTURE_MAPPING)
+  add_subdirectory(ConformalTextureMapping)
+endif()
 if (WIN32)
   # Image3dAPI only works on Windows
   # (see https://github.com/MedicalUltrasound/Image3dAPI)
