@@ -433,6 +433,9 @@ class PDAQuantificationWidget(ScriptedLoadableModuleWidget, VTKObservationMixin)
 
     # Get PDA curve node so that in case it has already been defined, the terminology can be restored
     pdaCurveNode = self.logic.getCurveNodeByCodeValue(self._parameterNode, self.logic.pdaCodeValue)
+    if not pdaCurveNode:
+      # PDA identified before the anatomy type was selected, so it does not have terminology yet
+      pdaCurveNode = self._parameterNode.GetNodeReference(self.logic.parameterNodeRef_PDACurve)
 
     # Set terminology for existing curves
     self.logic.setupTerminologyInCenterlineCurveTree(self._parameterNode)
@@ -625,6 +628,7 @@ class PDAQuantificationLogic(ScriptedLoadableModuleLogic, VTKObservationMixin):
     self.parameterNodeRef_OutputPDAModel = 'OutputPDAModel'
     self.parameterNodeRef_OutputTrimmedPDACurve = 'OutputTrimmedPDACurve'
     self.parameterNodeRef_OutputClippedPDABranchModel = 'OutputClippedPDABranchModel'
+    self.parameterNodeRef_PDACurve = 'PDACurve'
     self.parameterNodeRefPrefix_OutputAngle = 'OutputAngle_'
     # Parameter node parameter names
     self.parameter_InputSegmentID = 'InputSegment'
@@ -1127,7 +1131,9 @@ class PDAQuantificationLogic(ScriptedLoadableModuleLogic, VTKObservationMixin):
     # Setup output curve tree (display and terminology)
     self.setupCenterlineCurveTree(parameterNode)
 
-    # Set terminology for stitched PDA curve
+    # Set terminology for stitched PDA curve. Also store the PDA curve in the parameter node, because
+    # terminology can only be set after the anatomy type is selected.
+    parameterNode.SetNodeReferenceID(self.parameterNodeRef_PDACurve, stitchedPdaCurveNode.GetID())
     self.setupPDACurveTerminology(stitchedPdaCurveNode)
 
   def setupCenterlineCurveTree(self, parameterNode, curveReference=None):
@@ -1240,13 +1246,17 @@ class PDAQuantificationLogic(ScriptedLoadableModuleLogic, VTKObservationMixin):
     if pdaTerminologyEntryStr not in ['', None]:
       terminologiesLogic.DeserializeTerminologyEntry(pdaTerminologyEntryStr, pdaTerminologyEntry)
 
+    pdaCurveNode.SetName(self.pdaCodeMeaning)
+    if not pdaTerminologyEntry.GetTerminologyContextName():
+      # Anatomy type is not selected yet. Terminology will be set when it is selected.
+      return
+
     pdaTerminologyEntry.GetTypeObject().SetCodingSchemeDesignator(self.terminologyCodingSchemeDesignator)
     pdaTerminologyEntry.GetTypeObject().SetCodeValue(self.pdaCodeValue) # Same in all anatomy types
     pdaTerminologyEntry.GetTypeObject().SetCodeMeaning(self.pdaCodeMeaning)
 
     pdaTerminologyEntryStr = terminologiesLogic.SerializeTerminologyEntry(pdaTerminologyEntry)
     pdaCurveNode.SetAttribute('TerminologyEntry', pdaTerminologyEntryStr)
-    pdaCurveNode.SetName(self.pdaCodeMeaning)
 
   def getCurveFolderItemID(self, parameterNode):
     """
