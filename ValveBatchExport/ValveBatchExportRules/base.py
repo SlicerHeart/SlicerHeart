@@ -7,6 +7,20 @@ from HeartValveLib.helpers import getAllHeartValveModelNodes, getSpecificHeartVa
 from typing import Union
 
 
+def importPandas():
+  """Import pandas, installing it first if it is not available yet.
+
+  Only merging of the exported CSV files needs pandas, so it is not installed when the module starts.
+  """
+  try:
+    import pandas
+  except ImportError:
+    logging.warning("ValveBatchExport requires python package 'pandas'. Installing ...")
+    slicer.util.pip_install("pandas")
+    import pandas
+  return pandas
+
+
 class ValveBatchExportPlugin(qt.QWidget):
 
   _RULE_CLASS = None
@@ -151,7 +165,7 @@ class ValveBatchExportRule(object):
 
   @classmethod
   def concatCSVsAndSave(cls, inputCSVs, outFile, removeDuplicateRows=False):
-    import pandas as pd
+    pd = importPandas()
 
     dfs = cls.loadCSVs(inputCSVs)
     if len(dfs) == 0:
@@ -166,7 +180,7 @@ class ValveBatchExportRule(object):
 
   @staticmethod
   def loadCSVs(inputCSVs: list) -> list:
-    import pandas as pd
+    pd = importPandas()
     return [pd.read_csv(f) for f in inputCSVs]
 
   @staticmethod

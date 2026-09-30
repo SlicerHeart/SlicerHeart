@@ -54,12 +54,6 @@ class ValveBatchExport(ScriptedLoadableModule):
     self.parent.helpText = """Export data to CSV files from heart valve scene files."""
     self.parent.acknowledgementText = """ """
 
-    try:
-      import pandas
-    except ImportError:
-      logging.warning(f"{self.__class__.__name__} requires python package 'pandas'. Installing ...")
-      slicer.util.pip_install("pandas")
-
 
 #
 # ValveBatchExportWidget
