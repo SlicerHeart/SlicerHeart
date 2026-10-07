@@ -1543,7 +1543,7 @@ def getTransformToPlane(planePosition, planeNormal):
   planeX_World = np.cross(planeY_World, planeZ_World)
   planeX_World = planeX_World/np.linalg.norm(planeX_World)
 
-  transformPlaneToWorld = np.row_stack((np.column_stack((planeX_World, planeY_World, planeZ_World, planePosition)),
+  transformPlaneToWorld = np.vstack((np.column_stack((planeX_World, planeY_World, planeZ_World, planePosition)),
                                         (0, 0, 0, 1)))
   transformWorldToPlane = np.linalg.inv(transformPlaneToWorld)
 

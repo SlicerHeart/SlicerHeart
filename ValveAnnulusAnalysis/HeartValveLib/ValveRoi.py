@@ -276,7 +276,7 @@ class ValveRoi:
     numberOfPoints = annulusPoints.shape[1]
     # Concatenate a 4th line containing 1s so that we can transform the positions using
     # a single matrix multiplication.
-    annulusPoints_World = np.row_stack((annulusPoints, np.ones(numberOfPoints)))
+    annulusPoints_World = np.vstack((annulusPoints, np.ones(numberOfPoints)))
     # Point positions in the plane coordinate system:
     annulusPoints_Plane = np.dot(transformWorldToPlaneMatrix, annulusPoints_World)
     # remove the last row (all ones)
