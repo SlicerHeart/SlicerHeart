@@ -1515,7 +1515,7 @@ def getTransformToPlane(planePosition, planeNormal, xDirection=None):
   planeX_World = np.cross(planeY_World, planeZ_World)
   planeX_World = planeX_World/np.linalg.norm(planeX_World)
 
-  transformPlaneToWorld = np.row_stack((np.column_stack((planeX_World, planeY_World, planeZ_World, planePosition)),
+  transformPlaneToWorld = np.vstack((np.column_stack((planeX_World, planeY_World, planeZ_World, planePosition)),
                                         (0, 0, 0, 1)))
   transformWorldToPlane = np.linalg.inv(transformPlaneToWorld)
 
@@ -1532,7 +1532,7 @@ def getPointsProjectedToPlane(pointsArray, planePosition, planeNormal):
   numberOfPoints = pointsArray.shape[1]
   # Concatenate a 4th line containing 1s so that we can transform the positions using
   # a single matrix multiplication.
-  pointsArray_World = np.row_stack((pointsArray,np.ones(numberOfPoints)))
+  pointsArray_World = np.vstack((pointsArray,np.ones(numberOfPoints)))
   transformWorldToPlane = getTransformToPlane(planePosition, planeNormal)
   # Point positions in the plane coordinate system:
   pointsArray_Plane = np.dot(transformWorldToPlane, pointsArray_World)

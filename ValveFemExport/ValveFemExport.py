@@ -1460,7 +1460,7 @@ class ValveFemExportLogic(ScriptedLoadableModuleLogic):
     if surfaceModelNode.GetParentTransformNode():
       transformToWorld = slicer.util.arrayFromTransformMatrix(surfaceModelNode.GetParentTransformNode(), toWorld=True)
       # Concatenate a 4th line containing 1s so that we can transform the positions using a single matrix multiplication.
-      medialSurfaceNodePointsHom = np.row_stack((medialSurfaceNodePoints.T, np.ones(medialSurfaceNodePoints.shape[0])))
+      medialSurfaceNodePointsHom = np.vstack((medialSurfaceNodePoints.T, np.ones(medialSurfaceNodePoints.shape[0])))
       # Transform
       medialSurfaceNodePointsWorldHom = np.dot(transformToWorld, medialSurfaceNodePointsHom)
       # Save updated point positions

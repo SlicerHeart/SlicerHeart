@@ -480,7 +480,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     # Move annulus control points to valve plane
-    annulusControlPoints_World = np.row_stack((annulusControlPoints, np.ones(numberOfPoints)))
+    annulusControlPoints_World = np.vstack((annulusControlPoints, np.ones(numberOfPoints)))
     annulusControlPoints_Plane = np.dot(transformWorldToPlaneMatrix, annulusControlPoints_World)
     annulusControlPoints_Plane = annulusControlPoints_Plane[0:3, :]
     # calculate length of each point/vector and take average
@@ -500,7 +500,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     # STEP 1: Move annulus control points to valve plane
     # Concatenate a 4th line containing 1s so that we can transform the positions using
     # a single matrix multiplication.
-    annulusControlPoints_World = np.row_stack((annulusControlPoints, np.ones(numberOfPoints)))
+    annulusControlPoints_World = np.vstack((annulusControlPoints, np.ones(numberOfPoints)))
     # Control point positions in the plane coordinate system
     annulusControlPoints_Plane = np.dot(transformWorldToPlaneMatrix, annulusControlPoints_World)
     # remove the last row (all ones)
@@ -514,7 +514,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     rimControlPoints_Plane[0:2, :] = shiftFactor * annulusControlPoints_Plane[0:2, :]
     rimControlPoints_Plane[2, :] = annulusControlPoints_Plane[2, :]  # do not scale z axis
     # STEP 3: Move shifted points back to original plane
-    rimControlPoints_Plane = np.row_stack((rimControlPoints_Plane, np.ones(numberOfPoints)))
+    rimControlPoints_Plane = np.vstack((rimControlPoints_Plane, np.ones(numberOfPoints)))
     rimControlPoints_World = np.dot(np.linalg.inv(transformWorldToPlaneMatrix), rimControlPoints_Plane)
     rimControlPoints_World = rimControlPoints_World[0:3, :]
 
@@ -547,7 +547,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     # STEP 1: Move annulus control points to valve plane
-    annulusControlPoints_World = np.row_stack((annulusControlPoints, np.ones(numberOfPoints)))
+    annulusControlPoints_World = np.vstack((annulusControlPoints, np.ones(numberOfPoints)))
     annulusControlPoints_Plane = np.dot(transformWorldToPlaneMatrix, annulusControlPoints_World)
     annulusControlPoints_Plane = annulusControlPoints_Plane[0:3, :]
     # after translation center is negligible; very close to [0,0,0]
@@ -559,7 +559,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     rimControlPoints_Plane[0:2, :] = shiftFactor * annulusControlPoints_Plane[0:2, :]
     rimControlPoints_Plane[2, :] = annulusControlPoints_Plane[2, :]
     # STEP 3: Move shifted points back to original plane
-    rimControlPoints_Plane = np.row_stack((rimControlPoints_Plane, np.ones(numberOfPoints)))
+    rimControlPoints_Plane = np.vstack((rimControlPoints_Plane, np.ones(numberOfPoints)))
     rimControlPoints_World = np.dot(np.linalg.inv(transformWorldToPlaneMatrix), rimControlPoints_Plane)
     rimControlPoints_World = rimControlPoints_World[0:3, :]
 

@@ -598,7 +598,7 @@ def setControlPointsWorldFromArray(coaptationModel, controlPointsArray):
 
 def getAbovePlaneIndicator(pointsArray, planePosition, planeNormal):
   numberOfPoints = pointsArray.shape[1]
-  pointsArray_World = np.row_stack((pointsArray, np.ones(numberOfPoints)))
+  pointsArray_World = np.vstack((pointsArray, np.ones(numberOfPoints)))
   from ValveModel import getTransformToPlane
   transformWorldToPlane = getTransformToPlane(planePosition, planeNormal)
   # Point positions in the plane coordinate system:
