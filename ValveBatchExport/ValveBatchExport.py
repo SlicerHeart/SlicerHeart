@@ -96,7 +96,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
                                        progressCallback=self.progressUpdate,
                                        completedCallback=self._resetExport)
 
-    exportOptionsFrameLayout = self.ui.exportOptionsFrame.layout()
+    self.exportOptionsFrameLayout = self.ui.exportOptionsFrame.layout()
 
     self.imageFileFormatComboBox = qt.QComboBox()
     self.imageFileFormatComboBox.addItems([".nrrd", ".nii.gz"])
@@ -105,7 +105,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
 
     # add ui of export plugins here
     for exportPlugin in self.registeredExportPlugins:
-      exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
+      self.exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
 
     self.setupPhaseSelectionSection()
     self.setupValveTypeSelectionSection()
