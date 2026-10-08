@@ -3,7 +3,7 @@ ValveSegmentationSequenceTest.py
 
 Tests for the sequence (per-time-point) behaviour of the ValveSegmentation module: the clipped
 leaflet volume computation, per-time-point ROI/segmentation handling through the widget slots and
-giving a leaflet the same segment ID at all time points.
+keeping the leaflet segments of all time points the same.
 
 All tests run on a small synthetic volume sequence (no downloads).
 """
@@ -12,6 +12,7 @@ import os
 import sys
 
 import numpy as np
+import qt
 import vtk
 import slicer
 from slicer.ScriptedLoadableModule import *
@@ -222,7 +223,7 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
       self._unbindWidget(widget)
 
   # ---------------------------------------------------------------------------------------------
-  # Segment IDs of a leaflet are the same at all time points
+  # Leaflet segments are the same at all time points
   # ---------------------------------------------------------------------------------------------
 
   FRAMES = (1, 3, 5)
@@ -260,14 +261,87 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
       result[segmentId] = (definition["name"], definition["terminology"], ValveModel.segmentHasContent(segmentation, segmentId))
     return result
 
+  def _confirmRemoval(self, widget, answer):
+    """Answer the 'remove from all time points' question with *answer*; returns the list of questions asked."""
+    questions = []
+
+    def confirm(segmentName, timePointNames):
+      questions.append((segmentName, timePointNames))
+      return answer
+    widget.confirmRemoveSegmentFromAllTimePoints = confirm
+    return questions
+
+  def _restoreConfirmRemoval(self, widget):
+    widget.__dict__.pop("confirmRemoveSegmentFromAllTimePoints", None)
+
   def _bindSegmentationWidget(self, widget, valveBrowser):
     self._bindWidget(widget, valveBrowser)
     slicer.app.processEvents()
+
+  def test_widget_added_segment_is_added_to_all_time_points(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory)
+    widget = self._widget()
+    questions = self._confirmRemoval(widget, False)
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      factory.switchTo(valveBrowser, 3)
+      slicer.app.processEvents()
+      scene.addSphereSegment(valveBrowser.valveModel.leafletSegmentationNode, "Septal", "Septal leaflet", (0, 1.2, 0), 1.2, (0, 0, 1))
+      slicer.app.processEvents()
+      defaultTerminology = widget.ui.segmentEditorWidget.defaultTerminologyEntry
+      self.assertEqual(self._segments(valveBrowser, factory, 3)["Septal"], ("Septal leaflet", defaultTerminology, True))
+      for frameIndex in (1, 5):
+        segments = self._segments(valveBrowser, factory, frameIndex)
+        self.assertEqual(list(segments.keys()), ["Anterior", "Posterior", "Septal"], f"frame {frameIndex}")
+        self.assertEqual(segments["Septal"], ("Septal leaflet", defaultTerminology, False), f"frame {frameIndex}: empty copy")
+        self.assertTrue(segments["Anterior"][2], f"frame {frameIndex}: other leaflets untouched")
+      # Replaying the time points neither changes the segments nor logs anything about them
+      logModel = slicer.app.errorLogModel()
+      before = logModel.logEntryCount()
+      for frameIndex in self.FRAMES + self.FRAMES:
+        factory.switchTo(valveBrowser, frameIndex)
+        slicer.app.processEvents()
+        displayNode = valveBrowser.valveModel.leafletSegmentationNode.GetDisplayNode()
+        for segmentId in ("Anterior", "Posterior", "Septal"):
+          displayNode.GetSegmentVisibility(segmentId)
+      slicer.app.processEvents()
+      messages = [logModel.logEntryDescription(i) for i in range(before, logModel.logEntryCount())]
+      self.assertEqual([m for m in messages if "segment" in m.lower()], [])
+      self.assertEqual(self._segments(valveBrowser, factory, 3)["Septal"][2], True, "content kept")
+      self.assertEqual(questions, [])
+    finally:
+      self._restoreConfirmRemoval(widget)
+      self._unbindWidget(widget)
+
+  def test_widget_segment_properties_are_copied_to_all_time_points(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory)
+    widget = self._widget()
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      factory.switchTo(valveBrowser, 3)
+      slicer.app.processEvents()
+      segment = valveBrowser.valveModel.leafletSegmentationNode.GetSegmentation().GetSegment("Anterior")
+      segment.SetName("Anterior mitral leaflet")
+      segment.SetColor(0.2, 0.4, 0.6)
+      segment.SetTag("TerminologyEntry", self.TERMINOLOGY_A)
+      slicer.app.processEvents()
+      for frameIndex in self.FRAMES:
+        self._saveProxy(valveBrowser)
+        item = valveBrowser.valveModel.leafletSegmentationSequenceNode.GetDataNodeAtValue(factory.indexValue(frameIndex))
+        otherSegment = item.GetSegmentation().GetSegment("Anterior")
+        self.assertEqual(otherSegment.GetName(), "Anterior mitral leaflet", f"frame {frameIndex}")
+        self.assertEqual([round(c, 3) for c in otherSegment.GetColor()], [0.2, 0.4, 0.6], f"frame {frameIndex}")
+        self.assertEqual(self._segments(valveBrowser, factory, frameIndex)["Anterior"][1:], (self.TERMINOLOGY_A, True))
+    finally:
+      self._unbindWidget(widget)
 
   def test_widget_switching_time_points_changes_no_segment(self):
     factory = NewFormatValveFactory()
     valveBrowser = self._createSegmentedValve(factory, terminologies=True)
     widget = self._widget()
+    questions = self._confirmRemoval(widget, True)
     try:
       self._bindSegmentationWidget(widget, valveBrowser)
       expected = {frameIndex: self._segments(valveBrowser, factory, frameIndex) for frameIndex in self.FRAMES}
@@ -278,7 +352,131 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
         slicer.app.processEvents()
       self.assertEqual({frameIndex: self._segments(valveBrowser, factory, frameIndex) for frameIndex in self.FRAMES}, expected,
                        "segments and terminologies are kept (switching replaces every segment of the proxy node)")
+      self.assertEqual(questions, [])
     finally:
+      self._restoreConfirmRemoval(widget)
+      self._unbindWidget(widget)
+
+  def test_widget_removed_empty_segment_is_removed_from_all_time_points(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory)
+    valveModel = valveBrowser.valveModel
+    widget = self._widget()
+    questions = self._confirmRemoval(widget, False)
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      factory.switchTo(valveBrowser, 3)
+      slicer.app.processEvents()
+      valveModel.leafletSegmentationNode.GetSegmentation().AddEmptySegment("Septal", "Septal leaflet")
+      slicer.app.processEvents()
+      self.assertIn("Septal", self._segments(valveBrowser, factory, 1))
+      valveModel.leafletSegmentationNode.GetSegmentation().RemoveSegment("Septal")
+      slicer.app.processEvents()
+      self.assertEqual(questions, [], "nothing to lose at the other time points: no question")
+      for frameIndex in self.FRAMES:
+        self.assertEqual(list(self._segments(valveBrowser, factory, frameIndex).keys()), ["Anterior", "Posterior"])
+    finally:
+      self._restoreConfirmRemoval(widget)
+      self._unbindWidget(widget)
+
+  def test_widget_removed_segment_cleared_only_at_this_time_point(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory)
+    valveModel = valveBrowser.valveModel
+    widget = self._widget()
+    questions = self._confirmRemoval(widget, False)
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      factory.switchTo(valveBrowser, 3)
+      slicer.app.processEvents()
+      valveModel.setCardiacCyclePhase("end-systole")
+      valveModel.leafletSegmentationNode.GetSegmentation().RemoveSegment("Anterior")
+      slicer.app.processEvents()
+      self.assertEqual(len(questions), 1)
+      segmentName, timePointNames = questions[0]
+      self.assertEqual(segmentName, "Anterior leaflet")
+      self.assertEqual(len(timePointNames), 2, timePointNames)
+      self.assertTrue(all("volume index" in name for name in timePointNames), timePointNames)
+      segments3 = self._segments(valveBrowser, factory, 3)
+      self.assertEqual(list(segments3.keys()), ["Anterior", "Posterior"], "segment kept at its position")
+      self.assertFalse(segments3["Anterior"][2], "cleared at this time point")
+      for frameIndex in (1, 5):
+        self.assertTrue(self._segments(valveBrowser, factory, frameIndex)["Anterior"][2], f"frame {frameIndex} kept")
+    finally:
+      self._restoreConfirmRemoval(widget)
+      self._unbindWidget(widget)
+
+  def test_widget_remove_question_defaults_to_clearing_this_time_point(self):
+    widget = self._widget()
+    shown = []
+
+    def answer():
+      dialog = slicer.app.activeModalWidget()
+      if dialog is None:
+        return
+      shown.append((dialog.text, [button.text for button in dialog.buttons()],
+                    dialog.defaultButton().text, dialog.escapeButton().text))
+      qt.QApplication.sendEvent(dialog, qt.QKeyEvent(qt.QEvent.KeyPress, qt.Qt.Key_Escape, qt.Qt.NoModifier))
+    qt.QTimer.singleShot(200, answer)
+    removeFromAll = widget.confirmRemoveSegmentFromAllTimePoints("Anterior leaflet", ["mid-systole (volume index 2)", "volume index 6"])
+    self.assertEqual(len(shown), 1, "the question was shown")
+    text, buttons, defaultButton, escapeButton = shown[0]
+    self.assertIn('"Anterior leaflet"', text)
+    self.assertIn("mid-systole (volume index 2)", text)
+    self.assertIn("volume index 6", text)
+    self.assertEqual(sorted(buttons), ["Clear only this time point", "Remove from all time points"])
+    # Enter and Escape pick the answer that does not delete anything
+    self.assertEqual((defaultButton, escapeButton), ("Clear only this time point", "Clear only this time point"))
+    self.assertFalse(removeFromAll)
+
+  def test_widget_removed_segment_removed_from_all_time_points(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory)
+    valveModel = valveBrowser.valveModel
+    widget = self._widget()
+    questions = self._confirmRemoval(widget, True)
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      factory.switchTo(valveBrowser, 3)
+      slicer.app.processEvents()
+      valveModel.leafletSegmentationNode.GetSegmentation().RemoveSegment("Anterior")
+      slicer.app.processEvents()
+      self.assertEqual(len(questions), 1)
+      for frameIndex in self.FRAMES:
+        self.assertEqual(list(self._segments(valveBrowser, factory, frameIndex).keys()), ["Posterior"], f"frame {frameIndex}")
+      # Nothing is left behind for the removed segment: replaying the time points logs nothing about segments
+      logModel = slicer.app.errorLogModel()
+      before = logModel.logEntryCount()
+      for frameIndex in self.FRAMES + self.FRAMES:
+        factory.switchTo(valveBrowser, frameIndex)
+        slicer.app.processEvents()
+        valveModel.leafletSegmentationNode.GetDisplayNode().GetSegmentVisibility("Posterior")
+      slicer.app.processEvents()
+      messages = [logModel.logEntryDescription(i) for i in range(before, logModel.logEntryCount())]
+      self.assertEqual([m for m in messages if "segment" in m.lower()], [])
+    finally:
+      self._restoreConfirmRemoval(widget)
+      self._unbindWidget(widget)
+
+  def test_widget_removing_the_segmentation_of_a_time_point_keeps_the_others(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory)
+    valveModel = valveBrowser.valveModel
+    widget = self._widget()
+    questions = self._confirmRemoval(widget, True)
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      factory.switchTo(valveBrowser, 3)
+      slicer.app.processEvents()
+      widget.updateGUIFromHeartValveNode()
+      widget.onRemoveSegmentationButtonClicked()
+      slicer.app.processEvents()
+      self.assertEqual(questions, [])
+      self.assertSequenceIndexValues(valveModel.leafletSegmentationSequenceNode, [factory.indexValue(1), factory.indexValue(5)])
+      for frameIndex in (1, 5):
+        self.assertEqual(list(self._segments(valveBrowser, factory, frameIndex).keys()), ["Anterior", "Posterior"])
+    finally:
+      self._restoreConfirmRemoval(widget)
       self._unbindWidget(widget)
 
   def test_widget_segment_given_the_terminology_of_a_leaflet_becomes_that_leaflet(self):
@@ -286,6 +484,7 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
     valveBrowser = self._createSegmentedValve(factory, frames=(3, 5), terminologies=True)
     valveModel = valveBrowser.valveModel
     widget = self._widget()
+    questions = self._confirmRemoval(widget, False)
     try:
       self._bindSegmentationWidget(widget, valveBrowser)
       # New time point: the leaflets are there, empty
@@ -300,6 +499,7 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
       segmentationNode = valveModel.leafletSegmentationNode
       scene.addSphereSegment(segmentationNode, "Segment_1", "Posterior leaflet", (-1.2, 0, 0), 1.2, (0, 1, 0))
       slicer.app.processEvents()
+      self.assertIn("Segment_1", self._segments(valveBrowser, factory, 3), "new segment added to all time points")
       segmentationNode.GetSegmentation().GetSegment("Segment_1").SetTag("TerminologyEntry", self.TERMINOLOGY_P)
       slicer.app.processEvents()
       segments1 = self._segments(valveBrowser, factory, 1)
@@ -307,13 +507,11 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
       self.assertEqual(segments1["Posterior"], ("Posterior leaflet", self.TERMINOLOGY_P, True), "the new segment is the posterior leaflet")
       for frameIndex in (3, 5):
         segments = self._segments(valveBrowser, factory, frameIndex)
-        self.assertEqual(list(segments.keys()), ["Anterior", "Posterior"], f"frame {frameIndex}")
+        self.assertEqual(list(segments.keys()), ["Anterior", "Posterior"], f"frame {frameIndex}: Segment_1 removed")
         self.assertTrue(segments["Posterior"][2], f"frame {frameIndex}: posterior leaflet kept")
-      # Geometry kept with the renamed segment
-      labelmap = slicer.vtkOrientedImageData()
-      self.assertTrue(segmentationNode.GetBinaryLabelmapRepresentation("Posterior", labelmap))
-      self.assertGreater(self._voxelCount(labelmap), 0)
+      self.assertEqual(questions, [])
     finally:
+      self._restoreConfirmRemoval(widget)
       self._unbindWidget(widget)
 
   def test_widget_segment_with_a_new_terminology_keeps_its_id(self):
@@ -335,12 +533,55 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
       slicer.app.processEvents()
       segmentationNode.GetSegmentation().GetSegment("Segment_9").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
       slicer.app.processEvents()
-      segments = self._segments(valveBrowser, factory, 3)
-      self.assertEqual(list(segments.keys()), ["Anterior", "Posterior", "Custom", "Segment_9"])
-      self.assertEqual(segments["Custom"][1], customTerminology)
-      self.assertTrue(segments["Anterior"][2], "anterior leaflet kept")
+      for frameIndex in self.FRAMES:
+        segments = self._segments(valveBrowser, factory, frameIndex)
+        self.assertEqual(list(segments.keys()), ["Anterior", "Posterior", "Custom", "Segment_9"], f"frame {frameIndex}")
+        self.assertEqual(segments["Custom"][1], customTerminology)
+        self.assertTrue(segments["Anterior"][2], f"frame {frameIndex}: anterior leaflet kept")
     finally:
       self._unbindWidget(widget)
+
+  def test_widget_gives_all_time_points_the_same_segments_when_bound(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory, terminologies=True)
+    valveModel = valveBrowser.valveModel
+    # Segmented before the segments were kept in sync: frame 3 has an extra segment and frame 5 has
+    # the anterior leaflet under another ID
+    factory.switchTo(valveBrowser, 3)
+    scene.addSphereSegment(valveModel.leafletSegmentationNode, "Septal", "Septal leaflet", (0, 1.2, 0), 1.2, (0, 0, 1))
+    self._saveProxy(valveBrowser)
+    factory.switchTo(valveBrowser, 5)
+    segmentation5 = valveModel.leafletSegmentationNode.GetSegmentation()
+    anterior = segmentation5.GetSegment("Anterior")
+    segmentation5.RemoveSegment("Anterior")
+    segmentation5.AddSegment(anterior, "Segment_2")
+    self._saveProxy(valveBrowser)
+    widget = self._widget()
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      self.assertEqual(sorted(self._segments(valveBrowser, factory, 1).keys()), ["Anterior", "Posterior", "Septal"])
+      self.assertFalse(self._segments(valveBrowser, factory, 1)["Septal"][2])
+      self.assertEqual(sorted(self._segments(valveBrowser, factory, 5).keys()), ["Posterior", "Segment_2", "Septal"],
+                       "no empty second anterior leaflet next to Segment_2")
+      self.assertEqual(sorted(self._segments(valveBrowser, factory, 3).keys()), ["Anterior", "Posterior", "Septal"])
+    finally:
+      self._unbindWidget(widget)
+
+  def test_new_time_point_gets_the_segments_of_all_time_points(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory, frames=(1, 3))
+    valveModel = valveBrowser.valveModel
+    # Only the second time point has a septal leaflet (segmented without the module)
+    factory.switchTo(valveBrowser, 3)
+    scene.addSphereSegment(valveModel.leafletSegmentationNode, "Septal", "Septal leaflet", (0, 1.2, 0), 1.2, (0, 0, 1))
+    self._saveProxy(valveBrowser)
+    # A time point added before the first one in the sequence
+    factory.addTimePoint(valveBrowser, 0)
+    valveModel.initializeLeafletSegmentation()
+    septal = self._segments(valveBrowser, factory, 3)["Septal"]
+    segments = self._segments(valveBrowser, factory, 0)
+    self.assertEqual(sorted(segments.keys()), ["Anterior", "Posterior", "Septal"])
+    self.assertEqual(segments["Septal"], septal[:2] + (False,), "empty copy with the same name and terminology")
 
   def test_widget_survives_scene_clear(self):
     factory = NewFormatValveFactory()
