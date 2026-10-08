@@ -204,19 +204,21 @@ class ValveBatchExportRulesTestTest(SlicerHeartTestCase):
     factory, mitral = self._buildScene(segmentation=True, aortic=False)
     valveModel = mitral.valveModel
     sequenceNode = valveModel.leafletSegmentationSequenceNode
+    displayNode = valveModel.leafletSegmentationNode.GetDisplayNode()
+    segmentIds = ("Anterior", "Posterior", "ValveMask")
+    visibilityBefore = {segmentId: displayNode.GetSegmentVisibility(segmentId) for segmentId in segmentIds}
     rule = self._run(self.rules.LeafletSegmentationExportRule)
     # Each leaflet of each annotated time point is written to its own label map; the valve mask is not exported
     files = self._files(rule.outputDir, "." + self.rules.ValveBatchExportRule.IMAGE_FILE_EXTENSION)
     self.assertEqual(len(files), 4, f"one label map per leaflet and annotated time point: {files}")
-    self.assertEqual(len([name for name in files if "Anterior_leaflet" in name]), 2, files)
-    self.assertEqual(len([name for name in files if "Posterior_leaflet" in name]), 2, files)
+    self.assertEqual(len([name for name in files if "anterior_leaflet" in name.lower()]), 2, files)
+    self.assertEqual(len([name for name in files if "posterior_leaflet" in name.lower()]), 2, files)
     for indexValue in (factory.indexValue(1), factory.indexValue(4)):
       stored = sequenceNode.GetDataNodeAtValue(indexValue).GetSegmentation()
       self.assertIn("ValveMask", stored.GetSegmentIDs(), "export must not delete the valve mask from the scene")
       self.assertEqual(stored.GetNumberOfSegments(), 3)
-    displayNode = valveModel.leafletSegmentationNode.GetDisplayNode()
-    for segmentId in ("Anterior", "Posterior", "ValveMask"):
-      self.assertTrue(displayNode.GetSegmentVisibility(segmentId), f"export must not hide {segmentId} in the scene")
+    self.assertEqual({segmentId: displayNode.GetSegmentVisibility(segmentId) for segmentId in segmentIds}, visibilityBefore,
+                     "showing one segment at a time for the export must not change the scene")
     exported = slicer.util.loadLabelVolume(os.path.join(rule.outputDir, files[0]))
     self.assertGreater(slicer.util.arrayFromVolume(exported).max(), 0, "the label map contains the leaflet")
 

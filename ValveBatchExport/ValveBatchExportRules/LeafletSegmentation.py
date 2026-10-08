@@ -6,6 +6,7 @@ import vtk
 import HeartValveLib.Constants
 import slicer
 from .base import ValveBatchExportRule
+from HeartValveLib.util import getAllSegmentIDs
 
 from typing import Optional
 
