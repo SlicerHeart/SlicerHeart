@@ -3,7 +3,7 @@ ValveSegmentationSequenceTest.py
 
 Tests for the sequence (per-time-point) behaviour of the ValveSegmentation module: the clipped
 leaflet volume computation, per-time-point ROI/segmentation handling through the widget slots and
-the segment ID synchronisation between time points.
+giving a leaflet the same segment ID at all time points.
 
 All tests run on a small synthetic volume sequence (no downloads).
 """
@@ -144,7 +144,8 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
       self.assertFalse(widget.ui.addValveRoiButton.enabled)
       self.assertFalse(widget.ui.segmentEditorWidget.enabled)
       widget.onValveBrowserNodeModified()
-      self.assertIsNone(widget.editingSequenceValue)
+      slicer.app.processEvents()
+      self.assertIsNone(widget.leafletSegmentsSnapshot)
     finally:
       self._unbindWidget(widget)
 
@@ -220,89 +221,124 @@ class ValveSegmentationSequenceTestTest(SlicerHeartTestCase):
     finally:
       self._unbindWidget(widget)
 
-  def test_widget_updateSegmentIDs_matches_terminology(self):
+  # ---------------------------------------------------------------------------------------------
+  # Segment IDs of a leaflet are the same at all time points
+  # ---------------------------------------------------------------------------------------------
+
+  FRAMES = (1, 3, 5)
+
+  def _createSegmentedValve(self, factory, frames=FRAMES, terminologies=False):
+    """Valve with Anterior and Posterior leaflets segmented (non-empty) at every time point."""
+    valveBrowser = factory.createAnnotatedValve("mitral", frames=frames, roi=True, segmentation=True)
+    if terminologies:
+      for frameIndex in frames:
+        factory.switchTo(valveBrowser, frameIndex)
+        segmentation = valveBrowser.valveModel.leafletSegmentationNode.GetSegmentation()
+        segmentation.GetSegment("Anterior").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
+        segmentation.GetSegment("Posterior").SetTag("TerminologyEntry", self.TERMINOLOGY_P)
+        self._saveProxy(valveBrowser)
+    return valveBrowser
+
+  @staticmethod
+  def _saveProxy(valveBrowser):
+    segmentationNode = valveBrowser.valveModel.leafletSegmentationNode
+    if segmentationNode:
+      slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(valveBrowser.valveBrowserNode, segmentationNode)
+
+  def _segments(self, valveBrowser, factory, frameIndex):
+    """{segmentId: (name, terminology, hasContent)} of the leaflet segments stored for a time point."""
+    from HeartValveLib.ValveModel import ValveModel
+    self._saveProxy(valveBrowser)
+    item = valveBrowser.valveModel.leafletSegmentationSequenceNode.GetDataNodeAtValue(factory.indexValue(frameIndex))
+    self.assertIsNotNone(item, f"frame {frameIndex}: leaflet segmentation")
+    segmentation = item.GetSegmentation()
+    result = {}
+    for segmentId in segmentation.GetSegmentIDs():
+      if segmentId == "ValveMask":
+        continue
+      definition = ValveModel.getSegmentDefinition(segmentation.GetSegment(segmentId))
+      result[segmentId] = (definition["name"], definition["terminology"], ValveModel.segmentHasContent(segmentation, segmentId))
+    return result
+
+  def _bindSegmentationWidget(self, widget, valveBrowser):
+    self._bindWidget(widget, valveBrowser)
+    slicer.app.processEvents()
+
+  def test_widget_switching_time_points_changes_no_segment(self):
     factory = NewFormatValveFactory()
-    valveBrowser = factory.createAnnotatedValve("mitral", frames=(1, 3), roi=True)
+    valveBrowser = self._createSegmentedValve(factory, terminologies=True)
+    widget = self._widget()
+    try:
+      self._bindSegmentationWidget(widget, valveBrowser)
+      expected = {frameIndex: self._segments(valveBrowser, factory, frameIndex) for frameIndex in self.FRAMES}
+      for frameIndex in self.FRAMES + self.FRAMES:
+        factory.switchTo(valveBrowser, frameIndex)
+        slicer.app.processEvents()
+        widget.onValveBrowserNodeModified()
+        slicer.app.processEvents()
+      self.assertEqual({frameIndex: self._segments(valveBrowser, factory, frameIndex) for frameIndex in self.FRAMES}, expected,
+                       "segments and terminologies are kept (switching replaces every segment of the proxy node)")
+    finally:
+      self._unbindWidget(widget)
+
+  def test_widget_segment_given_the_terminology_of_a_leaflet_becomes_that_leaflet(self):
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createSegmentedValve(factory, frames=(3, 5), terminologies=True)
     valveModel = valveBrowser.valveModel
     widget = self._widget()
     try:
-      self._bindWidget(widget, valveBrowser)
-      # Time point 3 (current): reference segmentation with terminology tags
-      segmentation3 = valveModel.initializeLeafletSegmentation()
-      seg = segmentation3.GetSegmentation()
-      scene.addSphereSegment(segmentation3, "Anterior", "Anterior leaflet", (1.2, 0, 0), 1.2, (1, 0, 0))
-      scene.addSphereSegment(segmentation3, "Posterior", "Posterior leaflet", (-1.2, 0, 0), 1.2, (0, 1, 0))
-      seg.GetSegment("Anterior").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
-      seg.GetSegment("Posterior").SetTag("TerminologyEntry", self.TERMINOLOGY_P)
-      slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(valveBrowser.valveBrowserNode, segmentation3)
-      ids3 = sorted(seg.GetSegmentIDs())
-
-      # Time point 1: the user creates the same leaflets with generic IDs, in the other order
-      factory.switchTo(valveBrowser, 1)
+      self._bindSegmentationWidget(widget, valveBrowser)
+      # New time point: the leaflets are there, empty
+      factory.addTimePoint(valveBrowser, 1)
       slicer.app.processEvents()
-      widget.onValveBrowserNodeModified()
-      self.assertEqual(widget.editingSequenceValue, factory.indexValue(1))
-      segmentation1 = valveModel.initializeLeafletSegmentation()
-      seg1 = segmentation1.GetSegmentation()
-      for segmentId in list(seg1.GetSegmentIDs()):
-        if segmentId != "ValveMask":
-          seg1.RemoveSegment(segmentId)
-      scene.addSphereSegment(segmentation1, "Segment_1", "Posterior leaflet", (-1.2, 0, 0), 1.2, (0, 1, 0))
-      scene.addSphereSegment(segmentation1, "Segment_2", "Anterior leaflet", (1.2, 0, 0), 1.2, (1, 0, 0))
-      seg1.GetSegment("Segment_1").SetTag("TerminologyEntry", self.TERMINOLOGY_P)
-      seg1.GetSegment("Segment_2").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
-      slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(valveBrowser.valveBrowserNode, segmentation1)
-
-      # Leaving time point 1 synchronises its segment IDs with the other time points
-      factory.switchTo(valveBrowser, 3)
+      widget.updateGUIFromHeartValveNode()
+      widget.onAddSegmentationButtonClicked()
       slicer.app.processEvents()
-      widget.onValveBrowserNodeModified()
-      self.assertEqual(widget.editingSequenceValue, factory.indexValue(3))
-      stored1 = valveModel.leafletSegmentationSequenceNode.GetDataNodeAtValue(factory.indexValue(1)).GetSegmentation()
-      self.assertEqual(sorted(stored1.GetSegmentIDs()), ["Anterior", "Posterior", "ValveMask"],
-                       "segment IDs of the edited time point follow the terminology of the reference time point")
-      self.assertEqual(stored1.GetSegment("Anterior").GetName(), "Anterior leaflet")
-      self.assertEqual(stored1.GetSegment("Posterior").GetName(), "Posterior leaflet")
-      self.assertEqual(sorted(valveModel.leafletSegmentationNode.GetSegmentation().GetSegmentIDs()), ids3,
-                       "reference time point unchanged")
-      # Geometry kept with the renamed segments
-      factory.switchTo(valveBrowser, 1)
+      self.assertEqual({segmentId: segment[2] for segmentId, segment in self._segments(valveBrowser, factory, 1).items()},
+                       {"Anterior": False, "Posterior": False})
+      # The user segments the posterior leaflet with a new segment, then picks its terminology
+      segmentationNode = valveModel.leafletSegmentationNode
+      scene.addSphereSegment(segmentationNode, "Segment_1", "Posterior leaflet", (-1.2, 0, 0), 1.2, (0, 1, 0))
       slicer.app.processEvents()
+      segmentationNode.GetSegmentation().GetSegment("Segment_1").SetTag("TerminologyEntry", self.TERMINOLOGY_P)
+      slicer.app.processEvents()
+      segments1 = self._segments(valveBrowser, factory, 1)
+      self.assertEqual(list(segments1.keys()), ["Anterior", "Posterior"])
+      self.assertEqual(segments1["Posterior"], ("Posterior leaflet", self.TERMINOLOGY_P, True), "the new segment is the posterior leaflet")
+      for frameIndex in (3, 5):
+        segments = self._segments(valveBrowser, factory, frameIndex)
+        self.assertEqual(list(segments.keys()), ["Anterior", "Posterior"], f"frame {frameIndex}")
+        self.assertTrue(segments["Posterior"][2], f"frame {frameIndex}: posterior leaflet kept")
+      # Geometry kept with the renamed segment
       labelmap = slicer.vtkOrientedImageData()
-      self.assertTrue(valveModel.leafletSegmentationNode.GetBinaryLabelmapRepresentation("Anterior", labelmap))
+      self.assertTrue(segmentationNode.GetBinaryLabelmapRepresentation("Posterior", labelmap))
       self.assertGreater(self._voxelCount(labelmap), 0)
     finally:
       self._unbindWidget(widget)
 
-  def test_widget_updateSegmentIDs_keeps_unmatched_ids(self):
+  def test_widget_segment_with_a_new_terminology_keeps_its_id(self):
     factory = NewFormatValveFactory()
-    valveBrowser = factory.createAnnotatedValve("mitral", frames=(1, 3), roi=True)
+    valveBrowser = self._createSegmentedValve(factory, terminologies=True)
     valveModel = valveBrowser.valveModel
     widget = self._widget()
     try:
-      self._bindWidget(widget, valveBrowser)
-      segmentation3 = valveModel.initializeLeafletSegmentation()
-      scene.addSphereSegment(segmentation3, "Anterior", "Anterior leaflet", (1.2, 0, 0), 1.2, (1, 0, 0))
-      segmentation3.GetSegmentation().GetSegment("Anterior").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
-      slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(valveBrowser.valveBrowserNode, segmentation3)
-      factory.switchTo(valveBrowser, 1)
-      slicer.app.processEvents()
-      widget.onValveBrowserNodeModified()
-      segmentation1 = valveModel.initializeLeafletSegmentation()
-      seg1 = segmentation1.GetSegmentation()
-      for segmentId in list(seg1.GetSegmentIDs()):
-        if segmentId != "ValveMask":
-          seg1.RemoveSegment(segmentId)
-      scene.addSphereSegment(segmentation1, "Custom", "Custom structure", (0, 1.2, 0), 1.0, (0, 0, 1))
-      scene.addSphereSegment(segmentation1, "Segment_9", "Anterior leaflet", (1.2, 0, 0), 1.2, (1, 0, 0))
-      seg1.GetSegment("Segment_9").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
-      slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(valveBrowser.valveBrowserNode, segmentation1)
+      self._bindSegmentationWidget(widget, valveBrowser)
       factory.switchTo(valveBrowser, 3)
       slicer.app.processEvents()
-      widget.onValveBrowserNodeModified()
-      stored1 = valveModel.leafletSegmentationSequenceNode.GetDataNodeAtValue(factory.indexValue(1)).GetSegmentation()
-      self.assertEqual(sorted(stored1.GetSegmentIDs()), ["Anterior", "Custom", "ValveMask"])
-      self.assertEqual(stored1.GetNumberOfSegments(), 3, "no segment lost")
+      segmentationNode = valveModel.leafletSegmentationNode
+      scene.addSphereSegment(segmentationNode, "Custom", "Custom structure", (0, 1.2, 0), 1.0, (0, 0, 1))
+      slicer.app.processEvents()
+      customTerminology = self.TERMINOLOGY_A.replace("7986501^Anterior leaflet", "7986503^Commissure")
+      segmentationNode.GetSegmentation().GetSegment("Custom").SetTag("TerminologyEntry", customTerminology)
+      # A leaflet that has content at this time point is not replaced, even with the same terminology
+      scene.addSphereSegment(segmentationNode, "Segment_9", "Anterior leaflet", (1.2, 0, 0), 1.2, (1, 0, 0))
+      slicer.app.processEvents()
+      segmentationNode.GetSegmentation().GetSegment("Segment_9").SetTag("TerminologyEntry", self.TERMINOLOGY_A)
+      slicer.app.processEvents()
+      segments = self._segments(valveBrowser, factory, 3)
+      self.assertEqual(list(segments.keys()), ["Anterior", "Posterior", "Custom", "Segment_9"])
+      self.assertEqual(segments["Custom"][1], customTerminology)
+      self.assertTrue(segments["Anterior"][2], "anterior leaflet kept")
     finally:
       self._unbindWidget(widget)
 
