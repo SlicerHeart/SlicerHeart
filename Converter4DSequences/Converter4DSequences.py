@@ -22,6 +22,7 @@ from HeartValveLib.HeartValves import (
     getOrCreateVolumeSequenceBrowserNode,
 )
 from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
+from HeartValveLib.ValveModel import ValveModel
 
 
 class Converter4DSequences(ScriptedLoadableModule):
@@ -1040,13 +1041,6 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 keys[segmentId] = ("name", segmentation.GetSegment(segmentId).GetName())
         return keys
 
-    @staticmethod
-    def _getSegmentDefinition(segment):
-        """Name, color and terminology of a segment (what is needed to add an empty copy of it)."""
-        terminologyEntry = vtk.reference("")
-        segment.GetTag("TerminologyEntry", terminologyEntry)
-        return {"name": segment.GetName(), "color": list(segment.GetColor()), "terminology": terminologyEntry.get() or ""}
-
     def _getLeafletSegmentIdHarmonization(self, heartValveNodes):
         """Map the segment IDs of each valve's leaflet segmentation to the IDs that the same leaflet has in
         the segmentation of the first valve that has it.
@@ -1069,7 +1063,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
             if segmentationNode:
                 segmentation = segmentationNode.GetSegmentation()
                 if segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID) and HeartValveLib.VALVE_MASK_SEGMENT_ID not in segmentDefinitions:
-                    segmentDefinitions[HeartValveLib.VALVE_MASK_SEGMENT_ID] = self._getSegmentDefinition(
+                    segmentDefinitions[HeartValveLib.VALVE_MASK_SEGMENT_ID] = ValveModel.getSegmentDefinition(
                         segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID))
                 segmentIds = [segmentId for segmentId in segmentation.GetSegmentIDs()
                               if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID]
@@ -1104,29 +1098,13 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         targetSegmentId = segmentId
                         if segmentId not in [c["id"] for c in canonicalSegments]:
                             canonicalSegments.append({"id": segmentId, "name": name, "terminology": terminology})
-                            segmentDefinitions[segmentId] = self._getSegmentDefinition(segment)
+                            segmentDefinitions[segmentId] = ValveModel.getSegmentDefinition(segment)
                     matchedCanonicalIds.add(targetSegmentId)
                     usedSegmentIds.add(targetSegmentId)
                     if targetSegmentId != segmentId:
                         remap[segmentId] = targetSegmentId
             remapByValveId[heartValveNode.GetID()] = remap
         return remapByValveId, [c["id"] for c in canonicalSegments], segmentDefinitions
-
-    @staticmethod
-    def _addMissingSegments(segmentationNode, segmentDefinitions):
-        """Add an empty segment for every segment of segmentDefinitions that the segmentation lacks, so
-        that all time points of a valve have the same segments (as time points created in the new
-        format do). A proxy node whose segments changed from time point to time point left the
-        display properties and the subject hierarchy items of the other time points' segments
-        dangling, which logged warnings on every displayed frame."""
-        segmentation = segmentationNode.GetSegmentation()
-        for segmentId, definition in segmentDefinitions.items():
-            if segmentation.GetSegment(segmentId):
-                continue
-            newSegmentId = segmentation.AddEmptySegment(segmentId, definition["name"], definition["color"])
-            segment = segmentation.GetSegment(newSegmentId)
-            if segment and definition["terminology"]:
-                segment.SetTag("TerminologyEntry", definition["terminology"])
 
     @staticmethod
     def _copySegmentDisplayProperties(sourceDisplayNode, sourceSegmentationNode, targetDisplayNode, segmentIdRemap):
@@ -1409,7 +1387,10 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                         nodeCopy.SetName(nodeToAdd.GetName())
                         self._renameSegments(nodeCopy, entry.get('segmentIdRemap') or {})
                         if role == "LeafletSegmentation":
-                            self._addMissingSegments(nodeCopy, segmentDefinitions)
+                            # All time points of a valve have the same segments (see ValveModel), otherwise the
+                            # display properties and subject hierarchy items of the segments that a time point
+                            # lacks are left dangling, which logs warnings on every displayed frame
+                            ValveModel.addMissingSegments(nodeCopy.GetSegmentation(), segmentDefinitions)
 
                         # Apply parent transform if the node is transformable
                         if nodeCopy.IsA("vtkMRMLTransformableNode") and entry['originalTransformID']:

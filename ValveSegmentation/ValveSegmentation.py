@@ -63,7 +63,7 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     self.annulusMarkupNode = None
     self.annulusMarkupNodeObserver = None
 
-    # Observing the leaflet segmentation node to keep the segment IDs of a leaflet the same at all time points
+    # Observing the leaflet segmentation node to keep the leaflet segments of all time points the same
     self.observedLeafletSegmentationNode = None
     self.leafletSegmentationNodeObservers = []
     # (indexValue, {segmentId: definition}) of the displayed time point, see syncLeafletSegments
@@ -599,6 +599,9 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
         valveSegmentationNode.AddObserver(event, self.onLeafletSegmentsChanged)
         for event in (slicer.vtkSegmentation.SegmentAdded, slicer.vtkSegmentation.SegmentRemoved,
                       slicer.vtkSegmentation.SegmentModified)]
+      # Valves segmented before the leaflet segments were kept in sync may have different segments
+      # at different time points
+      self.valveModel.addMissingLeafletSegments()
     self.syncLeafletSegments()
 
   def removeLeafletSegmentationNodeObservers(self):
@@ -628,8 +631,8 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
             for segmentId in segmentation.GetSegmentIDs() if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID}
 
   def syncLeafletSegments(self):
-    """Give a segment that is added or given a terminology at the displayed time point the ID that the
-    leaflet with that terminology has at the other time points.
+    """Apply segments added, removed or changed (name, color, terminology) at the displayed time point
+    to all time points of the valve: all time points have the same leaflet segments.
 
     The segments are compared to a snapshot taken at the same time point. Switching time points
     replaces the content of the leaflet segmentation proxy node (which removes and adds every
@@ -659,19 +662,62 @@ class ValveSegmentationWidget(ScriptedLoadableModuleWidget):
     try:
       segmentation = segmentationNode.GetSegmentation()
       defaultTerminology = self.ui.segmentEditorWidget.defaultTerminologyEntry
+      mergedSegmentIds = []
       for segmentId in current:
         if segmentId not in previous:
           # New segments get the SlicerHeart default terminology
           segmentation.GetSegment(segmentId).SetTag("TerminologyEntry", defaultTerminology)
-        elif current[segmentId]["terminology"] == previous[segmentId]["terminology"]:
+        elif current[segmentId] == previous[segmentId]:
           continue
         if not segmentation.GetSegment(segmentId):
           continue  # replaced by a segment merged into its ID
         # A segment given the terminology of a leaflet that is not segmented at this time point is that leaflet
-        valveModel.mergeLeafletSegmentByTerminology(segmentId, [defaultTerminology])
+        mergedSegmentId = valveModel.mergeLeafletSegmentByTerminology(segmentId, [defaultTerminology])
+        if mergedSegmentId:
+          mergedSegmentIds.append(segmentId)
+          segmentId = mergedSegmentId
+        valveModel.copyLeafletSegmentToAllTimePoints(segmentId)
+      current = self.getLeafletSegmentDefinitions(segmentationNode)
+      previousSegmentIds = list(previous.keys())
+      for segmentId in previousSegmentIds:
+        if segmentId not in current and segmentId not in mergedSegmentIds:
+          self.onLeafletSegmentRemoved(segmentId, previous[segmentId], previousSegmentIds)
     finally:
       self.syncingLeafletSegments = False
     self.leafletSegmentsSnapshot = (indexValue, self.getLeafletSegmentDefinitions(segmentationNode))
+
+  def onLeafletSegmentRemoved(self, segmentId, definition, previousSegmentIds):
+    """A segment was removed at the displayed time point: remove it from all time points, unless it has
+    content at other time points and the user chooses to only clear it at this time point."""
+    valveModel = self.valveModel
+    timePointsWithContent = valveModel.getTimePointsWithLeafletSegmentContent(segmentId)
+    if timePointsWithContent and not self.confirmRemoveSegmentFromAllTimePoints(
+        definition["name"], [valveModel.getTimePointName(indexValue) for indexValue in timePointsWithContent]):
+      # Keep the segment, empty at this time point, at its previous position in the segment list
+      segmentation = valveModel.leafletSegmentationNode.GetSegmentation()
+      HeartValveLib.ValveModel.ValveModel.addMissingSegments(segmentation, {segmentId: definition})
+      precedingSegmentIds = previousSegmentIds[:previousSegmentIds.index(segmentId)]
+      segmentation.SetSegmentIndex(segmentId, len([precedingSegmentId for precedingSegmentId in precedingSegmentIds
+                                                   if segmentation.GetSegment(precedingSegmentId)]))
+      return
+    valveModel.removeLeafletSegmentFromAllTimePoints(segmentId)
+
+  def confirmRemoveSegmentFromAllTimePoints(self, segmentName, timePointNames):
+    """Ask whether a removed segment that has content at other time points is removed from all time
+    points. :returns: True to remove it from all time points, False to only clear it at this time point."""
+    messageBox = qt.QMessageBox(slicer.util.mainWindow())
+    messageBox.setIcon(qt.QMessageBox.Question)
+    messageBox.setWindowTitle("Remove segment")
+    messageBox.setText(f'Segment "{segmentName}" is also segmented at {len(timePointNames)} other time point(s):\n'
+                       + "\n".join(f"  - {name}" for name in timePointNames))
+    messageBox.setInformativeText("All time points of a valve have the same segments. Remove the segment from all "
+                                  "time points (deleting its segmentation there), or only clear it at this time point?")
+    removeAllButton = messageBox.addButton("Remove from all time points", qt.QMessageBox.DestructiveRole)
+    clearButton = messageBox.addButton("Clear only this time point", qt.QMessageBox.RejectRole)
+    messageBox.setDefaultButton(clearButton)
+    messageBox.setEscapeButton(clearButton)
+    messageBox.exec_()
+    return messageBox.clickedButton() == removeAllButton
 
   def onClippingModelUseAsEditorMaskClicked(self):
     import vtkSegmentationCorePython as vtkSegmentationCore
