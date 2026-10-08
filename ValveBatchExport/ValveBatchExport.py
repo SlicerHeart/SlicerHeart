@@ -243,6 +243,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self._exportRules = []
     self.numParallelProcesses = 1
     self.parallelExport = None
+    self._failedExports = []
 
   def clearRules(self):
     self._exportRules = []
@@ -266,6 +267,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self.addLog(f'Output directory: {outputDirPath}')
     self.outputDirPath = outputDirPath
     self.examineInputs(inputDirPath)
+    self._failedExports = []
 
     self.resetExport()
 
@@ -329,14 +331,23 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       if self._cancelExport:
         self.onExportStopped()
         return
-      self.exportMRBFile(filePath, subOutputDirPath)
+      try:
+        self.exportMRBFile(filePath, subOutputDirPath)
+      except Exception as e:
+        logging.exception(e)
+        self.addLog(f'{Path(subOutputDirPath).name} failed: {e}')
+        self._failedExports.append(Path(subOutputDirPath).name)
       self.onProcessFinished(fIdx + 1, len(self._inputData))
     self.onProcessesCompleted()
 
   def onProcessFinished(self, numCompleted, numProcesses, process=None, exitCode=None, exitStatus=None):
     if process:
-      if exitCode != qt.QProcess.NormalExit:
-        self.addLog(f'{process.name} failed with exit status: {ProcessError[exitStatus]}')
+      if exitStatus != qt.QProcess.NormalExit:
+        self.addLog(f'{process.name} failed: {ProcessError.get(process.error(), "Crashed")}')
+        self._failedExports.append(process.name)
+      elif exitCode != 0:
+        self.addLog(f'{process.name} failed with exit code {exitCode} (see the logs in its output folder)')
+        self._failedExports.append(process.name)
       else:
         self.addLog(f"{process.name} finished")
     self.addLog(f"{numCompleted} of {numProcesses} exports complete.")
@@ -347,6 +358,8 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     for rule in self._exportRules:
       rule.mergeTables(list(self._inputData.values()), self.outputDirPath)
     self.addLog(f'\nExport completed.')
+    if self._failedExports:
+      self.addLog(f'{len(self._failedExports)} export(s) failed: {", ".join(self._failedExports)}')
     if self.completedCallback:
       self.completedCallback()
 
@@ -391,14 +404,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       rule.processStart()
 
     self.addLog('  Loading scene...')
-    try:
-      slicer.mrmlScene.Clear(False)
-      slicer.util.loadScene(filePath)
-      # NB: this happens in Slicer_4.11 even though the scene was successfully loaded -- need to fix
-    except RuntimeError:
-      self.addLog(f'  Warning: errors found while loading scene from {filePath}')
-      # slicer.mrmlScene.Clear(False)
-      # return
+    self._loadScene(filePath)
 
     self.convertSceneToSequenceFormat()
 
@@ -415,6 +421,33 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self.addLog('Writing results...')
     for rule in self._exportRules:
       self._runRuleStep(rule, rule.processEnd)
+
+  def _loadScene(self, filePath):
+    """Load the scene, retrying once if it fails.
+
+    Reading the mrb file can fail now and then, e.g. from a cloud drive while other processes read too. The scene
+    is then loaded without any data. A corrupt mrb file is an error; other load errors are only warned about, as
+    before, since a scene with some missing files can still be worth exporting.
+    """
+    for attempt in range(2):
+      try:
+        slicer.mrmlScene.Clear(False)
+        slicer.util.loadScene(filePath)
+        return
+      except RuntimeError:
+        if attempt == 0:
+          self.addLog(f'  Warning: errors found while loading scene from {filePath}. Loading it again...')
+    import zipfile
+    try:
+      with zipfile.ZipFile(filePath) as archive:
+        corruptFile = archive.testzip()
+        problem = f'{corruptFile} in it is corrupt' if corruptFile else None
+    except zipfile.BadZipFile as e:
+      problem = str(e)
+    if problem:
+      slicer.mrmlScene.Clear(False)
+      raise RuntimeError(f'Cannot read {filePath}: {problem}')
+    self.addLog(f'  Warning: errors found while loading scene from {filePath}')
 
   def _runRuleStep(self, rule, method, *args):
     """Run one export rule step. A failing rule must not prevent the remaining rules from running."""
@@ -538,7 +571,7 @@ class SlicerInstanceProcess(qt.QProcess):
   def run(self):
     if self.logDir:
       self._initLogFiles()
-    args = ["--no-splash", "--python-script", self.scriptPath, *self.scriptArguments]
+    args = ["--no-splash", "--no-main-window", "--python-script", self.scriptPath, *self.scriptArguments]
     logging.info(args)
     self.start(slicer.app.applicationFilePath(), args)
 
@@ -666,15 +699,27 @@ def main(argv):
 
   input_mrb = args.input_mrb
 
+  # NB: Slicer trims its shared file cache when it starts, deleting the oldest folders in it. These include the
+  # folders that the other running exports unpacked their mrb files into, so each export gets its own folder.
+  import shutil
+  import tempfile
+  cacheDir = tempfile.mkdtemp(prefix=f"ValveBatchExport_{Path(input_mrb).stem}_", dir=slicer.app.temporaryPath)
+  slicer.mrmlScene.GetCacheManager().SetRemoteCacheDirectory(cacheDir)
+
+  exitCode = 0
   try:
     logic.exportMRBFile(input_mrb,
                         args.output_directory)
+  except Exception as e:
+    # NB: without exiting here, this Slicer instance would keep running and the export never finish
+    logging.exception(e)
+    exitCode = 1
   finally:
-    import shutil
+    shutil.rmtree(cacheDir, ignore_errors=True)
     logFilePath = slicer.app.errorLogModel().filePath
     shutil.copy(logFilePath, Path(args.output_directory) / f"{Path(input_mrb).stem}_Slicer.log")
 
-  sys.exit(0)
+  sys.exit(exitCode)
 
 
 if __name__ == "__main__":
