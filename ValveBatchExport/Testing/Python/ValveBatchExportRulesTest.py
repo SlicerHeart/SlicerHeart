@@ -183,7 +183,7 @@ class ValveBatchExportRulesTestTest(SlicerHeartTestCase):
   def test_volume_frame_export(self):
     factory, mitral = self._buildScene(segmentation=False, aortic=False)
     rule = self._run(self.rules.ValveVolumeFrameExportRule)
-    files = self._files(rule.outputDir, ".nii.gz")
+    files = self._files(rule.outputDir, "." + self.rules.ValveBatchExportRule.IMAGE_FILE_EXTENSION)
     self.assertEqual(len(files), 2, f"one volume per annotated time point: {files}")
     values = set()
     for name in files:
@@ -205,17 +205,20 @@ class ValveBatchExportRulesTestTest(SlicerHeartTestCase):
     valveModel = mitral.valveModel
     sequenceNode = valveModel.leafletSegmentationSequenceNode
     rule = self._run(self.rules.LeafletSegmentationExportRule)
-    files = self._files(rule.outputDir, ".seg.nrrd")
-    self.assertEqual(len(files), 2, f"one segmentation per annotated time point: {files}")
-    for name in files:
-      self.assertIn("leaflets", name)
+    # Each leaflet of each annotated time point is written to its own label map; the valve mask is not exported
+    files = self._files(rule.outputDir, "." + self.rules.ValveBatchExportRule.IMAGE_FILE_EXTENSION)
+    self.assertEqual(len(files), 4, f"one label map per leaflet and annotated time point: {files}")
+    self.assertEqual(len([name for name in files if "Anterior_leaflet" in name]), 2, files)
+    self.assertEqual(len([name for name in files if "Posterior_leaflet" in name]), 2, files)
     for indexValue in (factory.indexValue(1), factory.indexValue(4)):
       stored = sequenceNode.GetDataNodeAtValue(indexValue).GetSegmentation()
       self.assertIn("ValveMask", stored.GetSegmentIDs(), "export must not delete the valve mask from the scene")
       self.assertEqual(stored.GetNumberOfSegments(), 3)
-    exported = slicer.util.loadSegmentation(os.path.join(rule.outputDir, files[0]))
-    self.assertNotIn("ValveMask", exported.GetSegmentation().GetSegmentIDs(), "mask removed from the export")
-    self.assertEqual(exported.GetSegmentation().GetNumberOfSegments(), 2)
+    displayNode = valveModel.leafletSegmentationNode.GetDisplayNode()
+    for segmentId in ("Anterior", "Posterior", "ValveMask"):
+      self.assertTrue(displayNode.GetSegmentVisibility(segmentId), f"export must not hide {segmentId} in the scene")
+    exported = slicer.util.loadLabelVolume(os.path.join(rule.outputDir, files[0]))
+    self.assertGreater(slicer.util.arrayFromVolume(exported).max(), 0, "the label map contains the leaflet")
 
   def test_leaflet_order_helpers(self):
     rules = self.rules
