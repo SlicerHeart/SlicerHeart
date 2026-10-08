@@ -720,6 +720,121 @@ class ValveModel:
       if sourceSegment.GetTag("TerminologyEntry", terminologyRef):
         destinationSegment.SetTag("TerminologyEntry", terminologyRef.get())
 
+    # Leaflet segments of the time points of a valve: a leaflet has the same segment ID at all time points.
+    # The valve mask segment is excluded, it is generated for each time point from that time point's valve ROI.
+
+    @staticmethod
+    def getSegmentDefinition(segment):
+      """Name, color and terminology of a segment: what is needed to add an empty copy of it."""
+      terminologyRef = vtk.reference("")
+      segment.GetTag("TerminologyEntry", terminologyRef)
+      return {"name": segment.GetName(), "color": list(segment.GetColor()), "terminology": terminologyRef.get() or ""}
+
+    @staticmethod
+    def segmentHasContent(segmentation, segmentId):
+      """True if the segment exists and is not empty in the source representation of the segmentation."""
+      import numpy as np
+      from vtk.util import numpy_support
+      segment = segmentation.GetSegment(segmentId)
+      if not segment:
+        return False
+      representation = segment.GetRepresentation(segmentation.GetSourceRepresentationName())
+      if representation is None:
+        return False
+      if representation.IsA("vtkPolyData"):
+        return representation.GetNumberOfPoints() > 0
+      if representation.IsEmpty() or not representation.GetPointData().GetScalars():
+        return False
+      # Binary labelmaps may be shared between segments: only voxels with this segment's label count
+      voxels = numpy_support.vtk_to_numpy(representation.GetPointData().GetScalars())
+      return bool(np.any(voxels == segment.GetLabelValue()))
+
+    def getLeafletSegmentationTimePoints(self):
+      """Leaflet segmentation of each time point that has one, as [(indexValue, segmentationNode)].
+
+      For the displayed time point the proxy node is returned instead of the sequence item, because
+      edits of the proxy node are written to the item (a change made to the item directly would be
+      overwritten by the proxy node's content).
+      """
+      leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+      if not leafletSegmentationSequenceNode:
+        return []
+      _, displayedIndexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      timePoints = []
+      for itemIndex in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+        indexValue = leafletSegmentationSequenceNode.GetNthIndexValue(itemIndex)
+        if indexValue == displayedIndexValue and self.leafletSegmentationNode:
+          segmentationNode = self.leafletSegmentationNode
+        else:
+          segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(itemIndex)
+        if segmentationNode:
+          timePoints.append((indexValue, segmentationNode))
+      return timePoints
+
+    @staticmethod
+    def terminologiesEqual(terminology1, terminology2):
+      if not terminology1 or not terminology2:
+        return False
+      return slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminology1, terminology2)
+
+    def getLeafletSegmentDefinitions(self):
+      """{segmentId: definition} of the leaflet segments of all time points (first definition found wins)."""
+      import HeartValveLib
+      definitions = {}
+      for _, segmentationNode in self.getLeafletSegmentationTimePoints():
+        segmentation = segmentationNode.GetSegmentation()
+        for segmentId in segmentation.GetSegmentIDs():
+          if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID and segmentId not in definitions:
+            definitions[segmentId] = ValveModel.getSegmentDefinition(segmentation.GetSegment(segmentId))
+      return definitions
+
+    def mergeLeafletSegmentByTerminology(self, segmentId, ignoredTerminologies=()):
+      """Move a segment of the displayed time point to the ID of the leaflet that has its terminology.
+
+      A leaflet may be segmented with a new segment that is given the leaflet's terminology afterwards.
+      If another leaflet segment of the valve has that terminology and is empty (or missing) at the
+      displayed time point, the new segment replaces it at this time point.
+
+      :param ignoredTerminologies: terminologies that do not identify a leaflet (e.g. the default one)
+      :returns: the segment's new ID, or None if it was not moved
+      """
+      segmentationNode = self.leafletSegmentationNode
+      segmentation = segmentationNode.GetSegmentation() if segmentationNode else None
+      segment = segmentation.GetSegment(segmentId) if segmentation else None
+      if not segment:
+        return None
+      terminology = ValveModel.getSegmentDefinition(segment)["terminology"]
+      if not terminology or any(ValveModel.terminologiesEqual(terminology, ignored) for ignored in ignoredTerminologies):
+        return None
+      targetSegmentId = None
+      for otherSegmentId, definition in self.getLeafletSegmentDefinitions().items():
+        if (otherSegmentId != segmentId and ValveModel.terminologiesEqual(definition["terminology"], terminology)
+            and not ValveModel.segmentHasContent(segmentation, otherSegmentId)):
+          targetSegmentId = otherSegmentId
+          break
+      if not targetSegmentId:
+        return None
+
+      displayNode = segmentationNode.GetDisplayNode()
+      displayProperties = []
+      if displayNode:
+        displayProperties = [(getattr(displayNode, f"Set{name}"), getattr(displayNode, f"Get{name}")(segmentId))
+                             for name in ValveModel._SEGMENT_DISPLAY_PROPERTIES]
+      segmentIndex = segmentation.GetSegmentIndex(segmentId)
+      if segmentation.GetSegment(targetSegmentId):
+        segmentation.RemoveSegment(targetSegmentId)
+        segmentIndex = segmentation.GetSegmentIndex(segmentId)
+      segmentation.RemoveSegment(segmentId)
+      segmentation.AddSegment(segment, targetSegmentId)
+      segmentation.SetSegmentIndex(targetSegmentId, segmentIndex)
+      for setter, value in displayProperties:
+        setter(targetSegmentId, value)
+      return targetSegmentId
+
+    _SEGMENT_DISPLAY_PROPERTIES = ["SegmentVisibility", "SegmentVisibility3D", "SegmentVisibility2DFill",
+                                   "SegmentVisibility2DOutline", "SegmentOpacity3D", "SegmentOpacity2DFill",
+                                   "SegmentOpacity2DOutline"]
+
     def updateValveMaskSegment(self):
       """Create or update the valve mask segment ("Annulus mask") of the leaflet segmentation for
       the current time point.
