@@ -1229,6 +1229,7 @@ class ValveModel:
         modelsLogic = slicer.modules.models.logic()
         polyData = vtk.vtkPolyData()
         modelNode = modelsLogic.AddModel(polyData)
+        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + " SurfaceModel"))
         self.moveNodeToHeartValveFolder(modelNode, 'LeafletSurface')
         modelNode.GetDisplayNode().SetColor(segmentColor)
         modelNode.GetDisplayNode().BackfaceCullingOff()
@@ -1240,7 +1241,7 @@ class ValveModel:
         modelNode.GetDisplayNode().SetPower(10)
         self.setLeafletNodeReference("LeafletSurfaceModel", segmentId, modelNode)
         leafletSurfaceModelNode = modelNode
-      leafletSurfaceModelNode.SetName(segmentName + " SurfaceModel")
+      ValveModel.updateLeafletNodeName(leafletSurfaceModelNode, segmentName + " SurfaceModel")
       self.applyProbeToRasTransformToNode(leafletSurfaceModelNode)
       leafletModel.setSurfaceModelNode(leafletSurfaceModelNode)
 
@@ -1250,7 +1251,7 @@ class ValveModel:
         # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
         markupNode.CreateDefaultDisplayNodes()
         markupNode.SetNumberOfPointsPerInterpolatingSegment(20)
-        markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + "SurfaceBoundaryMarkup"))
+        markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + " SurfaceBoundaryMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'LeafletSurfaceEdit')
@@ -1258,7 +1259,7 @@ class ValveModel:
         markupNode.GetDisplayNode().SetColor(0,0,1)
         self.setLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId, markupNode)
         leafletSurfaceBoundaryMarkupNode = markupNode
-      leafletSurfaceBoundaryMarkupNode.SetName(segmentName + " SurfaceBoundaryMarkup")
+      ValveModel.updateLeafletNodeName(leafletSurfaceBoundaryMarkupNode, segmentName + " SurfaceBoundaryMarkup")
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryMarkupNode)
       leafletModel.setSurfaceBoundaryMarkupNode(leafletSurfaceBoundaryMarkupNode)
       if self.valveBrowserNode.GetSequenceNode(leafletSurfaceBoundaryMarkupNode) is None:
@@ -1312,22 +1313,18 @@ class ValveModel:
       for segmentId in segmentIds:
         self.addLeafletModel(segmentId)
 
-      self.findAndRemoveOrphanNodes(validSegmentIDs=segmentIds)
+    @staticmethod
+    def updateLeafletNodeName(node, name):
+      """Rename a leaflet node after its segment, keeping the node names of the scene unique.
 
-    def findAndRemoveOrphanNodes(self, validSegmentIDs):
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
-      toDelete = []
-      for subFolderId in ["LeafletSurfaceEdit", "LeafletSurface"]:
-        folderItemId = shNode.GetItemChildWithName(valveNodeItemId, subFolderId)
-        shNode.GetItemChildren(folderItemId, childItemIDs := vtk.vtkIdList())
-        for index in range(childItemIDs.GetNumberOfIds()):
-          dataNode = shNode.GetItemDataNode(childItemIDs.GetId(index))
-          if not dataNode.GetAttribute('SegmentID') in validSegmentIDs:
-            toDelete.append(dataNode)
-      for node in toDelete:
-        logging.debug(f"Found orphan node. Removing {node.GetName()}")
-        slicer.mrmlScene.RemoveNode(node)
+      The leaflet nodes of a valve are proxy nodes shared by all time points; several valves (and
+      their leaflets of the same name) may exist in one scene, so the name gets a suffix if needed.
+      A node that is already named after the segment (possibly with such a suffix) is left alone.
+      """
+      if node.GetName() and node.GetName().startswith(name):
+        return
+      node.SetName(slicer.mrmlScene.GetUniqueNameByString(name))
+
     def getCoaptationsForLeaflet(self, leafletModel):
       coaptations = []
       for coaptation in self.coaptationModels:
