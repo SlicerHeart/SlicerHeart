@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import os
 import vtk, qt, slicer
@@ -150,7 +151,6 @@ class ValveMoldCreatorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     try:
       global HeartValveLib
       import HeartValveLib
-      import HeartValveLib.SmoothCurve
     except ImportError as exc:
       logging.error("{}: {}".format(self.moduleName, exc.message))
 
@@ -766,7 +766,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
     segNode = valveModel.getLeafletSegmentationNode()
     segmentation = segNode.GetSegmentation()
 
-    annulusPoints = slicer.util.arrayFromMarkupsControlPoints(valveModel.annulusContourCurve.controlPointsMarkupNode).T
+    annulusPoints = slicer.util.arrayFromMarkupsControlPoints(valveModel.annulusContourCurveNode).T
 
     from ValveQuantificationLib.MeasurementPreset import MeasurementPreset
 
@@ -804,7 +804,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
     depth = float(parameterNode.GetParameter(PARAM_BASE_CLIPPING_DEPTH))
 
     from ValveQuantificationLib import MeasurementPreset
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     [annulusPointsProjected, _, _] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     annulusPlane2D = MeasurementPreset.createPolyDataFromPolygon(annulusPointsProjected.T)
@@ -821,7 +821,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
 
     marginSizeMm = float(parameterNode.GetParameter(PARAM_BASE_ADD_MARGIN_MM))
 
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     [annulusPointsProjected, _, _] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     adjustedPositions = increaseAnnulusDiameter(annulusPointsProjected.T, marginSizeMm, planePosition)
@@ -832,7 +832,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
     pushPolydataToSegmentation(segNode, moldTemplate, DEFAULT_SEG_NAME_MOLD)
 
     # create ring around the top part of the mold to subtract any strange artifacts
-    inputMarkupsNode = valveModel.annulusContourCurve.controlPointsMarkupNode
+    inputMarkupsNode = valveModel.annulusContourCurveNode
     increasedAnnulusNode = cloneMRMLNode(inputMarkupsNode)
     markupsPositions = slicer.util.arrayFromMarkupsControlPoints(increasedAnnulusNode)
     adjustedPositions = increaseAnnulusDiameter(markupsPositions, marginSizeMm+2, planePosition)
@@ -866,7 +866,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
 
     margin = float(parameterNode.GetParameter(PARAM_ANNULUS_MARGIN))
 
-    annulusPoints = valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsControlPoints(valveModel.annulusContourCurveNode).T
     adjustedPositions = increaseAnnulusDiameter(annulusPoints.T, margin, planePosition).T
 
     findClosestPoint = parameterNode.GetParameter(PARAM_ANNULUS_PROJECTION_MODE) == "Closest Point"
@@ -903,19 +903,18 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
             projPoints.InsertNextPoint(points.GetPoint(0))
             normals.InsertNextTuple3(*((stiffenerPos - center) / np.linalg.norm(stiffenerPos - center)))
 
-    projectedAnnulusContourCurve = self.createProjectedSmoothCurve(projPoints, valveModel,
-                                                                   DEFAULT_SEG_NAME_PROJECTED_ANNULUS)
+    projectedAnnulusContourCurveNode = self.createProjectedAnnulusCurveNode(projPoints, valveModel,
+                                                                           DEFAULT_SEG_NAME_PROJECTED_ANNULUS)
 
     # subtract projected annulus from molds
-    pushPolydataToSegmentation(segNode, projectedAnnulusContourCurve.curveModelNode.GetPolyData(),
+    pushPolydataToSegmentation(segNode, self.getCurveTubePolyData(projectedAnnulusContourCurveNode, radius=1.0),
                                DEFAULT_SEG_NAME_PROJECTED_ANNULUS)
 
     segNode.GetSegmentation().GetSegment(DEFAULT_SEG_NAME_PROJECTED_ANNULUS).SetColor(hex2rgb(DEFAULT_COLOR_ANNULUS_PROJECTION))
 
-    # hide fiducials and model node
-    slicer.modules.markups.logic().SetAllMarkupsVisibility(projectedAnnulusContourCurve.controlPointsMarkupNode, False)
-    projectedAnnulusContourCurve.curveModelNode.GetDisplayNode().SetVisibility3D(False)
-    return projectedAnnulusContourCurve
+    # hide the projected annulus, it is only needed for building the mold
+    projectedAnnulusContourCurveNode.GetDisplayNode().SetVisibility(False)
+    return projectedAnnulusContourCurveNode
 
   def subtractAnnulus(self, valveModel):
     segNode = valveModel.getLeafletSegmentationNode()
@@ -931,45 +930,42 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
     subtractSegments(segNode, valveVolume, DEFAULT_SEG_NAME_MOLD, DEFAULT_SEG_NAME_PROJECTED_ANNULUS)
 
   @classmethod
-  def createProjectedSmoothCurve(cls, projPoints, valveModel, name, closed=True):
-    fiducialNode = cls.createMarkupsFiducialNodeFromPoints(projPoints, valveModel, name)
-    projectedFiducialsContourModel = cls.createModelAndAddToFolder(vtk.vtkPolyData(), valveModel, name)
-    projectedFiducialsContourModel.GetDisplayNode().SetColor(0.8, 0, 1.0)
-    projectedFiducialsContourCurve = cls.createSmoothCurve(fiducialNode, projectedFiducialsContourModel, closed)
-    return projectedFiducialsContourCurve
-
-  @classmethod
-  def createMarkupsFiducialNodeFromPoints(cls, projPoints, valveModel, projectedAnnulusName):
-    markupsNodeName = f"{projectedAnnulusName}_Points"
-    if slicer.mrmlScene.GetFirstNodeByName(markupsNodeName):
-      slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(markupsNodeName))
-    fiducialNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", markupsNodeName)
-    fiducialNode.CreateDefaultDisplayNodes()
-    fiducialNode.GetDisplayNode().SetPointLabelsVisibility(False)
-    for idx in range(projPoints.GetNumberOfPoints()):
-      fiducialNode.AddControlPointWorld(vtk.vtkVector3d(projPoints.GetPoint(idx)))
-    cls.applyProbeToRasTransformAndAddToFolder(fiducialNode, valveModel)
-    return fiducialNode
+  def createProjectedAnnulusCurveNode(cls, projPoints, valveModel, name, closed=True):
+    """Create a curve markups node through the projected annulus points (in the Probe coordinate system
+    of the valve, like the annulus contour of the valve itself)."""
+    existingNode = slicer.mrmlScene.GetFirstNodeByName(name)
+    if existingNode and existingNode.IsA("vtkMRMLMarkupsCurveNode"):
+      slicer.mrmlScene.RemoveNode(existingNode)
+    curveNode = slicer.mrmlScene.AddNewNodeByClass(
+      "vtkMRMLMarkupsClosedCurveNode" if closed else "vtkMRMLMarkupsCurveNode", name)
+    curveNode.CreateDefaultDisplayNodes()
+    displayNode = curveNode.GetDisplayNode()
+    displayNode.SetPointLabelsVisibility(False)
+    displayNode.SetColor(0.8, 0, 1.0)
+    displayNode.SetSelectedColor(0.8, 0, 1.0)
+    cls.applyProbeToRasTransformAndAddToFolder(curveNode, valveModel)
+    slicer.util.updateMarkupsControlPointsFromArray(curveNode, vtk.util.numpy_support.vtk_to_numpy(projPoints.GetData()))
+    return curveNode
 
   @staticmethod
-  def createSmoothCurve(markupsCurve, curveModel, closed):
-    from HeartValveLib import SmoothCurve
-    smoothCurve = SmoothCurve.SmoothCurve()
-    smoothCurve.setInterpolationMethod(SmoothCurve.InterpolationSpline)
-    smoothCurve.setClosed(closed)
-    smoothCurve.setControlPointsMarkupNode(markupsCurve)
-    smoothCurve.setCurveModelNode(curveModel)
-    smoothCurve.setTubeRadius(1.0)
-    smoothCurve.updateCurve()
-    return smoothCurve
+  def getCurveTubePolyData(curveNode, radius):
+    """Tube surface around the curve of a curve markups node."""
+    from HeartValveLib.util import createTubeModelFromPointArray
+    tubeModelNode = createTubeModelFromPointArray(slicer.util.arrayFromMarkupsCurvePoints(curveNode),
+                                                  loop=curveNode.IsA("vtkMRMLMarkupsClosedCurveNode"),
+                                                  visible=False, radius=radius)[0]
+    polyData = vtk.vtkPolyData()
+    polyData.DeepCopy(tubeModelNode.GetPolyData())
+    slicer.mrmlScene.RemoveNode(tubeModelNode.GetDisplayNode())
+    slicer.mrmlScene.RemoveNode(tubeModelNode)
+    return polyData
 
   def generateHPA(self, valveModel, parameterNode, valveHPAHeight=None):
-    origAnnulusSmoothCurve = valveModel.annulusContourCurve
-    try:
-      if slicer.util.toBool(parameterNode.GetParameter(PARAM_HPA_USE_ANNULUS_PROJECTION)) is True:
-        projectedAnnulus = self.projectAnnulus(valveModel, parameterNode)
-        valveModel.annulusContourCurve = projectedAnnulus
+    projectedAnnulusCurveNode = None
+    if slicer.util.toBool(parameterNode.GetParameter(PARAM_HPA_USE_ANNULUS_PROJECTION)) is True:
+      projectedAnnulusCurveNode = self.projectAnnulus(valveModel, parameterNode)
 
+    with replacedAnnulusContour(valveModel, projectedAnnulusCurveNode):
       self.updateProgress("Getting lowest annulus profile point", 1, 4)
       lowestAnnulusPointDistance = self.getLowestAnnulusPoint(valveModel)
       hpaDistanceFromLowestAnnulusPoint = float(parameterNode.GetParameter(PARAM_HPA_DIST_TOP_ANNULUS_MIN))
@@ -1042,9 +1038,6 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
 
       if all(self.getMoldAssemblyModels(valveModel)):
         self.addMoldAssembly(valveModel)
-
-    finally:
-      valveModel.annulusContourCurve = origAnnulusSmoothCurve
 
   def getSourceLandmarkPoints(self,
                               parameterNode: slicer.vtkMRMLScriptedModuleNode):
@@ -1301,7 +1294,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
 
   def getMaximumAnnulusToValveProfileDistance(self, valveModel):
     planePosition, planeNormal = valveModel.getAnnulusContourPlane()
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     from ValveQuantification import MeasurementPreset
     annulusAreaPolyData = MeasurementPreset.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.2)
     moldSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal)
@@ -1329,7 +1322,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def getLowestAnnulusPoint(valveModel):
-    annulusControlPoints = valveModel.annulusContourCurve.getControlPointsAsArray()
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(valveModel.annulusContourCurveNode).T
     _, planeNormal = valveModel.getAnnulusContourPlane()
     from ValveQuantification import ValveQuantificationLogic
 
@@ -1387,7 +1380,7 @@ class ValveMoldCreatorLogic(ScriptedLoadableModuleLogic):
     planePosition, planeNormal = valveModel.getAnnulusContourPlane()
     p.SetOrigin(planePosition)
     p.SetPoint2(planePosition + planeNormal)
-    poly = valveModel.annulusContourCurve.curvePoly
+    poly = valveModel.annulusContourCurveNode.GetCurve()
 
     for pointIndex in range(numberOfLandmarkPoints):
       pointOnCircle = circlePointsProbe[0:3, pointIndex]
@@ -1670,7 +1663,7 @@ class DiastolicValveMoldCreatorLogic(ValveMoldCreatorLogic):
     depth = float(parameterNode.GetParameter(PARAM_BASE_CLIPPING_DEPTH))
 
     from ValveQuantificationLib import MeasurementPreset
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     [annulusPointsProjected, _, _] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     annulusPlane2D = MeasurementPreset.createPolyDataFromPolygon(annulusPointsProjected.T)
@@ -1688,7 +1681,7 @@ class DiastolicValveMoldCreatorLogic(ValveMoldCreatorLogic):
     marginSizeMm = float(parameterNode.GetParameter(PARAM_BASE_ADD_MARGIN_MM))
 
     # create ring around the top part of the mold to subtract any strange artifacts
-    inputMarkupsNode = valveModel.annulusContourCurve.controlPointsMarkupNode
+    inputMarkupsNode = valveModel.annulusContourCurveNode
     increasedAnnulusNode = cloneMRMLNode(inputMarkupsNode)
     markupsPositions = slicer.util.arrayFromMarkupsControlPoints(increasedAnnulusNode)
     adjustedPositions = increaseAnnulusDiameter(markupsPositions, marginSizeMm + 2, planePosition)
@@ -1728,7 +1721,7 @@ class DiastolicValveMoldCreatorLogic(ValveMoldCreatorLogic):
     marginSizeMm = float(parameterNode.GetParameter(PARAM_BASE_ADD_MARGIN_MM))
     from ValveQuantificationLib.MeasurementPreset import MeasurementPreset
 
-    annulusPoints = valveModel.annulusContourCurve.getInterpolatedPointsAsArray()
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     adjustedPositions = increaseAnnulusDiameter(annulusPoints.T, marginSizeMm, planePosition)
     annulusPlane3D = MeasurementPreset.createSoapBubblePolyDataFromCircumferencePoints(adjustedPositions.T)
 
@@ -2064,6 +2057,28 @@ def increaseAnnulusDiameter(markupsPositions, marginSizeMm, centerPos):
     vec = vec / np.linalg.norm(vec)
     adjustedPositions.append(pos + vec * marginSizeMm)
   return np.array(adjustedPositions)
+
+
+@contextlib.contextmanager
+def replacedAnnulusContour(valveModel, annulusContourCurveNode):
+  """Make the valve model use another curve node as its annulus contour for the duration of the block.
+
+  The mold is built around the annulus projected onto the mold surface. ValveModel.annulusContourCurveNode
+  is a property backed by a node reference of the heart valve node and by the valve's sequences, so the
+  projected curve cannot simply be assigned to it. Instead the valve model object temporarily gets a
+  subclass whose property returns the projected curve: this affects this object only and leaves the
+  scene untouched. With None the block runs with the valve's own annulus.
+  """
+  if annulusContourCurveNode is None:
+    yield
+    return
+  originalClass = valveModel.__class__
+  valveModel.__class__ = type(originalClass.__name__, (originalClass,),
+                              {"annulusContourCurveNode": property(lambda self: annulusContourCurveNode)})
+  try:
+    yield
+  finally:
+    valveModel.__class__ = originalClass
 
 
 def cloneMRMLNode(node):

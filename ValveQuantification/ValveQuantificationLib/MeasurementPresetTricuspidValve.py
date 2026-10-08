@@ -52,10 +52,10 @@ class MeasurementPresetTricuspidValve(MeasurementPreset):
         # (that will be the center point)
         firstCoaptationLinePoint = np.array(basePoints.GetPoint(0))
         from HeartValveLib.util import getClosestPointPositionAlongCurve
-        closestAnnulusPointToFirstPoint = \n          getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, firstCoaptationLinePoint)
+        closestAnnulusPointToFirstPoint = getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, firstCoaptationLinePoint)
         firstPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToFirstPoint-firstCoaptationLinePoint)
         lastCoaptationLinePoint = np.array(basePoints.GetPoint(numberOfBasePoints - 1))
-        closestAnnulusPointToLastPoint = \n          getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, lastCoaptationLinePoint)
+        closestAnnulusPointToLastPoint = getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, lastCoaptationLinePoint)
         lastPointDistanceFromAnnulusCurve = np.linalg.norm(closestAnnulusPointToLastPoint-lastCoaptationLinePoint)
 
         if firstPointDistanceFromAnnulusCurve > lastPointDistanceFromAnnulusCurve:
