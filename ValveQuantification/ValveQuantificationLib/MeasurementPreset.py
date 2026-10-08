@@ -1870,33 +1870,46 @@ class MeasurementPreset(object):
 
     valveSurfacePolydata = mergePolydata(*leafletSurfaces)
     try:
-      # Smooth PolyData
-      # NB: using a bigger annulus area, so it can better fit/wrap to the valve surface
-      annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 5.0)
+      if leafletSurfaces:
+        # Smooth PolyData
+        # NB: using a bigger annulus area, so it can better fit/wrap to the valve surface
+        annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 5.0)
 
-      # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
-      maxLeafletDepthMm = 60
+        # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
+        maxLeafletDepthMm = 60
 
-      # NB: get largest distance in atrial direction and translate 3d annulus plane there to drop the blanket
-      allLeafletSurfacePolyDataWithDistance = \
-        self.getSignedDistance(valveSurfacePolydata, annulusAreaPolyData, -planeNormal, maxLeafletDepthMm)
+        # NB: get largest distance in atrial direction and translate 3d annulus plane there to drop the blanket
+        allLeafletSurfacePolyDataWithDistance = \
+          self.getSignedDistance(valveSurfacePolydata, annulusAreaPolyData, -planeNormal, maxLeafletDepthMm)
 
-      distances = \
-        vtk.util.numpy_support.vtk_to_numpy(
-          allLeafletSurfacePolyDataWithDistance.GetCellData().GetArray("Distance")
-        )
+        distances = \
+          vtk.util.numpy_support.vtk_to_numpy(
+            allLeafletSurfacePolyDataWithDistance.GetCellData().GetArray("Distance")
+          )
 
-      annulusAreaPolyDataBigger = translatePolyData(annulusAreaPolyDataBigger, -planeNormal, max(distances) * 1.2)
+        annulusAreaPolyDataBigger = translatePolyData(annulusAreaPolyDataBigger, -planeNormal, max(distances) * 1.2)
 
-      allLeafletSurfacePolyData = \
-        extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces, iterations=3,
-                                                    nVertices=5000, subdivide=2, smoothIterations=100,
-                                                    relaxationFactor=0.7)
+        allLeafletSurfacePolyData = \
+          extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces, iterations=3,
+                                                      nVertices=5000, subdivide=2, smoothIterations=100,
+                                                      relaxationFactor=0.7)
 
-      if allLeafletSurfacePolyData:
-        self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
-                                              valveModel,
-                                              planeNormal)  # , strategy="(SmoothPolydata)")
+        if allLeafletSurfacePolyData:
+          self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+                                                valveModel,
+                                                planeNormal)  # , strategy="(SmoothPolydata)")
+
+      else:
+        # The leaflet surfaces have not been extracted (LeafletAnalysis): take the valve surface from the
+        # closed union of the leaflet segments instead, so that the atrial area, billow and tenting metrics
+        # are still computed
+        kernelSizeMm = 2.0
+        allLeafletSurfacePolyData = extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition,
+                                                                                 planeNormal, kernelSizeMm,
+                                                                                 maxKernelSizeMm=3.0)
+        if allLeafletSurfacePolyData:
+          self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+                                                valveModel, planeNormal)
 
       # NB: Morphological_Closing
 
@@ -1920,6 +1933,7 @@ class MeasurementPreset(object):
       #                                         planeNormal, strategy="(Wrap Solidify)")
 
     except AttributeError:
+      logging.exception("Valve surface extraction failed")
       self.addMessage("Valve Surface not extracted")
 
   def addBillowTentingAndAtrialSurface(self, allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
