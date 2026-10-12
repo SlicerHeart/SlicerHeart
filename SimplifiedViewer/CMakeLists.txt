@@ -16,6 +16,18 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/SeekNext.svg
   Resources/Icons/SeekLast.svg
   Resources/Icons/SeekLoop.svg
+  Resources/Icons/Center.svg
+  Resources/Icons/Crosshair.svg
+  Resources/Icons/Folder.svg
+  Resources/Icons/Fullscreen.svg
+  Resources/Icons/FullscreenExit.svg
+  Resources/Icons/Layouts.svg
+  Resources/Icons/Measurements.svg
+  Resources/Icons/SceneViews.svg
+  Resources/Icons/SeekPause.svg
+  Resources/Icons/Settings.svg
+  Resources/Icons/SliceIntersections.svg
+  Resources/Icons/Visibility.svg
   Resources/UI/${MODULE_NAME}.ui
   Resources/Stylesheet/${MODULE_NAME}.qss
   )
