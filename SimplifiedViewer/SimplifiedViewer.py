@@ -25,10 +25,9 @@ class SimplifiedViewer(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = _("Simplified Viewer")
-        # TODO: set categories (folders where the module shows up in the module selector)
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
         self.parent.dependencies = ["UserStatistics"]
-        self.parent.contributors = ["Kyle Sunderland (PerkLab)", "Andras Lasso (PerkLab)"]
+        self.parent.contributors = ["Kyle Sunderland (PerkLab)", "Andras Lasso (PerkLab)", "Christian Herz (CHOP)", "Matt Jolley (UPenn)"]
         self.parent.helpText = _("Simplified viewer module for SlicerHeart.")
         # TODO: replace with organization, grant and thanks
         self.parent.acknowledgementText = _("This file was originally developed by Kyle Sunderland (PerkLab), Andras Lasso (PerkLab).")
