@@ -13,6 +13,9 @@ The extension currently includes the following features (new features are added 
 - Cardiac image visualization:
   - Echo Volume Render: module for display of 3D/4D cardiac ultrasound images with distance-dependent coloring.
   - Valve View: module for visualization of heart valves: allows reslicing the volume using two rotating orthogonal planes. This feature is mainly for Slicer-4.10, as in Slicer-4.11 and later, this feature is built into Slicer core (enable slice intersections and Ctrl/Cmd + Alt + Left-click-and drag to rotate slice view).
+  - [Simplified Viewer](SimplifiedViewer/README.md): simplified user interface for viewing Slicer scenes, for example when Slicer is streamed to a web browser.
+  - [Viewer Link Creator](ViewerLinkCreator/README.md): generate a link with encoded arguments (user name, application, scene file path) to share a scene with users of a web viewer application.
+  - Slicer Startup Accelerator (`Utilities/SlicerStartupAccelerator`): scripts for faster startup of Slicer by preloading application files into operating system caches, and for launching Slicer directly into the Simplified Viewer with a loading screen (Windows).
 - Quantification:
   - Valve annulus analysis: specify basic heart valve properties and annulus contour.
   - Valve segmentation: module for volumetric segmentation of heart valves.
