@@ -7,6 +7,7 @@ from slicer.util import VTKObservationMixin
 import numpy as np
 import math
 from PIL import ImageColor
+import HeartValveLib
 
 
 #

@@ -41,18 +41,12 @@ class NewFormatValveFactory:
     return self.volumeSequenceNode.GetNumberOfDataNodes()
 
   def createValveBrowser(self, valveType="mitral", probePosition="TTE_APICAL", name=None):
-    """Create a valve browser the way the ValveAnnulusAnalysis node selector does (the selector
-    stamps ``ModuleName=HeartValve`` on the new browser node; HeartValveLib does not)."""
+    """Create a valve browser the way the ValveAnnulusAnalysis node selector does (through
+    ``HeartValveLib.HeartValves.createValveBrowserNode``)."""
     import HeartValveLib
     browserName = name or f"{valveType.capitalize()}ValveBrowser"
-    valveBrowserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", browserName)
-    valveBrowserNode.SetAttribute("ModuleName", "HeartValve")
-    valveBrowser = HeartValveLib.HeartValves.getValveBrowser(valveBrowserNode)
-    valveBrowser.valveVolumeNode = self.volumeProxyNode
-    valveBrowser.valveType = valveType
-    if probePosition is not None:
-      valveBrowser.probePosition = probePosition
-    return valveBrowser
+    return HeartValveLib.HeartValves.createValveBrowserNode(
+      self.volumeProxyNode, valveType=valveType, probePosition=probePosition, name=browserName)
 
   def selectFrame(self, frameIndex):
     scene.selectVolumeFrame(self.volumeBrowserNode, frameIndex)

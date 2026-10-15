@@ -104,6 +104,32 @@ def getValveBrowser(valveBrowserNode):
   return valveBrowser
 
 
+def createValveBrowserNode(valveVolumeNode=None, valveType=None, probePosition=None, name=None):
+  """Create a new valve: a sequence browser node marked as a heart valve browser, the way the valve
+  selector of the Valve Annulus Analysis module creates one, initialized with its master (HeartValve)
+  sequence and axial slice transform. Time points are then added through the returned ValveBrowser
+  (``addTimePoint`` / ``addTimePointAtCurrentFrame``).
+
+  :param valveVolumeNode: valve volume; a static volume is wrapped into a single-frame volume sequence
+  :param valveType: key of VALVE_TYPE_PRESETS, e.g. "mitral"
+  :param probePosition: key of PROBE_POSITION_PRESETS, e.g. "TTE_APICAL"
+  :param name: name of the browser node (made unique), "HeartValveBrowser" by default; when a valve
+    type is given the valve nodes are named after it instead, as in the GUI
+  :returns: ValveBrowser of the new browser node
+  """
+  valveBrowserNode = slicer.mrmlScene.AddNewNodeByClass(
+    "vtkMRMLSequenceBrowserNode", slicer.mrmlScene.GetUniqueNameByString(name or "HeartValveBrowser"))
+  valveBrowserNode.SetAttribute("ModuleName", "HeartValve")
+  valveBrowser = getValveBrowser(valveBrowserNode)
+  if valveVolumeNode is not None:
+    valveBrowser.valveVolumeNode = valveVolumeNode
+  if valveType is not None:
+    valveBrowser.valveType = valveType
+  if probePosition is not None:
+    valveBrowser.probePosition = probePosition
+  return valveBrowser
+
+
 def getValveModel(heartValveNode):
   if heartValveNode is None:
     return None
