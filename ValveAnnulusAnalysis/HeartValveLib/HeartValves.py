@@ -919,7 +919,11 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
     numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
     numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
     if numLegacySurfaceBoundaries:
-      assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+      if not (numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels):
+        logging.warning(f"{scriptedModuleNode.GetName()}: number of legacy surface boundaries "
+                        f"({numLegacySurfaceBoundaries}), surface boundary markups ({numSurfaceBoundaryMarkups}) "
+                        f"and leaflet surface models ({numLeafletSurfaceModels}) do not match, skipping")
+        continue
 
       for boundaryModelIndex in range(numLegacySurfaceBoundaries):
         boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)

@@ -90,6 +90,33 @@ class HeartValveHelpersTestTest(SlicerHeartTestCase):
     self.assertEqual(named.valveBrowserNode.GetName(), "MyValve")
 
   # ---------------------------------------------------------------------------------------------
+  # ValveModel.initializeValveRoi
+  # ---------------------------------------------------------------------------------------------
+
+  def test_initializeValveRoi(self):
+    valveBrowser = self._mitral()
+    valveModel = valveBrowser.valveModel
+    self.assertIsNone(valveModel.valveRoiModelNode)
+    roiNode = valveModel.initializeValveRoi()
+    self.assertIsNotNone(roiNode)
+    self.assertIs(roiNode, valveModel.valveRoiModelNode)
+    self.assertGreater(roiNode.GetPolyData().GetNumberOfPoints(), 0, "ROI is fitted to the annulus")
+    self.assertIs(valveModel.initializeValveRoi(), roiNode, "second call reuses the ROI of the time point")
+    # another time point of the same valve gets its own ROI item in the sequence
+    self.factory.switchTo(valveBrowser, 1)
+    roiSequenceNode = valveModel.valveRoiSequenceNode
+    self.assertIsNotNone(roiSequenceNode)
+    self.assertSequenceLacksItem(roiSequenceNode, self.factory.indexValue(1))
+    roiNode1 = valveModel.initializeValveRoi()
+    self.assertIsNotNone(roiNode1)
+    self.assertSequenceHasItem(roiSequenceNode, self.factory.indexValue(1))
+    self.assertGreater(roiNode1.GetPolyData().GetNumberOfPoints(), 0)
+
+  def test_initializeValveRoi_without_contour(self):
+    valveBrowser = self.factory.createAnnotatedValve("mitral", frames=(2,), phases=("mid-systole",), contour=False)
+    self.assertIsNone(valveBrowser.valveModel.initializeValveRoi())
+
+  # ---------------------------------------------------------------------------------------------
   # Time points by volume frame
   # ---------------------------------------------------------------------------------------------
 

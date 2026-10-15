@@ -603,6 +603,30 @@ class ValveModel:
 
       return modelNode  # Annulus contour line
 
+    def initializeValveRoi(self):
+      """Ensure the valve ROI model exists for the current time point and fit it to the annulus contour
+      (what the "Add ROI" button of the Valve Segmentation module does). The ROI defines the geometry of
+      the leaflet segmentation, so it is needed before initializeLeafletSegmentation.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: valve ROI model node of the current time point, or None if there is no annulus contour.
+      """
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if annulusContourCurveNode is None or annulusContourCurveNode.GetNumberOfControlPoints() == 0:
+        logging.warning("initializeValveRoi failed: no annulus contour at the current time point")
+        return None
+      roiModelNode = self.valveRoiModelNode
+      if not roiModelNode:
+        if self.valveRoiSequenceNode is None:
+          roiModelNode = self.createValveRoiModelNode()
+        else:
+          self.valveBrowser.addCurrentTimePointToSequence(self.valveRoiSequenceNode)
+          roiModelNode = self.valveRoiModelNode
+      self.valveRoi.setAnnulusContourCurve(annulusContourCurveNode)
+      self.valveRoi.updateRoi()
+      return roiModelNode
+
     def createLeafletSegmentationNode(self):
       segmentationNode = slicer.vtkMRMLSegmentationNode()
       segmentationNode.SetName("LeafletSegmentation")

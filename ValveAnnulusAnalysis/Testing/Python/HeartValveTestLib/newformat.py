@@ -108,18 +108,11 @@ class NewFormatValveFactory:
     return labeled
 
   def addRoi(self, valveBrowser):
-    """Ensure a valve ROI model exists for the current time point (mirrors the ValveSegmentation
-    'Add ROI' button) and return it."""
-    valveModel = valveBrowser.valveModel
-    roiNode = valveModel.valveRoiModelNode
-    if not roiNode:
-      if valveModel.valveRoiSequenceNode is None:
-        roiNode = valveModel.createValveRoiModelNode()
-      else:
-        valveBrowser.addCurrentTimePointToSequence(valveModel.valveRoiSequenceNode)
-        roiNode = valveModel.valveRoiModelNode
-    valveModel.valveRoi.setAnnulusContourCurve(valveModel.annulusContourCurveNode)
-    valveModel.valveRoi.updateRoi()
+    """Ensure a valve ROI model exists for the current time point (what the ValveSegmentation
+    'Add ROI' button does, through ``ValveModel.initializeValveRoi``) and return it."""
+    roiNode = valveBrowser.valveModel.initializeValveRoi()
+    if roiNode is None:
+      raise RuntimeError("initializeValveRoi failed")
     return roiNode
 
   def addSegmentation(self, valveBrowser, segments=None, withGeometry=True):
