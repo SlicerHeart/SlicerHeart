@@ -313,6 +313,35 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
       self.assertEqual(self._tableRows(preset.metricsTable.metricTableNode), firstResults[frame],
                        f"frame {frame}: results must not depend on the order of computation")
 
+  def test_leaflet_volume_metrics_with_empty_reference_geometry(self):
+    """Leaflet segmentations propagated by the legacy registration workflow carry a reference image
+    geometry with an empty extent. Rasterizing the billow/tenting volumes with it allocated an image of
+    negative size and aborted Slicer (bad allocation); the geometry of the leaflet labelmaps is used
+    instead and the leaflet segmentation is left unchanged."""
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createMitralValve(factory, (1,))
+    valveModel = self._quantificationValveModel(valveBrowser)
+    quantLogic = self._quantLogic()
+    measurementNode = self._createMeasurementNode("MitralValve", {"ValveMitralValve": valveBrowser.heartValveNode})
+    preset = quantLogic.getMeasurementPresetById("MitralValve")
+    quantLogic.computeMetrics(measurementNode)
+    baseline = self._tableRows(preset.metricsTable.metricTableNode)
+    self.assertIn("Billow volume", baseline)
+    self.assertIn("Tenting volume", baseline)
+
+    segmentation = valveModel.leafletSegmentationNode.GetSegmentation()
+    parameterName = slicer.vtkSegmentationConverter.GetReferenceImageGeometryParameterName()
+    geometry = segmentation.GetConversionParameter(parameterName)
+    self.assertTrue(geometry)
+    emptyGeometry = ";".join(geometry.split(";")[:16]) + ";0;-1;0;-1;0;-1;"
+    segmentation.SetConversionParameter(parameterName, emptyGeometry)
+    messages = quantLogic.computeMetrics(measurementNode)
+    rows = self._tableRows(preset.metricsTable.metricTableNode)
+    self.assertEqual(sorted(rows), sorted(baseline), f"messages: {messages}")
+    self.assertGreater(float(rows["Billow volume"]) + float(rows["Tenting volume"]), 0.0)
+    self.assertEqual(segmentation.GetConversionParameter(parameterName), emptyGeometry,
+                     "quantification must not change the reference geometry of the leaflet segmentation")
+
   def test_recompute_does_not_accumulate_result_nodes(self):
     """Results that are not stored per time point (phase comparison tables, chord models, color
     tables) belong to the last computation only: recomputing must replace them, not add to them."""

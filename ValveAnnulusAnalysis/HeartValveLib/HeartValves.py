@@ -25,6 +25,7 @@ try:
   SceneEndImportEventObserver
 except NameError:
   SceneEndImportEventObserver = None
+  SceneEndImportUpgradeObserver = None
 
 
 def removeDeletedNodesFromCaches():
@@ -64,9 +65,14 @@ _CacheCleanupObservers = [
 
 def setup(usPresetsScenePath):
   global SceneEndImportEventObserver
+  global SceneEndImportUpgradeObserver
   registerCustomLayouts()
   registerCustomVrPresets(usPresetsScenePath)
   updateLegacyHeartValveNodes()
+  upgradeConvertedMeasurementSequences()
+  if SceneEndImportUpgradeObserver is None:
+    SceneEndImportUpgradeObserver = slicer.mrmlScene.AddObserver(
+      slicer.vtkMRMLScene.EndImportEvent, upgradeConvertedMeasurementSequences)
   if SceneEndImportEventObserver is None:
     logging.debug("Added scene end import observer for HeartValves")
     SceneEndImportEventObserver = slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.EndImportEvent, updateLegacyHeartValveNodes)
@@ -1151,3 +1157,63 @@ def setMarkupPlaceModeToUnconstrained(markupsNode):
     return
   markupsNode.CreateDefaultDisplayNodes()
   markupsNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
+
+
+def upgradeConvertedMeasurementSequences(unused1=None, unused2=None):
+  """Upgrade the measurement sequences of scenes converted by earlier versions of Converter4DSequences.
+
+  Those versions stored the converted HeartValveMeasurement nodes (and their results tables) with the
+  default missing-item mode, so at every time point without a measurement item the browser replaced
+  the proxy with a blank default node: the measurement disappeared from Valve Quantification and was
+  saved blank. The converter now uses MissingItemIgnore; this applies it to older scenes as well and
+  restores a blanked proxy from the sequence data, so the measurement can be selected at any time point.
+
+  :return: number of upgraded sequences
+  """
+  upgraded = 0
+  ignore = slicer.vtkMRMLSequenceBrowserNode.MissingItemIgnore
+  for browserNode in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+    if browserNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    masterSequenceNode = browserNode.GetMasterSequenceNode()
+    sequenceNodes = vtk.vtkCollection()
+    browserNode.GetSynchronizedSequenceNodes(sequenceNodes, True)
+    for sequenceIndex in range(sequenceNodes.GetNumberOfItems()):
+      sequenceNode = sequenceNodes.GetItemAsObject(sequenceIndex)
+      if sequenceNode.GetNumberOfDataNodes() == 0:
+        continue
+      if sequenceNode.GetNthDataNode(0).GetAttribute("ModuleName") != "HeartValveMeasurement":
+        continue
+      proxyNode = browserNode.GetProxyNode(sequenceNode)
+      # Results (tables, models) referenced by the measurement live in sequences of their own
+      resultSequenceNodes = []
+      if proxyNode:
+        roles = []
+        proxyNode.GetNodeReferenceRoles(roles)
+        for role in roles:
+          for referenceIndex in range(proxyNode.GetNumberOfNodeReferences(role)):
+            referencedNode = proxyNode.GetNthNodeReference(role, referenceIndex)
+            if not referencedNode or referencedNode.GetAttribute("ModuleName") == "HeartValve":
+              continue
+            referencedSequenceNode = browserNode.GetSequenceNode(referencedNode)
+            if referencedSequenceNode:
+              resultSequenceNodes.append(referencedSequenceNode)
+      for node in [sequenceNode] + resultSequenceNodes:
+        if browserNode.GetMissingItemMode(node) != ignore:
+          browserNode.SetMissingItemMode(node, ignore)
+          upgraded += 1
+      if proxyNode and not proxyNode.GetAttribute("ModuleName"):
+        # The proxy was blanked (and saved blank) at a time point without a measurement item: restore
+        # its attributes from the item shown now, or else from the first item.
+        dataNode = None
+        if masterSequenceNode and browserNode.GetSelectedItemNumber() >= 0:
+          indexValue = masterSequenceNode.GetNthIndexValue(browserNode.GetSelectedItemNumber())
+          dataNode = sequenceNode.GetDataNodeAtValue(indexValue, True)
+        if not dataNode:
+          dataNode = sequenceNode.GetNthDataNode(0)
+        for attributeName in dataNode.GetAttributeNames():
+          proxyNode.SetAttribute(attributeName, dataNode.GetAttribute(attributeName))
+        proxyNode.SetHideFromEditors(False)
+  if upgraded:
+    logging.info(f"Upgraded {upgraded} heart valve measurement sequence(s) to MissingItemIgnore")
+  return upgraded

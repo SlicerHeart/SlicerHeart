@@ -839,6 +839,52 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     quantLogic.computeMetrics(proxy)
     self.assertEqual(quantLogic.getMeasurementCardiacCyclePhaseShortNames(proxy), ["ES"])
 
+  def test_measurement_sequence_missing_item_mode_is_upgraded_on_load(self):
+    """Scenes converted by earlier converter versions stored the measurement sequences with the default
+    missing-item mode: at any time point without a measurement item the proxy was reset to a blank node,
+    so the measurement vanished from Valve Quantification and was saved blank. Such scenes are upgraded
+    to MissingItemIgnore (measurement and results sequences) when they are loaded, and a blank proxy is
+    restored from the sequence data."""
+    builder = LegacySceneBuilder()
+    records = builder.addLegacyValves("mitral", self.THREE_PHASES[:2], leaflets=False)
+    builder.addLegacyMeasurement("GenericValve", {"ValveValve": records[1]}, hidden=True, tableAsReference=True)
+    self._convert()
+    valveBrowser = self._browserForValveType("mitral")
+    browserNode = valveBrowser.valveBrowserNode
+    proxy = scene.measurementNodes()[0]
+    measurementSequence = browserNode.GetSequenceNode(proxy)
+    tableSequence = browserNode.GetSequenceNode(proxy.GetNodeReference("QuantificationResultsTable"))
+    self.assertIsNotNone(tableSequence)
+    # Mimic the output of the old converter, saved while a phase without a measurement was displayed
+    for sequenceNode in (measurementSequence, tableSequence):
+      browserNode.SetMissingItemMode(sequenceNode, slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault)
+    self._goTo(valveBrowser, records[0].indexValue)
+    self.assertIsNone(proxy.GetAttribute("ModuleName"), "precondition: the proxy is blank at a phase without a measurement")
+    mrbPath = scene.saveSceneToMrb(self.tempDirectory())
+
+    slicer.mrmlScene.Clear(0)
+    self.resetHeartValveLibCaches()
+    slicer.util.loadScene(mrbPath)
+    self._pumpEvents(0.5)
+    valveBrowser = self._browserForValveType("mitral")
+    browserNode = valveBrowser.valveBrowserNode
+    measurementNodes = scene.measurementNodes()
+    self.assertEqual(len(measurementNodes), 1, "the measurement must be recognisable right after loading")
+    proxy = measurementNodes[0]
+    self.assertEqual(proxy.GetAttribute("MeasurementPreset"), "GenericValve")
+    self.assertFalse(proxy.GetHideFromEditors())
+    ignore = slicer.vtkMRMLSequenceBrowserNode.MissingItemIgnore
+    self.assertEqual(browserNode.GetMissingItemMode(browserNode.GetSequenceNode(proxy)), ignore)
+    tableProxy = proxy.GetNodeReference("QuantificationResultsTable")
+    self.assertIsNotNone(tableProxy, "valve and results references survive")
+    self.assertEqual(browserNode.GetMissingItemMode(browserNode.GetSequenceNode(tableProxy)), ignore)
+    self._goTo(valveBrowser, records[1].indexValue)
+    self.assertEqual(proxy.GetNodeReference("ValveValve").GetID(), valveBrowser.heartValveNode.GetID())
+    self.assertEqual(tableProxy.GetCellText(0, 1), "123.4")
+    self._goTo(valveBrowser, records[0].indexValue)
+    self.assertEqual(proxy.GetAttribute("ModuleName"), "HeartValveMeasurement",
+                     "with MissingItemIgnore the proxy keeps its content at phases without a measurement")
+
   def test_measurement_result_tables_and_models_without_references_are_preserved(self):
     builder = LegacySceneBuilder()
     records = builder.addLegacyValves("mitral", self.THREE_PHASES[:2], leaflets=False)

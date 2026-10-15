@@ -1330,7 +1330,7 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
             # Log details about what we're about to add
             uniqueNodeIds = set([entry['node'].GetID() for entry in nodeEntries])
-            if len(uniqueNodeIds) == 1:
+            if len(nodeEntries) > 1 and len(uniqueNodeIds) == 1:
                 logging.warning(f"  WARNING: Same node being added at multiple time points for role={role}, refIndex={refIndex}!")
 
             try:

@@ -1565,6 +1565,42 @@ class MeasurementPreset(object):
     volumeModelNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
     return volumeMm3
 
+  @staticmethod
+  def isValidImageGeometry(imageData):
+    extent = imageData.GetExtent()
+    return all(extent[2 * axis] <= extent[2 * axis + 1] for axis in range(3))
+
+  @staticmethod
+  def referenceGeometryFromSegments(segmentationNode, paddingVoxels=10):
+    """Serialized image geometry that covers the binary labelmaps of all segments of the segmentation
+    node (in the grid of the labelmaps), padded by paddingVoxels on each side.
+    :return: geometry string, None if no segment has a labelmap
+    """
+    unionExtent = None
+    imageToWorldMatrix = vtk.vtkMatrix4x4()
+    for segmentId in segmentationNode.GetSegmentation().GetSegmentIDs():
+      labelmap = vtkSegmentationCore.vtkOrientedImageData()
+      if not segmentationNode.GetBinaryLabelmapRepresentation(segmentId, labelmap) or not labelmap.GetPointData().GetScalars():
+        continue
+      if not MeasurementPreset.isValidImageGeometry(labelmap):
+        continue
+      extent = labelmap.GetExtent()
+      if unionExtent is None:
+        unionExtent = list(extent)
+        labelmap.GetImageToWorldMatrix(imageToWorldMatrix)
+      else:
+        for axis in range(3):
+          unionExtent[2 * axis] = min(unionExtent[2 * axis], extent[2 * axis])
+          unionExtent[2 * axis + 1] = max(unionExtent[2 * axis + 1], extent[2 * axis + 1])
+    if unionExtent is None:
+      return None
+    geometryImage = vtkSegmentationCore.vtkOrientedImageData()
+    geometryImage.SetExtent(unionExtent[0] - paddingVoxels, unionExtent[1] + paddingVoxels,
+                            unionExtent[2] - paddingVoxels, unionExtent[3] + paddingVoxels,
+                            unionExtent[4] - paddingVoxels, unionExtent[5] + paddingVoxels)
+    geometryImage.SetImageToWorldMatrix(imageToWorldMatrix)
+    return vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(imageToWorldMatrix, geometryImage)
+
   def addVolumeMeasurementBetweenSurfaces(self, measurementName, color, valveModel, allLeafletSurfacePolyData,
                                           annulusAreaPolyData, extrusionDirection, extrusionLength, leafletRois):
     """
@@ -1595,7 +1631,20 @@ class MeasurementPreset(object):
     # Set reference image geometry
     referenceGeometryString = leafletSegmentationNode.GetSegmentation().GetConversionParameter(vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName())
     referenceGeometryImage = vtkSegmentationCore.vtkOrientedImageData()
-    vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(referenceGeometryString, referenceGeometryImage)
+    if referenceGeometryString:
+      vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(referenceGeometryString, referenceGeometryImage)
+    if not referenceGeometryString or not self.isValidImageGeometry(referenceGeometryImage):
+      # Leaflet segmentations propagated by the legacy registration workflow carry a reference image
+      # geometry with an empty extent. Converting the extruded surfaces with it allocated an image of
+      # negative size, which aborted the application (bad allocation). Use the geometry of the leaflet
+      # labelmaps instead. The leaflet segmentation itself is left unchanged.
+      referenceGeometryString = self.referenceGeometryFromSegments(leafletSegmentationNode)
+      if not referenceGeometryString:
+        self.metricsMessages.append(f"{measurementName} cannot be computed: the leaflet segmentation has no valid reference image geometry.")
+        slicer.mrmlScene.RemoveNode(segmentationNode)
+        return
+      logging.warning(f"{measurementName}: the leaflet segmentation of {valveModel.heartValveNode.GetName()} has no valid"
+                      " reference image geometry, using the geometry of the leaflet labelmaps")
     segmentation.SetConversionParameter(vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName(), referenceGeometryString)
     segmentation.SetConversionParameter(vtkSegmentationCore.vtkClosedSurfaceToBinaryLabelmapConversionRule.GetOversamplingFactorParameterName(), str(oversamplingFactor))
     # Crop models to labelmap (to save memory and make sure that at the far end both segments are cropped to the same size)
