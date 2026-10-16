@@ -12,6 +12,7 @@ import os
 import sys
 
 import numpy as np
+import math
 import vtk
 import slicer
 from slicer.ScriptedLoadableModule import *
@@ -313,11 +314,13 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
       self.assertEqual(self._tableRows(preset.metricsTable.metricTableNode), firstResults[frame],
                        f"frame {frame}: results must not depend on the order of computation")
 
-  def test_leaflet_volume_metrics_with_empty_reference_geometry(self):
-    """Leaflet segmentations propagated by the legacy registration workflow carry a reference image
-    geometry with an empty extent. Rasterizing the billow/tenting volumes with it allocated an image of
-    negative size and aborted Slicer (bad allocation); the geometry of the leaflet labelmaps is used
-    instead and the leaflet segmentation is left unchanged."""
+  def test_leaflet_volume_metrics_with_unusable_reference_geometry(self):
+    """Legacy scenes contain leaflet segmentations whose reference image geometry is unusable for
+    rasterizing the billow/tenting volumes: an empty extent (segmentations propagated by the legacy
+    registration workflow; rasterizing with it allocated an image of negative size and aborted Slicer),
+    a single-voxel placeholder that does not cover the leaflets, or a whole-volume geometry of billions
+    of voxels after oversampling. The geometry of the leaflet labelmaps is used instead and the leaflet
+    segmentation is left unchanged."""
     factory = NewFormatValveFactory()
     valveBrowser = self._createMitralValve(factory, (1,))
     valveModel = self._quantificationValveModel(valveBrowser)
@@ -333,14 +336,67 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
     parameterName = slicer.vtkSegmentationConverter.GetReferenceImageGeometryParameterName()
     geometry = segmentation.GetConversionParameter(parameterName)
     self.assertTrue(geometry)
-    emptyGeometry = ";".join(geometry.split(";")[:16]) + ";0;-1;0;-1;0;-1;"
-    segmentation.SetConversionParameter(parameterName, emptyGeometry)
+    matrix = ";".join(geometry.split(";")[:16])
+    identity = "1;0;0;0;0;1;0;0;0;0;1;0;0;0;0;1"
+    for description, badGeometry in (("empty extent", matrix + ";0;-1;0;-1;0;-1;"),
+                                     ("single voxel placeholder", identity + ";0;0;0;0;0;0;"),
+                                     ("whole volume at sub-voxel resolution", identity + ";0;1999;0;1999;0;1999;")):
+      segmentation.SetConversionParameter(parameterName, badGeometry)
+      messages = quantLogic.computeMetrics(measurementNode)
+      rows = self._tableRows(preset.metricsTable.metricTableNode)
+      self.assertEqual(sorted(rows), sorted(baseline), f"{description}: messages: {messages}")
+      self.assertGreater(float(rows["Billow volume"]) + float(rows["Tenting volume"]), 0.0, description)
+      self.assertEqual(segmentation.GetConversionParameter(parameterName), badGeometry,
+                       f"{description}: quantification must not change the reference geometry of the leaflet segmentation")
+
+  def test_leaflet_metrics_skip_leaflets_empty_at_the_time_point(self):
+    """All time points of a valve share the same leaflet segments, so a leaflet may be empty at a time
+    point. Such a leaflet gets no metrics, and the per-leaflet atrial areas stay with the right leaflets:
+    the surfaces of empty leaflets are absent from the surface list, which used to be matched to the
+    leaflet models by position (the areas of a 9-segment CAVC scene with 3 segmented leaflets landed on
+    the wrong leaflets and two of them were reported as 0)."""
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createMitralValve(factory, (1,))
+    valveModel = self._quantificationValveModel(valveBrowser)
+    quantLogic = self._quantLogic()
+    measurementNode = self._createMeasurementNode("MitralValve", {"ValveMitralValve": valveBrowser.heartValveNode})
+    preset = quantLogic.getMeasurementPresetById("MitralValve")
+    segmentationNode = valveModel.leafletSegmentationNode
+    segmentation = segmentationNode.GetSegmentation()
+    # Give each leaflet a surface as LeafletAnalysis would: a boundary loop around the segment (the
+    # leaflet models are rebuilt from the segmentation on every computation, which re-extracts the
+    # surface from the boundary markup, so setting a polydata on the surface model would not survive)
+    valveModel.updateLeafletModelsFromSegmentation()
+    segmentationNode.CreateClosedSurfaceRepresentation()
+    leafletIds = [leafletModel.segmentId for leafletModel in valveModel.leafletModels]
+    self.assertEqual(len(leafletIds), 2)
+    for leafletModel, (_, _, _, center) in zip(valveModel.leafletModels, NewFormatValveFactory.DEFAULT_SEGMENTS):
+      boundary = leafletModel.getSurfaceBoundaryMarkupNode()
+      boundary.SetLocked(False)
+      for i in range(8):
+        angle = 2.0 * math.pi * i / 8
+        boundary.AddControlPoint(center[0] + 1.2 * math.cos(angle), center[1] + 1.2 * math.sin(angle), center[2])
+      leafletModel.updateSurface()
+      self.assertGreater(leafletModel.surfaceModelNode.GetPolyData().GetNumberOfCells(), 0)
+    quantLogic.computeMetrics(measurementNode)
+    baseline = self._tableRows(preset.metricsTable.metricTableNode)
+    first, second = (segmentation.GetSegment(segmentId).GetName() for segmentId in leafletIds)
+    for name in (first, second):
+      self.assertIn(f"Leaflet area (atrial) - {name} (3D)", baseline)
+      self.assertIn(f"Leaflet volume - {name}", baseline)
+
+    # Empty the first leaflet at this time point (its stale surface model must not be used either)
+    slicer.vtkSlicerSegmentationsModuleLogic.ClearSegment(segmentationNode, leafletIds[0])
+    self.assertFalse(valveModel.segmentHasContent(segmentation, leafletIds[0]))
     messages = quantLogic.computeMetrics(measurementNode)
     rows = self._tableRows(preset.metricsTable.metricTableNode)
-    self.assertEqual(sorted(rows), sorted(baseline), f"messages: {messages}")
-    self.assertGreater(float(rows["Billow volume"]) + float(rows["Tenting volume"]), 0.0)
-    self.assertEqual(segmentation.GetConversionParameter(parameterName), emptyGeometry,
-                     "quantification must not change the reference geometry of the leaflet segmentation")
+    self.assertFalse([name for name in rows if name.endswith(f"- {first}") or f"- {first} (" in name],
+                     f"no metrics for the leaflet that is empty at this time point; messages: {messages}")
+    self.assertIn(f"Leaflet volume - {second}", rows)
+    self.assertEqual(rows[f"Leaflet volume - {second}"], baseline[f"Leaflet volume - {second}"])
+    # The whole atrial surface belongs to the only remaining leaflet
+    self.assertEqual(rows[f"Leaflet area (atrial) - {second} (3D)"], rows["Leaflet area (atrial) - all (3D)"])
+    self.assertGreater(float(rows["Leaflet area (atrial) - all (3D)"]), 0.0)
 
   def test_recompute_does_not_accumulate_result_nodes(self):
     """Results that are not stored per time point (phase comparison tables, chord models, color

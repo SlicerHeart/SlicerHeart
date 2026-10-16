@@ -1565,16 +1565,29 @@ class MeasurementPreset(object):
     volumeModelNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
     return volumeMm3
 
+  # Largest reference geometry (in voxels, after oversampling) accepted for rasterizing the volume
+  # between surfaces. Valve-sized reference geometries are a few ten million voxels.
+  MAX_VOLUME_RASTERIZATION_VOXELS = 250000000
+
   @staticmethod
   def isValidImageGeometry(imageData):
     extent = imageData.GetExtent()
     return all(extent[2 * axis] <= extent[2 * axis + 1] for axis in range(3))
 
   @staticmethod
-  def referenceGeometryFromSegments(segmentationNode, paddingVoxels=10):
-    """Serialized image geometry that covers the binary labelmaps of all segments of the segmentation
-    node (in the grid of the labelmaps), padded by paddingVoxels on each side.
-    :return: geometry string, None if no segment has a labelmap
+  def imageGeometryWorldBounds(imageData):
+    """Axis-aligned world bounds of an oriented image (its extent corners transformed to world)."""
+    imageToWorldMatrix = vtk.vtkMatrix4x4()
+    imageData.GetImageToWorldMatrix(imageToWorldMatrix)
+    extent = imageData.GetExtent()
+    corners = np.array([[extent[i], extent[2 + j], extent[4 + k], 1.0] for i in (0, 1) for j in (0, 1) for k in (0, 1)])
+    worldCorners = corners @ np.array([[imageToWorldMatrix.GetElement(r, c) for c in range(4)] for r in range(4)]).T
+    return worldCorners[:, :3].min(axis=0), worldCorners[:, :3].max(axis=0)
+
+  @staticmethod
+  def segmentLabelmapsGeometry(segmentationNode):
+    """Union extent of the binary labelmaps of all segments and their image-to-world matrix.
+    :return: (extent list, vtkMatrix4x4), (None, None) if no segment has a labelmap
     """
     unionExtent = None
     imageToWorldMatrix = vtk.vtkMatrix4x4()
@@ -1593,6 +1606,17 @@ class MeasurementPreset(object):
           unionExtent[2 * axis] = min(unionExtent[2 * axis], extent[2 * axis])
           unionExtent[2 * axis + 1] = max(unionExtent[2 * axis + 1], extent[2 * axis + 1])
     if unionExtent is None:
+      return None, None
+    return unionExtent, imageToWorldMatrix
+
+  @staticmethod
+  def referenceGeometryFromSegments(segmentationNode, paddingVoxels=10):
+    """Serialized image geometry that covers the binary labelmaps of all segments of the segmentation
+    node (in the grid of the labelmaps), padded by paddingVoxels on each side.
+    :return: geometry string, None if no segment has a labelmap
+    """
+    unionExtent, imageToWorldMatrix = MeasurementPreset.segmentLabelmapsGeometry(segmentationNode)
+    if unionExtent is None:
       return None
     geometryImage = vtkSegmentationCore.vtkOrientedImageData()
     geometryImage.SetExtent(unionExtent[0] - paddingVoxels, unionExtent[1] + paddingVoxels,
@@ -1600,6 +1624,48 @@ class MeasurementPreset(object):
                             unionExtent[4] - paddingVoxels, unionExtent[5] + paddingVoxels)
     geometryImage.SetImageToWorldMatrix(imageToWorldMatrix)
     return vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(imageToWorldMatrix, geometryImage)
+
+  def volumeRasterizationGeometry(self, leafletSegmentationNode, oversamplingFactor):
+    """Reference image geometry for rasterizing surfaces of the leaflet segmentation.
+
+    The segmentation's own reference image geometry is used when it is usable. Legacy scenes contain
+    leaflet segmentations whose reference geometry is unusable: segmentations propagated by the
+    registration workflow carry an empty extent (rasterizing with it allocated an image of negative
+    size and aborted the application), others carry a single-voxel placeholder that does not cover the
+    leaflets, or the whole ultrasound volume at sub-voxel resolution (billions of voxels after
+    oversampling). In those cases the geometry of the leaflet labelmaps is used instead.
+    :return: (geometry string, reason) where reason is None if the segmentation's own geometry is used,
+      and (None, reason) if no geometry can be determined
+    """
+    parameterName = vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName()
+    referenceGeometryString = leafletSegmentationNode.GetSegmentation().GetConversionParameter(parameterName)
+    reason = None
+    if not referenceGeometryString:
+      reason = "no reference image geometry"
+    else:
+      referenceGeometryImage = vtkSegmentationCore.vtkOrientedImageData()
+      vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(referenceGeometryString, referenceGeometryImage)
+      if not self.isValidImageGeometry(referenceGeometryImage):
+        reason = "reference image geometry with an empty extent"
+      else:
+        dimensions = referenceGeometryImage.GetDimensions()
+        voxels = dimensions[0] * dimensions[1] * dimensions[2] * oversamplingFactor ** 3
+        if voxels > self.MAX_VOLUME_RASTERIZATION_VOXELS:
+          reason = f"reference image geometry of {voxels} voxels after oversampling"
+        else:
+          unionExtent, imageToWorldMatrix = self.segmentLabelmapsGeometry(leafletSegmentationNode)
+          if unionExtent is not None:
+            labelmapsImage = vtkSegmentationCore.vtkOrientedImageData()
+            labelmapsImage.SetExtent(unionExtent)
+            labelmapsImage.SetImageToWorldMatrix(imageToWorldMatrix)
+            referenceMin, referenceMax = self.imageGeometryWorldBounds(referenceGeometryImage)
+            labelmapsMin, labelmapsMax = self.imageGeometryWorldBounds(labelmapsImage)
+            tolerance = max(referenceGeometryImage.GetSpacing())
+            if np.any(labelmapsMin < referenceMin - tolerance) or np.any(labelmapsMax > referenceMax + tolerance):
+              reason = "reference image geometry that does not cover the leaflet labelmaps"
+    if reason is None:
+      return referenceGeometryString, None
+    return self.referenceGeometryFromSegments(leafletSegmentationNode), reason
 
   def addVolumeMeasurementBetweenSurfaces(self, measurementName, color, valveModel, allLeafletSurfacePolyData,
                                           annulusAreaPolyData, extrusionDirection, extrusionLength, leafletRois):
@@ -1628,23 +1694,15 @@ class MeasurementPreset(object):
     # Set parent transform
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
     segmentationNode.SetAndObserveTransformNodeID(leafletSegmentationNode.GetTransformNodeID())
-    # Set reference image geometry
-    referenceGeometryString = leafletSegmentationNode.GetSegmentation().GetConversionParameter(vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName())
-    referenceGeometryImage = vtkSegmentationCore.vtkOrientedImageData()
-    if referenceGeometryString:
-      vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(referenceGeometryString, referenceGeometryImage)
-    if not referenceGeometryString or not self.isValidImageGeometry(referenceGeometryImage):
-      # Leaflet segmentations propagated by the legacy registration workflow carry a reference image
-      # geometry with an empty extent. Converting the extruded surfaces with it allocated an image of
-      # negative size, which aborted the application (bad allocation). Use the geometry of the leaflet
-      # labelmaps instead. The leaflet segmentation itself is left unchanged.
-      referenceGeometryString = self.referenceGeometryFromSegments(leafletSegmentationNode)
+    # Set reference image geometry (the leaflet segmentation itself is left unchanged)
+    referenceGeometryString, reason = self.volumeRasterizationGeometry(leafletSegmentationNode, oversamplingFactor)
+    if reason:
       if not referenceGeometryString:
-        self.metricsMessages.append(f"{measurementName} cannot be computed: the leaflet segmentation has no valid reference image geometry.")
+        self.metricsMessages.append(f"{measurementName} cannot be computed: the leaflet segmentation has {reason} and no labelmaps.")
         slicer.mrmlScene.RemoveNode(segmentationNode)
         return
-      logging.warning(f"{measurementName}: the leaflet segmentation of {valveModel.heartValveNode.GetName()} has no valid"
-                      " reference image geometry, using the geometry of the leaflet labelmaps")
+      logging.warning(f"{measurementName}: the leaflet segmentation of {valveModel.heartValveNode.GetName()} has {reason},"
+                      " using the geometry of the leaflet labelmaps")
     segmentation.SetConversionParameter(vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName(), referenceGeometryString)
     segmentation.SetConversionParameter(vtkSegmentationCore.vtkClosedSurfaceToBinaryLabelmapConversionRule.GetOversamplingFactorParameterName(), str(oversamplingFactor))
     # Crop models to labelmap (to save memory and make sure that at the far end both segments are cropped to the same size)
@@ -1878,9 +1936,16 @@ class MeasurementPreset(object):
     segmentation = leafletSegmentationNode.GetSegmentation()
     allLeafletThickness = []
     leafletSurfaces = []
+    # Segment ID of each entry of leafletSurfaces: the per-leaflet atrial areas are assigned by position
+    # in this list, which must not be confused with the position among all leaflet models
+    leafletSurfaceSegmentIds = []
     for leafletModel in valveModel.leafletModels:
       segmentId = leafletModel.segmentId
       segment = segmentation.GetSegment(segmentId)
+      # All time points of a valve share the same leaflet segments: a leaflet that is not segmented at
+      # this time point has no metrics here
+      if not segment or not valveModel.segmentHasContent(segmentation, segmentId):
+        continue
 
       leafletVolume = self.addSegmentVolumeMeasurement("Leaflet volume - {0}".format(segment.GetName()),
                                                        segment.GetColor(), leafletSegmentationNode,
@@ -1907,6 +1972,7 @@ class MeasurementPreset(object):
         # NB: necessary for calculating partial atrial surface
         if leafletSurfacePolyData is not None:
           leafletSurfaces.append( leafletSurfacePolyData )
+          leafletSurfaceSegmentIds.append(segmentId)
       except TypeError as exc:
         logging.warning("Leaflet ({}) thickness computation failed: {}".format(segment.GetName(), str(exc)))
         import traceback
@@ -1945,8 +2011,8 @@ class MeasurementPreset(object):
 
         if allLeafletSurfacePolyData:
           self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
-                                                valveModel,
-                                                planeNormal)  # , strategy="(SmoothPolydata)")
+                                                valveModel, planeNormal,
+                                                leafletSurfaceSegmentIds=leafletSurfaceSegmentIds)  # , strategy="(SmoothPolydata)")
 
       else:
         # The leaflet surfaces have not been extracted (LeafletAnalysis): take the valve surface from the
@@ -1958,7 +2024,8 @@ class MeasurementPreset(object):
                                                                                  maxKernelSizeMm=3.0)
         if allLeafletSurfacePolyData:
           self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
-                                                valveModel, planeNormal)
+                                                valveModel, planeNormal,
+                                                leafletSurfaceSegmentIds=leafletSurfaceSegmentIds)
 
       # NB: Morphological_Closing
 
@@ -1986,7 +2053,7 @@ class MeasurementPreset(object):
       self.addMessage("Valve Surface not extracted")
 
   def addBillowTentingAndAtrialSurface(self, allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
-                                       valveModel, planeNormal, strategy=''):
+                                       valveModel, planeNormal, strategy='', leafletSurfaceSegmentIds=None):
     if not allLeafletSurfacePolyData:
       logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()} using {strategy}')
       return
@@ -2011,7 +2078,8 @@ class MeasurementPreset(object):
                          KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                          KEY_UNIT: 'mm*mm'})
     if leafletSurfaces:
-      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy)
+      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy,
+                                               leafletSurfaceSegmentIds)
     # Get leaflet projections on the valve plane normal so that we can split the volume measurements per leaflet
     leafletRois = []
     for leafletModel in valveModel.leafletModels:
@@ -2046,7 +2114,20 @@ class MeasurementPreset(object):
     for leafletRoi in leafletRois:
       slicer.mrmlScene.RemoveNode(leafletRoi.roiModelNode)
 
-  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy=''):
+  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy='',
+                                          leafletSurfaceSegmentIds=None):
+    """Split the atrial valve surface between the leaflets (each cell goes to the closest leaflet surface)
+    and report the area per leaflet.
+    :param leafletSurfaceSegmentIds: segment ID of each entry of leafletSurfaces. Leaflets without a
+      surface (e.g. not segmented at this time point) are absent from leafletSurfaces, so the entries
+      cannot be matched to the leaflet models by position: that assigned the areas to the wrong leaflets.
+    """
+    if leafletSurfaceSegmentIds is None:
+      leafletSurfaceSegmentIds = [leafletModel.segmentId for leafletModel in valveModel.leafletModels]
+    if len(leafletSurfaceSegmentIds) != len(leafletSurfaces):
+      logging.warning(f"Leaflet atrial areas of {valveModel.heartValveNode.GetName()} not computed: "
+                      f"{len(leafletSurfaces)} leaflet surfaces for {len(leafletSurfaceSegmentIds)} leaflets")
+      return
     # calculate all cell center distances from atrial valve surface to individual leaflets
     vtkCenters = vtk.vtkCellCenters()
     vtkCenters.SetInputData(allLeafletSurfacePolyData)
@@ -2079,8 +2160,8 @@ class MeasurementPreset(object):
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
     segmentation = leafletSegmentationNode.GetSegmentation()
 
-    for idx, leafletModel in enumerate(valveModel.leafletModels):
-      segmentId = leafletModel.segmentId
+    for idx, segmentId in enumerate(leafletSurfaceSegmentIds):
+      leafletModel = valveModel.findLeafletModel(segmentId)
       segment = segmentation.GetSegment(segmentId)
       metricName = f'Leaflet area (atrial) - {segment.GetName()} (3D){strategy}'
 
