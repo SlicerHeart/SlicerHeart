@@ -5,6 +5,10 @@ Usage (any Python 3 interpreter, for example PythonSlicer.exe of any Slicer inst
 
     python Run4DFlowFeatureTests.py --slicer "C:/.../3D Slicer 5.12.4/Slicer.exe" --slicer "C:/.../Slicer.exe" [--output <dir>] [--suite Import4DFlowFeaturesTest]
 
+To regenerate the summary from existing results (for example, after re-running a single suite in one Slicer version):
+
+    python Run4DFlowFeatureTests.py --summary-only [--output <dir>]
+
 For each Slicer version, the tests are run in testing mode (settings are not saved, popups are suppressed) with the main
 window shown (needed for screenshots). Reports are written to <output>/<Slicer version>/<module>/report.md and a
 summary of all versions to <output>/README.md.
@@ -62,6 +66,23 @@ def runSuite(slicerExecutable, suiteName, testsDir, reportDir, logFilePath, time
         except subprocess.TimeoutExpired:
             exitCode = "timeout"
     return exitCode, time.time() - startTime
+
+
+RUN_INFO_FILE_NAME = "run-info.json"
+
+
+def loadRunInfo(reportDir):
+    """Load information about the test runs of a Slicer version (executable, exit code and duration of each suite)."""
+    runInfoFilePath = os.path.join(reportDir, RUN_INFO_FILE_NAME)
+    if not os.path.exists(runInfoFilePath):
+        return {"executable": "", "suites": {}}
+    with open(runInfoFilePath, encoding="utf-8") as runInfoFile:
+        return json.load(runInfoFile)
+
+
+def saveRunInfo(reportDir, runInfo):
+    with open(os.path.join(reportDir, RUN_INFO_FILE_NAME), "w", encoding="utf-8") as runInfoFile:
+        json.dump(runInfo, runInfoFile, indent=2)
 
 
 def loadResults(reportDir, reportFolderName):
@@ -157,31 +178,47 @@ def writeSummary(outputDir, runs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--slicer", action="append", required=True, help="Slicer executable (can be specified multiple times)")
+    parser.add_argument("--slicer", action="append", help="Slicer executable (can be specified multiple times)")
     parser.add_argument("--output", default=os.path.join(REPOSITORY_ROOT, ".test-reports"), help="Output folder for reports")
     parser.add_argument("--suite", action="append", help="Test suite to run (default: all)")
     parser.add_argument("--timeout", type=float, default=3600, help="Timeout for each test suite in seconds")
+    parser.add_argument("--summary-only", action="store_true",
+        help="Do not run tests, just regenerate the summary from all results in the output folder")
     args = parser.parse_args()
+    if not args.slicer and not args.summary_only:
+        parser.error("--slicer is required (unless --summary-only is specified)")
 
     os.makedirs(args.output, exist_ok=True)
     selectedSuites = [s for s in SUITES if not args.suite or s[0] in args.suite]
-    runs = []
-    for slicerExecutable in args.slicer:
+    for slicerExecutable in (args.slicer or []) if not args.summary_only else []:
         if not os.path.exists(slicerExecutable):
             print(f"Slicer executable not found: {slicerExecutable}")
             continue
         version = slicerVersion(slicerExecutable)
         reportDir = os.path.join(args.output, version)
         os.makedirs(reportDir, exist_ok=True)
-        run = {"version": version, "executable": slicerExecutable, "suites": {}}
+        runInfo = loadRunInfo(reportDir)
+        runInfo["executable"] = slicerExecutable
         for suiteName, testsDir, reportFolderName in selectedSuites:
             print(f"Running {suiteName} in Slicer {version}...", flush=True)
             logFilePath = os.path.join(reportDir, f"{suiteName}.log")
             exitCode, durationSec = runSuite(slicerExecutable, suiteName, testsDir, reportDir, logFilePath, args.timeout)
+            runInfo["suites"][suiteName] = {"exitCode": exitCode, "durationSec": durationSec}
+            saveRunInfo(reportDir, runInfo)
             results = loadResults(reportDir, reportFolderName)
-            run["suites"][suiteName] = {"exitCode": exitCode, "durationSec": durationSec, "results": results}
             summary = results["summary"] if results else "no results"
             print(f"  exit code {exitCode}, {durationSec:.0f}s: {summary}", flush=True)
+
+    # Summary of all results in the output folder (including results of previous runs of other Slicer versions or suites)
+    runs = []
+    versions = sorted(name for name in os.listdir(args.output) if os.path.exists(os.path.join(args.output, name, RUN_INFO_FILE_NAME)))
+    for version in versions:
+        reportDir = os.path.join(args.output, version)
+        runInfo = loadRunInfo(reportDir)
+        run = {"version": version, "executable": runInfo["executable"], "suites": {}}
+        for suiteName, testsDir, reportFolderName in SUITES:
+            if suiteName in runInfo["suites"]:
+                run["suites"][suiteName] = dict(runInfo["suites"][suiteName], results=loadResults(reportDir, reportFolderName))
         runs.append(run)
 
     summaryFilePath = writeSummary(args.output, runs)
