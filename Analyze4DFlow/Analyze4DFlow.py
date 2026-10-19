@@ -1696,9 +1696,11 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 areaPositiveMm2 = np.sum(signedVelocityMagnitudeMPerSec >= 0) * areaPerPointMm2
                 areaNegativeMm2 = areaMm2 - areaPositiveMm2
 
-                # Forward/backward flow
-                positiveFlowRateMlPerSec = np.sum(signedVelocityMagnitudeMPerSec[signedVelocityMagnitudeMPerSec>0]) * areaPerPointMm2
-                negativeFlowRateMlPerSec = np.sum(signedVelocityMagnitudeMPerSec[signedVelocityMagnitudeMPerSec<0]) * areaPerPointMm2
+                # Forward/backward flow: flux of the velocity field through the plane, i.e., the velocity component
+                # normal to the plane is integrated over the cross-section. Using the velocity magnitude instead would
+                # overestimate the flow if the plane is not perpendicular to the flow direction.
+                positiveFlowRateMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec>0]) * areaPerPointMm2
+                negativeFlowRateMlPerSec = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec<0]) * areaPerPointMm2
 
                 # TODO: max acceleration (cm/s/s) / min acceleration (cm/s/s) - to be worked on later
 
@@ -1744,7 +1746,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 ["Area", 1, "mm2", ""],
                 ["PositiveArea", 1, "mm2", ""],
                 ["NegativeArea", 1, "mm2", ""],
-                ["FlowRate", 1, "ml/s", f"Sum of positive and negative flow in the plane cross-section"],
+                ["FlowRate", 1, "ml/s", f"Sum of positive and negative flow through the plane cross-section (velocity component normal to the plane integrated over the cross-section)"],
                 ["PositiveFlowRate", 1, "ml/s", f"Flow in the plane cross-section in forward flow direction"],
                 ["NegativeFlowRate", 1, "ml/s", f"Flow in the plane cross-section in backward flow direction"],
                 ["MeanVelocity", 100, "cm/s", f"Average speed in the plane cross-section"],
