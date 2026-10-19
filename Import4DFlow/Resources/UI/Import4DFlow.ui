@@ -39,17 +39,40 @@
        </layout>
       </item>
       <item row="1" column="0" colspan="2">
-       <widget class="QPushButton" name="convertButton">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
-        <property name="toolTip">
-         <string>Convert component images to 4D flow field</string>
-        </property>
-        <property name="text">
-         <string>Create flow field</string>
-        </property>
-       </widget>
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
+        <item>
+         <widget class="QPushButton" name="convertButton">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string>Convert component images to 4D flow field</string>
+          </property>
+          <property name="text">
+           <string>Create flow field</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="storeInTransformCheckBox">
+          <property name="toolTip">
+           <string>Store the flow field in a sequence of grid transform nodes. This is the legacy flow field format, kept for backward compatibility with existing scenes and with tools that expect a transform. If unchecked, the flow field is stored in a sequence of vector volume nodes (a 3-component image, with the velocity vector in each voxel). This setting is remembered between sessions.</string>
+          </property>
+          <property name="text">
+           <string>Store in transform</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>
@@ -75,6 +98,7 @@
         <property name="nodeTypes">
          <stringlist notr="true">
           <string>vtkMRMLTransformNode</string>
+          <string>vtkMRMLVectorVolumeNode</string>
          </stringlist>
         </property>
         <property name="showChildNodeTypes">
@@ -381,6 +405,11 @@
           <string>Stack of NRRD files</string>
          </property>
         </item>
+        <item>
+         <property name="text">
+          <string>5D NRRD file</string>
+         </property>
+        </item>
        </widget>
       </item>
      </layout>
@@ -402,6 +431,22 @@
   </layout>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentEditorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentEditorWidget.h</header>
+  </customwidget>
   <customwidget>
    <class>ctkCollapsibleButton</class>
    <extends>QWidget</extends>
@@ -428,22 +473,6 @@
    <class>ctkSliderWidget</class>
    <extends>QWidget</extends>
    <header>ctkSliderWidget.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLNodeComboBox</class>
-   <extends>QWidget</extends>
-   <header>qMRMLNodeComboBox.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLWidget</class>
-   <extends>QWidget</extends>
-   <header>qMRMLWidget.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSegmentEditorWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSegmentEditorWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
