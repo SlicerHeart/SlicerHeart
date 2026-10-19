@@ -455,7 +455,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         sequenceNode = None
         for i in range(foundBrowserNodes.GetNumberOfItems()):
             foundBrowserNode = foundBrowserNodes.GetItemAsObject(i)
-            foundSequenceNode = sequenceBrowserNode.GetSequenceNode(node)
+            foundSequenceNode = foundBrowserNode.GetSequenceNode(node)
             if foundBrowserNode == sequenceBrowserNode:
                 # Store the sequence node corresponding to the transform sequence browser node
                 sequenceNode = foundSequenceNode
