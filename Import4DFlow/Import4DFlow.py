@@ -529,6 +529,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             [("inplane_rl", True), ("inplane_ap", True), ('through', False)],
         ]
 
+        # Converts direction code in the SequenceName DICOM field (for example, "in" in "fl3d1_v150in")
+        # to direction code used in the private DICOM tag (for example, "through" in "v150_through").
+        self.sequenceNameDirectionCodes = {"in": "through", "rl": "inplane_rl", "ap": "inplane_ap", "fh": "inplane_fh"}
+
         # for current Siemens CS4D flow images this can be hardcoded
         self.magnitudeVolumeRange = 255
         self.componentVolumeMaxValueSiemensCS4DFlow = 4096
@@ -605,7 +609,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
     def _findVolumeNodeSetCandidatesInScene(self):
         import pydicom
+        import re
         import traceback
+
+        # Velocity encoding and direction code at the end of SequenceName, for example "150" and "in" in "fl3d1_v150in"
+        sequenceNameComponentPattern = r"_v(\d+(?:\.\d+)?)(in|rl|ap|fh)$"
 
         volumeNodesSets = {}
         unsortedVolumeNodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
@@ -653,23 +661,23 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
                     volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
                     volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
+                elif ("SequenceName" in ds) and re.search(sequenceNameComponentPattern, ds["SequenceName"].value.strip()):
+                    # component image (contain speed specification)
+                    # Examples: 'fl3d1_v150in', 'fl3d1_v150ap', 'fl3d1_v150fh', 'WIP_f_v150fh'
+                    # In freerunning flow sequence, all the directions may be under the same series
+                    logging.debug(f"Found a flow vector component image candidate: {volumeNode.GetName()}")
+                    match = re.search(sequenceNameComponentPattern, ds["SequenceName"].value.strip())
+                    vencCmPerSec = float(match.group(1))
+                    # Convert to the same direction codes as used in the private tag (and axisForDirectionCodes)
+                    directionCode = self.sequenceNameDirectionCodes[match.group(2)]
+                    volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
+                    volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
+                    volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
                 elif ("SequenceName" in ds) and (('fl3d1r2' in ds["SequenceName"].value) or ('fl3d1r3' in ds["SequenceName"].value)):
-                    if '_v' in ds["SequenceName"].value:
-                        # component image (contain speed specification)
-                        # Examples: 'fl3d1_v150in', 'fl3d1_v150ap', 'fl3d1_v150fh'
-                        # In freerunning flow sequence, all the directions may be under the same series
-                        logging.debug(f"Found a flow vector component image candidate: {volumeNode.GetName()}")
-                        speedAndDirectionCode = ds["SequenceName"].value.split('_v')[-1]  # 150in
-                        # directionCodeInput: last two characters
-                        # vencCmPerSecInput: all characters except the last two
-                        vencCmPerSecInput = float(speedAndDirectionCode[:-2])
-                        directionCodeInput = speedAndDirectionCode[-2:]
-                    else:
-                        # magnitude image
-                        # Examples: '*fl3d1r2' or 'fl3d1r2' or 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
-                        logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
-                        directionCode = 'magnitude'
-                    
+                    # magnitude image
+                    # Examples: '*fl3d1r2' or 'fl3d1r2' or 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
+                    logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
+                    directionCode = 'magnitude'
                 else:
                     # something else
                     logging.debug(f"Unknown image: {volumeNode.GetName()} - skip")
