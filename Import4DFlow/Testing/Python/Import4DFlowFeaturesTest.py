@@ -596,6 +596,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             import nrrd
             fileErrors = []
             loadedErrors = []
+            # Slicer versions that can read spatial vectors from NRRD files provide measurement frame information in the NRRD reader
+            import vtkTeem
+            spatialVectorNrrdReadingSupported = hasattr(vtkTeem.vtkTeemNRRDReader(), "GetMeasurementFrameSpecified")
             rasToLps = np.array([-1.0, -1.0, 1.0])
             for frameIndex, fileName in enumerate(files):
                 filePath = os.path.join(exportDir, fileName)
@@ -613,12 +616,24 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 else:
                     loadedNode = slicer.util.loadVolume(filePath)
                     velocity = slicer.util.arrayFromVolume(loadedNode)
+                    if spatialVectorNrrdReadingSupported:
+                        self.report.checkEqual(f"[{storage}] {fileName}: loaded as spatial vector volume", loadedNode.GetVoxelVectorType(),
+                            slicer.vtkMRMLVolumeNode.VoxelVectorTypeSpatial)
+                    else:
+                        # This Slicer version does not convert spatial vectors from LPS (file) to RAS when it reads
+                        # NRRD files. Compare to the LPS vectors (to check that the image is loaded correctly otherwise).
+                        velocity = velocity * rasToLps
                 loadedErrors.append(float(np.abs(velocity - expectedFrames[frameIndex]).max()))
                 slicer.mrmlScene.RemoveNode(loadedNode)
             self.report.checkClose(f"[{storage}] Maximum velocity error in files (LPS vectors)", max(fileErrors), 0.0,
                 atol=velocityQuantizationMPerSec(vencCmPerSec), unit="m/s")
-            self.report.checkClose(f"[{storage}] Maximum velocity error in files loaded back into Slicer (RAS vectors)", max(loadedErrors), 0.0,
+            self.report.checkClose(f"[{storage}] Maximum velocity error in files loaded back into Slicer", max(loadedErrors), 0.0,
                 atol=velocityQuantizationMPerSec(vencCmPerSec), unit="m/s")
+            if not storeInTransform and not spatialVectorNrrdReadingSupported:
+                self.report.text("Slicer limitation: this Slicer version does not convert spatial vectors from LPS (file) to RAS"
+                    " when it loads a vector volume from a NRRD file (fixed in vtkMRMLNRRDStorageNode in later Slicer versions),"
+                    " therefore the loaded vectors were compared to LPS vectors. Use the 5D NRRD export to load the flow field"
+                    " back into this Slicer version.")
 
     @reportedTest("Export to 5D NRRD file",
         "All frames of the flow field are written into a single 5D NRRD file (vector, 3 spatial axes, time), which is"
