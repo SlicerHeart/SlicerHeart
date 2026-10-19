@@ -1018,15 +1018,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         magnitudeVolumeNode = flowFieldNode.GetNodeReference("magnitudeVolume")
         magnitudeVolumeSequenceNode = self._getSequenceFromProxyNode(magnitudeVolumeNode)
-        labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "___temp1___")
-
-        colorTableNode = slicer.vtkMRMLColorTableNode()
-        colorTableNode.SetTypeToUser()
-        colorTableNode.SaveWithSceneOff()
-        colorTableNode.SetAttribute("Category", "Flow")
-        colorTableNode.SetAttribute("SlicerHeart.ColorMappingType", "SpeedComponent")
-        colorTableNode.SetName("___temp1_color___")
-        colorTableNode = slicer.mrmlScene.AddNode(colorTableNode)
 
         for volumeIndex in range(magnitudeVolumeSequenceNode.GetNumberOfDataNodes()):
             magnitudeVolumeNodeInSequence = magnitudeVolumeSequenceNode.GetNthDataNode(volumeIndex)
@@ -1042,7 +1033,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 scaleToMeterPerSec = componentVolumeNodesScaleToCmPerSec[axis] / 100
                 componentVolumeNodeInSequence = volumeSequenceNode.GetNthDataNode(volumeIndex)
 
-                componentVoxelArray = slicer.util.arrayFromVolume(componentVolumeNodeInSequence).copy()
+                # Use 32-bit integers, as unwrapped values may not fit into the 16-bit range of the input images
+                componentVoxelArray = slicer.util.arrayFromVolume(componentVolumeNodeInSequence).astype("int32")
 
                 # Discard low values
                 noiseMagnitudeThreshold = noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange
@@ -1053,17 +1045,16 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 if segmentationNode:
                     segmentationSequenceNode = self._getSequenceFromProxyNode(segmentationNode)
                     segmentationNodeInSequence = segmentationSequenceNode.GetNthDataNode(volumeIndex)
-                    segmentIds = self._getSegmentIds()
-                    slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(segmentationNodeInSequence, segmentIds, labelmapNode, magnitudeVolumeNode, slicer.vtkSegmentation.EXTENT_UNION_OF_EFFECTIVE_SEGMENTS, colorTableNode)
-                    segmentationArray = slicer.util.arrayFromVolume(labelmapNode)
-
-                    for wrapIndex in range(1, self.maxWraps):
-                        componentVolumeMaxValue = componentVoxelArray.dtype.type(componentVolumeMaxValues[axis])
-                        # Find voxels with phase wraps
-                        # Negative wrap (segment indices: 1, 3, 5)
-                        componentVoxelArray[segmentationArray == wrapIndex * 2 - 1] -= wrapIndex * 2 * componentVolumeMaxValue
-                        # Positive wrap (segment indices: 2, 4, 6)
-                        componentVoxelArray[segmentationArray == wrapIndex * 2] += wrapIndex * 2 * componentVolumeMaxValue
+                    segmentation = segmentationNodeInSequence.GetSegmentation()
+                    componentVolumeMaxValue = int(componentVolumeMaxValues[axis])
+                    for wrapIndex in range(1, self.maxWraps + 1):
+                        for segmentId, wrapSign in [(f"Wrap-Neg-{wrapIndex}x", -1), (f"Wrap-Pos-{wrapIndex}x", +1)]:
+                            # Segments are accessed by ID (and not by exported label value), because label values
+                            # depend on the segments that are present in the segmentation.
+                            if not segmentation.GetSegment(segmentId):
+                                continue
+                            wrapMask = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNodeInSequence, segmentId, magnitudeVolumeNode)
+                            componentVoxelArray[wrapMask > 0] += wrapSign * wrapIndex * 2 * componentVolumeMaxValue
 
                 stationaryTissueSpeedThreshold = stationaryTissueSpeedThresholdVencPercent / 100 * self.componentVolumeMaxValueSiemensCS4DFlow
                 componentVoxelBackgroundArray = self._getComponentBackground(magnitudeVoxelArray, slicer.util.arrayFromVolume(componentVolumeNodeInSequence), noiseMagnitudeThreshold, backgroundSubtractionMethod, stationaryTissueSpeedThreshold)
@@ -1075,10 +1066,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         flowFieldSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", ','.join(vencCmPerSecList))  # velocity encoding, in cm/sec
         flowFieldSequenceNode.SetAttribute("SlicerHeart.velocityUnit", "m/s")
-
-        if labelmapNode.GetDisplayNode():
-            slicer.mrmlScene.RemoveNode(labelmapNode.GetDisplayNode().GetColorNode())
-        slicer.mrmlScene.RemoveNode(labelmapNode)
 
 
     def _createFlowFieldFrameNode(self, storeInTransform, referenceVolumeNode):
