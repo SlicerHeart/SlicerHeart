@@ -784,6 +784,11 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 flowFieldNode, magnitudeVolumeNode, False, slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode"))
             if not velocityImageNode:
                 raise RuntimeError("Failed to compute velocity vectors from the flow field transform")
+            # The displacement volume is marked as spatial vectors, which would make Slicer convert the vectors to LPS
+            # when the volume is passed to a CLI module (probe volume with model), but the probed vectors are not
+            # converted back to RAS. Process the RAS vectors as generic vectors, the same way as vector volume flow fields.
+            if hasattr(velocityImageNode, "SetVoxelVectorType"):
+                velocityImageNode.SetVoxelVectorType(slicer.vtkMRMLVolumeNode.VoxelVectorTypeUndefined)
             return velocityImageNode
         if flowFieldNode.GetParentTransformNode():
             raise RuntimeError("Vector volume flow field under a parent transform is not supported. Harden or remove the parent transform of the flow field.")
