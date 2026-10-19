@@ -555,7 +555,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 if flowFieldNode.GetNthDisplayNode(i).IsA("vtkMRMLTransformDisplayNode") or flowFieldNode.GetNthDisplayNode(i).IsA("vtkMRMLVectorFieldDisplayNode")]
             self.report.checkEqual(f"[{storage}] Number of glyph display nodes after repeated calls", len(glyphDisplayNodes), 1)
             self.report.checkTrue(f"[{storage}] Visible in slice views", displayNode.GetVisibility() and displayNode.GetVisibility2D())
-            self.report.checkTrue(f"[{storage}] Region is the magnitude volume", displayNode.GetRegionNode() == volumeNodeSet["magnitudeVolumeNode"])
+            # Transform display node and earlier vector field display node: "region", current vector field display node: "samplingRegion"
+            regionNode = displayNode.GetSamplingRegionNode() if hasattr(displayNode, "GetSamplingRegionNode") else displayNode.GetRegionNode()
+            self.report.checkTrue(f"[{storage}] Region is the magnitude volume", regionNode == volumeNodeSet["magnitudeVolumeNode"])
             colorNode = displayNode.GetColorNode()
             self.report.checkEqual(f"[{storage}] Color node category", colorNode.GetAttribute("Category") if colorNode else None, "Flow")
             colorRange = colorNode.GetColorTransferFunction().GetRange() if colorNode else (0, 0)

@@ -1155,6 +1155,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             displayNode.SetGlyphSpacingMm(2.0)
             displayNode.SetGlyphDiameterMm(0.8)
             displayNode.SetGlyphScalePercent(500)
+            displayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
         else:
             if not hasattr(slicer, "vtkMRMLVectorFieldDisplayNode"):
                 logging.warning("Flow vectors of a vector volume flow field cannot be displayed in this Slicer version"
@@ -1165,18 +1166,27 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             if not displayNode:
                 displayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorFieldDisplayNode")
                 flowFieldNode.AddAndObserveDisplayNodeID(displayNode.GetID())
-            displayNode.SetMaskingMode(slicer.vtkMRMLVectorFieldDisplayNode.MaskingModeFixedSpacing)
             displayNode.SetThresholdRange(0.05, 100.0)  # meter/sec, hide glyphs where there is no flow
             displayNode.SetThresholdEnabled(True)
-            displayNode.SetEffectiveSamplingSpacingMm(2.0)
             displayNode.SetGlyphDiameterAbsolute(True)
-            displayNode.SetGlyphDiameterMm(0.8)
-            displayNode.SetScaleFactor(5.0)
+            if hasattr(displayNode, "SetSamplingSpacing"):
+                # Current vector field display node API
+                displayNode.SetSamplingPattern(slicer.vtkMRMLVectorFieldDisplayNode.SamplingPatternRegular)
+                displayNode.SetSamplingSpacing(2.0)
+                displayNode.SetGlyphDiameter(0.8)
+                displayNode.SetGlyphScaleFactor(5.0)
+                displayNode.SetAndObserveSamplingRegionNode(magnitudeVolumeNode)
+            else:
+                # Earlier vector field display node API
+                displayNode.SetMaskingMode(slicer.vtkMRMLVectorFieldDisplayNode.MaskingModeFixedSpacing)
+                displayNode.SetEffectiveSamplingSpacingMm(2.0)
+                displayNode.SetGlyphDiameterMm(0.8)
+                displayNode.SetScaleFactor(5.0)
+                displayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
 
         displayNode.SetVisibility(True)
         displayNode.SetVisibility2D(True)
         displayNode.SetVisibility3D(False)  # with small glyph spacing, updating of the glyphs in 3D can be slow
-        displayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
 
         colorNode = displayNode.GetColorNode()
         if not colorNode or colorNode.GetAttribute("Category") != "Flow":

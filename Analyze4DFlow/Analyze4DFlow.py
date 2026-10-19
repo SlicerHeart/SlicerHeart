@@ -1068,9 +1068,13 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 newDisplayNode.CopyContent(sourceDisplayNode)
                 newDisplayNode.SetVisibility(False)
                 if sourceDisplayNode.IsA("vtkMRMLTransformDisplayNode") or sourceDisplayNode.IsA("vtkMRMLVectorFieldDisplayNode"):
-                    # Copy the glyph display node's region reference too (CopyContent does not copy node references)
-                    regionNodeID = sourceDisplayNode.GetNodeReferenceID("region")
-                    newDisplayNode.SetNodeReferenceID("region", regionNodeID)
+                    # Copy the glyph display node's region references too (CopyContent does not copy node references).
+                    # Transform display node uses "region", vector field display node uses "samplingRegion"
+                    # (or "region" in earlier Slicer versions) and "maskingRegion" reference role.
+                    for referenceRole in ["region", "samplingRegion", "maskingRegion"]:
+                        regionNodeID = sourceDisplayNode.GetNodeReferenceID(referenceRole)
+                        if regionNodeID:
+                            newDisplayNode.SetNodeReferenceID(referenceRole, regionNodeID)
                 outputMaskedFlowField.SetAndObserveDisplayNodeID(newDisplayNode.GetID())
             elif not outputMaskedFlowField.IsA("vtkMRMLTransformNode"):
                 outputMaskedFlowField.CreateDefaultDisplayNodes()
