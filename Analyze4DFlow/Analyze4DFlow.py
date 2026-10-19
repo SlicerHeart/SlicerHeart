@@ -1823,8 +1823,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 dataArray.SetName(name)
                 dataArray.InsertNextValue(value)
                 outputFlowMetricsSummaryTable.AddColumn(dataArray)
-                outputFlowMetricsTableNode.SetColumnUnitLabel(name, unit)
-                outputFlowMetricsTableNode.SetColumnDescription(name, description)
+                outputFlowMetricsSummaryTableNode.SetColumnUnitLabel(name, unit)
+                outputFlowMetricsSummaryTableNode.SetColumnDescription(name, description)
 
             outputFlowMetricsSummaryTableNode.Modified()
 
