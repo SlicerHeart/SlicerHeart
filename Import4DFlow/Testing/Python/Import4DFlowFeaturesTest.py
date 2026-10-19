@@ -363,8 +363,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         " component images. Linear and quadratic fit background subtraction must remove the error from stationary tissue"
         " and restore the vessel velocity. Checks are performed on a phantom with realistic proportions (small vessel"
         " surrounded by a large amount of stationary tissue). A phantom with a large vessel is evaluated for information only:"
-        " voxels are considered stationary for the fit if the given velocity *component* is below 10% of the velocity"
-        " encoding, therefore blood that flows mainly along other axes biases the fit.")
+        " slowly moving blood near the vessel wall is below the stationary tissue speed threshold, which biases the fit"
+        " if the vessel is large compared to the surrounding stationary tissue.")
     def test_07_BackgroundSubtraction(self):
         vencCmPerSec = 150.0
         phantoms = [

@@ -966,10 +966,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         return flowFieldNode
 
-    def _getComponentBackground(self, magnitudeVoxelArray, componentVoxelArray, noiseMagnitudeThreshold, backgroundSubtractionMethod, componentThreshold):
+    def _getComponentBackground(self, magnitudeVoxelArray, componentVoxelArray, noiseMagnitudeThreshold, backgroundSubtractionMethod, stationaryTissueMask):
+        """Compute background phase offset of a component image by fitting a smooth function to the stationary tissue voxels.
+        stationaryTissueMask: voxels where the speed is low (computed from all velocity components), only these
+        voxels are used for fitting (voxels below the noise magnitude threshold are excluded, too).
+        """
         import numpy as np
 
-        background_3d = np.zeros_like(componentVoxelArray)
+        # Use floating-point background values (rounding to integer would add a bias)
+        background_3d = np.zeros(componentVoxelArray.shape, dtype=np.float64)
         if backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.NoSubtraction:
             return background_3d
 
@@ -978,7 +983,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         data = componentVoxelArray
 
         # Mask array (True for values to be used in fitting)
-        mask = np.logical_and(magnitudeVoxelArray > noiseMagnitudeThreshold, np.abs(componentVoxelArray) < componentThreshold)
+        mask = np.logical_and(magnitudeVoxelArray > noiseMagnitudeThreshold, stationaryTissueMask)
 
         # Get the indices and values of the masked elements
         indices = np.array(np.nonzero(mask))
@@ -1051,6 +1056,18 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
             # Node that stores the flow field of this frame, with the geometry of the magnitude volume
             flowFieldNodeInSequence, displacementArray = self._createFlowFieldFrameNode(storeInTransform, magnitudeVolumeNodeInSequence)
+
+            # Stationary tissue (used for background phase fitting): where the speed (computed from all velocity components)
+            # is below the threshold. Using each component separately would include blood that flows mainly along other axes.
+            stationaryTissueMask = None
+            if backgroundSubtractionMethod != BackgroundSubtractionMethodEnum.NoSubtraction:
+                speedSquaredCmPerSec = 0
+                for axis in range(3):
+                    componentArray = slicer.util.arrayFromVolume(componentVolumeSequenceNodes[axis].GetNthDataNode(volumeIndex))
+                    speedSquaredCmPerSec = speedSquaredCmPerSec + (componentArray * componentVolumeNodesScaleToCmPerSec[axis]) ** 2
+                stationaryTissueSpeedThresholdCmPerSec = stationaryTissueSpeedThresholdVencPercent / 100 * max(float(venc) for venc in vencCmPerSecList)
+                stationaryTissueMask = speedSquaredCmPerSec < stationaryTissueSpeedThresholdCmPerSec ** 2
+
             for axis in range(3):
                 volumeSequenceNode = componentVolumeSequenceNodes[axis]
 
@@ -1082,8 +1099,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                             wrapMask = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNodeInSequence, segmentId, magnitudeVolumeNode)
                             componentVoxelArray[wrapMask > 0] += wrapSign * wrapIndex * 2 * componentVolumeMaxValue
 
-                stationaryTissueSpeedThreshold = stationaryTissueSpeedThresholdVencPercent / 100 * self.componentVolumeMaxValueSiemensCS4DFlow
-                componentVoxelBackgroundArray = self._getComponentBackground(magnitudeVoxelArray, slicer.util.arrayFromVolume(componentVolumeNodeInSequence), noiseMagnitudeThreshold, backgroundSubtractionMethod, stationaryTissueSpeedThreshold)
+                componentVoxelBackgroundArray = self._getComponentBackground(magnitudeVoxelArray, slicer.util.arrayFromVolume(componentVolumeNodeInSequence), noiseMagnitudeThreshold, backgroundSubtractionMethod, stationaryTissueMask)
 
                 displacementArray[:, :, :, axis] = (componentVoxelArray - componentVoxelBackgroundArray) * scaleToMeterPerSec
 
