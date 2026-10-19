@@ -598,6 +598,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         transform = vtk.vtkTransform()
         transform.Translate(15, -8, 4)
         transform.RotateZ(25)
+        transform.RotateX(40)  # large rotation, so that errors in transforming velocity vectors are detectable
         parentTransform.SetMatrixTransformToParent(transform.GetMatrix())
         for node in [modelNode, planeNode, segmentationNode]:
             node.SetAndObserveTransformNodeID(parentTransform.GetID())
