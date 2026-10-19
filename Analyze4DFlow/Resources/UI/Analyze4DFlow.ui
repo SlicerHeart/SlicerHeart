@@ -29,6 +29,7 @@
         <stringlist notr="true">
          <string>vtkMRMLModelNode</string>
          <string>vtkMRMLTransformNode</string>
+         <string>vtkMRMLVectorVolumeNode</string>
         </stringlist>
        </property>
        <property name="showChildNodeTypes">
@@ -683,6 +684,7 @@
             <stringlist notr="true">
              <string>vtkMRMLModelNode</string>
              <string>vtkMRMLTransformNode</string>
+             <string>vtkMRMLVectorVolumeNode</string>
             </stringlist>
            </property>
            <property name="showChildNodeTypes">
