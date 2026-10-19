@@ -602,10 +602,44 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parentTransform.SetMatrixTransformToParent(transform.GetMatrix())
         for node in [modelNode, planeNode, segmentationNode]:
             node.SetAndObserveTransformNodeID(parentTransform.GetID())
-        _, metrics, _ = self.analyze(modelNode, planeNode, segmentationNode, segmentId, summary=False)
+        outputs, metrics, _ = self.analyze(modelNode, planeNode, segmentationNode, segmentId, streamlines=True, speedThreshold=0.02, summary=False)
         self.report.checkClose("[static model, parent transform] Flow rate", metrics["FlowRate"][0], expectedFlow, rtol=0.08, unit="ml/s")
+        # Streamlines (in world coordinate system) must follow the transformed vessel axis
+        vesselAxisWorld = np.array(transform.TransformVector(phantom.vesselAxis))
+        streamlinesPolyData = outputs["streamlines"].GetPolyData()
+        cosines = []
+        if streamlinesPolyData and streamlinesPolyData.GetNumberOfLines():
+            points = vtk.util.numpy_support.vtk_to_numpy(streamlinesPolyData.GetPoints().GetData())
+            lines = streamlinesPolyData.GetLines()
+            lines.InitTraversal()
+            idList = vtk.vtkIdList()
+            while lines.GetNextCell(idList):
+                segments = np.diff(points[[idList.GetId(i) for i in range(idList.GetNumberOfIds())]], axis=0)
+                lengths = np.linalg.norm(segments, axis=1)
+                cosines.extend(np.abs(segments[lengths > 1e-6] @ vesselAxisWorld) / lengths[lengths > 1e-6])
+        self.report.checkClose("[static model, parent transform] Streamlines are parallel to the transformed vessel axis (mean |cos|)",
+            float(np.mean(cosines)) if cosines else 0.0, 1.0, atol=0.02)
         for node in [modelNode, planeNode, segmentationNode]:
             node.SetAndObserveTransformNodeID(None)
+
+        # Measurement plane under a parent transform (flow field is not transformed): the plane is specified in the
+        # transformed coordinate system so that in world coordinate system it is perpendicular to the vessel
+        planeTransform = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode", "Plane transform")
+        planeTransform.SetMatrixTransformToParent(transform.GetMatrix())
+        worldToPlaneParent = vtk.vtkTransform()
+        worldToPlaneParent.SetMatrix(transform.GetMatrix())
+        worldToPlaneParent.Inverse()
+        transformedPlaneNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", "Plane under transform")
+        transformedPlaneNode.SetPlaneType(transformedPlaneNode.PlaneTypePointNormal)
+        transformedPlaneNode.AddControlPoint(vtk.vtkVector3d(*worldToPlaneParent.TransformPoint(phantom.centerRas)))
+        transformedPlaneNode.SetNormal(worldToPlaneParent.TransformVector(phantom.vesselAxis))
+        transformedPlaneNode.SetSizeMode(transformedPlaneNode.SizeModeAbsolute)
+        transformedPlaneNode.SetSize(36.0, 36.0)
+        transformedPlaneNode.SetAndObserveTransformNodeID(planeTransform.GetID())
+        self.report.checkClose("[plane under parent transform] Plane normal in world coordinate system is the vessel axis (|cos|)",
+            abs(float(np.dot(transformedPlaneNode.GetNormalWorld(), phantom.vesselAxis))), 1.0, atol=1e-6)
+        _, metrics, _ = self.analyze(modelNode, transformedPlaneNode, segmentationNode, segmentId, summary=False)
+        self.report.checkClose("[static model, plane under parent transform] Flow rate", metrics["FlowRate"][0], expectedFlow, rtol=0.08, unit="ml/s")
 
         # Static vector volume
         vectorVolumeNode = phantom.createVolumeNode(phantom.velocityVolumeArray(peakFrame), "Static velocity", "vtkMRMLVectorVolumeNode", addToScene=True)
