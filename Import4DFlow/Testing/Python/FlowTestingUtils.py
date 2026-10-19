@@ -795,9 +795,13 @@ class FlowPhantom:
         threshold.SetUpperThreshold(1.5)
         threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
         threshold.AllScalarsOff()  # keep cells that have at least one point inside
-        threshold.Update()
+        # Split the axis-aligned voxel cells into tetrahedra, as in typical CFD meshes
+        # (voxel cells become invalid if the mesh is rotated by a parent transform)
+        tetrahedralize = vtk.vtkDataSetTriangleFilter()
+        tetrahedralize.SetInputConnection(threshold.GetOutputPort())
+        tetrahedralize.Update()
         mesh = vtk.vtkUnstructuredGrid()
-        mesh.DeepCopy(threshold.GetOutput())
+        mesh.DeepCopy(tetrahedralize.GetOutput())
         mesh.GetPointData().RemoveArray("inside")
         return mesh
 
