@@ -897,11 +897,25 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             # Replace frame indices by frame times
             proxyNodes = [magnitudeVolumeNode] + componentVolumeNodes
             sequenceNodes = [self._getSequenceFromProxyNode(proxyNode) for proxyNode in proxyNodes]
+            # Skip sequences that already use frame times as index (for example, if a flow field has been already created
+            # from these images)
+            sequenceNodes = [sequenceNode for sequenceNode in sequenceNodes
+                if [sequenceNode.GetNthIndexValue(i) for i in range(sequenceNode.GetNumberOfDataNodes())] != frameLabelsStrList]
+
+            # Temporarily disable saving of proxy node changes into all synchronized sequences (for example, flow fields
+            # that were created earlier from the same images), because proxy nodes would be saved into
+            # the sequences at the temporary index values.
+            synchronizedSequenceNodes = vtk.vtkCollection()
+            magnitudeVolumeSequenceBrowserNode.GetSynchronizedSequenceNodes(synchronizedSequenceNodes, True)
+            savedSaveChanges = {}
+            for synchronizedSequenceNode in [synchronizedSequenceNodes.GetItemAsObject(i) for i in range(synchronizedSequenceNodes.GetNumberOfItems())]:
+                savedSaveChanges[synchronizedSequenceNode.GetID()] = magnitudeVolumeSequenceBrowserNode.GetSaveChanges(synchronizedSequenceNode)
+                magnitudeVolumeSequenceBrowserNode.SetSaveChanges(synchronizedSequenceNode, False)
 
             # Temporary disable playback to avoid updating the index values
             for sequenceNode in sequenceNodes:
                 magnitudeVolumeSequenceBrowserNode.SetPlayback(sequenceNode, False)
-            
+
             for sequenceNode in sequenceNodes:
                 sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.TextIndex)
                 sequenceNode.SetIndexName("time")
@@ -921,6 +935,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             # Restore playback state
             for sequenceNode in sequenceNodes:
                 magnitudeVolumeSequenceBrowserNode.SetPlayback(sequenceNode, True)
+
+            # Restore saving of proxy node changes
+            for synchronizedSequenceNodeID, saveChanges in savedSaveChanges.items():
+                magnitudeVolumeSequenceBrowserNode.SetSaveChanges(slicer.mrmlScene.GetNodeByID(synchronizedSequenceNodeID), saveChanges)
 
         flowFieldNodeClassName = "vtkMRMLTransformNode" if storeInTransform else "vtkMRMLVectorVolumeNode"
         flowFieldNode = slicer.mrmlScene.AddNewNodeByClass(flowFieldNodeClassName, "FlowField")
