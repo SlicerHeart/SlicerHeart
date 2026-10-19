@@ -439,7 +439,13 @@ class FeatureTestCase(unittest.TestCase):
         cls.report.write()
         logging.info(f"Test report written to {os.path.join(cls.report.outputDir, 'report.md')}")
 
+    # If a test runs longer than this then the Python stack is written to crash-traceback.txt (to find where it hangs)
+    HANG_TIMEOUT_SEC = 600
+
     def setUp(self):
+        import faulthandler
+        faulthandler.dump_traceback_later(self.HANG_TIMEOUT_SEC, repeat=False, file=self._crashLogFile)
+        self.addCleanup(faulthandler.cancel_dump_traceback_later)
         slicer.mrmlScene.Clear()
         slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
 
