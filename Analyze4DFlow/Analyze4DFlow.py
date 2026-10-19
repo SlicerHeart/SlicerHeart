@@ -565,6 +565,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         parentTransformNode.GetTransformToWorld(meshToWorld)
         transformFilter = vtk.vtkTransformFilter()
         transformFilter.SetTransform(meshToWorld)
+        # Transform velocity vectors, too (by default only the active vectors would be transformed)
+        transformFilter.TransformAllInputVectorsOn()
         transformFilter.SetInputData(mesh)
         transformFilter.Update()
         return transformFilter.GetOutput()
@@ -1190,7 +1192,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                             outputSpeedVolume.SetIJKToRASMatrix(ijkToRAS)
                             displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
                             speedVolumeArray = self._computeSpeedVolumeScalarArray(
-                                displacementImageArray, speedVolumeProjectedToPlane, crossSectionPlaneNode.GetNormal())
+                                displacementImageArray, speedVolumeProjectedToPlane, crossSectionPlaneNode.GetNormalWorld())
                             slicer.util.updateVolumeFromArray(outputSpeedVolume, speedVolumeArray)
                             self._updateSpeedVolumeColorMapping(outputSpeedVolume, flowFieldNode, speedVolumeProjectedToPlane, streamlinesSpeedThresholdMPerSec)
                     finally:
@@ -1227,7 +1229,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                         velocityImageArray = vtk.util.numpy_support.vtk_to_numpy(
                             resampledImageData.GetPointData().GetArray(velocityArrayName)).reshape([dims[2], dims[1], dims[0], 3])
                         speedVolumeArray = self._computeSpeedVolumeScalarArray(
-                            velocityImageArray, speedVolumeProjectedToPlane, crossSectionPlaneNode.GetNormal())
+                            velocityImageArray, speedVolumeProjectedToPlane, crossSectionPlaneNode.GetNormalWorld())
                         slicer.util.updateVolumeFromArray(outputSpeedVolume, speedVolumeArray)
                         self._updateSpeedVolumeColorMapping(outputSpeedVolume, flowFieldNode, speedVolumeProjectedToPlane, streamlinesSpeedThresholdMPerSec)
 
@@ -1650,7 +1652,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         areaPerPointMm2 = totalAreaMm2 / numberOfPoints
 
         # Get plane normal
-        planeNormal = crossSectionPlaneNode.GetNormal()
+        planeNormal = crossSectionPlaneNode.GetNormalWorld()  # sampled velocity vectors are in world coordinate system
 
         metricNames = ["Time", "Area", "PositiveArea", "NegativeArea",
                        "FlowRate", "PositiveFlowRate", "NegativeFlowRate",
