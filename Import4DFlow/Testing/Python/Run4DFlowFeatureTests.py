@@ -59,12 +59,18 @@ def runSuite(slicerExecutable, suiteName, testsDir, reportDir, logFilePath, time
     environment["SLICERHEART_TEST_REPORT_DIR"] = reportDir
     startTime = time.time()
     with open(logFilePath, "w", encoding="utf-8", errors="replace") as logFile:
+        # Run in the report folder, as the application may create files (for example, DICOM database) in the working directory
+        process = subprocess.Popen(command, stdout=logFile, stderr=subprocess.STDOUT, env=environment, cwd=reportDir)
         try:
-            # Run in the report folder, as the application may create files (for example, DICOM database) in the working directory
-            process = subprocess.run(command, stdout=logFile, stderr=subprocess.STDOUT, env=environment, timeout=timeoutSec, cwd=reportDir)
-            exitCode = process.returncode
+            exitCode = process.wait(timeout=timeoutSec)
         except subprocess.TimeoutExpired:
             exitCode = "timeout"
+            # The Slicer launcher starts the application in a child process, therefore the whole process tree must be stopped
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+            else:
+                process.kill()
+            process.wait()
     return exitCode, time.time() - startTime
 
 
