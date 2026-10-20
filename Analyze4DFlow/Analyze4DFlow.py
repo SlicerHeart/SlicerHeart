@@ -1345,8 +1345,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         transformNode.SetAndObserveTransformToParent(gridTransform)
 
     def _createStreamlinesFromImage(self, outputStreamlinesModel, speedImageNodeMPerSec, seedPointsModel, maximumLengthMm, bidirectional, computeAllMetrics, speedThresholdMPerSec):
-        import vtkAddon
         import numpy as np
+        from vtk.util import numpy_support
 
         seedPointsAll = seedPointsModel.GetPolyData()
 
@@ -1358,30 +1358,28 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         threshold.Update()
         seedPoints = threshold.GetOutput()
 
+        # Streamlines are computed in a "canonical" space, where the image axes are aligned with the coordinate
+        # system axes, the origin is at (0,0,0), and the spacing is the same as in ijkToRAS. This is necessary
+        # because vtkStreamTracer in VTK < 9.7 does not interpolate correctly in images with a non-identity
+        # direction matrix. Velocity vectors are transformed with the full linear part of the RAS to canonical
+        # transform, so the computed trajectories are exact for any IJK to RAS matrix (including non-orthogonal
+        # axes). For orthogonal axes this is a rotation (possibly with reflection), so lengths and speeds
+        # (maximum propagation, terminal speed) are the same as in RAS.
         ijkToRAS = vtk.vtkMatrix4x4()
         speedImageNodeMPerSec.GetIJKToRASMatrix(ijkToRAS)
-
-        # Get IJK to RAS matrix scale factors
-        spacing = [1, 1, 1]
-        for column in range(3):
-            spacing[column] = np.linalg.norm([ijkToRAS.GetElement(row, column) for row in range(3)])
-
-        # Canonical: axis directions are IJK, origin is at (0,0,0), spacing is the same as in ijkToRAS
-        ijkToCanonical = vtk.vtkMatrix4x4()
-        for column in range(3):
-            ijkToCanonical.SetElement(column, column, spacing[column])
-
-        # Get IJK to canonical matrix
-        rasToIJK = vtk.vtkMatrix4x4()
-        vtk.vtkMatrix4x4.Invert(ijkToRAS, rasToIJK)
-        rasToCanonical = vtk.vtkMatrix4x4()
-        vtk.vtkMatrix4x4.Multiply4x4(ijkToCanonical, rasToIJK, rasToCanonical)
+        ijkToRASArray = slicer.util.arrayFromVTKMatrix(ijkToRAS)
+        spacing = np.linalg.norm(ijkToRASArray[:3, :3], axis=0)
+        rasToCanonicalArray = np.diag(list(spacing) + [1.0]) @ np.linalg.inv(ijkToRASArray)
+        canonicalToRasArray = np.linalg.inv(rasToCanonicalArray)
+        rasToCanonicalLinear = rasToCanonicalArray[:3, :3]
+        canonicalToRasLinear = canonicalToRasArray[:3, :3]
+        orthogonalAxes = np.allclose(rasToCanonicalLinear @ rasToCanonicalLinear.T, np.eye(3), atol=1e-6)
 
         # Transform seed points to canonical space
         transformFromRasToCanonicalFilter = vtk.vtkTransformPolyDataFilter()
         transformFromRasToCanonicalFilter.SetInputData(seedPoints)
         transformFromRasToCanonical = vtk.vtkTransform()
-        transformFromRasToCanonical.SetMatrix(rasToCanonical)
+        transformFromRasToCanonical.SetMatrix(slicer.util.vtkMatrixFromArray(rasToCanonicalArray))
         transformFromRasToCanonicalFilter.SetTransform(transformFromRasToCanonical)
         transformFromRasToCanonicalFilter.Update()
         seedPointsCanonical = transformFromRasToCanonicalFilter.GetOutput()
@@ -1390,10 +1388,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         speedImageData = vtk.vtkImageData()
         speedImageData.DeepCopy(speedImageNodeMPerSec.GetImageData())
         speedImageData.SetSpacing(spacing)
-
-        rasToCanonicalDirection = vtk.vtkMatrix3x3()
-        vtkAddon.vtkAddonMathUtilities.GetOrientationMatrix(rasToCanonical, rasToCanonicalDirection)
-        vtk.vtkImageTransform.TransformVectors(rasToCanonicalDirection, [1,1,1], speedImageData.GetPointData().GetScalars())
+        speedImageData.SetOrigin(0.0, 0.0, 0.0)
+        velocityArray = numpy_support.vtk_to_numpy(speedImageData.GetPointData().GetScalars())
+        velocityArray[:] = velocityArray @ rasToCanonicalLinear.T
 
         # Note: various streamlines, pathlines, etc. are described here: http://www.vmtk.org/tutorials/ParticleTracing.html
         # vtkParticleTracerBase is available for particle tracing in unsteady vector fields        #
@@ -1410,20 +1407,47 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         streamLine.SetTerminalSpeed(speedThresholdMPerSec)
         streamLine.Update()
 
-        # Transform results to RAS space
-        canonicalToRas = vtk.vtkMatrix4x4()
-        vtk.vtkMatrix4x4.Invert(rasToCanonical, canonicalToRas)
-        transformFromCanonicalToRasFilter = vtk.vtkTransformPolyDataFilter()
-        transformFromCanonicalToRasFilter.SetInputData(streamLine.GetOutput())
-        transformCanonicalToRas = vtk.vtkTransform()
-        transformCanonicalToRas.SetMatrix(canonicalToRas)
-        transformFromCanonicalToRasFilter.SetTransform(transformCanonicalToRas)
-        transformFromCanonicalToRasFilter.Update()
-        streamLinesRas = transformFromCanonicalToRasFilter.GetOutput()
+        # Transform results to RAS space. Points and arrays are transformed explicitly (not by
+        # vtkTransformPolyDataFilter), as the vorticity related arrays are not regular vectors.
+        streamLinesRas = vtk.vtkPolyData()
+        streamLinesRas.DeepCopy(streamLine.GetOutput())
         pointData = streamLinesRas.GetPointData()
         if pointData.GetArray('ImageScalars'):
             # Rename the input array to "Velocity"
             pointData.GetArray('ImageScalars').SetName('Velocity')
+        if streamLinesRas.GetNumberOfPoints() > 0:
+            pointsArray = numpy_support.vtk_to_numpy(streamLinesRas.GetPoints().GetData())
+            pointsArray[:] = pointsArray @ canonicalToRasLinear.T + canonicalToRasArray[:3, 3]
+            streamLinesRas.GetPoints().Modified()
+            for arrayName in ['Velocity', 'Normals']:
+                array = pointData.GetArray(arrayName)
+                if array is None:
+                    continue
+                values = numpy_support.vtk_to_numpy(array)
+                values[:] = values @ canonicalToRasLinear.T
+                if arrayName == 'Normals':
+                    values /= np.maximum(np.linalg.norm(values, axis=1), 1e-12)[:, np.newaxis]
+                array.Modified()
+            if orthogonalAxes:
+                # Vorticity is a pseudovector and rotation (angle) and angular velocity are pseudoscalars:
+                # their sign flips if the transform includes a reflection.
+                handedness = np.sign(np.linalg.det(canonicalToRasLinear))
+                for arrayName in ['Vorticity', 'Rotation', 'AngularVelocity']:
+                    array = pointData.GetArray(arrayName)
+                    if array is None:
+                        continue
+                    values = numpy_support.vtk_to_numpy(array)
+                    if arrayName == 'Vorticity':
+                        values[:] = handedness * (values @ canonicalToRasLinear.T)
+                    else:
+                        values *= handedness
+                    array.Modified()
+            else:
+                # Vorticity cannot be transformed from the canonical space if the image axes are not orthogonal
+                for arrayName in ['Vorticity', 'Rotation', 'AngularVelocity']:
+                    if pointData.GetArray(arrayName):
+                        logging.warning(f"{arrayName} is not available for streamlines computed in images with non-orthogonal axes")
+                        pointData.RemoveArray(arrayName)
 
         if pointData.GetArray('Velocity'):
             # Compute the speed (velocity magnitude) for coloring.
@@ -1973,6 +1997,8 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
         self.test_ComputeHeartRateBpmFromDicom()
         self.setUp()
         self.test_AnalyzeTransformAndVectorVolumeFlowField()
+        self.setUp()
+        self.test_StreamlinesInObliqueImage()
 
     def test_Analyze4DFlow1(self):
         """ Ideally you should have several levels of tests.  At the lowest level
@@ -2270,5 +2296,95 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
         for name in transformSummary:
             np.testing.assert_allclose(volumeSummary[name], transformSummary[name], rtol=1e-5, atol=1e-6, err_msg=name)
         np.testing.assert_allclose(volumeSpeedVolume, transformSpeedVolume, atol=1e-6)
+
+        self.delayDisplay("Test passed")
+
+    def test_StreamlinesInObliqueImage(self):
+        """Streamlines must be correct for any IJK to RAS matrix (oblique, flipped, anisotropic, sheared axes).
+
+        The velocity field is a solid-body rotation about the S axis. It is linear in space, therefore
+        trilinear interpolation is exact, and a streamline started at a distance from the axis must be
+        a circle around the axis. vtkStreamTracer in VTK < 9.7 interpolates incorrectly in oriented images
+        (0.1-0.4 mm error in this test), which is avoided by computing the streamlines in an axis-aligned space.
+        """
+        import numpy as np
+
+        def rotationMatrix(axis, angleDeg):
+            axis = np.asarray(axis, float) / np.linalg.norm(axis)
+            angle = np.radians(angleDeg)
+            k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+            return np.eye(3) + np.sin(angle) * k + (1 - np.cos(angle)) * k @ k
+
+        dims = (40, 40, 40)
+        angularVelocity = np.array([0.0, 0.0, 2.0])  # rad/s about the S axis
+        radiusMm = 8.0
+        directions = rotationMatrix((0.3, 1.0, -0.4), 28.0) @ np.diag([1.0, -1.0, 1.0])
+        shear = np.array([[1.0, 0.25, 0.0], [0.0, 1.0, -0.15], [0.0, 0.0, 1.0]])
+        oblique = np.eye(4)
+        oblique[:3, :3] = directions * [0.8, 1.1, 1.6]
+        oblique[:3, 3] = [-20.0, 15.0, 30.0]
+        ijkToRasMatrices = {
+            "axis-aligned": np.eye(4),
+            "oblique, flipped, anisotropic": oblique,
+        }
+        sheared = oblique.copy()
+        sheared[:3, :3] = sheared[:3, :3] @ shear
+        ijkToRasMatrices["sheared"] = sheared
+
+        logic = Analyze4DFlowLogic()
+        for name, ijkToRas in ijkToRasMatrices.items():
+            self.delayDisplay(f"Compute streamlines in {name} image")
+            velocityVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode", f"Velocity {name}")
+            velocityImage = vtk.vtkImageData()
+            velocityImage.SetDimensions(dims)
+            velocityImage.AllocateScalars(vtk.VTK_FLOAT, 3)
+            velocityVolumeNode.SetAndObserveImageData(velocityImage)
+            velocityVolumeNode.SetIJKToRASMatrix(slicer.util.vtkMatrixFromArray(ijkToRas))
+            storedIjkToRas = vtk.vtkMatrix4x4()
+            velocityVolumeNode.GetIJKToRASMatrix(storedIjkToRas)
+            np.testing.assert_allclose(slicer.util.arrayFromVTKMatrix(storedIjkToRas), ijkToRas, atol=1e-6, err_msg=name)
+
+            k, j, i = np.indices(tuple(reversed(dims)), dtype=float)
+            ijk = np.stack([i, j, k], axis=-1)
+            pointsRas = ijk @ ijkToRas[:3, :3].T + ijkToRas[:3, 3]
+            centerRas = (np.array(dims, float) - 1) / 2.0 @ ijkToRas[:3, :3].T + ijkToRas[:3, 3]
+            slicer.util.arrayFromVolume(velocityVolumeNode)[:] = np.cross(angularVelocity, pointsRas - centerRas)
+            slicer.util.arrayFromVolumeModified(velocityVolumeNode)
+
+            seedRas = centerRas + [radiusMm, 0.0, 0.0]
+            seedPolyData = vtk.vtkPolyData()
+            seedPoints = vtk.vtkPoints()
+            seedPoints.InsertNextPoint(seedRas)
+            seedPolyData.SetPoints(seedPoints)
+            insideVessel = vtk.vtkDoubleArray()
+            insideVessel.SetName("insideVessel")
+            insideVessel.InsertNextValue(1.0)
+            seedPolyData.GetPointData().AddArray(insideVessel)
+            seedModelNode = slicer.modules.models.logic().AddModel(seedPolyData)
+
+            streamlinesModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", f"Streamlines {name}")
+            maximumLengthMm = 40.0
+            logic._createStreamlinesFromImage(streamlinesModelNode, velocityVolumeNode, seedModelNode,
+                maximumLengthMm, False, True, 1e-3)
+
+            streamlinePoints = slicer.util.arrayFromModelPoints(streamlinesModelNode)
+            self.assertGreater(len(streamlinePoints), 10, name)
+            relativePoints = streamlinePoints - centerRas
+            np.testing.assert_allclose(np.linalg.norm(relativePoints[:, :2], axis=1), radiusMm, atol=1e-3, err_msg=name)
+            np.testing.assert_allclose(relativePoints[:, 2], 0.0, atol=1e-3, err_msg=name)
+            lengthMm = np.linalg.norm(np.diff(streamlinePoints, axis=0), axis=1).sum()
+            self.assertGreater(lengthMm, 0.5 * maximumLengthMm, name)
+
+            # Vector arrays must be in RAS
+            velocity = slicer.util.arrayFromModelPointData(streamlinesModelNode, "Velocity")
+            np.testing.assert_allclose(velocity, np.cross(angularVelocity, relativePoints), atol=1e-3, err_msg=name)
+            pointData = streamlinesModelNode.GetPolyData().GetPointData()
+            if name == "sheared":
+                # vorticity cannot be computed for non-orthogonal axes
+                self.assertIsNone(pointData.GetArray("Vorticity"), name)
+            else:
+                vorticity = slicer.util.arrayFromModelPointData(streamlinesModelNode, "Vorticity")
+                np.testing.assert_allclose(vorticity, np.broadcast_to(2.0 * angularVelocity, vorticity.shape),
+                                           atol=1e-3, err_msg=name)
 
         self.delayDisplay("Test passed")
