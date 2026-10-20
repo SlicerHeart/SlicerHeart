@@ -141,6 +141,30 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.assertEqual(len(volumeNodeSets), 1, "Number of detected 4D flow image sets")
         return list(volumeNodeSets.values())[0]
 
+    def isSpatialVectorNrrdReadingSupported(self):
+        """Returns True if this Slicer version loads spatial vector volumes from NRRD files as spatial vectors
+        (vector components converted from LPS in the file to RAS). Older Slicer versions load single-frame vector
+        volume NRRD files without converting the vector components. Determined by saving a small spatial vector
+        volume and loading it back."""
+        vector = [1.0, 2.0, 3.0]
+        volumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode", "__tmp__spatial vector")
+        slicer.util.updateVolumeFromArray(volumeNode, np.tile(np.array(vector, dtype=np.float32), (2, 2, 2, 1)))
+        volumeNode.SetVoxelVectorType(slicer.vtkMRMLVolumeNode.VoxelVectorTypeSpatial)
+        filePath = os.path.join(self.temporaryDirectory("Import4DFlowSpatialVector_"), "spatial.nrrd")
+        loadedNode = None
+        try:
+            slicer.util.exportNode(volumeNode, filePath)
+            loadedNode = slicer.util.loadVolume(filePath)
+            return bool(np.allclose(slicer.util.arrayFromVolume(loadedNode), vector))
+        finally:
+            for node in [volumeNode, loadedNode]:
+                if node is None:
+                    continue
+                for dependentNode in [node.GetStorageNode(), node.GetDisplayNode()]:
+                    if dependentNode:
+                        slicer.mrmlScene.RemoveNode(dependentNode)
+                slicer.mrmlScene.RemoveNode(node)
+
     def removeFlowField(self, flowFieldNode):
         """Remove a flow field and its sequence from the scene (to reduce memory usage)."""
         browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
@@ -651,9 +675,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             import nrrd
             fileErrors = []
             loadedErrors = []
-            # Slicer versions that can read spatial vectors from NRRD files provide measurement frame information in the NRRD reader
-            import vtkTeem
-            spatialVectorNrrdReadingSupported = hasattr(vtkTeem.vtkTeemNRRDReader(), "GetMeasurementFrameSpecified")
+            spatialVectorNrrdReadingSupported = self.isSpatialVectorNrrdReadingSupported()
             rasToLps = np.array([-1.0, -1.0, 1.0])
             for frameIndex, fileName in enumerate(files):
                 filePath = os.path.join(exportDir, fileName)
@@ -1189,7 +1211,6 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     def test_19_RealDataExportAndScene(self):
         from DICOMLib import DICOMUtils
         import nrrd
-        import vtkTeem
         dataDir = self.realDataDirectoryOrSkip()
         workDir = self.temporaryDirectory("Import4DFlowRealDataExport_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
@@ -1213,7 +1234,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkEqual("Anonymized scene files", len(anonymizedFiles), 1)
 
         # NRRD stack
-        spatialVectorNrrdReadingSupported = hasattr(vtkTeem.vtkTeemNRRDReader(), "GetMeasurementFrameSpecified")
+        spatialVectorNrrdReadingSupported = self.isSpatialVectorNrrdReadingSupported()
         rasToLps = np.array([-1.0, -1.0, 1.0])
         for storage, flowFieldNode in flowFieldNodes.items():
             exportDir = os.path.join(workDir, "nrrd-" + storage.replace(" ", "-"))
