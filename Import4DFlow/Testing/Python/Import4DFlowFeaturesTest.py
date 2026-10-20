@@ -124,6 +124,61 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             displayNode.SetVisibility3D(True)
         FlowTestingUtils.reset3DView()
 
+    # Clinical data helpers
+
+    def realDataDirectoryOrSkip(self):
+        dataDir = FlowTestingUtils.environmentValue(FlowTestingUtils.REAL_DATA_ENV_VARIABLE)
+        if not dataDir or not os.path.isdir(dataDir):
+            self.skipTest(f"Anonymized 4D flow data set is not available (set {FlowTestingUtils.REAL_DATA_ENV_VARIABLE} in the environment or in .env.local)")
+        return dataDir
+
+    def loadRealDataVolumeNodeSet(self, dataDir):
+        """Load the clinical data set from DICOM (the DICOM database must be open) and return the detected image set."""
+        from DICOMLib import DICOMUtils
+        DICOMUtils.importDicom(dataDir, slicer.dicomDatabase)
+        FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
+        volumeNodeSets = self.logic.findVolumeNodeSets()
+        self.assertEqual(len(volumeNodeSets), 1, "Number of detected 4D flow image sets")
+        return list(volumeNodeSets.values())[0]
+
+    def removeFlowField(self, flowFieldNode):
+        """Remove a flow field and its sequence from the scene (to reduce memory usage)."""
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        sequenceNode = browserNode.GetSequenceNode(flowFieldNode)
+        browserNode.RemoveSynchronizedSequenceNode(sequenceNode.GetID())
+        slicer.mrmlScene.RemoveNode(sequenceNode)
+        slicer.mrmlScene.RemoveNode(flowFieldNode)
+
+    @staticmethod
+    def countDicomIdentifiers(scene):
+        """Returns (number of DICOM attributes, number of DICOM UIDs, list of patient names) in a scene."""
+        dicomAttributes = 0
+        nodes = scene.GetNodes()
+        for i in range(nodes.GetNumberOfItems()):
+            node = nodes.GetItemAsObject(i)
+            dicomAttributes += len([a for a in node.GetAttributeNames() if a.startswith("DICOM") or a == "MultiVolume.FrameFileList"])
+        sh = scene.GetSubjectHierarchyNode()
+        children = vtk.vtkIdList()
+        sh.GetItemChildren(sh.GetSceneItemID(), children, True)
+        dicomUids = 0
+        patientNames = []
+        for i in range(children.GetNumberOfIds()):
+            itemId = children.GetId(i)
+            dicomUids += len([u for u in sh.GetItemUIDNames(itemId) if u.startswith("DICOM")])
+            dicomAttributes += len([a for a in sh.GetItemAttributeNames(itemId) if a.startswith("DICOM")])
+            if sh.GetItemLevel(itemId) == "Patient":
+                patientNames.append(sh.GetItemName(itemId))
+        return dicomAttributes, dicomUids, patientNames
+
+    def findFlowFieldProxyNodes(self):
+        """Returns {storage name: flow field proxy node} for all flow fields in the scene."""
+        flowFieldNodes = {}
+        for className, storage in [("vtkMRMLTransformNode", "grid transform"), ("vtkMRMLVectorVolumeNode", "vector volume")]:
+            for node in slicer.util.getNodesByClass(className):
+                if node.GetAttribute("SlicerHeart.Type") == "FlowField" and slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(node):
+                    flowFieldNodes[storage] = node
+        return flowFieldNodes
+
     # Tests
 
     @reportedTest("Module and GUI initialization",
@@ -701,24 +756,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.createFlowField(volumeNodeSet, True)
         shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
 
-        def countIdentifiers(scene):
-            dicomAttributes = 0
-            nodes = scene.GetNodes()
-            for i in range(nodes.GetNumberOfItems()):
-                node = nodes.GetItemAsObject(i)
-                dicomAttributes += len([a for a in node.GetAttributeNames() if a.startswith("DICOM") or a == "MultiVolume.FrameFileList"])
-            sh = scene.GetSubjectHierarchyNode()
-            children = vtk.vtkIdList()
-            sh.GetItemChildren(sh.GetSceneItemID(), children, True)
-            dicomUids = 0
-            patientNames = []
-            for i in range(children.GetNumberOfIds()):
-                itemId = children.GetId(i)
-                dicomUids += len([u for u in sh.GetItemUIDNames(itemId) if u.startswith("DICOM")])
-                dicomAttributes += len([a for a in sh.GetItemAttributeNames(itemId) if a.startswith("DICOM")])
-                if sh.GetItemLevel(itemId) == "Patient":
-                    patientNames.append(sh.GetItemName(itemId))
-            return dicomAttributes, dicomUids, patientNames
+        countIdentifiers = self.countDicomIdentifiers
 
         originalCounts = countIdentifiers(slicer.mrmlScene)
         self.report.checkTrue("Original scene contains DICOM attributes and UIDs", originalCounts[0] > 0 and originalCounts[1] > 0,
@@ -1037,3 +1075,294 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.screenshot(f"Flow field (grid transform) at frame {peakFrame} ({indexValues[peakFrame]:.0f} ms), slice views centered at a high-speed voxel")
         slicer.util.selectModule("Import4DFlow")
         self.report.screenshot("Application window with the clinical data set", kind="window")
+
+    @reportedTest("Clinical data set: processing options",
+        "Processing options are tested on the clinical data set: noise masking with different magnitude thresholds, background"
+        " phase correction (linear and quadratic fit), and manual phase wrap correction (voxels painted into the phase wrap"
+        " segmentation).")
+    def test_18_RealDataProcessingOptions(self):
+        from DICOMLib import DICOMUtils
+        dataDir = self.realDataDirectoryOrSkip()
+        workDir = self.temporaryDirectory("Import4DFlowRealDataOptions_")
+        with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
+            volumeNodeSet = self.loadRealDataVolumeNodeSet(dataDir)
+        magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+        magnitudeSequenceNode = self.logic._getSequenceFromProxyNode(magnitudeVolumeNode)
+        numberOfFrames = magnitudeSequenceNode.GetNumberOfDataNodes()
+        magnitudeFrames = [slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(i)) for i in range(numberOfFrames)]
+        vencs = [float(self.logic._getSequenceAttribute(n, "SlicerHeart.vencCmPerSec")) for n in volumeNodeSet["componentVolumeNodes"]]
+
+        # Noise masking
+        rows = []
+        framesByThreshold = {}
+        nonzeroVoxels = {}
+        for thresholdPercent in [2.0, 5.0, 15.0]:
+            flowFieldNode = self.createFlowField(volumeNodeSet, False, noiseMagnitudeThresholdPercent=thresholdPercent)
+            frames = self.velocityFrames(flowFieldNode)
+            self.removeFlowField(flowFieldNode)
+            framesByThreshold[thresholdPercent] = frames
+            magnitudeThreshold = thresholdPercent / 100 * self.logic.magnitudeVolumeRange
+            maxSpeedBelow = max(float(np.abs(f[m < magnitudeThreshold]).max()) if np.any(m < magnitudeThreshold) else 0.0
+                for f, m in zip(frames, magnitudeFrames))
+            self.report.checkClose(f"[noise threshold {thresholdPercent:g}%] Max. speed where magnitude is below threshold", maxSpeedBelow, 0.0, atol=1e-6, unit="m/s")
+            nonzeroVoxels[thresholdPercent] = sum(int(np.count_nonzero(np.any(f != 0, axis=-1))) for f in frames)
+            rows.append([f"{thresholdPercent:g}%", f"{magnitudeThreshold:.1f}", nonzeroVoxels[thresholdPercent]])
+        self.report.table(["Noise threshold", "Magnitude threshold", "Voxels with non-zero velocity (all frames)"], rows)
+        self.report.checkTrue("Higher noise threshold masks more voxels", nonzeroVoxels[2.0] >= nonzeroVoxels[5.0] >= nonzeroVoxels[15.0],
+            [nonzeroVoxels[t] for t in [2.0, 5.0, 15.0]], "decreasing")
+        highThreshold = 15.0 / 100 * self.logic.magnitudeVolumeRange
+        difference = max(float(np.abs(a - b)[m >= highThreshold].max()) for a, b, m in zip(framesByThreshold[2.0], framesByThreshold[15.0], magnitudeFrames))
+        self.report.checkClose("Velocity above all noise thresholds does not depend on the threshold (max. difference)", difference, 0.0, atol=1e-6, unit="m/s")
+        baseFrames = framesByThreshold[5.0]
+        del framesByThreshold
+
+        # Background phase correction. Stationary tissue: strong signal and low speed in all frames.
+        highSignal = np.all([m >= 0.3 * np.percentile(m, 99) for m in magnitudeFrames], axis=0)
+        maxSpeed = np.max([np.linalg.norm(f, axis=-1) for f in baseFrames], axis=0)
+        meanSpeed = np.mean([np.linalg.norm(f, axis=-1) for f in baseFrames], axis=0)
+        stationary = np.logical_and(highSignal, maxSpeed < 0.1)
+        moving = np.logical_and(highSignal, meanSpeed > 0.3)
+        self.report.text(f"Stationary tissue (strong signal, speed below 0.1 m/s in all frames): {int(np.count_nonzero(stationary))} voxels;"
+            f" moving blood (strong signal, mean speed above 0.3 m/s): {int(np.count_nonzero(moving))} voxels.")
+
+        def stationaryBias(frames):
+            """Magnitude of the mean velocity vector of stationary tissue (averaged over all frames)."""
+            return float(np.linalg.norm(np.mean([f[stationary].mean(axis=0) for f in frames], axis=0)))
+
+        biasBefore = stationaryBias(baseFrames)
+        rows = [["no subtraction", biasBefore, 0.0]]
+        for method in [BackgroundSubtractionMethodEnum.LinearFit, BackgroundSubtractionMethodEnum.QuadraticFit]:
+            flowFieldNode = self.createFlowField(volumeNodeSet, False, backgroundSubtractionMethod=method)
+            frames = self.velocityFrames(flowFieldNode)
+            self.removeFlowField(flowFieldNode)
+            biasAfter = stationaryBias(frames)
+            vesselChange = float(np.median([np.linalg.norm(f - b, axis=-1)[moving] for f, b in zip(frames, baseFrames)]))
+            rows.append([method.label(), biasAfter, vesselChange])
+            self.report.checkTrue(f"[{method.label()}] Background velocity bias in stationary tissue is not increased",
+                biasAfter <= max(biasBefore, 0.005), f"{biasAfter:.4f} m/s", f"<= {max(biasBefore, 0.005):.4f} m/s")
+            self.report.checkRange(f"[{method.label()}] Median velocity change in moving blood (background correction is a small offset)",
+                vesselChange, 0.0, 0.05, "m/s")
+        self.report.table(["Background subtraction", "Mean velocity bias in stationary tissue (m/s)", "Median velocity change in moving blood (m/s)"], rows)
+
+        # Manual phase wrap correction
+        flowFieldNode = self.createFlowField(volumeNodeSet, False, unwrap=True)
+        before = self.velocityFrames(flowFieldNode)
+        frameIndex = numberOfFrames // 4
+        component = 0
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, frameIndex)
+        segmentationNode = flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", component)
+        segmentation = segmentationNode.GetSegmentation()
+        alreadyWrapped = np.zeros(magnitudeFrames[frameIndex].shape, dtype=bool)
+        for segmentIndex in range(segmentation.GetNumberOfSegments()):
+            segmentId = segmentation.GetNthSegmentID(segmentIndex)
+            alreadyWrapped |= slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNode, segmentId, magnitudeVolumeNode) > 0
+        candidates = np.logical_and(magnitudeFrames[frameIndex] >= 0.3 * np.percentile(magnitudeFrames[frameIndex], 99), np.logical_not(alreadyWrapped))
+        marked = np.zeros(candidates.shape, dtype=np.uint8)
+        marked[tuple(np.argwhere(candidates)[:500].T)] = 1
+        if not segmentation.GetSegment("Wrap-Pos-1x"):
+            segmentation.AddEmptySegment("Wrap-Pos-1x")
+        existingPositiveWraps = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationNode, "Wrap-Pos-1x", magnitudeVolumeNode) > 0
+        slicer.util.updateSegmentBinaryLabelmapFromArray(np.logical_or(existingPositiveWraps, marked > 0).astype(np.uint8),
+            segmentationNode, "Wrap-Pos-1x", magnitudeVolumeNode)
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(browserNode, segmentationNode)
+        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        after = self.velocityFrames(flowFieldNode)
+        invert = volumeNodeSet["componentVolumeNodesInvertToRasDirection"][component]
+        expectedShift = 2 * vencs[component] / 100.0 * (-1.0 if invert else 1.0)
+        shift = (after[frameIndex][..., component] - before[frameIndex][..., component])[marked > 0]
+        self.report.text(f"{int(np.count_nonzero(marked))} voxels of component {component} in frame {frameIndex} are marked as positive 1x wrap.")
+        self.report.checkClose("Velocity shift in voxels marked as positive wrap (mean)", float(shift.mean()), expectedShift, atol=1e-4, unit="m/s")
+        self.report.checkClose("Velocity shift in voxels marked as positive wrap (max. deviation)", float(np.abs(shift - expectedShift).max()), 0.0, atol=1e-4, unit="m/s")
+        unmarkedDifference = 0.0
+        for index, (a, b) in enumerate(zip(after, before)):
+            difference = np.abs(a - b)
+            if index == frameIndex:
+                difference[marked > 0, component] = 0
+            unmarkedDifference = max(unmarkedDifference, float(difference.max()))
+        self.report.checkClose("Velocity change in all other voxels, components, and frames", unmarkedDifference, 0.0, atol=1e-6, unit="m/s")
+
+    @reportedTest("Clinical data set: export and scene persistence",
+        "Flow fields of the clinical data set (both storage formats, with temporal unwrapping) are exported to NRRD stack and"
+        " anonymized scene, and saved in a scene file. Exported files and reloaded scenes must contain the same velocities;"
+        " the anonymized scene must not contain DICOM identifiers.")
+    def test_19_RealDataExportAndScene(self):
+        from DICOMLib import DICOMUtils
+        import nrrd
+        import vtkTeem
+        dataDir = self.realDataDirectoryOrSkip()
+        workDir = self.temporaryDirectory("Import4DFlowRealDataExport_")
+        with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
+            volumeNodeSet = self.loadRealDataVolumeNodeSet(dataDir)
+        flowFieldNodes = {"grid transform": self.createFlowField(volumeNodeSet, True, unwrap=True),
+                          "vector volume": self.createFlowField(volumeNodeSet, False, unwrap=True)}
+        frames = {storage: self.velocityFrames(node) for storage, node in flowFieldNodes.items()}
+        numberOfFrames = len(frames["grid transform"])
+        timings = []
+
+        # Anonymized scene (exported first, while the scene still contains the DICOM identifiers)
+        originalCounts = self.countDicomIdentifiers(slicer.mrmlScene)
+        self.report.checkTrue("Scene contains DICOM attributes and UIDs before anonymization", originalCounts[0] > 0 and originalCounts[1] > 0,
+            originalCounts[:2], "> 0")
+        anonymizedDir = os.path.join(workDir, "anonymized")
+        os.makedirs(anonymizedDir)
+        startTime = time.time()
+        self.logic.exportDisplacementFieldToFiles(None, anonymizedDir, Import4DFlowLogic.EXPORT_FORMAT_ANONYMIZED_SCENE)
+        timings.append(["Export anonymized scene", time.time() - startTime])
+        anonymizedFiles = [f for f in os.listdir(anonymizedDir) if f.endswith(".mrb")]
+        self.report.checkEqual("Anonymized scene files", len(anonymizedFiles), 1)
+
+        # NRRD stack
+        spatialVectorNrrdReadingSupported = hasattr(vtkTeem.vtkTeemNRRDReader(), "GetMeasurementFrameSpecified")
+        rasToLps = np.array([-1.0, -1.0, 1.0])
+        for storage, flowFieldNode in flowFieldNodes.items():
+            exportDir = os.path.join(workDir, "nrrd-" + storage.replace(" ", "-"))
+            os.makedirs(exportDir)
+            startTime = time.time()
+            self.logic.exportDisplacementFieldToFiles(flowFieldNode, exportDir, Import4DFlowLogic.EXPORT_FORMAT_NRRD_STACK)
+            timings.append([f"Export NRRD stack ({storage})", time.time() - startTime])
+            files = sorted(f for f in os.listdir(exportDir) if f.endswith(".nrrd"))
+            self.report.checkEqual(f"[NRRD stack, {storage}] Number of exported files", len(files), numberOfFrames)
+            fileErrors = []
+            loadedErrors = []
+            for frameIndex, fileName in enumerate(files):
+                filePath = os.path.join(exportDir, fileName)
+                data, header = nrrd.read(filePath)
+                fileErrors.append(float(np.abs(np.asarray(data).transpose(3, 2, 1, 0) - frames[storage][frameIndex] * rasToLps).max()))
+                if storage == "grid transform":
+                    loadedNode = slicer.util.loadTransform(filePath)
+                    velocity = slicer.util.arrayFromGridTransform(loadedNode)
+                else:
+                    loadedNode = slicer.util.loadVolume(filePath)
+                    velocity = slicer.util.arrayFromVolume(loadedNode)
+                    if not spatialVectorNrrdReadingSupported:
+                        velocity = velocity * rasToLps  # this Slicer version does not convert LPS vectors to RAS when reading NRRD
+                loadedErrors.append(float(np.abs(velocity - frames[storage][frameIndex]).max()))
+                slicer.mrmlScene.RemoveNode(loadedNode)
+            self.report.checkClose(f"[NRRD stack, {storage}] Max. velocity difference in files (LPS vectors)", max(fileErrors), 0.0, atol=1e-5, unit="m/s")
+            self.report.checkClose(f"[NRRD stack, {storage}] Max. velocity difference in files loaded back into Slicer", max(loadedErrors), 0.0, atol=1e-5, unit="m/s")
+
+        # Scene save and reload
+        sceneFile = os.path.join(workDir, "scene", "FlowScene.mrb")
+        os.makedirs(os.path.dirname(sceneFile))
+        startTime = time.time()
+        self.report.checkTrue("Scene is saved", slicer.util.saveScene(sceneFile))
+        timings.append(["Save scene", time.time() - startTime])
+        slicer.mrmlScene.Clear()
+        startTime = time.time()
+        slicer.util.loadScene(sceneFile)
+        timings.append(["Load scene", time.time() - startTime])
+        reloadedFlowFieldNodes = self.findFlowFieldProxyNodes()
+        for storage in flowFieldNodes:
+            self.report.checkTrue(f"[scene reload, {storage}] Flow field is found", storage in reloadedFlowFieldNodes)
+            if storage not in reloadedFlowFieldNodes:
+                continue
+            reloadedFrames = self.velocityFrames(reloadedFlowFieldNodes[storage])
+            self.report.checkEqual(f"[scene reload, {storage}] Number of frames", len(reloadedFrames), numberOfFrames)
+            self.report.checkClose(f"[scene reload, {storage}] Max. velocity difference",
+                max(float(np.abs(a - b).max()) for a, b in zip(reloadedFrames, frames[storage])), 0.0, atol=1e-6, unit="m/s")
+            self.report.checkTrue(f"[scene reload, {storage}] Phase wrap segmentations are restored",
+                all(reloadedFlowFieldNodes[storage].GetNthNodeReference("phaseWrapSegmentation", c) is not None for c in range(3)))
+
+        # Anonymized scene content
+        slicer.mrmlScene.Clear()
+        if anonymizedFiles:
+            slicer.util.loadScene(os.path.join(anonymizedDir, anonymizedFiles[0]))
+            dicomAttributes, dicomUids, patientNames = self.countDicomIdentifiers(slicer.mrmlScene)
+            self.report.checkEqual("[anonymized scene] DICOM attributes", dicomAttributes, 0)
+            self.report.checkEqual("[anonymized scene] DICOM UIDs", dicomUids, 0)
+            self.report.checkTrue("[anonymized scene] Patient names", all(name == "Anonymous" for name in patientNames), patientNames, "Anonymous")
+            anonymizedFlowFieldNodes = self.findFlowFieldProxyNodes()
+            for storage in flowFieldNodes:
+                self.report.checkTrue(f"[anonymized scene, {storage}] Flow field is found", storage in anonymizedFlowFieldNodes)
+                if storage in anonymizedFlowFieldNodes:
+                    self.report.checkClose(f"[anonymized scene, {storage}] Max. velocity difference",
+                        max(float(np.abs(a - b).max()) for a, b in zip(self.velocityFrames(anonymizedFlowFieldNodes[storage]), frames[storage])),
+                        0.0, atol=1e-6, unit="m/s")
+        self.report.table(["Step", "Duration (s)"], [[name, f"{duration:.1f}"] for name, duration in timings], "Computation times")
+
+    @reportedTest("Clinical data set: module GUI workflow",
+        "The clinical data set is processed using the module GUI: find images, create flow field (both storage formats),"
+        " phase unwrapping modes, recompute, show flow field / magnitude / component images, and export to 5D NRRD file.")
+    def test_20_RealDataGuiWorkflow(self):
+        from DICOMLib import DICOMUtils
+        dataDir = self.realDataDirectoryOrSkip()
+        workDir = self.temporaryDirectory("Import4DFlowRealDataGui_")
+        with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
+            DICOMUtils.importDicom(dataDir, slicer.dicomDatabase)
+            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
+            slicer.util.selectModule("Import4DFlow")
+            widget = slicer.modules.import4dflow.widgetRepresentation().self()
+            widget.onInspectButton()
+            self.report.checkEqual("[GUI] Image sets listed in GUI", widget.ui.inputVolumeNodeSetSelector.count, 1)
+            self.report.checkTrue("[GUI] Convert button is enabled", widget.ui.convertButton.enabled)
+            parameterNode = widget._parameterNode
+
+            flowFieldNodes = {}
+            for storeInTransform in [False, True]:
+                storage = self.storageName(storeInTransform)
+                widget.ui.storeInTransformCheckBox.checked = storeInTransform
+                try:
+                    widget.onConvertButton()
+                    error = None
+                except Exception as e:
+                    error = f"{type(e).__name__}: {e}"
+                self.report.checkTrue(f"[GUI, {storage}] 'Create flow field' completes without error", error is None, error or "no error", "no error")
+                flowFieldNode = parameterNode.outputFlowField
+                expectedClass = "vtkMRMLTransformNode" if storeInTransform else "vtkMRMLVectorVolumeNode"
+                self.report.checkTrue(f"[GUI, {storage}] Flow field is created", flowFieldNode is not None and flowFieldNode.IsA(expectedClass))
+                flowFieldNodes[storage] = flowFieldNode
+        frames = {storage: self.velocityFrames(node) for storage, node in flowFieldNodes.items()}
+        self.report.checkClose("[GUI] Both storage formats give the same velocities (max. difference)",
+            max(float(np.abs(a - b).max()) for a, b in zip(frames["grid transform"], frames["vector volume"])), 0.0, atol=1e-5, unit="m/s")
+        flowFieldNode = flowFieldNodes["grid transform"]
+        temporalFrames = frames["grid transform"]
+
+        # Show buttons
+        displayNode = self.logic.getFlowFieldDisplayNode(flowFieldNode)
+        visibility = bool(displayNode.GetVisibility())
+        widget.onShowFlowFieldButton()
+        self.report.checkEqual("[GUI] 'Show flow field' button toggles glyph visibility", bool(displayNode.GetVisibility()), not visibility)
+        widget.onShowFlowFieldButton()
+        redComposite = slicer.app.layoutManager().sliceWidget("Red").mrmlSliceCompositeNode()
+        for component in range(3):
+            widget.onShowComponentVolumeButton(component)
+            self.report.checkEqual(f"[GUI] Component button {component + 1} shows the component image", redComposite.GetBackgroundVolumeID(),
+                flowFieldNode.GetNthNodeReference("componentVolume", component).GetID())
+        self.report.screenshot("Clinical data set: component image with phase wrap segmentation in the module GUI", kind="window")
+        widget.onShowMagnitudeVolumeButton()
+        self.report.checkEqual("[GUI] Magnitude button shows the magnitude image", redComposite.GetBackgroundVolumeID(),
+            flowFieldNode.GetNodeReference("magnitudeVolume").GetID())
+
+        # Unwrapping modes
+        parameterNode.unwrapMode = UnwrapModeEnum.NoUnwrap
+        widget.onComputePhaseUnwrappingButton()
+        widget.onRecomputeFlowFieldButton()
+        noUnwrapFrames = self.velocityFrames(flowFieldNode)
+        changedVoxels = sum(int(np.count_nonzero(np.any(a != b, axis=-1))) for a, b in zip(noUnwrapFrames, temporalFrames))
+        self.report.text(f"Number of voxels (over all frames) changed by temporal unwrapping: {changedVoxels}")
+        self.report.checkTrue("[GUI] Removing phase unwrapping changes the flow field (the data set contains phase wraps)", changedVoxels > 0, changedVoxels, "> 0")
+        parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
+        widget.onComputePhaseUnwrappingButton()
+        widget.onRecomputeFlowFieldButton()
+        self.report.checkClose("[GUI] Temporal unwrapping again gives the same flow field (max. difference)",
+            max(float(np.abs(a - b).max()) for a, b in zip(self.velocityFrames(flowFieldNode), temporalFrames)), 0.0, atol=1e-6, unit="m/s")
+        parameterNode.unwrapMode = UnwrapModeEnum.LaplacianUnwrap
+        with self.assertRaises(NotImplementedError):
+            widget.onComputePhaseUnwrappingButton()
+        self.report.checkTrue("[GUI] Laplacian unwrapping reports an error", True)
+
+        # Export
+        exportDir = os.path.join(workDir, "export")
+        os.makedirs(exportDir)
+        parameterNode.exportDirectory = exportDir
+        parameterNode.exportFormat = Import4DFlowLogic.EXPORT_FORMAT_NRRD_5D
+        widget.onExportButton()
+        exportedFile = os.path.join(exportDir, "flowfield.seq.nrrd")
+        self.report.checkTrue("[GUI] 5D NRRD file is exported", os.path.exists(exportedFile), os.listdir(exportDir))
+        if os.path.exists(exportedFile):
+            loadedSequenceNode = slicer.util.loadNodeFromFile(exportedFile, "SequenceFile")
+            self.report.checkClose("[GUI] Exported 5D NRRD file contains the flow field (max. difference)",
+                max(float(np.abs(slicer.util.arrayFromVolume(loadedSequenceNode.GetNthDataNode(i)) - temporalFrames[i]).max())
+                    for i in range(loadedSequenceNode.GetNumberOfDataNodes())), 0.0, atol=1e-5, unit="m/s")
+        self.report.screenshot("Clinical data set: module GUI after export", kind="window")
