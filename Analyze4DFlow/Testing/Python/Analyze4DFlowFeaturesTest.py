@@ -179,6 +179,82 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             FlowTestingUtils.showVolumeInSliceViews(backgroundNode, phantom.centerRas, foreground=speedVolumeNode if backgroundNode != speedVolumeNode else None)
         FlowTestingUtils.reset3DView()
 
+    # Clinical data helpers
+
+    def realDataDirectoryOrSkip(self):
+        dataDir = FlowTestingUtils.environmentValue(FlowTestingUtils.REAL_DATA_ENV_VARIABLE)
+        if not dataDir or not os.path.isdir(dataDir):
+            self.skipTest(f"Anonymized 4D flow data set is not available (set {FlowTestingUtils.REAL_DATA_ENV_VARIABLE} in the environment or in .env.local)")
+        return dataDir
+
+    def loadRealDataFlowFields(self, dataDir, kinds=("transform", "volume")):
+        """Load the clinical data set from DICOM (the DICOM database must be open) and create flow fields
+        (with temporal unwrapping). Returns (volumeNodeSet, {kind: flowFieldNode})."""
+        from DICOMLib import DICOMUtils
+        DICOMUtils.importDicom(dataDir, slicer.dicomDatabase)
+        FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
+        volumeNodeSets = self.importLogic.findVolumeNodeSets()
+        self.assertEqual(len(volumeNodeSets), 1, "Number of detected 4D flow image sets")
+        volumeNodeSet = list(volumeNodeSets.values())[0]
+        flowFieldNodes = {}
+        for kind in kinds:
+            flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=(kind == "transform"))
+            self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
+            self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            flowFieldNodes[kind] = flowFieldNode
+        return volumeNodeSet, flowFieldNodes
+
+    def findPeakCoherentFlow(self, vectorVolumeFlowFieldNode, magnitudeVolumeNode):
+        """Find location of the highest coherent systolic flow. Noise (random velocity directions, often saturated at the
+        velocity encoding) is suppressed by averaging velocity vectors in a 5x5x5 neighborhood and only considering
+        bright voxels; the coherent speed is then median filtered.
+        Returns (peakSpeed, peakFrame, peakIndex (k, j, i), peakRas, flowDirection)."""
+        import scipy.ndimage
+        sequenceNode = self.importLogic._getSequenceFromProxyNode(vectorVolumeFlowFieldNode)
+        magnitudeSequenceNode = self.importLogic._getSequenceFromProxyNode(magnitudeVolumeNode)
+        best = (-1.0, None, None, None)
+        for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
+            velocity = slicer.util.arrayFromVolume(sequenceNode.GetNthDataNode(frameIndex))
+            magnitude = slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(frameIndex))
+            meanVelocity = np.stack([scipy.ndimage.uniform_filter(velocity[..., c], size=5) for c in range(3)], axis=-1)
+            coherentSpeed = scipy.ndimage.median_filter(np.linalg.norm(meanVelocity, axis=-1), size=3)
+            coherentSpeed[magnitude < 0.3 * np.percentile(magnitude, 99)] = 0
+            index = np.unravel_index(np.argmax(coherentSpeed), coherentSpeed.shape)
+            if coherentSpeed[index] > best[0]:
+                best = (float(coherentSpeed[index]), frameIndex, index, meanVelocity[index])
+        peakSpeed, peakFrame, peakIndex, flowDirection = best
+        k, j, i = peakIndex
+        flowDirection = flowDirection / np.linalg.norm(flowDirection)
+        ijkToRas = vtk.vtkMatrix4x4()
+        magnitudeVolumeNode.GetIJKToRASMatrix(ijkToRas)
+        peakRas = np.array(ijkToRas.MultiplyPoint([i, j, k, 1])[:3])
+        return peakSpeed, peakFrame, peakIndex, peakRas, flowDirection
+
+    @staticmethod
+    def createPlane(centerRas, normal, sizeMm, name):
+        planeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", name)
+        planeNode.SetPlaneType(planeNode.PlaneTypePointNormal)
+        planeNode.AddControlPointWorld(vtk.vtkVector3d(*centerRas))
+        planeNode.SetNormalWorld(normal)
+        planeNode.SetSizeMode(planeNode.SizeModeAbsolute)
+        planeNode.SetSize(sizeMm, sizeMm)
+        return planeNode
+
+    @staticmethod
+    def createSphereSegmentation(centerRas, radiusMm, referenceVolumeNode, name):
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", name)
+        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(referenceVolumeNode)
+        sphere = vtk.vtkSphereSource()
+        sphere.SetCenter(*centerRas)
+        sphere.SetRadius(radiusMm)
+        sphere.SetPhiResolution(30)
+        sphere.SetThetaResolution(30)
+        sphere.Update()
+        segmentId = segmentationNode.AddSegmentFromClosedSurfaceRepresentation(sphere.GetOutput(), name, [0.9, 0.3, 0.2])
+        segmentationNode.CreateDefaultDisplayNodes()
+        return segmentationNode, segmentId
+
     # Tests
 
     @reportedTest("Module and GUI initialization",
@@ -884,9 +960,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         " spherical mask. Both storage formats must give identical flow metrics, values must be physiologically plausible.")
     def test_15_RealData(self):
         from DICOMLib import DICOMUtils
-        dataDir = FlowTestingUtils.environmentValue(FlowTestingUtils.REAL_DATA_ENV_VARIABLE)
-        if not dataDir or not os.path.isdir(dataDir):
-            self.skipTest(f"Anonymized 4D flow data set is not available (set {FlowTestingUtils.REAL_DATA_ENV_VARIABLE} in the environment or in .env.local)")
+        dataDir = self.realDataDirectoryOrSkip()
         timings = []
         workDir = self.temporaryDirectory("Analyze4DFlowRealData_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")) as db:
@@ -915,47 +989,11 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkRange("Heart rate", heartRate, 30, 220, "bpm")
         self.report.checkClose("Heart rate is the same for both storage formats", self.logic.heartRateBpm(flowFieldNodes["volume"]), heartRate, atol=1e-6, unit="bpm")
 
-        # Find location of the highest coherent systolic flow. Noise (random velocity directions, often saturated at the
-        # velocity encoding) is suppressed by averaging velocity vectors in a 5x5x5 neighborhood and only considering
-        # bright voxels; the coherent speed is then median filtered.
-        import scipy.ndimage
-        sequenceNode = self.importLogic._getSequenceFromProxyNode(flowFieldNodes["volume"])
-        magnitudeSequenceNode = self.importLogic._getSequenceFromProxyNode(magnitudeVolumeNode)
-        best = (-1.0, None, None, None)
-        for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
-            velocity = slicer.util.arrayFromVolume(sequenceNode.GetNthDataNode(frameIndex))
-            magnitude = slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(frameIndex))
-            meanVelocity = np.stack([scipy.ndimage.uniform_filter(velocity[..., c], size=5) for c in range(3)], axis=-1)
-            coherentSpeed = scipy.ndimage.median_filter(np.linalg.norm(meanVelocity, axis=-1), size=3)
-            coherentSpeed[magnitude < 0.3 * np.percentile(magnitude, 99)] = 0
-            index = np.unravel_index(np.argmax(coherentSpeed), coherentSpeed.shape)
-            if coherentSpeed[index] > best[0]:
-                best = (float(coherentSpeed[index]), frameIndex, index, meanVelocity[index])
-        peakSpeed, peakFrame, peakIndex, flowDirection = best
-        k, j, i = peakIndex
-        flowDirection = flowDirection / np.linalg.norm(flowDirection)
-        ijkToRas = vtk.vtkMatrix4x4()
-        magnitudeVolumeNode.GetIJKToRASMatrix(ijkToRas)
-        peakRas = np.array(ijkToRas.MultiplyPoint([i, j, k, 1])[:3])
+        peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNodes["volume"], magnitudeVolumeNode)
         self.report.text(f"Measurement plane is placed at frame {peakFrame}, RAS position {np.round(peakRas, 1).tolist()},"
             f" normal {np.round(flowDirection, 3).tolist()} (coherent speed in 5x5x5 neighborhood: {peakSpeed:.2f} m/s).")
-
-        planeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", "Measurement plane")
-        planeNode.SetPlaneType(planeNode.PlaneTypePointNormal)
-        planeNode.AddControlPointWorld(vtk.vtkVector3d(*peakRas))
-        planeNode.SetNormalWorld(flowDirection)
-        planeNode.SetSizeMode(planeNode.SizeModeAbsolute)
-        planeNode.SetSize(30.0, 30.0)
-        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "Vessel mask")
-        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(magnitudeVolumeNode)
-        sphere = vtk.vtkSphereSource()
-        sphere.SetCenter(*peakRas)
-        sphere.SetRadius(10.0)
-        sphere.SetPhiResolution(30)
-        sphere.SetThetaResolution(30)
-        sphere.Update()
-        segmentId = segmentationNode.AddSegmentFromClosedSurfaceRepresentation(sphere.GetOutput(), "Vessel mask", [0.9, 0.3, 0.2])
-        segmentationNode.CreateDefaultDisplayNodes()
+        planeNode = self.createPlane(peakRas, flowDirection, 30.0, "Measurement plane")
+        segmentationNode, segmentId = self.createSphereSegmentation(peakRas, 10.0, magnitudeVolumeNode, "Vessel mask")
 
         results = {}
         outputsByKind = {}
@@ -999,3 +1037,178 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.screenshot(f"Clinical data set at frame {peakFrame}: speed volume over magnitude image, streamlines and measurement plane in 3D")
         self.logic.createPlotFromTable(outputsByKind["transform"]["table"])
         self.report.screenshot("Flow metrics plot of the clinical data set")
+
+    @reportedTest("Clinical data set: analysis options",
+        "Analysis options are tested on the clinical data set (vector volume storage), at the location of the highest coherent"
+        " flow: mass conservation (peak flow rate through parallel planes 4 mm upstream and downstream), plane orientation"
+        " (plane tilted by 20 degrees), speed threshold mask (no segmentation), speed volume (magnitude and projected to the"
+        " plane normal), and masked flow field output (grid transform and vector volume storage). Consistency is checked using"
+        " the peak (systolic) flow rate, because forward and backward volumes also integrate the low velocities of diastolic"
+        " frames, which are dominated by noise at the boundary of the (approximate, spherical) vessel mask.")
+    def test_16_RealDataAnalysisOptions(self):
+        from DICOMLib import DICOMUtils
+        dataDir = self.realDataDirectoryOrSkip()
+        workDir = self.temporaryDirectory("Analyze4DFlowRealDataOptions_")
+        with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
+            volumeNodeSet, flowFieldNodes = self.loadRealDataFlowFields(dataDir)
+        magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+        flowFieldNode = flowFieldNodes["volume"]
+        peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNode, magnitudeVolumeNode)
+        maskRadiusMm = 10.0
+        self.report.text(f"Measurement location: frame {peakFrame}, RAS position {np.round(peakRas, 1).tolist()},"
+            f" flow direction {np.round(flowDirection, 3).tolist()}, coherent speed {peakSpeed:.2f} m/s.")
+
+        # Mass conservation: the same blood volume must flow through parallel planes along the vessel
+        rows = []
+        peakFlowRates = {}
+        for offsetMm in [-4.0, 0.0, 4.0]:
+            centerRas = peakRas + offsetMm * flowDirection
+            planeNode = self.createPlane(centerRas, flowDirection, 30.0, f"Plane {offsetMm:+g} mm")
+            segmentationNode, segmentId = self.createSphereSegmentation(centerRas, maskRadiusMm, magnitudeVolumeNode, f"Mask {offsetMm:+g} mm")
+            _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId)
+            peakFlowRates[offsetMm] = max(metrics["FlowRate"])
+            rows.append([f"perpendicular, {offsetMm:+g} mm", summaryMetrics["ForwardVolume"], summaryMetrics["BackwardVolume"],
+                max(metrics["FlowRate"]), summaryMetrics["PeakVelocity"]])
+        for offsetMm in [-4.0, 4.0]:
+            self.report.checkClose(f"Mass conservation: peak flow rate {offsetMm:+g} mm along the vessel vs. at the measurement location",
+                peakFlowRates[offsetMm], peakFlowRates[0.0], rtol=0.2, unit="ml/s")
+
+        # Plane orientation: flow through a tilted plane (at the same location) must be similar
+        helperAxis = np.array([1.0, 0.0, 0.0]) if abs(flowDirection[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        perpendicular = np.cross(flowDirection, helperAxis)
+        perpendicular /= np.linalg.norm(perpendicular)
+        tiltDeg = 20.0
+        tiltedNormal = math.cos(math.radians(tiltDeg)) * flowDirection + math.sin(math.radians(tiltDeg)) * perpendicular
+        planeNode = self.createPlane(peakRas, tiltedNormal, 30.0, "Tilted plane")
+        segmentationNode, segmentId = self.createSphereSegmentation(peakRas, maskRadiusMm, magnitudeVolumeNode, "Mask tilted")
+        _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId)
+        rows.append([f"tilted by {tiltDeg:g} deg", summaryMetrics["ForwardVolume"], summaryMetrics["BackwardVolume"],
+            max(metrics["FlowRate"]), summaryMetrics["PeakVelocity"]])
+        self.report.checkClose(f"Peak flow rate through plane tilted by {tiltDeg:g} deg vs. perpendicular plane",
+            max(metrics["FlowRate"]), peakFlowRates[0.0], rtol=0.2, unit="ml/s")
+
+        # Speed threshold mask (no segmentation)
+        planeNode = self.createPlane(peakRas, flowDirection, 20.0, "Plane, speed threshold mask")
+        _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, speedThreshold=0.1)
+        rows.append(["speed threshold mask (0.1 m/s), 20 mm plane", summaryMetrics["ForwardVolume"], summaryMetrics["BackwardVolume"],
+            max(metrics["FlowRate"]), summaryMetrics["PeakVelocity"]])
+        self.report.checkTrue("[speed threshold mask] Area at peak flow is positive", metrics["Area"][peakFrame] > 0, metrics["Area"][peakFrame], "> 0")
+        self.report.checkRange("[speed threshold mask] Forward volume", summaryMetrics["ForwardVolume"], 0.5, 200, "ml")
+        self.report.table(["Measurement", "Forward volume (ml)", "Backward volume (ml)", "Max. flow rate (ml/s)", "Peak velocity (cm/s)"], rows)
+
+        # Speed volume (magnitude and projected), masked flow field output
+        ijkToRas = vtk.vtkMatrix4x4()
+        magnitudeVolumeNode.GetIJKToRASMatrix(ijkToRas)
+        ijkToRasArray = slicer.util.arrayFromVTKMatrix(ijkToRas)
+        dims = magnitudeVolumeNode.GetImageData().GetDimensions()
+        k, j, i = np.indices((dims[2], dims[1], dims[0]))
+        voxelRas = np.stack([i, j, k], axis=-1) @ ijkToRasArray[:3, :3].T + ijkToRasArray[:3, 3]
+        distanceFromCenter = np.linalg.norm(voxelRas - peakRas, axis=-1)
+        inside = distanceFromCenter < maskRadiusMm - 2.0
+        outside = distanceFromCenter > maskRadiusMm + 2.0
+        planeNode = self.createPlane(peakRas, flowDirection, 30.0, "Plane, speed volume")
+        segmentationNode, segmentId = self.createSphereSegmentation(peakRas, maskRadiusMm, magnitudeVolumeNode, "Mask, speed volume")
+        originalFrame = slicer.util.arrayFromVolume(self.importLogic._getSequenceFromProxyNode(flowFieldNode).GetNthDataNode(peakFrame)).copy()
+        speedValues = {}
+        for projected in [False, True]:
+            speedVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Speed projected" if projected else "Speed")
+            self.logic.sampleFlowFieldWithPlane(planeNode, flowFieldNode, samplingDistanceMm=1.0,
+                outputFlowMetricsModel=slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Metrics"),
+                maskSegmentationNode=segmentationNode, maskSegmentID=segmentId,
+                outputSpeedVolume=speedVolumeNode, speedVolumeProjectedToPlane=projected, streamlinesSpeedThresholdMPerSec=0.1)
+            FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+            speedValues[projected] = slicer.util.arrayFromVolume(speedVolumeNode).copy()
+        expectedMagnitude = np.linalg.norm(originalFrame, axis=-1)
+        expectedProjected = originalFrame @ np.array(planeNode.GetNormalWorld())
+        self.report.checkClose("[speed volume] Max. error of speed magnitude inside the mask",
+            float(np.abs(speedValues[False] - expectedMagnitude)[inside].max()), 0.0, atol=1e-4, unit="m/s")
+        self.report.checkClose("[speed volume] Max. error of projected speed inside the mask",
+            float(np.abs(speedValues[True] - expectedProjected)[inside].max()), 0.0, atol=1e-4, unit="m/s")
+        self.report.checkClose("[speed volume] Max. speed outside the mask", float(np.abs(speedValues[False])[outside].max()), 0.0, atol=1e-6, unit="m/s")
+        self.report.checkTrue("[speed volume] Projected speed at the measurement location is positive (flow along the plane normal)",
+            speedValues[True][peakIndex] > 0, float(speedValues[True][peakIndex]), "> 0")
+        FlowTestingUtils.showVolumeInSliceViews(magnitudeVolumeNode, peakRas, foreground=speedVolumeNode, foregroundOpacity=0.7)
+        self.report.screenshot(f"Clinical data set: speed projected to the plane normal (Doppler-like) at frame {peakFrame}")
+
+        for kind in ["transform", "volume"]:
+            outputNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode" if kind == "transform" else "vtkMRMLVectorVolumeNode", f"Masked {kind}")
+            self.analyze(flowFieldNodes[kind], planeNode, segmentationNode, segmentId, maskedOutput=outputNode, summary=False)
+            FlowTestingUtils.selectSequenceItem(flowFieldNodes[kind], peakFrame)
+            maskedFrame = slicer.util.arrayFromGridTransform(outputNode) if kind == "transform" else slicer.util.arrayFromVolume(outputNode)
+            self.report.checkClose(f"[masked flow field, {KIND_NAMES[kind]}] Max. velocity error inside the mask",
+                float(np.abs(maskedFrame - originalFrame)[inside].max()), 0.0, atol=1e-4, unit="m/s")
+            self.report.checkClose(f"[masked flow field, {KIND_NAMES[kind]}] Max. speed outside the mask",
+                float(np.linalg.norm(maskedFrame, axis=-1)[outside].max()), 0.0, atol=1e-6, unit="m/s")
+
+    @reportedTest("Clinical data set: module GUI workflow",
+        "The analysis of the clinical data set is performed using the module GUI: heart rate from DICOM, analysis with all"
+        " outputs, flow metrics plot, and sequence registration (requires the Sequence Registration extension).")
+    def test_17_RealDataGuiWorkflow(self):
+        from DICOMLib import DICOMUtils
+        dataDir = self.realDataDirectoryOrSkip()
+        workDir = self.temporaryDirectory("Analyze4DFlowRealDataGui_")
+        with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
+            volumeNodeSet, flowFieldNodes = self.loadRealDataFlowFields(dataDir)
+            magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+            flowFieldNode = flowFieldNodes["transform"]
+            self.importLogic.setFlowFieldVisualizationToDefault(flowFieldNode)
+            peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNodes["volume"], magnitudeVolumeNode)
+            planeNode = self.createPlane(peakRas, flowDirection, 30.0, "Measurement plane")
+            segmentationNode, segmentId = self.createSphereSegmentation(peakRas, 10.0, magnitudeVolumeNode, "Vessel mask")
+
+            # Remove heart rate stored at import, so that it is set from DICOM using the GUI
+            magnitudeSequenceNode = self.importLogic._getSequenceFromProxyNode(magnitudeVolumeNode)
+            heartRateAtImport = float(magnitudeSequenceNode.GetAttribute("SlicerHeart.heartRateBpm"))
+            magnitudeSequenceNode.RemoveAttribute("SlicerHeart.heartRateBpm")
+
+            slicer.util.selectModule("Analyze4DFlow")
+            widget = slicer.modules.analyze4dflow.widgetRepresentation().self()
+            parameterNode = widget._parameterNode
+            parameterNode.inputFlowField = flowFieldNode
+            parameterNode.inputPlane = planeNode
+            widget.ui.inputMaskSegmentSelectorWidget.setCurrentNode(segmentationNode)
+            widget.ui.inputMaskSegmentSelectorWidget.setCurrentSegmentID(segmentId)
+            parameterNode.outputFlowMetricsModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Flow metrics")
+            parameterNode.outputStreamlinesModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Streamlines")
+            parameterNode.outputSpeedVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Speed")
+            parameterNode.outputMaskedFlowField = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "Masked flow field")
+            parameterNode.outputFlowMetricsTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics table")
+            parameterNode.outputFlowMetricsSummaryTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics summary")
+            parameterNode.samplingDistance = 1.0
+            parameterNode.speedThreshold = 0.1
+
+            widget.onSetHeartRateFromDicomButton()
+            self.report.checkClose("[GUI] Heart rate from DICOM", widget.ui.heartRateBpmDoubleSpinBox.value, heartRateAtImport, atol=0.01, unit="bpm")
+            self.report.checkEqual("[GUI] Heart rate source", magnitudeSequenceNode.GetAttribute("SlicerHeart.heartRateSource"), "dicom-nominal-interval")
+
+        startTime = time.time()
+        widget.onAnalyzeButton()
+        self.report.text(f"Analysis time (GUI): {time.time() - startTime:.1f} s")
+        metrics = tableToDict(parameterNode.outputFlowMetricsTable)
+        summaryMetrics = {name: values[0] for name, values in tableToDict(parameterNode.outputFlowMetricsSummaryTable).items()}
+        numberOfFrames = self.importLogic._getNumberOfDataNodesInSequence(magnitudeVolumeNode)
+        self.report.checkEqual("[GUI] Flow metrics table rows", len(metrics.get("FlowRate", [])), numberOfFrames)
+        self.report.checkRange("[GUI] Forward volume", summaryMetrics.get("ForwardVolume", float("nan")), 1, 200, "ml")
+        self.report.checkRange("[GUI] Forward flow per minute", summaryMetrics.get("VolPerMinute", float("nan")), 0.1, 20, "l/min")
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        for name in ["outputFlowMetricsModel", "outputStreamlinesModel", "outputSpeedVolume", "outputMaskedFlowField"]:
+            self.report.checkTrue(f"[GUI] Output '{name}' is in the flow field's sequence browser",
+                browserNode.GetSequenceNode(getattr(parameterNode, name)) is not None)
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+        FlowTestingUtils.showVolumeInSliceViews(magnitudeVolumeNode, peakRas, foreground=parameterNode.outputSpeedVolume, foregroundOpacity=0.6)
+        FlowTestingUtils.reset3DView()
+        self.report.screenshot("Clinical data set: module GUI after analysis", kind="window")
+
+        widget.onShowFlowMetricsPlotButton()
+        self.report.checkTrue("[GUI] Plot chart is created", parameterNode.outputFlowMetricsPlotChart is not None)
+        self.report.screenshot("Clinical data set: module GUI with flow metrics plot", kind="window")
+
+        if hasattr(slicer.modules, "sequenceregistration"):
+            widget.onSequenceRegistrationPushButton()
+            self.report.checkTrue("[GUI] Sequence registration module is set up", slicer.util.moduleSelector().selectedModule == "SequenceRegistration")
+        else:
+            with self.assertRaises(RuntimeError) as context:
+                widget.onSequenceRegistrationPushButton()
+            self.report.checkTrue("[GUI] Missing Sequence Registration extension is reported", "Sequence registration" in str(context.exception),
+                str(context.exception))
+            self.report.text("Sequence Registration extension is not installed: only the error reporting is tested.")
