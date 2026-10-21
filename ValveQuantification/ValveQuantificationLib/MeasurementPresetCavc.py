@@ -137,6 +137,9 @@ class MeasurementPresetCavc(MeasurementPreset):
       return ["Selection of CAVC is required"]
 
     valveModel = inputValveModels["Cavc"]
+    if not self.areRequiredLandmarksAvailable(valveModel, names=["MA", "MP"]):
+      # Everything below splits the valve along the MA-MP line (createSplittingPlane)
+      return ["MA and MP annulus landmarks are required for CAVC measurements"]
 
     self.addMeasurement(self.getAnnulusCircumference(valveModel))
     self.addAnnulusPointDistanceMeasurements(valveModel)

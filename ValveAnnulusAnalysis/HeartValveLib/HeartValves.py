@@ -874,6 +874,25 @@ def removeEmptyLeafletSegments(scriptedModuleNodes):
     slicer.mrmlScene.RemoveNode(parameterNode)
 
 
+def nodeIdsReferencedOutsideRoles(scriptedModuleNode, roles):
+  """IDs of the nodes that the heart valve node references under roles other than *roles*.
+  The legacy upgrades remove the obsolete nodes of a valve subfolder (e.g. the tube models of the
+  "LeafletSurface" folder). A node of another role that the user had placed in that folder (e.g. the
+  valve ROI model dragged into "LeafletSurface") is still needed and must not be removed with them.
+  """
+  allRoles = []
+  scriptedModuleNode.GetNodeReferenceRoles(allRoles)
+  nodeIds = set()
+  for role in allRoles:
+    if role in roles:
+      continue
+    for referenceIndex in range(scriptedModuleNode.GetNumberOfNodeReferences(role)):
+      nodeId = scriptedModuleNode.GetNthNodeReferenceID(role, referenceIndex)
+      if nodeId:
+        nodeIds.add(nodeId)
+  return nodeIds
+
+
 def updateLegacyPapillaryMuscleNodes(scriptedModuleNodes):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   for scriptedModuleNode in scriptedModuleNodes:
@@ -906,11 +925,12 @@ def updateLegacyPapillaryMuscleNodes(scriptedModuleNodes):
 
     papMusclesFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMuscles")
     if papMusclesFolderId:
+      keptNodeIds = nodeIdsReferencedOutsideRoles(scriptedModuleNode, ["PapillaryLineMarkup", "PapillaryLineModel"])
       children = vtk.vtkCollection()
       shNode.GetDataNodesInBranch(papMusclesFolderId, children)
       for childIdx in range(children.GetNumberOfItems()):
         child = children.GetItemAsObject(childIdx)
-        if type(child) is slicer.vtkMRMLModelNode:
+        if type(child) is slicer.vtkMRMLModelNode and child.GetID() not in keptNodeIds:
           slicer.mrmlScene.RemoveNode(child)
 
 
@@ -941,13 +961,17 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
                                                  markupsCurveNode.GetID())
         moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'LeafletSurfaceEdit')
 
+      leafletSurfaceRoles = ["LeafletSurfaceModel", "LeafletSurfaceBoundaryMarkup", "LeafletSurfaceBoundaryModel"]
+      keptNodeIds = nodeIdsReferencedOutsideRoles(scriptedModuleNode, leafletSurfaceRoles)
+
       leafletSurfaceEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurfaceEdit")
       if leafletSurfaceEditFolderId:
         children = vtk.vtkCollection()
         shNode.GetDataNodesInBranch(leafletSurfaceEditFolderId, children)
         for childIdx in range(children.GetNumberOfItems()):
           child = children.GetItemAsObject(childIdx)
-          if type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]:
+          if (type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]
+              and child.GetID() not in keptNodeIds):
             slicer.mrmlScene.RemoveNode(child)
 
       leafletSurfaceFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurface")
@@ -958,7 +982,7 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
         shNode.GetDataNodesInBranch(leafletSurfaceFolderId, children)
         for childIdx in range(children.GetNumberOfItems()):
           child = children.GetItemAsObject(childIdx)
-          if not child.GetAttribute('SegmentID') in segmentIds:
+          if child.GetAttribute('SegmentID') not in segmentIds and child.GetID() not in keptNodeIds:
             slicer.mrmlScene.RemoveNode(child)
 
 
@@ -992,11 +1016,14 @@ def updateLegacyCoaptationModelNodes(scriptedModuleNodes):
 
     coaptationEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "CoaptationEdit")
     if coaptationEditFolderId:
+      keptNodeIds = nodeIdsReferencedOutsideRoles(scriptedModuleNode, ["CoaptationBaseLineMarkup", "CoaptationMarginLineMarkup",
+                                                                        "CoaptationBaseLineModel", "CoaptationMarginLineModel"])
       children = vtk.vtkCollection()
       shNode.GetDataNodesInBranch(coaptationEditFolderId, children)
       for childIdx in range(children.GetNumberOfItems()):
         child = children.GetItemAsObject(childIdx)
-        if type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]:
+        if (type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]
+            and child.GetID() not in keptNodeIds):
           slicer.mrmlScene.RemoveNode(child)
 
 

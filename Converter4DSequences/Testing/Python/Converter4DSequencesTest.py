@@ -205,6 +205,22 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     builder.addLegacyDevice()
     self.assertTrue(logic.sceneHasConvertibleNodes(), "legacy device is convertible")
 
+  def test_conversion_keeps_nodes_of_other_roles_placed_in_valve_subfolders(self):
+    """The legacy upgrade removes the obsolete nodes of the valve subfolders (leaflet surface boundary
+    tubes, papillary tubes, coaptation tubes). A node of another role that the user dragged into
+    such a folder must survive: a real scene had its mid-systole ROI model in "LeafletSurface", and
+    the converted valve had no ROI at that time point."""
+    builder = LegacySceneBuilder()
+    record = builder.addLegacyValve("tricuspid", frameIndex=2, phase="mid-systole", papillary=True, coaptation=True)
+    roiNode = record.nodes["ValveRoiModel"]
+    builder._moveToValveFolder(record.node, roiNode, "LeafletSurface")
+    self.assertEqual(shParentName(roiNode), "LeafletSurface")
+    self._convert()
+    valveBrowser = self._browserForValveType("tricuspid")
+    self._assertPhaseData(valveBrowser, record)
+    self._goTo(valveBrowser, record.indexValue)
+    self.assertIsNotNone(valveBrowser.valveModel.valveRoiModelNode)
+
   def test_stripFrameAndPhaseFromName(self):
     logic = self._logic()
     strip = logic._stripFrameAndPhaseFromName
