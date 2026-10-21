@@ -977,9 +977,14 @@ class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
     return self.getMeasurementPresetById(presetId)
 
   def computeMetrics(self, heartValveMeasurementNode):
+    measurementPreset = self.getMeasurementPreset(heartValveMeasurementNode)
+    if measurementPreset is None:
+      # Scenes of other labs contain measurement nodes of presets that live in other extensions
+      # (e.g. "RightVentricle"): report it instead of failing on the missing preset
+      presetId = self.getMeasurementPresetId(heartValveMeasurementNode)
+      return [f"Measurement preset '{presetId}' is not available (its module is not installed), nothing was computed"]
     slicer.app.pauseRender()
     try:
-      measurementPreset = self.getMeasurementPreset(heartValveMeasurementNode)
       messages = measurementPreset.computeMetricsForMeasurementNode(heartValveMeasurementNode)
     finally:
       slicer.app.resumeRender()
@@ -993,6 +998,8 @@ class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
   def getMeasurementCardiacCyclePhaseShortNames(self, heartValveMeasurementNode):
     phaseShortNames = []
     measurementPreset = self.getMeasurementPreset(heartValveMeasurementNode)
+    if measurementPreset is None:
+      return phaseShortNames
     for inputValveId in measurementPreset.inputValveIds:
       heartValveNode = heartValveMeasurementNode.GetNodeReference('Valve' + inputValveId)
       if not heartValveNode:

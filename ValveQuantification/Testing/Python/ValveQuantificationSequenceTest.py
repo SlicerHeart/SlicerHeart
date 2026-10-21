@@ -349,6 +349,62 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
       self.assertEqual(segmentation.GetConversionParameter(parameterName), badGeometry,
                        f"{description}: quantification must not change the reference geometry of the leaflet segmentation")
 
+    # Negative extents: Slicer's oversampling (vtkCalculateOversamplingFactor::ApplyOversamplingOnImageGeometry)
+    # clamps the maximum of a negative extent to 0, which turned such a geometry into an image of
+    # billions of voxels and aborted the application with a negative allocation. The labelmaps of a
+    # legacy scene had extents starting around -4000, as the segmentation's own reference geometry and
+    # as the labelmaps the fallback geometry is built from.
+    shift = (-1000, -1000, -1000)
+    self._shiftLabelmapExtents(segmentation, shift)
+    for description, testGeometry in (("reference geometry with a negative extent", self._shiftImageGeometryExtent(geometry, shift)),
+                                      ("fallback geometry from labelmaps with negative extents", identity + ";0;0;0;0;0;0;")):
+      segmentation.SetConversionParameter(parameterName, testGeometry)
+      messages = quantLogic.computeMetrics(measurementNode)
+      rows = self._tableRows(preset.metricsTable.metricTableNode)
+      self.assertEqual(sorted(rows), sorted(baseline), f"{description}: messages: {messages}")
+      for name in ("Billow volume", "Tenting volume"):
+        self.assertAlmostEqual(float(rows[name]), float(baseline[name]), delta=0.05 * float(baseline[name]) + 0.01,
+                               msg=f"{description}: {name}")
+
+  @staticmethod
+  def _shiftLabelmapExtents(segmentation, shift):
+    """Move the voxel grid of the binary labelmaps of all segments by *shift* voxels in IJK without
+    moving the labelmaps in world coordinates (a labelmap shared by several segments is moved once)."""
+    labelmapName = slicer.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName()
+    shiftedLabelmaps = set()
+    for segmentId in segmentation.GetSegmentIDs():
+      labelmap = segmentation.GetSegment(segmentId).GetRepresentation(labelmapName)
+      if labelmap is None or labelmap.__this__ in shiftedLabelmaps:
+        continue
+      shiftedLabelmaps.add(labelmap.__this__)
+      matrix = vtk.vtkMatrix4x4()
+      labelmap.GetImageToWorldMatrix(matrix)
+      origin = matrix.MultiplyPoint([-shift[0], -shift[1], -shift[2], 1.0])
+      for axis in range(3):
+        matrix.SetElement(axis, 3, origin[axis])
+      extent = labelmap.GetExtent()
+      labelmap.SetExtent([extent[i] + shift[i // 2] for i in range(6)])
+      labelmap.SetImageToWorldMatrix(matrix)
+      labelmap.Modified()
+    segmentation.Modified()
+
+  @staticmethod
+  def _shiftImageGeometryExtent(geometryString, shift):
+    """Serialized image geometry of the same voxel grid with its extent moved by *shift* voxels."""
+    values = geometryString.split(";")
+    matrix = vtk.vtkMatrix4x4()
+    for row in range(4):
+      for column in range(4):
+        matrix.SetElement(row, column, float(values[row * 4 + column]))
+    extent = [int(value) for value in values[16:22]]
+    origin = matrix.MultiplyPoint([-shift[0], -shift[1], -shift[2], 1.0])
+    for axis in range(3):
+      matrix.SetElement(axis, 3, origin[axis])
+    image = slicer.vtkOrientedImageData()
+    image.SetExtent([extent[i] + shift[i // 2] for i in range(6)])
+    image.SetImageToWorldMatrix(matrix)
+    return slicer.vtkSegmentationConverter.SerializeImageGeometry(matrix, image)
+
   def test_leaflet_metrics_skip_leaflets_empty_at_the_time_point(self):
     """All time points of a valve share the same leaflet segments, so a leaflet may be empty at a time
     point. Such a leaflet gets no metrics, and the per-leaflet atrial areas stay with the right leaflets:
@@ -451,6 +507,18 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
     rows = self._tableRows(preset.metricsTable.metricTableNode)
     self.assertTrue(any("circumference" in name for name in rows), rows)
     self.assertIn("Mitral-Aortic valve plane angle", rows)
+
+  def test_measurement_node_of_unavailable_preset_reports_instead_of_failing(self):
+    """A scene of another lab had measurement nodes of presets that live in other extensions
+    ("RightVentricle"): computing them raised an AttributeError on the missing preset."""
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createMitralValve(factory, (1,))
+    quantLogic = self._quantLogic()
+    measurementNode = self._createMeasurementNode("RightVentricle", {"ValveMitralValve": valveBrowser.heartValveNode})
+    self.assertIsNone(quantLogic.getMeasurementPreset(measurementNode))
+    messages = quantLogic.computeMetrics(measurementNode)
+    self.assertTrue(any("RightVentricle" in m and "not available" in m for m in messages), messages)
+    self.assertEqual(quantLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode), [])
 
   def test_cavc_presets_report_missing_inputs(self):
     """Missing coaptations or landmarks must produce messages, not exceptions."""

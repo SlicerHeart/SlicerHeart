@@ -413,15 +413,20 @@ class LeafletModel:
       return
 
     boundaryMarkups = self.getSurfaceBoundaryMarkupNode()
+    # The boundary is a closed curve node: every control point added outside StartModify/EndModify
+    # recomputes its measurements (curve length over all points), which made this loop quadratic
+    # in the number of curve points (6 minutes for the 3300 points of a densely placed annulus)
+    wasModified = boundaryMarkups.StartModify()
     boundaryMarkups.RemoveAllControlPoints()
 
     loc = vtk.vtkPointLocator()
     loc.SetDataSet(segmentPolydata)
 
-    numberOfCurvePoints = curve.GetCurve().GetNumberOfPoints()
+    curvePoints = curve.GetCurve().GetPoints()
+    numberOfCurvePoints = curvePoints.GetNumberOfPoints()
     pos = np.zeros(3)
     for pointIndex in range(numberOfCurvePoints):
-      curve.GetCurve().GetPoint(pointIndex, pos)
+      curvePoints.GetPoint(pointIndex, pos)
       pos += (pos - valvePlanePosition) * 0.2
 
       closestPointId = loc.FindClosestPoint(pos)
@@ -429,3 +434,4 @@ class LeafletModel:
         nearestPointOnLeafletSurface = segmentPolydata.GetPoints().GetPoint(closestPointId)
         boundaryMarkups.AddControlPoint(nearestPointOnLeafletSurface[0], nearestPointOnLeafletSurface[1],
                                         nearestPointOnLeafletSurface[2])
+    boundaryMarkups.EndModify(wasModified)

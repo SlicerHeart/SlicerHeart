@@ -1610,6 +1610,27 @@ class MeasurementPreset(object):
     return unionExtent, imageToWorldMatrix
 
   @staticmethod
+  def serializeZeroBasedImageGeometry(imageToWorldMatrix, extent):
+    """Serialized image geometry of the voxel grid (imageToWorldMatrix, extent) with the extent moved to
+    start at 0 (the origin is moved to the first voxel, so the grid does not move in world coordinates).
+
+    Slicer's oversampling of a reference geometry (vtkCalculateOversamplingFactor::ApplyOversamplingOnImageGeometry)
+    clamps the maximum of a negative extent to 0, which turns a geometry with a negative extent into
+    an image of up to billions of voxels: rasterizing the leaflet surfaces with the geometry of the
+    labelmaps of a legacy scene (extent starting around -4000) aborted the application with a
+    negative allocation.
+    """
+    origin = imageToWorldMatrix.MultiplyPoint([extent[0], extent[2], extent[4], 1.0])
+    zeroBasedMatrix = vtk.vtkMatrix4x4()
+    zeroBasedMatrix.DeepCopy(imageToWorldMatrix)
+    for axis in range(3):
+      zeroBasedMatrix.SetElement(axis, 3, origin[axis])
+    geometryImage = vtkSegmentationCore.vtkOrientedImageData()
+    geometryImage.SetExtent(0, extent[1] - extent[0], 0, extent[3] - extent[2], 0, extent[5] - extent[4])
+    geometryImage.SetImageToWorldMatrix(zeroBasedMatrix)
+    return vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(zeroBasedMatrix, geometryImage)
+
+  @staticmethod
   def referenceGeometryFromSegments(segmentationNode, paddingVoxels=10):
     """Serialized image geometry that covers the binary labelmaps of all segments of the segmentation
     node (in the grid of the labelmaps), padded by paddingVoxels on each side.
@@ -1618,12 +1639,10 @@ class MeasurementPreset(object):
     unionExtent, imageToWorldMatrix = MeasurementPreset.segmentLabelmapsGeometry(segmentationNode)
     if unionExtent is None:
       return None
-    geometryImage = vtkSegmentationCore.vtkOrientedImageData()
-    geometryImage.SetExtent(unionExtent[0] - paddingVoxels, unionExtent[1] + paddingVoxels,
-                            unionExtent[2] - paddingVoxels, unionExtent[3] + paddingVoxels,
-                            unionExtent[4] - paddingVoxels, unionExtent[5] + paddingVoxels)
-    geometryImage.SetImageToWorldMatrix(imageToWorldMatrix)
-    return vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(imageToWorldMatrix, geometryImage)
+    paddedExtent = [unionExtent[0] - paddingVoxels, unionExtent[1] + paddingVoxels,
+                    unionExtent[2] - paddingVoxels, unionExtent[3] + paddingVoxels,
+                    unionExtent[4] - paddingVoxels, unionExtent[5] + paddingVoxels]
+    return MeasurementPreset.serializeZeroBasedImageGeometry(imageToWorldMatrix, paddedExtent)
 
   def volumeRasterizationGeometry(self, leafletSegmentationNode, oversamplingFactor):
     """Reference image geometry for rasterizing surfaces of the leaflet segmentation.
@@ -1634,6 +1653,7 @@ class MeasurementPreset(object):
     size and aborted the application), others carry a single-voxel placeholder that does not cover the
     leaflets, or the whole ultrasound volume at sub-voxel resolution (billions of voxels after
     oversampling). In those cases the geometry of the leaflet labelmaps is used instead.
+    The returned geometry never has a negative extent (see serializeZeroBasedImageGeometry).
     :return: (geometry string, reason) where reason is None if the segmentation's own geometry is used,
       and (None, reason) if no geometry can be determined
     """
@@ -1664,6 +1684,11 @@ class MeasurementPreset(object):
             if np.any(labelmapsMin < referenceMin - tolerance) or np.any(labelmapsMax > referenceMax + tolerance):
               reason = "reference image geometry that does not cover the leaflet labelmaps"
     if reason is None:
+      extent = referenceGeometryImage.GetExtent()
+      if min(extent[0], extent[2], extent[4]) < 0:
+        imageToWorldMatrix = vtk.vtkMatrix4x4()
+        referenceGeometryImage.GetImageToWorldMatrix(imageToWorldMatrix)
+        referenceGeometryString = self.serializeZeroBasedImageGeometry(imageToWorldMatrix, extent)
       return referenceGeometryString, None
     return self.referenceGeometryFromSegments(leafletSegmentationNode), reason
 

@@ -11,6 +11,7 @@ and is skipped when it is not available.
 import math
 import os
 import sys
+import time
 
 import numpy as np
 import vtk
@@ -726,6 +727,35 @@ class ValveModelSequenceTestTest(SlicerHeartTestCase):
     self.assertGreaterEqual(unionVoxels, max(countsBefore["Anterior"], countsBefore["Posterior"]))
     self.assertLessEqual(unionVoxels, countsBefore["Anterior"] + countsBefore["Posterior"])
     self.assertGreater(unionVoxels, countsBefore["Anterior"], "union is larger than a single leaflet")
+
+  def test_createSurfaceBoundaryFromCurve_handles_dense_annulus_curves(self):
+    """The surface boundary of a leaflet has one control point per curve point of the annulus, added
+    to a closed curve node. Adding them one by one outside StartModify/EndModify recomputed the curve
+    measurements after every point, which was quadratic in the number of curve points: a real scene
+    whose annulus had 165 control points (3300 curve points) spent 6 minutes per time point in it."""
+    factory = NewFormatValveFactory()
+    valveBrowser = factory.createValveBrowser("mitral")
+    factory.addTimePoint(valveBrowser, 3)
+    factory.setContour(valveBrowser, 3)
+    factory.addRoi(valveBrowser)
+    factory.addSegmentation(valveBrowser)
+    valveModel = valveBrowser.valveModel
+    self.assertIsNotNone(valveModel.setAnnulusContourPoints(NewFormatValveFactory.contourPoints(3, numPoints=200)))
+    curveNode = valveModel.annulusContourCurveNode
+    numberOfCurvePoints = curveNode.GetCurve().GetNumberOfPoints()
+    self.assertGreater(numberOfCurvePoints, 1500)
+    valveModel.updateLeafletModelsFromSegmentation()
+    valveModel.leafletSegmentationNode.CreateClosedSurfaceRepresentation()
+    leafletModel = valveModel.leafletModels[0]
+    planePosition, planeNormal = valveModel.getAnnulusContourPlane()
+
+    start = time.time()
+    leafletModel.createSurfaceBoundaryFromCurve(planePosition, planeNormal, curveNode)
+    elapsed = time.time() - start
+
+    boundary = leafletModel.getSurfaceBoundaryMarkupNode()
+    self.assertEqual(boundary.GetNumberOfControlPoints(), numberOfCurvePoints)
+    self.assertLess(elapsed, 30.0, f"creating the boundary from {numberOfCurvePoints} curve points took {elapsed:.1f} s")
 
   def test_coaptation_surface_at_every_time_point(self):
     """A coaptation added at a second time point (item added to its sequences before the lines are
