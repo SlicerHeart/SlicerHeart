@@ -2654,23 +2654,22 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         planeNode.SetSize(2 * plane["radius"], 2 * plane["radius"])
         return planeNode
 
-    def writeTestCaseFlows(self, caseDirectory, flowFieldNode, planeNodes=None, samplingDistanceMm=0.5, overwritePlanes=False):
+    def writeTestCaseFlows(self, datasetDirectory, caseId, flowFieldNode, planeNodes=None, samplingDistanceMm=0.5, overwritePlanes=False):
         """Write measurement planes and plane flows of a test case written by Import4DFlowLogic.exportTestCase.
 
-        Planes: the specified plane nodes, otherwise the existing planes of the case (which may have been edited by the user),
-        otherwise automatically placed planes (findMeasurementPlanes). The planes are written into the annotations folder of the
-        case and described in annotations/annotations.json. Plane flows are computed by the plane probe method of this module,
-        in the lumen of the case. outputs/flows.json contains for each plane the per-frame flow rate (ml/s) and the net, forward,
-        backward volume and peak velocity, and conservation checks for plane pairs; outputs/quality_report.json the quality
-        report of the flow field.
+        Planes (inputs of the case): the specified plane nodes, otherwise the existing planes of the case (which may have been
+        edited by the user), otherwise automatically placed planes (findMeasurementPlanes). The planes are written into the
+        annotations folder of the case (inputs/<case>/annotations) and described in annotations.json. Plane flows (outputs of
+        the case) are computed by the plane probe method of this module, in the lumen of the case. flows.json contains for each
+        plane the per-frame flow rate (ml/s) and the net, forward, backward volume and peak velocity, and conservation checks
+        for plane pairs; quality_report.json the quality report of the flow field.
         """
         import Import4DFlow
         importLogic = Import4DFlow.Import4DFlowLogic()
         library = FlowLibraryBridge.ensureLibrary()
-        manifest = importLogic.readTestCaseJson(caseDirectory, "manifest")
-        acquisition = importLogic.readTestCaseJson(caseDirectory, "acquisition", {})
-        annotations = importLogic.readTestCaseJson(caseDirectory, "annotations", {})
-        annotationsDirectory = os.path.join(caseDirectory, importLogic.TEST_CASE_ANNOTATIONS_DIRECTORY)
+        acquisition = importLogic.readTestCaseJson(datasetDirectory, caseId, "acquisition", {})
+        annotations = importLogic.readTestCaseJson(datasetDirectory, caseId, "annotations", {})
+        annotationsDirectory = importLogic.testCaseAnnotationsDirectory(datasetDirectory, caseId)
 
         velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
         lumenDescription = annotations["lumen"]
@@ -2701,8 +2700,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                                        " the flow through them must be the same. Plane normal is the vessel axis, disc radius is the smallest"
                                        " that contains the lumen cross-section. Meant as a starting point for review.",
                         "parameters": parameters,
-                        "inputs": [importLogic.TEST_CASE_FILES["velocity"],
-                                   f"{importLogic.TEST_CASE_ANNOTATIONS_DIRECTORY}/{lumenDescription['file']}"],
+                        # the files it was computed from (relative to the data set), as they were at this time
+                        "inputs": [importLogic.testCaseRelativePath(datasetDirectory, caseId, "velocity"),
+                                   os.path.relpath(lumenPath, datasetDirectory).replace(os.sep, "/")],
                         })
                 planeFiles = []
                 for plane in planes:
@@ -2713,7 +2713,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                         raise RuntimeError(f"Failed to write {os.path.join(annotationsDirectory, filename)}")
                     planeFiles.append(filename)
                 annotations["planes"] = dict({"files": planeFiles}, **planesDescription)
-                importLogic.writeTestCaseJson(caseDirectory, "annotations", annotations)
+                importLogic.writeTestCaseJson(datasetDirectory, caseId, "annotations", annotations)
             else:
                 planesRas = library.read_planes([os.path.join(annotationsDirectory, f) for f in existingPlaneFiles], world="RAS")
                 planes = [dict(plane, name=name) for name, plane in planesRas.items()]
@@ -2773,11 +2773,13 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                                         if f"{pair}_a" in referencePlanes and f"{pair}_b" in referencePlanes],
                 "ratio_checks": [],
                 }
-            importLogic.writeTestCaseJson(caseDirectory, "flows", flows)
+            importLogic.writeTestCaseJson(datasetDirectory, caseId, "flows", flows)
 
             # Quality report of the corrected flow field
-            report = importLogic.computeQualityReport(flowFieldNode, lumenMask, studyId=manifest["case_id"])
-            with open(os.path.join(caseDirectory, importLogic.TEST_CASE_FILES["quality_report"]), "w", encoding="utf-8") as file:
+            report = importLogic.computeQualityReport(flowFieldNode, lumenMask, studyId=caseId)
+            qualityReportPath = importLogic.testCasePath(datasetDirectory, caseId, "quality_report")
+            os.makedirs(os.path.dirname(qualityReportPath), exist_ok=True)
+            with open(qualityReportPath, "w", encoding="utf-8", newline="\n") as file:
                 file.write(library.to_json(report))
         finally:
             for node in temporaryNodes:

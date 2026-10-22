@@ -78,25 +78,22 @@ def environmentValue(name, default=None):
     return default
 
 
-def testCaseDirectories():
-    """Folders of the available 4D flow test cases (Slicer-native format), smallest first."""
+def testCases():
+    """The available 4D flow test cases (Slicer-native format): list of (data set folder, case ID), smallest first.
+    The data set folder is set in TEST_CASES_ENV_VARIABLE (environment or .env.local)."""
     root = environmentValue(TEST_CASES_ENV_VARIABLE)
-    if not root or not os.path.isdir(root):
+    if not root or not os.path.isfile(os.path.join(root, "manifest.json")):
         return []
-    caseDirectories = []
-    for vendor in sorted(os.listdir(root)):
-        vendorDirectory = os.path.join(root, vendor)
-        if not os.path.isdir(vendorDirectory):
-            continue
-        for case in sorted(os.listdir(vendorDirectory)):
-            if os.path.isfile(os.path.join(vendorDirectory, case, "manifest.json")):
-                caseDirectories.append(os.path.join(vendorDirectory, case))
+    from Import4DFlowLib import FlowLibraryBridge
+    import Import4DFlow
+    slicerIo = FlowLibraryBridge.ensureLibrary().slicer_io
+    logic = Import4DFlow.Import4DFlowLogic
 
-    def caseSize(caseDirectory):
-        velocityRawPath = os.path.join(caseDirectory, "inputs", "velocity_raw.seq.nrrd")
+    def caseSize(caseId):
+        velocityRawPath = logic.testCasePath(root, caseId, "velocity_raw")
         return os.path.getsize(velocityRawPath) if os.path.isfile(velocityRawPath) else 0
 
-    return sorted(caseDirectories, key=caseSize)
+    return [(root, caseId) for caseId in sorted(slicerIo.dataset_cases(root), key=caseSize)]
 
 
 def gitDescription():

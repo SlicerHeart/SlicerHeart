@@ -655,14 +655,21 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.logic.qualityReportToTable(report, tableNode)
 
     def onLoadTestCaseButton(self) -> None:
-        caseDirectory = qt.QFileDialog.getExistingDirectory(slicer.util.mainWindow(), "Select test case folder (that contains manifest.json)",
-                                                            self._parameterNode.exportDirectory or slicer.mrmlScene.GetRootDirectory())
-        if caseDirectory:
-            self.loadTestCase(caseDirectory)
+        caseDirectory = qt.QFileDialog.getExistingDirectory(slicer.util.mainWindow(),
+            "Select the folder of the test case (inputs/<case> in the folder of the data set)",
+            self._parameterNode.exportDirectory or slicer.mrmlScene.GetRootDirectory())
+        if not caseDirectory:
+            return
+        try:
+            datasetDirectory, caseId = Import4DFlowLogic.testCaseFromDirectory(caseDirectory)
+        except ValueError as e:
+            slicer.util.errorDisplay(f"Failed to load test case: {e}")
+            return
+        self.loadTestCase(datasetDirectory, caseId)
 
-    def loadTestCase(self, caseDirectory):
+    def loadTestCase(self, datasetDirectory, caseId):
         with slicer.util.tryWithErrorDisplay("Failed to load test case.", waitCursor=True):
-            loaded = self.logic.loadTestCase(caseDirectory, storeInTransform=self.ui.storeInTransformCheckBox.checked)
+            loaded = self.logic.loadTestCase(datasetDirectory, caseId, storeInTransform=self.ui.storeInTransformCheckBox.checked)
             flowFieldNode = loaded["flowFieldNode"]
             self.logic.setFlowFieldVisualizationToDefault(flowFieldNode)
             browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
@@ -676,6 +683,15 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             slicer.util.setSliceViewerLayers(background=loaded["magnitudeVolumeNode"], fit=True)
             return loaded
 
+    def askTestCaseId(self, datasetDirectory):
+        """Ask the ID of a new test case of the data set (an anonymized identifier: it is the name of the case folders).
+        Returns the ID, or None if canceled."""
+        caseId = qt.QInputDialog.getText(slicer.util.mainWindow(), "Export test case",
+            "Case ID (anonymized identifier, the name of the case folders in the data set):", qt.QLineEdit.Normal,
+            Import4DFlowLogic.nextTestCaseId(datasetDirectory))
+        caseId = caseId.strip() if caseId else ""
+        return caseId or None
+
     def onExportButton(self) -> None:
         if not self._parameterNode.exportDirectory:
             self.ui.exportPathLineEdit.setCurrentPath(slicer.mrmlScene.GetRootDirectory())
@@ -684,7 +700,11 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         success = False
         with slicer.util.tryWithErrorDisplay("Failed to export the flow field to files.", waitCursor=True):
             if self._parameterNode.exportFormat == Import4DFlowLogic.EXPORT_FORMAT_TEST_CASE:
-                self.logic.exportTestCaseWithFlows(self._parameterNode.outputFlowField, self._parameterNode.exportDirectory,
+                # The export folder is the folder of the data set; the case is added to it
+                caseId = self.askTestCaseId(self._parameterNode.exportDirectory)
+                if not caseId:
+                    return
+                self.logic.exportTestCaseWithFlows(self._parameterNode.outputFlowField, self._parameterNode.exportDirectory, caseId,
                     lumenSegmentationNode=self._parameterNode.lumenSegmentation, lumenSegmentId=self._parameterNode.lumenSegmentID)
             else:
                 self.logic.exportDisplacementFieldToFiles(self._parameterNode.outputFlowField, self._parameterNode.exportDirectory, self._parameterNode.exportFormat)
@@ -1583,7 +1603,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         elif exportFormat == Import4DFlowLogic.EXPORT_FORMAT_ANONYMIZED_SCENE:
             self.exportDisplacementFieldToAnonymizedScene(exportDirectory)
         elif exportFormat == Import4DFlowLogic.EXPORT_FORMAT_TEST_CASE:
-            self.exportTestCaseWithFlows(flowFieldNode, exportDirectory)
+            # The export folder is the folder of the data set; the case gets the next free case ID
+            self.exportTestCaseWithFlows(flowFieldNode, exportDirectory, self.nextTestCaseId(exportDirectory))
         else:
             raise ValueError(f"Unsupported export format: {exportFormat}")
 
@@ -2288,43 +2309,76 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     # Test cases in Slicer-native file format, for testing slicerheart_4dflow (and this module) without DICOM import
     #
 
-    # Test case layout (the same as slicerheart_4dflow.slicer_io.CASE_FILES, format version 3).
-    # inputs: data converted from DICOM (without any processing) and the description of the acquisition;
-    # outputs: results of the processing and the description of the processing (software, options);
-    # annotations: lumen segmentation and measurement planes, annotations.json describes how they were created;
-    # references/<software>/flows.json: plane flows computed by independent software (optional, not written by SlicerHeart).
-    TEST_CASE_FORMAT_VERSION = 3
-    TEST_CASE_FILES = {
-        "manifest": "manifest.json",
-        "acquisition": "inputs/acquisition.json",
-        "magnitude": "inputs/magnitude.seq.nrrd",
-        "velocity_raw": "inputs/velocity_raw.seq.nrrd",
-        "processing": "outputs/processing.json",
-        "velocity": "outputs/velocity.seq.nrrd",
-        "wrap_count": "outputs/wrap_count.seq.nrrd",
-        "pcmra": "outputs/pcmra.nrrd",
-        "flows": "outputs/flows.json",
-        "quality_report": "outputs/quality_report.json",
-        "annotations": "annotations/annotations.json",
-    }
-    TEST_CASE_ANNOTATIONS_DIRECTORY = "annotations"
+    # Test case data set (format version 4, read by slicerheart_4dflow.slicer_io): manifest.json at the root describes the
+    # data set; inputs/<case>/ holds what the processing starts from: acquisition/ (data converted from DICOM without any
+    # processing, and the description of the acquisition), annotations/ (lumen segmentation and measurement planes,
+    # annotations.json describes how they were created) and optional references/<source>/flows.json (plane flows measured
+    # independently, not written by SlicerHeart); outputs/<case>/ holds the results of the processing and its
+    # description. The case ID is the name of the case folder. File names are those of slicerheart_4dflow.slicer_io.
+    TEST_CASE_FORMAT_VERSION = 4
     TEST_CASE_LUMEN_FILE = "lumen.seg.nrrd"
 
     @staticmethod
-    def readTestCaseJson(caseDirectory, key, default=None):
-        """Read a JSON file of a test case (key of TEST_CASE_FILES). Returns default if the file does not exist."""
-        path = os.path.join(caseDirectory, Import4DFlowLogic.TEST_CASE_FILES[key])
+    def testCasePath(datasetDirectory, caseId, key):
+        """Path of a file of a test case: "manifest" (of the data set), a key of slicerheart_4dflow.slicer_io.INPUT_FILES
+        (in inputs/<case>) or of OUTPUT_FILES (in outputs/<case>)."""
+        slicerIo = FlowLibraryBridge.ensureLibrary().slicer_io
+        if key == "manifest":
+            return os.path.join(datasetDirectory, slicerIo.DATASET_MANIFEST)
+        inputDirectory, outputDirectory = slicerIo.case_directories(datasetDirectory, caseId)
+        if key in slicerIo.INPUT_FILES:
+            return os.path.join(str(inputDirectory), slicerIo.INPUT_FILES[key])
+        return os.path.join(str(outputDirectory), slicerIo.OUTPUT_FILES[key])
+
+    @staticmethod
+    def testCaseAnnotationsDirectory(datasetDirectory, caseId):
+        slicerIo = FlowLibraryBridge.ensureLibrary().slicer_io
+        return os.path.join(str(slicerIo.case_directories(datasetDirectory, caseId)[0]), slicerIo.ANNOTATIONS_DIR)
+
+    @staticmethod
+    def testCaseRelativePath(datasetDirectory, caseId, key):
+        """Path of a file of a test case relative to the data set (as recorded in annotations.json)."""
+        return os.path.relpath(Import4DFlowLogic.testCasePath(datasetDirectory, caseId, key), datasetDirectory).replace(os.sep, "/")
+
+    @staticmethod
+    def testCaseFromDirectory(directory):
+        """(data set folder, case ID) of a case folder (inputs/<case> or outputs/<case> of a test case data set).
+        Raises ValueError if the folder is not a case folder of a data set."""
+        slicerIo = FlowLibraryBridge.ensureLibrary().slicer_io
+        directory = os.path.normpath(directory)
+        caseId = os.path.basename(directory)
+        area = os.path.basename(os.path.dirname(directory))
+        datasetDirectory = os.path.dirname(os.path.dirname(directory))
+        if area not in (slicerIo.INPUTS_DIR, slicerIo.OUTPUTS_DIR) or not os.path.isfile(os.path.join(datasetDirectory, slicerIo.DATASET_MANIFEST)):
+            raise ValueError(f"{directory} is not a case folder of a test case data set (inputs/<case> or outputs/<case>,"
+                             f" with {slicerIo.DATASET_MANIFEST} in the data set folder)")
+        return datasetDirectory, caseId
+
+    @staticmethod
+    def nextTestCaseId(datasetDirectory, prefix="Case"):
+        """A case ID that is not used in the data set yet: prefix followed by a 4-digit number."""
+        slicerIo = FlowLibraryBridge.ensureLibrary().slicer_io
+        used = set(slicerIo.dataset_cases(datasetDirectory)) if os.path.isdir(datasetDirectory) else set()
+        number = 1
+        while f"{prefix}{number:04d}" in used:
+            number += 1
+        return f"{prefix}{number:04d}"
+
+    @staticmethod
+    def readTestCaseJson(datasetDirectory, caseId, key, default=None):
+        """Read a JSON file of a test case (see testCasePath). Returns default if the file does not exist."""
+        path = Import4DFlowLogic.testCasePath(datasetDirectory, caseId, key)
         if not os.path.isfile(path):
             return default
         with open(path, encoding="utf-8") as file:
             return json.load(file)
 
     @staticmethod
-    def writeTestCaseJson(caseDirectory, key, content):
-        """Write a JSON file of a test case (key of TEST_CASE_FILES)."""
-        path = os.path.join(caseDirectory, Import4DFlowLogic.TEST_CASE_FILES[key])
+    def writeTestCaseJson(datasetDirectory, caseId, key, content):
+        """Write a JSON file of a test case (see testCasePath)."""
+        path = Import4DFlowLogic.testCasePath(datasetDirectory, caseId, key)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as file:
+        with open(path, "w", encoding="utf-8", newline="\n") as file:
             json.dump(content, file, indent=2)
             file.write("\n")
 
@@ -2421,59 +2475,58 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             logging.debug(f"DICOM metadata is not available: {e}")
         return metadata
 
-    def exportTestCase(self, flowFieldNode, caseDirectory, caseId, lumenSegmentationNode=None, lumenSegmentId=None, metadata=None,
-                       overwriteLumen=False):
-        """Write the flow field as a test case in 3D Slicer native file formats, which can be read without Slicer by
-        slicerheart_4dflow.slicer_io.load_case and loaded into Slicer by loadTestCase (layout: see TEST_CASE_FILES and
-        slicerheart_4dflow tests/clinical/README.md).
+    # Default processing of test cases (exported from DICOM, or outputs regenerated from the inputs)
+    TEST_CASE_DEFAULT_UNWRAP_MODE = "LaplacianThenTemporalUnwrap"
+    TEST_CASE_NOISE_MAGNITUDE_THRESHOLD_PERCENT = 5.0
+    TEST_CASE_STATIONARY_TISSUE_SPEED_THRESHOLD_VENC_PERCENT = 10.0
 
+    def applyDefaultTestCaseProcessing(self, flowFieldNode, unwrapMode=None):
+        """Process a flow field as the test cases are processed: phase unwrapping (unwrapMode, a name of UnwrapModeEnum;
+        default TEST_CASE_DEFAULT_UNWRAP_MODE) and a quadratic background fit."""
+        mode = UnwrapModeEnum[unwrapMode or self.TEST_CASE_DEFAULT_UNWRAP_MODE]
+        threshold = self.TEST_CASE_NOISE_MAGNITUDE_THRESHOLD_PERCENT
+        if mode == UnwrapModeEnum.TemporalUnwrap:
+            self.temporalUnwrap(flowFieldNode, 0, threshold)
+        else:
+            self.laplacianUnwrap(flowFieldNode, mode, threshold)
+        self.updateFlowFieldFromComponentVolumes(flowFieldNode, threshold, BackgroundSubtractionMethodEnum.QuadraticFit,
+                                                 self.TEST_CASE_STATIONARY_TISSUE_SPEED_THRESHOLD_VENC_PERCENT)
+
+    def exportTestCase(self, flowFieldNode, datasetDirectory, caseId, lumenSegmentationNode=None, lumenSegmentId=None, metadata=None,
+                       overwriteLumen=False):
+        """Write the flow field as a test case of a data set in 3D Slicer native file formats, which can be read without
+        Slicer by slicerheart_4dflow.slicer_io.load_case and loaded into Slicer by loadTestCase (layout: see testCasePath and
+        slicerheart_4dflow tests/clinical/README.md): the inputs (writeTestCaseInputs), the lumen (writeTestCaseLumen) and the
+        outputs of the processing (writeTestCaseOutputs). Measurement planes and plane flows are written by
+        Analyze4DFlowLogic.writeTestCaseFlows. Returns the path of the inputs folder of the case."""
+        self._log(f"Writing test case {caseId} to {datasetDirectory}...")
+        arrays = self.writeTestCaseInputs(flowFieldNode, datasetDirectory, caseId, metadata)
+        outputs = self.writeTestCaseOutputs(flowFieldNode, datasetDirectory, caseId)
+        self.writeTestCaseLumen(datasetDirectory, caseId, flowFieldNode, lumenSegmentationNode, lumenSegmentId, overwriteLumen,
+                                pcmra=outputs["pcmra"], velocity=outputs["velocity"], magnitude=arrays["magnitude"],
+                                voxelToWorld=arrays["voxelToWorld"])
+        return os.path.dirname(os.path.dirname(self.testCasePath(datasetDirectory, caseId, "acquisition")))
+
+    def writeTestCaseInputs(self, flowFieldNode, datasetDirectory, caseId, metadata=None):
+        """Write the acquisition of a test case (inputs/<case>/acquisition: magnitude and raw velocity as acquired, the
+        description of the acquisition), and the manifest of the data set if it does not have one yet.
         Only image data and geometry are written (no DICOM header fields, names, dates, or UIDs), the case is identified
         by caseId. Velocities are in mm/s; vector components are LPS in the files (as any Slicer volume file).
-        metadata: additional fields of the acquisition description (inputs/acquisition.json), for example from _dicomMetadata.
-
-        The lumen segmentation is written from the specified segment, or estimated from the PC-MRA if the case does not
-        have one yet. An existing lumen segmentation (which may have been edited by the user) and its description are kept
-        unless overwriteLumen is set. Measurement planes and plane flows are written by Analyze4DFlowLogic.writeTestCaseFlows.
-        Returns the path of the manifest file.
-        """
-        library = FlowLibraryBridge.ensureLibrary()
-        files = self.TEST_CASE_FILES
-        path = lambda key: os.path.join(caseDirectory, files[key])
-        for key in ("magnitude", "velocity", "annotations"):
-            os.makedirs(os.path.dirname(path(key)), exist_ok=True)
-
+        metadata: additional fields of the acquisition description, for example from _dicomMetadata.
+        Returns dict: magnitude (t, k, j, i) float32, voxelToWorld (RAS)."""
+        path = lambda key: self.testCasePath(datasetDirectory, caseId, key)
+        os.makedirs(os.path.dirname(path("acquisition")), exist_ok=True)
         geometryNode = FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode)
         voxelToWorld = FlowLibraryBridge.voxelToWorld(geometryNode)
-        velocity, _, timesMs = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+        _, _, timesMs = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
         magnitudeSequenceNode = self._getSequenceFromProxyNode(flowFieldNode.GetNodeReference("magnitudeVolume"))
         magnitudeFrames = np.stack([slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(i))
                                     for i in range(magnitudeSequenceNode.GetNumberOfDataNodes())])
         encodingToWorld = FlowLibraryBridge.encodingToWorld(flowFieldNode)
         rawVelocity = FlowLibraryBridge.rawWorldVelocity(flowFieldNode)
-        wrapCountsEncoded = self.getWrapCounts(flowFieldNode)
-        if wrapCountsEncoded is None:
-            wrapCountsEncoded = np.zeros(velocity.shape, np.int8)
-
-        self._log(f"Writing test case {caseId} to {caseDirectory}...")
         self._writeVolumeSequenceFile(path("magnitude"), magnitudeFrames, voxelToWorld, timesMs)
         self._writeVolumeSequenceFile(path("velocity_raw"), rawVelocity, voxelToWorld, timesMs, vector=True, velocity=True)
-        self._writeVolumeSequenceFile(path("velocity"), velocity, voxelToWorld, timesMs, vector=True, velocity=True)
-        # Wrap counts are integers per velocity encoding direction (component c: encoding_to_world[:, c]), not spatial vectors
-        self._writeVolumeSequenceFile(path("wrap_count"), wrapCountsEncoded.astype(np.int16), voxelToWorld, timesMs, vector=True, spatial=False)
-        pcmra = library.pcmra(magnitudeFrames.astype(np.float32), velocity).astype(np.float32)
-        pcmraNode = self._volumeNodeFromArray(pcmra, voxelToWorld)
-        slicer.mrmlScene.AddNode(pcmraNode)
-        try:
-            if not slicer.util.saveNode(pcmraNode, path("pcmra")):
-                raise RuntimeError(f"Failed to write {path('pcmra')}")
-        finally:
-            slicer.mrmlScene.RemoveNode(pcmraNode)
 
-        # Lumen segmentation
-        self.writeTestCaseLumen(caseDirectory, flowFieldNode, lumenSegmentationNode, lumenSegmentId, overwriteLumen,
-                                pcmra=pcmra, velocity=velocity, magnitude=magnitudeFrames.astype(np.float32), voxelToWorld=voxelToWorld)
-
-        # Description of the acquisition (inputs) and of the processing (outputs)
         scales, vencs, invertToRas = FlowLibraryBridge.componentEncoding(flowFieldNode)
         lpsFromRas = np.diag([-1.0, -1.0, 1.0])
         componentEncodings = []
@@ -2499,46 +2552,72 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         acquisition.update(self._dicomMetadata(flowFieldNode))
         if metadata:
             acquisition.update(metadata)
-        self.writeTestCaseJson(caseDirectory, "acquisition", acquisition)
+        self.writeTestCaseJson(datasetDirectory, caseId, "acquisition", acquisition)
+
+        if not os.path.isfile(path("manifest")):
+            self.writeTestCaseJson(datasetDirectory, caseId, "manifest", {
+                "format_version": self.TEST_CASE_FORMAT_VERSION,
+                "name": os.path.basename(os.path.normpath(datasetDirectory)),
+                "license": "internal",
+                "doi": None,
+                })
+        return {"magnitude": magnitudeFrames.astype(np.float32), "voxelToWorld": voxelToWorld}
+
+    def writeTestCaseOutputs(self, flowFieldNode, datasetDirectory, caseId):
+        """Write the outputs of the processing of a test case (outputs/<case>: processed velocity, wrap counts, PC-MRA, the
+        description of the processing). The plane flows and the quality report are written by
+        Analyze4DFlowLogic.writeTestCaseFlows. Returns dict: velocity (t, k, j, i, 3) mm/s RAS, pcmra."""
+        library = FlowLibraryBridge.ensureLibrary()
+        path = lambda key: self.testCasePath(datasetDirectory, caseId, key)
+        os.makedirs(os.path.dirname(path("velocity")), exist_ok=True)
+        geometryNode = FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode)
+        voxelToWorld = FlowLibraryBridge.voxelToWorld(geometryNode)
+        velocity, _, timesMs = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+        wrapCountsEncoded = self.getWrapCounts(flowFieldNode)
+        if wrapCountsEncoded is None:
+            wrapCountsEncoded = np.zeros(velocity.shape, np.int8)
+        self._writeVolumeSequenceFile(path("velocity"), velocity, voxelToWorld, timesMs, vector=True, velocity=True)
+        # Wrap counts are integers per velocity encoding direction (component c: encoding_to_world[:, c]), not spatial vectors
+        self._writeVolumeSequenceFile(path("wrap_count"), wrapCountsEncoded.astype(np.int16), voxelToWorld, timesMs, vector=True, spatial=False)
+        magnitude = FlowLibraryBridge.magnitudeArray(flowFieldNode)
+        pcmra = library.pcmra(magnitude, velocity).astype(np.float32)
+        pcmraNode = self._volumeNodeFromArray(pcmra, voxelToWorld)
+        slicer.mrmlScene.AddNode(pcmraNode)
+        try:
+            if not slicer.util.saveNode(pcmraNode, path("pcmra")):
+                raise RuntimeError(f"Failed to write {path('pcmra')}")
+        finally:
+            slicer.mrmlScene.RemoveNode(pcmraNode)
         flowFieldSequenceNode = self._getSequenceFromProxyNode(flowFieldNode)
-        self.writeTestCaseJson(caseDirectory, "processing", {
+        self.writeTestCaseJson(datasetDirectory, caseId, "processing", {
             "software": {"slicer": slicer.app.applicationVersion, "slicerheart_4dflow": library.__version__},
             "processing": json.loads(flowFieldSequenceNode.GetAttribute("SlicerHeart.processing") or "{}"),
             # Plausibility warnings of the phase unwrapping (see checkPhaseUnwrapping), empty if the result is plausible
             "phase_unwrapping_warnings": json.loads(flowFieldSequenceNode.GetAttribute("SlicerHeart.phaseUnwrappingWarnings") or "[]"),
             })
+        return {"velocity": velocity, "pcmra": pcmra}
 
-        previousManifest = self.readTestCaseJson(caseDirectory, "manifest", {})
-        self.writeTestCaseJson(caseDirectory, "manifest", {
-            "format_version": self.TEST_CASE_FORMAT_VERSION,
-            "case_id": caseId,
-            "license": previousManifest.get("license", "internal"),
-            "doi": previousManifest.get("doi"),
-            })
-        return path("manifest")
-
-    def exportTestCaseWithFlows(self, flowFieldNode, caseDirectory, caseId=None, lumenSegmentationNode=None, lumenSegmentId=None,
+    def exportTestCaseWithFlows(self, flowFieldNode, datasetDirectory, caseId, lumenSegmentationNode=None, lumenSegmentId=None,
                                 planeNodes=None, metadata=None):
         """Export a test case (exportTestCase), then write measurement planes (automatically placed if not specified
         and the case has none yet) and plane flows computed by Analyze 4D Flow (Analyze4DFlowLogic.writeTestCaseFlows).
-        The case ID is the name of the case directory, if not specified. Returns the manifest path."""
-        caseId = caseId or os.path.basename(os.path.normpath(caseDirectory))
-        manifestPath = self.exportTestCase(flowFieldNode, caseDirectory, caseId, lumenSegmentationNode or None,
-                                           lumenSegmentId or None, metadata)
+        Returns the path of the inputs folder of the case."""
+        caseDirectory = self.exportTestCase(flowFieldNode, datasetDirectory, caseId, lumenSegmentationNode or None,
+                                            lumenSegmentId or None, metadata)
         import Analyze4DFlow
-        Analyze4DFlow.Analyze4DFlowLogic().writeTestCaseFlows(caseDirectory, flowFieldNode, planeNodes)
-        return manifestPath
+        Analyze4DFlow.Analyze4DFlowLogic().writeTestCaseFlows(datasetDirectory, caseId, flowFieldNode, planeNodes)
+        return caseDirectory
 
-    def writeTestCaseLumen(self, caseDirectory, flowFieldNode, lumenSegmentationNode=None, lumenSegmentId=None, overwriteLumen=False,
-                           pcmra=None, velocity=None, magnitude=None, voxelToWorld=None):
-        """Write the lumen segmentation of a test case (annotations/lumen.seg.nrrd) and its description in
-        annotations/annotations.json: the specified segment (in its own resolution), otherwise the existing lumen of the case
+    def writeTestCaseLumen(self, datasetDirectory, caseId, flowFieldNode, lumenSegmentationNode=None, lumenSegmentId=None,
+                           overwriteLumen=False, pcmra=None, velocity=None, magnitude=None, voxelToWorld=None):
+        """Write the lumen segmentation of a test case (inputs/<case>/annotations/lumen.seg.nrrd) and its description in
+        annotations.json: the specified segment (in its own resolution), otherwise the existing lumen of the case
         (which may have been edited by the user) unless overwriteLumen is set, otherwise the automatic lumen (estimateLumen,
         on a grid twice as fine as the image). pcmra, velocity (mm/s), magnitude and voxelToWorld are computed from the flow
         field if not given. Returns True if the lumen file was written."""
-        files = self.TEST_CASE_FILES
-        annotations = self.readTestCaseJson(caseDirectory, "annotations", {})
-        lumenPath = os.path.join(caseDirectory, self.TEST_CASE_ANNOTATIONS_DIRECTORY, self.TEST_CASE_LUMEN_FILE)
+        annotations = self.readTestCaseJson(datasetDirectory, caseId, "annotations", {})
+        lumenPath = os.path.join(self.testCaseAnnotationsDirectory(datasetDirectory, caseId), self.TEST_CASE_LUMEN_FILE)
+        os.makedirs(os.path.dirname(lumenPath), exist_ok=True)
         written = True
         if lumenSegmentationNode and lumenSegmentId:
             # In the resolution of the segmentation (which may be finer than the image)
@@ -2568,10 +2647,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                                " above twice that of the velocity noise. Meant as a starting point for review and editing.",
                 "parameters": {"minimumComponentVolumeMl": minimumComponentVolumeMl, "oversampling": self.LUMEN_OVERSAMPLING,
                                "growthVoxels": 1.5, "growthNoiseFactor": 2.0},
-                "inputs": [files["pcmra"], files["velocity"], files["magnitude"]],
+                # the files it was computed from (relative to the data set), as they were at this time
+                "inputs": [self.testCaseRelativePath(datasetDirectory, caseId, key) for key in ("pcmra", "velocity", "magnitude")],
                 })
         annotations["lumen"] = dict({"file": self.TEST_CASE_LUMEN_FILE, "segment": "lumen"}, **annotations["lumen"])
-        self.writeTestCaseJson(caseDirectory, "annotations", annotations)
+        self.writeTestCaseJson(datasetDirectory, caseId, "annotations", annotations)
         return written
 
     def _writeLumenSegmentation(self, path, mask, voxelToWorld):
@@ -2584,13 +2664,16 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         finally:
             slicer.mrmlScene.RemoveNode(segmentationNode)
 
-    def loadTestCase(self, caseDirectory, storeInTransform=False, applyProcessing=True):
+    def loadTestCase(self, datasetDirectory, caseId, storeInTransform=False, applyProcessing=True, useOutputs=True, unwrapMode=None):
         """Load a test case written by exportTestCase into the scene, without DICOM import.
 
         The magnitude and component image sequences are reconstructed from the raw velocity (exactly, as the stored
         component values are integers) with the same attributes as images imported from DICOM, so all Import 4D Flow
-        processing can be applied. The phase wrap segmentations are restored from the wrap counts, and the flow field is
-        computed with the processing settings recorded in outputs/processing.json (if applyProcessing is True).
+        processing can be applied. If useOutputs is set and the case has outputs, the phase wrap segmentations are restored
+        from its wrap counts and the flow field is computed with the processing settings recorded in processing.json, which
+        reproduces the outputs (for review). Otherwise only the inputs are used: the flow field is processed with the
+        default processing of test cases (applyDefaultTestCaseProcessing, unwrapMode), as for regenerating the outputs.
+        Processing is applied only if applyProcessing is set.
         The lumen segmentation and measurement planes are loaded from their files, so that after editing they can be
         saved back to the test case (File / Save data).
 
@@ -2598,12 +2681,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         acquisition, processing, annotations.
         """
         library = FlowLibraryBridge.ensureLibrary()
-        case = library.load_case(caseDirectory, world="RAS")
+        case = library.load_case(datasetDirectory, caseId, world="RAS")
+        useOutputs = useOutputs and case["has_outputs"]
         manifest, acquisition, annotations = case["manifest"], case["acquisition"], case["annotations"]
         processing = case["processing"].get("processing", {})
         voxelToWorld = case["voxel_to_world"]
         timesMs = case["time_ms"]
-        caseId = manifest.get("case_id", os.path.basename(os.path.normpath(caseDirectory)))
         frameLabels = ",".join(f"{float(t):g}" for t in timesMs)
 
         def createSequence(name, frames, attributes):
@@ -2645,12 +2728,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         flowFieldNode = self.createFlowFieldFromComponentVolumes(componentVolumeNodes, invertToRasDirections, magnitudeVolumeNode, storeInTransform)
         flowFieldNode.SetName(f"{caseId} flow field")
 
-        wrapCountsEncoded = case["wrap_count_t"].astype(np.int8)  # per encoded component
-        if np.any(wrapCountsEncoded != 0):
+        wrapCountsEncoded = case["wrap_count_t"].astype(np.int8) if useOutputs else None  # per encoded component
+        if wrapCountsEncoded is not None and np.any(wrapCountsEncoded != 0):
             self.setWrapCounts(flowFieldNode, wrapCountsEncoded)
             self._getSequenceFromProxyNode(flowFieldNode).SetAttribute("SlicerHeart.phaseUnwrapping", processing.get("phaseUnwrapping", "TemporalUnwrap"))
 
-        annotationsDirectory = os.path.join(caseDirectory, self.TEST_CASE_ANNOTATIONS_DIRECTORY)
+        annotationsDirectory = self.testCaseAnnotationsDirectory(datasetDirectory, caseId)
         lumenSegmentationNode = None
         lumenDescription = annotations.get("lumen", {})
         if lumenDescription.get("file") and os.path.isfile(os.path.join(annotationsDirectory, lumenDescription["file"])):
@@ -2659,7 +2742,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         for filename in annotations.get("planes", {}).get("files", []):
             planeNodes.append(slicer.util.loadMarkups(os.path.join(annotationsDirectory, filename)))
 
-        if applyProcessing:
+        if applyProcessing and not useOutputs:
+            self.applyDefaultTestCaseProcessing(flowFieldNode, unwrapMode)
+        elif applyProcessing:
             lumenMask = None
             if lumenSegmentationNode:
                 lumenSegmentId = lumenSegmentationNode.GetSegmentation().GetSegmentIdBySegmentName(lumenDescription.get("segment", "lumen")) \
