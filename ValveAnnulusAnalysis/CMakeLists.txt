@@ -16,6 +16,9 @@ set(MODULE_PYTHON_SCRIPTS
   HeartValveLib/PapillaryModel
   HeartValveLib/CoaptationModel
   HeartValveLib/Constants
+  HeartValveWidgets/__init__
+  HeartValveWidgets/ValveSequenceInfoWidget
+  HeartValveWidgets/ValveSequenceBrowserWidget
   )
 
 set(MODULE_PYTHON_RESOURCES
@@ -27,6 +30,8 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/Tricuspid.png
   Resources/Icons/TruncalValve.png
   Resources/UI/${MODULE_NAME}.ui
+  Resources/UI/ValveSequenceInfoWidget.ui
+  Resources/UI/ValveSequenceBrowserWidget.ui
   Resources/VrPresets/CT-EndoVascular.png
   Resources/VrPresets/US-Green.png
   Resources/VrPresets/US-Grey.png
