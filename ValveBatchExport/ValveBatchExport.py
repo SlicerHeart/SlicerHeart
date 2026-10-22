@@ -3,8 +3,9 @@ from pathlib import Path
 import sys
 import argparse
 import vtk, qt, ctk, slicer
+
 from slicer.ScriptedLoadableModule import *
-from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS
+from HeartValveLib.Constants import CARDIAC_CYCLE_PHASE_PRESETS, VALVE_TYPE_PRESETS
 from HeartValveLib.helpers import getAllFilesWithExtension, isMRBFile
 from ValveBatchExportRules import *
 from collections import deque
@@ -71,6 +72,7 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
                              ValveBatchExportPlugin(ValveLandmarksExportRule, False),
                              ValveBatchExportPlugin(ValveLeafletSurfacesExportRule, False),
                              ValveBatchExportPlugin(ValveVolumeExportRule, False),
+                             ValveBatchExportPlugin(ValveVolumeFrameExportRule, False),
                              ValveBatchExportPlugin(QuantificationResultsExportRule),
                              ValveBatchExportPlugin(PapillaryAnalysisResultsExportRule),
                              ValveBatchExportPlugin(LeafletSegmentationExportRule, False),
@@ -86,34 +88,15 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
+    uiWidget = slicer.util.loadUI(self.resourcePath('UI/ValveBatchExport.ui'))
+    self.layout.addWidget(uiWidget)
+    self.ui = slicer.util.childWidgetVariables(uiWidget)
+
     self.logic = ValveBatchExportLogic(logCallback=self.addLog,
                                        progressCallback=self.progressUpdate,
                                        completedCallback=self._resetExport)
 
-    # Instantiate and connect widgets ...
-
-    parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    parametersCollapsibleButton.text = "Parameters"
-    self.layout.addWidget(parametersCollapsibleButton)
-
-    # Layout within the dummy collapsible button
-    parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
-
-    self.inputDirSelector = ctk.ctkPathLineEdit()
-    self.inputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-    self.inputDirSelector.settingKey = 'ValveBatchExportInputDir'
-    self.inputDirSelector.setToolTip("Directory containing scene (.mrb) files with heart valves.")
-    parametersFormLayout.addRow("Input directory:", self.inputDirSelector)
-
-    self.outputDirSelector = ctk.ctkPathLineEdit()
-    self.outputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-    self.outputDirSelector.settingKey = 'ValveBatchExportOutputDir'
-    self.outputDirSelector.setToolTip("Directory that will contain exported data.")
-    parametersFormLayout.addRow("Output directory:", self.outputDirSelector)
-
-    self.exportOptionsFrame = qt.QGroupBox("Export options")
-    self.exportOptionsFrameLayout = qt.QFormLayout()
-    self.exportOptionsFrame.setLayout(self.exportOptionsFrameLayout)
+    self.exportOptionsFrameLayout = self.ui.exportOptionsFrame.layout()
 
     self.imageFileFormatComboBox = qt.QComboBox()
     self.imageFileFormatComboBox.addItems([".nrrd", ".nii.gz"])
@@ -125,44 +108,19 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
       self.exportOptionsFrameLayout.addRow(exportPlugin.getDescription(), exportPlugin)
 
     self.setupPhaseSelectionSection()
-    self.exportOptionsFrameLayout.addRow("Phases (if available)", self.phaseSelectionWidget)
-
-    parametersFormLayout.addRow(self.exportOptionsFrame)
+    self.setupValveTypeSelectionSection()
 
     from multiprocessing import cpu_count
-    self.parallelProcessesSpinBox = ctk.ctkDoubleSpinBox()
-    self.parallelProcessesSpinBox.minimum = 1
-    self.parallelProcessesSpinBox.maximum = cpu_count()
-    self.parallelProcessesSpinBox.decimals = 0
-    self.parallelProcessesSpinBox.value = self.logic.numParallelProcesses
-    self.parallelProcessesSpinBox.valueChanged.connect(self.onNumParallelProcessesChanged)
+    self.ui.parallelProcessesSpinBox.maximum = cpu_count()
+    self.ui.parallelProcessesSpinBox.value = self.logic.numParallelProcesses
+    self.ui.parallelProcessesSpinBox.valueChanged.connect(self.onNumParallelProcessesChanged)
 
-    self.minProcessesButton = qt.QPushButton("min")
-    self.minProcessesButton.toolTip = "Minimum number of processes"
-    self.minProcessesButton.clicked.connect(lambda : self.parallelProcessesSpinBox.setValue(1))
+    self.ui.minProcessesButton.clicked.connect(lambda : self.ui.parallelProcessesSpinBox.setValue(1))
+    self.ui.maxProcessesButton.clicked.connect(lambda : self.ui.parallelProcessesSpinBox.setValue(cpu_count()))
 
-    self.maxProcessesButton = qt.QPushButton("max")
-    self.maxProcessesButton.toolTip = "Maximum number of parallel processes"
-    self.maxProcessesButton.clicked.connect(lambda : self.parallelProcessesSpinBox.setValue(cpu_count()))
+    self.ui.exportButton.clicked.connect(self.onExportButtonClicked)
 
-    hbox = qt.QHBoxLayout()
-    hbox.addWidget(self.parallelProcessesSpinBox)
-    hbox.addWidget(self.minProcessesButton)
-    hbox.addWidget(self.maxProcessesButton)
-    parametersFormLayout.addRow("Parallel processes", hbox)
-
-    self.exportButton = qt.QPushButton("Start Export")
-    self.exportButton.toolTip = \
-      "Iterate through all the scene files in the input directory and write results to the output directory"
-    parametersFormLayout.addRow(self.exportButton)
-    self.exportButton.clicked.connect(self.onExportButtonClicked)
-
-    self.statusLabel = qt.QPlainTextEdit()
-    self.statusLabel.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
-    parametersFormLayout.addRow(self.statusLabel)
-
-    self.progressbar = qt.QProgressBar()
-    parametersFormLayout.addRow(self.progressbar)
+    self.ui.statusLabel.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
 
     self._exportRunning = False
 
@@ -170,28 +128,36 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
     self.logic.numParallelProcesses = int(val)
 
   def progressUpdate(self, value, maximum):
-    self.progressbar.setValue(value)
-    self.progressbar.setMaximum(maximum)
+    self.ui.progressbar.setMaximum(maximum)
+    self.ui.progressbar.setValue(value)
 
   def setupPhaseSelectionSection(self):
     self.phaseCheckboxes = []
-    self.phaseSelectionWidget = qt.QWidget()
-    self.phaseSelectionWidget.setLayout(qt.QGridLayout())
-    self.phaseSelectionWidget.layout().setSpacing(0)
-    self.phaseSelectionWidget.layout().setMargin(0)
+    layout = self.ui.phaseSelectionWidget.layout()
 
-    maxCols = 5
+    maxCols = 3
     for idx, (phaseName, phaseAttributes) in enumerate(CARDIAC_CYCLE_PHASE_PRESETS.items()):
       checkbox = qt.QCheckBox(phaseAttributes['shortname'])
       checkbox.setProperty('name', phaseAttributes['shortname'])
       checkbox.setToolTip(f"{phaseName}({phaseAttributes['shortname']})")
       checkbox.checked = True
       self.phaseCheckboxes.append(checkbox)
-      self.phaseSelectionWidget.layout().addWidget(checkbox, idx // maxCols, idx % maxCols)
+      layout.addWidget(checkbox, idx // maxCols, idx % maxCols)
+    self.ui.phaseSelectionButton.clicked.connect(self.onPhasesSelectionButtonClicked)
 
-    button = qt.QPushButton("Select/Deselect All")
-    self.phaseSelectionWidget.layout().addWidget(button, idx // maxCols + 1, 0, 1, maxCols)
-    button.clicked.connect(self.onPhasesSelectionButtonClicked)
+  def setupValveTypeSelectionSection(self):
+    self.valveTypeCheckboxes = []
+    layout = self.ui.valveTypeSelectionWidget.layout()
+
+    maxCols = 2
+    for idx, phaseName in enumerate(VALVE_TYPE_PRESETS.keys()):
+      checkbox = qt.QCheckBox(phaseName)
+      checkbox.setProperty('name', phaseName)
+      checkbox.setToolTip(f"{phaseName}")
+      checkbox.checked = True
+      self.valveTypeCheckboxes.append(checkbox)
+      layout.addWidget(checkbox, idx // maxCols, idx % maxCols)
+    self.ui.valveTypeSelectionButton.clicked.connect(self.onValveTypeSelectionButtonClicked)
 
   def onPhasesSelectionButtonClicked(self):
     uncheckedFound = any(checkbox.checked is False for checkbox in self.phaseCheckboxes)
@@ -199,6 +165,13 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
 
   def getCheckedPhases(self):
     return [checkbox.property('name') for checkbox in self.phaseCheckboxes if checkbox.checked is True]
+
+  def onValveTypeSelectionButtonClicked(self):
+    uncheckedFound = any(checkbox.checked is False for checkbox in self.valveTypeCheckboxes)
+    deque(map(lambda checkbox: checkbox.setChecked(uncheckedFound), self.valveTypeCheckboxes))
+
+  def getCheckedValveTypes(self):
+    return [checkbox.property('name') for checkbox in self.valveTypeCheckboxes if checkbox.checked is True]
 
   def onExportButtonClicked(self):
     if self._exportRunning:
@@ -217,34 +190,35 @@ class ValveBatchExportWidget(ScriptedLoadableModuleWidget):
         slicer.app.restoreOverrideCursor()
 
   def _startExport(self):
-    self.exportButton.text = "Stop Export"
+    self.ui.exportButton.text = "Stop Export"
     self._exportRunning = True
-    self.inputDirSelector.addCurrentPathToHistory()
-    self.outputDirSelector.addCurrentPathToHistory()
-    self.statusLabel.plainText = ''
+    self.ui.inputDirSelector.addCurrentPathToHistory()
+    self.ui.outputDirSelector.addCurrentPathToHistory()
+    self.ui.statusLabel.plainText = ''
     ValveBatchExportRule.setPhasesToExport(self.getCheckedPhases())
     ValveBatchExportRule.setImageFileExtension(self.getSelectedImageFileExtension())
+    ValveBatchExportRule.setValveTypesToExport(self.getCheckedValveTypes())
     self.logic.clearRules()
     for registeredPlugin in self.registeredExportPlugins:
       if registeredPlugin.activated:
         self.logic.addRule(registeredPlugin.getRuleClass())
-    outputDir = self.outputDirSelector.currentPath
+    outputDir = self.ui.outputDirSelector.currentPath
     if not outputDir:
-      outputDir = self.inputDirSelector.currentPath
-    self.logic.exportDir(self.inputDirSelector.currentPath, outputDir)
+      outputDir = self.ui.inputDirSelector.currentPath
+    self.logic.exportDir(self.ui.inputDirSelector.currentPath, outputDir)
 
   def getSelectedImageFileExtension(self):
     return self.imageFileFormatComboBox.currentText.lstrip(".")
 
   def _resetExport(self):
-    self.exportButton.text = "Start Export"
+    self.ui.exportButton.text = "Start Export"
     self._exportRunning = False
     self._hasErrors = False
 
   def addLog(self, text):
     """Append text to log window
     """
-    self.statusLabel.appendPlainText(text)
+    self.ui.statusLabel.appendPlainText(text)
     slicer.app.processEvents() # force update
 
 
@@ -294,7 +268,6 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
     self.addLog('Export started...')
     self.addLog(f'Input directory: {inputDirPath}')
     self.addLog(f'Output directory: {outputDirPath}')
-
     self.outputDirPath = outputDirPath
     self.examineInputs(inputDirPath)
 
@@ -338,6 +311,7 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       args.extend(rule.OTHER_FLAGS)
     args.extend(["-ph", *ValveBatchExportRule.EXPORT_PHASES])
     args.extend(["-if", ValveBatchExportRule.IMAGE_FILE_EXTENSION])
+    args.extend(["-vt", *ValveBatchExportRule.EXPORT_VALVE_TYPES])
     return args
 
   def resetExport(self):
@@ -382,6 +356,14 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       self.completedCallback()
 
   def exportMRBFile(self, filePath, outputDirPath):
+    from Converter4DSequences import Converter4DSequences
+    # The export rules expect the multi-frame sequence format, and the scene is converted explicitly
+    # below. Suspend the automatic conversion on scene load, which is deferred to the event loop and
+    # would otherwise run while (or after) the rules process the scene.
+    with Converter4DSequences.suspendAutoConvert():
+      self._exportMRBFile(filePath, outputDirPath)
+
+  def _exportMRBFile(self, filePath, outputDirPath):
     if not isMRBFile(filePath):
       self.addLog(f'  {filePath} is not a mrb file. Skipped.')
       return
@@ -423,19 +405,43 @@ class ValveBatchExportLogic(ScriptedLoadableModuleLogic):
       # slicer.mrmlScene.Clear(False)
       # return
 
+    self.convertSceneToSequenceFormat()
+
     self.addLog('  Collecting data...')
 
     for rule in self._exportRules:
-      rule.processScene(filePath)
+      self._runRuleStep(rule, rule.processScene, filePath)
 
     for rule in self._exportRules:
-      rule.afterProcessScene(filePath)
+      self._runRuleStep(rule, rule.afterProcessScene, filePath)
 
     slicer.mrmlScene.Clear(False)
 
     self.addLog('Writing results...')
     for rule in self._exportRules:
-      rule.processEnd()
+      self._runRuleStep(rule, rule.processEnd)
+
+  def _runRuleStep(self, rule, method, *args):
+    """Run one export rule step. A failing rule must not prevent the remaining rules from running."""
+    try:
+      method(*args)
+    except Exception as e:
+      self.addLog(f'  Error: {type(rule).__name__}.{method.__name__} failed: {e}')
+      import traceback
+      traceback.print_exc()
+
+  def convertSceneToSequenceFormat(self):
+    """Convert legacy (single frame) HeartValve nodes of the loaded scene to the multi-frame sequence
+    format expected by the export rules. Already converted scenes are left unchanged.
+    """
+    from Converter4DSequences import Converter4DSequencesLogic
+    self.addLog('  Converting scene to sequence format...')
+    try:
+      Converter4DSequencesLogic().performFullConversion(showMessage=False, interactive=False)
+    except Exception as e:
+      self.addLog(f'  Warning: conversion to sequence format failed: {e}')
+      import traceback
+      traceback.print_exc()
 
 
 class ProcessesLogic(object):
@@ -592,6 +598,8 @@ def main(argv):
                       help="cardiac phases which will be exported")
   parser.add_argument("-if", "--image_file_format", choices=["nrrd", "nii.gz"], default="nrrd",
                       help="preferred file format for exported image volumes and label maps")
+  parser.add_argument("-vt", "--valve_types", type=str, nargs="+", required=True,
+                      help="valve types which will be exported")
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG, "--export_annulus_coordinates", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_1, "--annulus_curve_point_coordinates", action='store_true')
   parser.add_argument(AnnulusContourCoordinatesExportRule.CMD_FLAG_2, "--annulus_control_point_coordinates", action='store_true')
@@ -599,6 +607,7 @@ def main(argv):
   parser.add_argument(ValveLandmarkCoordinatesExportRule.CMD_FLAG, "--export_landmark_coordinates", action='store_true')
   parser.add_argument(PapillaryAnalysisResultsExportRule.CMD_FLAG, "--export_papillary_results", action='store_true')
   parser.add_argument(ValveVolumeExportRule.CMD_FLAG, "--export_image_volume", action='store_true')
+  parser.add_argument(ValveVolumeFrameExportRule.CMD_FLAG, "--export_valve_volume_frame", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG, "--export_leaflet_segmentation", action='store_true')
   parser.add_argument(LeafletSegmentationExportRule.CMD_FLAG_LABELMAP,
                       "--export_leaflet_segmentation_labelmap", action='store_true')
@@ -631,6 +640,7 @@ def main(argv):
 
   ValveBatchExportRule.EXPORT_PHASES = args.phases
   ValveBatchExportRule.setImageFileExtension(args.image_file_format)
+  ValveBatchExportRule.EXPORT_VALVE_TYPES = args.valve_types
 
   if args.export_quantification_results:
     logic.addRule(QuantificationResultsExportRule)
@@ -648,6 +658,8 @@ def main(argv):
     logic.addRule(ValveVolumeExportRule)
   if args.extracted_leaflet_surfaces:
     logic.addRule(ValveLeafletSurfacesExportRule)
+  if args.export_valve_volume_frame:
+    logic.addRule(ValveVolumeFrameExportRule)
   if args.export_leaflet_segmentation:
     LeafletSegmentationExportRule.EXPORT_SEGMENTS_AS_LABELMAP = \
       args.export_leaflet_segmentation_labelmap or not args.export_leaflet_segmentation_model

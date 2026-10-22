@@ -13,10 +13,11 @@ class ValveLandmarksExportRule(ValveBatchExportRule):
 
   def processScene(self, sceneFileName):
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      annulusMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, "landmarks")
-      slicer.util.saveNode(annulusMarkupNode, str(Path(self.outputDir) / f"{valveModelName}.fcsv"))
+      for timePoint in self.iterateExportedTimePoints(valveModel):
+        frameNumber = self.getAssociatedFrameNumber(valveModel)
+        annulusMarkupNode = valveModel.getAnnulusLabelsMarkupNode()
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        valveType = valveModel.getValveType()
+        cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
+        valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber, "landmarks")
+        slicer.util.saveNode(annulusMarkupNode, str(Path(self.outputDir) / f"{valveModelName}.fcsv"))

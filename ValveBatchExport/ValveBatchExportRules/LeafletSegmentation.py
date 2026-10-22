@@ -6,6 +6,7 @@ import vtk
 import HeartValveLib.Constants
 import slicer
 from .base import ValveBatchExportRule
+from HeartValveLib.util import getAllSegmentIDs
 
 from typing import Optional
 
@@ -67,28 +68,35 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
   def processScene(self, sceneFileName):
 
     for valveModel in self.getHeartValveModelNodes():
-      frameNumber = self.getAssociatedFrameNumber(valveModel)
-      filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
-      valveType = valveModel.heartValveNode.GetAttribute('ValveType')
-      cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
-      valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
-      leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
 
-      if leafletSegmentationNode is None:
-        self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
-        continue
-      segmentationBounds = [0, -1, 0, -1, 0, -1]
-      leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
-      if segmentationBounds[0] > segmentationBounds[1] or \
-        segmentationBounds[2] > segmentationBounds[3] or \
-        segmentationBounds[4] > segmentationBounds[5]:
-        self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
-        continue
+      for timePoint in self.iterateExportedTimePoints(valveModel):
+        frameNumber = self.getAssociatedFrameNumber(valveModel)
+        filename, file_extension = os.path.splitext(os.path.basename(sceneFileName))
+        valveType = valveModel.getValveType()
+        cardiacCyclePhaseName = valveModel.cardiacCyclePhasePresets[valveModel.getCardiacCyclePhase()]["shortname"]
+        valveModelName = self.generateValveModelName(filename, valveType, cardiacCyclePhaseName, frameNumber)
+        leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
 
-      self._saveSegmentsIntoSeparateFiles(valveModel, valveModelName)
+        if leafletSegmentationNode is None:
+          self.addLog(f"  Leaflet segmentation export skipped (segmentation is missing) - {valveModelName}")
+          continue
+        segmentationBounds = [0, -1, 0, -1, 0, -1]
+        leafletSegmentationNode.GetSegmentation().GetBounds(segmentationBounds)
+        if segmentationBounds[0] > segmentationBounds[1] or \
+          segmentationBounds[2] > segmentationBounds[3] or \
+          segmentationBounds[4] > segmentationBounds[5]:
+          self.addLog(f"  Leaflet segmentation export skipped (empty segmentation) - {valveModelName}")
+          continue
 
-  def _saveSegmentsIntoSeparateFiles(self, valveModel, prefix):
-    segmentationNode = valveModel.getLeafletSegmentationNode()
+        # Export a temporary copy: showing one segment at a time must not alter the scene (the display
+        # properties of the valve's segmentation are stored per time point)
+        exportedSegmentationNode = cloneSegmentationNode(leafletSegmentationNode)
+        try:
+          self._saveSegmentsIntoSeparateFiles(exportedSegmentationNode, valveModel, valveModelName)
+        finally:
+          slicer.mrmlScene.RemoveNode(exportedSegmentationNode)
+
+  def _saveSegmentsIntoSeparateFiles(self, segmentationNode, valveModel, prefix):
     segmentationsLogic = slicer.modules.segmentations.logic()
 
     labelNode = None
@@ -106,7 +114,9 @@ class LeafletSegmentationExportRule(ValveBatchExportRule):
       if self.EXPORT_SEGMENTS_AS_LABELMAP:
         segmentationsLogic.ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelNode,
                                                                valveModel.getLeafletVolumeNode())
-        slicer.util.saveNode(labelNode, str(Path(self.outputDir) / f"{filenamePrefix}.{self.IMAGE_FILE_EXTENSION}"))
+        filename = f"{filenamePrefix}.{self.IMAGE_FILE_EXTENSION}"
+        if not slicer.util.saveNode(labelNode, str(Path(self.outputDir) / filename)):
+          self.addLog(f"  Leaflet segment export skipped (file writing failed) - {filename}")
       if self.EXPORT_SEGMENTS_AS_MODEL:
         self._saveSegmentAsModel(segmentationNode, segmentID, valveModel.getLeafletVolumeNode(), filenamePrefix)
 
@@ -164,6 +174,15 @@ def hideAllSegments(segmentationNode):
     segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, False)
 
 
+def cloneSegmentationNode(segmentationNode):
+  """Returns a temporary deep copy of the segmentation node (the caller must remove it from the scene)."""
+  clonedNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentationNode.GetName())
+  clonedNode.CopyContent(segmentationNode)
+  clonedNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
+  clonedNode.CreateDefaultDisplayNodes()
+  return clonedNode
+
+
 def deleteValveMask(segmentationNode):
   segmentation = segmentationNode.GetSegmentation()
   valveMaskSegment = segmentationNode.GetSegmentation().GetSegment(HeartValveLib.Constants.VALVE_MASK_SEGMENT_ID)
@@ -181,15 +200,25 @@ def getLeafletOrderDefinition(valveType):
 
 
 def checkAndSortSegments(segmentationNode, valveType):
+  """Sort segments into the expected leaflet order. Returns a log message (empty if nothing to report).
+
+  Segments that cannot be matched to the expected leaflet order are left untouched so that the
+  segmentation can still be exported.
+  """
   from HeartValveLib.util import getAllSegmentIDs
-  expectedOrder = getLeafletOrderDefinition(valveType)
+  try:
+    expectedOrder = getLeafletOrderDefinition(valveType)
+  except ValueError as exc:
+    return f"  Segments not sorted: {exc}"
   segmentIDs = getAllSegmentIDs(segmentationNode)
   segmentNames = getAllSegmentNames(segmentationNode)
-  message = ""
-  if not isSorted(expectedOrder, segmentIDs) or not isSorted(expectedOrder, segmentNames):
-    message = "Leaflet names don't match up with segment IDs. Sorting segments."
+  if isSorted(expectedOrder, segmentIDs) and isSorted(expectedOrder, segmentNames):
+    return ""
+  try:
     sortSegments(segmentationNode, valveType)
-  return message
+  except ValueError as exc:
+    return f"  Segments not sorted: {exc}"
+  return "Leaflet names don't match up with segment IDs. Sorting segments."
 
 
 def isSorted(expectedOrder : list, currentOrder : list) -> bool:
@@ -199,6 +228,8 @@ def isSorted(expectedOrder : list, currentOrder : list) -> bool:
   :param currentOrder: list of strings to check for order
   :return: true if ordered, otherwise false
   """
+  if len(currentOrder) < len(expectedOrder):
+    return False
   return all(expectedOrder[i] in currentOrder[i] for i in range(len(expectedOrder)))
 
 

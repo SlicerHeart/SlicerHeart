@@ -3,7 +3,8 @@ import qt
 import vtk
 import logging
 import slicer
-from HeartValveLib.helpers import getAllHeartValveModelNodes, getSpecificHeartValveModelNodes
+import HeartValveLib
+from HeartValveLib.helpers import getAllHeartValveModelNodes, getValveTimePointsMatchingPhase
 from typing import Union
 
 
@@ -78,7 +79,8 @@ class ValveBatchExportRule(object):
   DETAILED_DESCRIPTION = ""
   USER_INTERFACE = False
 
-  EXPORT_PHASES = [] # empty means all phases will be exported
+  EXPORT_PHASES = []        # empty means all phases will be exported
+  EXPORT_VALVE_TYPES = []   # empty means all valve types will be exported
   IMAGE_FILE_EXTENSION = "nrrd"
   OUTPUT_CSV_FILES = []
 
@@ -126,6 +128,11 @@ class ValveBatchExportRule(object):
       raise ValueError(f"Unsupported image file extension: {imageFileExtension}")
     logging.debug("Image file extension set to: %s" % imageFileExtension)
     cls.IMAGE_FILE_EXTENSION = imageFileExtension
+
+  @classmethod
+  def setValveTypesToExport(cls, valveTypes):
+    logging.debug("Valve types to export set to: %s" % valveTypes)
+    cls.EXPORT_VALVE_TYPES = valveTypes
 
   @staticmethod
   def getTableNode(measurementNode, identifier):
@@ -197,10 +204,67 @@ class ValveBatchExportRule(object):
     raise NotImplementedError("Method needs to be implemented if class member `USER_INTERFACE` set to True")
 
   def getHeartValveModelNodes(self):
-    if self.EXPORT_PHASES:
-      return getSpecificHeartValveModelNodes(self.EXPORT_PHASES)
+    # Phase is not filtered here: in sequence scenes a valve type has one proxy node, and the phase
+    # belongs to the individual time points (see getExportedTimePoints).
+    valveModels = getAllHeartValveModelNodes()
+    if self.EXPORT_VALVE_TYPES:
+      return (vm for vm in valveModels if vm.getValveType() in self.EXPORT_VALVE_TYPES)
     else:
-      return getAllHeartValveModelNodes()
+      return valveModels
+
+  def getExportedTimePoints(self, valveModel):
+    """ Browser item numbers to export: every time point annotated with one of EXPORT_PHASES, or all
+    time points when no phase is selected. """
+    browserNode = valveModel.valveBrowserNode
+    if browserNode is None:
+      logging.warning(f"Valve {valveModel.getValveType()} has no sequence browser, skipping")
+      return []
+    if not self.EXPORT_PHASES:
+      return list(range(browserNode.GetNumberOfItems()))
+    itemNumbers = set()
+    for phase in self.EXPORT_PHASES:
+      itemNumbers.update(getValveTimePointsMatchingPhase(valveModel.heartValveNode, phase))
+    return sorted(itemNumbers)
+
+  def iterateExportedTimePoints(self, valveModel):
+    """ Select each exported time point (see getExportedTimePoints) in the valve browser, one after
+    the other, yielding its item number. The time point that was selected before the export is
+    restored when the iteration ends (also if it is left early or by an exception), so that exporting
+    does not change what the scene shows. """
+    itemNumbers = self.getExportedTimePoints(valveModel)
+    if not itemNumbers:
+      return
+    browserNode = valveModel.valveBrowserNode
+    originalItemNumber = browserNode.GetSelectedItemNumber()
+    try:
+      for itemNumber in itemNumbers:
+        browserNode.SetSelectedItemNumber(itemNumber)
+        yield itemNumber
+    finally:
+      browserNode.SetSelectedItemNumber(originalItemNumber)
+
+  def iterateMeasurementTimePoints(self, measurementNode):
+    """ Select each exported time point of the measured valve, one after the other (see
+    iterateExportedTimePoints), yielding the cardiac cycle phase short name of the measurement at that
+    time point ("multiple" if the input valves of the measurement are in different phases).
+    As in the Valve quantification module, time points are those of the first input valve. """
+    valveQuantificationLogic = slicer.modules.valvequantification.widgetRepresentation().self().logic
+    measurementPreset = valveQuantificationLogic.getMeasurementPreset(measurementNode)
+    heartValveNodes = [measurementNode.GetNodeReference('Valve' + inputValveId)
+                       for inputValveId in measurementPreset.inputValveIds]
+    heartValveNodes = [heartValveNode for heartValveNode in heartValveNodes if heartValveNode]
+    if not heartValveNodes:
+      return
+    valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNodes[0])
+    for timePoint in self.iterateExportedTimePoints(valveModel):
+      phaseNames = valveQuantificationLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode)
+      if len(phaseNames) > 1:
+        if self.EXPORT_PHASES and not all(phaseName in self.EXPORT_PHASES for phaseName in phaseNames):
+          logging.debug("Multiple phases compare measurement node found but selected phases don't match those. Skipping")
+          continue
+        yield "multiple"
+      else:
+        yield phaseNames[0] if phaseNames else ''
 
   def addLog(self, text):
     logging.info(text)
