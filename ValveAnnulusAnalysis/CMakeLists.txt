@@ -12,6 +12,7 @@ set(MODULE_PYTHON_SCRIPTS
   HeartValveLib/ValveRoi
   HeartValveLib/LeafletModel
   HeartValveLib/ValveModel
+  HeartValveLib/ValveBrowser
   HeartValveLib/PapillaryModel
   HeartValveLib/CoaptationModel
   HeartValveLib/Constants
@@ -19,6 +20,7 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/Icons/ValveBrowser.png
   Resources/Icons/CAVC.png
   Resources/Icons/Mitral.png
   Resources/Icons/PDA.png

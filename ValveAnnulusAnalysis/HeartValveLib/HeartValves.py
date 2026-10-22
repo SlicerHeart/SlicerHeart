@@ -2,11 +2,15 @@ import os
 import vtk
 import slicer
 import HeartValveLib
-from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID
+from HeartValveLib.Constants import VALVE_MASK_SEGMENT_ID, DEFAULT_SLICE_VIEW_SHOWN_IN_3D
 from HeartValveLib.helpers import getAllModuleSpecificScriptableNodes
 from HeartValveLib.util import getAllSegmentIDs
 
 import logging
+
+# Dictionary that stores a ValveBrowser Python object for each valve browser MRML node in the scene.
+# These Python objects are shared between multiple modules.
+ValveBrowsers = {}
 
 # Dictionary that stores a ValveModel Python object for each MRML node in the scene.
 # These Python objects are shared between multiple modules.
@@ -21,13 +25,54 @@ try:
   SceneEndImportEventObserver
 except NameError:
   SceneEndImportEventObserver = None
+  SceneEndImportUpgradeObserver = None
+
+
+def removeDeletedNodesFromCaches():
+  """Remove the cached ValveBrowser / ValveModel objects of nodes that are not in the scene anymore.
+  The caches hold references to the MRML nodes, so without this the nodes of a closed scene (and
+  the Python objects that operate on them) would be kept alive and could be returned again."""
+  for cache in (ValveBrowsers, ValveModels):
+    for node in list(cache.keys()):
+      if not slicer.mrmlScene.IsNodePresent(node):
+        del cache[node]
+
+
+@vtk.calldata_type(vtk.VTK_OBJECT)
+def _onSceneNodeRemoved(caller, event, node):
+  ValveBrowsers.pop(node, None)
+  ValveModels.pop(node, None)
+
+
+def _onSceneEndClose(caller, event):
+  # Nodes are not removed one by one when the scene is closed, so NodeRemovedEvent is not invoked
+  removeDeletedNodesFromCaches()
+
+
+try:
+  _CacheCleanupObservers
+except NameError:
+  _CacheCleanupObservers = []
+
+# The observers are re-created when the module is reloaded, so that they call the current functions
+for _observerTag in _CacheCleanupObservers:
+  slicer.mrmlScene.RemoveObserver(_observerTag)
+_CacheCleanupObservers = [
+  slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.NodeRemovedEvent, _onSceneNodeRemoved),
+  slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.EndCloseEvent, _onSceneEndClose),
+]
 
 
 def setup(usPresetsScenePath):
   global SceneEndImportEventObserver
+  global SceneEndImportUpgradeObserver
   registerCustomLayouts()
   registerCustomVrPresets(usPresetsScenePath)
   updateLegacyHeartValveNodes()
+  upgradeConvertedMeasurementSequences()
+  if SceneEndImportUpgradeObserver is None:
+    SceneEndImportUpgradeObserver = slicer.mrmlScene.AddObserver(
+      slicer.vtkMRMLScene.EndImportEvent, upgradeConvertedMeasurementSequences)
   if SceneEndImportEventObserver is None:
     logging.debug("Added scene end import observer for HeartValves")
     SceneEndImportEventObserver = slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.EndImportEvent, updateLegacyHeartValveNodes)
@@ -48,6 +93,47 @@ def getTerminologyFile():
   moduleDir = os.path.dirname(slicer.modules.valveannulusanalysis.path)
   terminologyFile = os.path.join(moduleDir, 'Resources', 'SlicerHeartSegmentationCategoryTypeModifier.json')
   return terminologyFile
+
+
+def getValveBrowser(valveBrowserNode):
+  if valveBrowserNode is None:
+    return None
+
+  try:
+    valveBrowser = ValveBrowsers[valveBrowserNode]
+  except KeyError:
+    from HeartValveLib.ValveBrowser import ValveBrowser
+    valveBrowser = ValveBrowser()
+    valveBrowser.valveBrowserNode = valveBrowserNode
+
+    ValveBrowsers[valveBrowserNode] = valveBrowser
+  return valveBrowser
+
+
+def createValveBrowserNode(valveVolumeNode=None, valveType=None, probePosition=None, name=None):
+  """Create a new valve: a sequence browser node marked as a heart valve browser, the way the valve
+  selector of the Valve Annulus Analysis module creates one, initialized with its master (HeartValve)
+  sequence and axial slice transform. Time points are then added through the returned ValveBrowser
+  (``addTimePoint`` / ``addTimePointAtCurrentFrame``).
+
+  :param valveVolumeNode: valve volume; a static volume is wrapped into a single-frame volume sequence
+  :param valveType: key of VALVE_TYPE_PRESETS, e.g. "mitral"
+  :param probePosition: key of PROBE_POSITION_PRESETS, e.g. "TTE_APICAL"
+  :param name: name of the browser node (made unique), "HeartValveBrowser" by default; when a valve
+    type is given the valve nodes are named after it instead, as in the GUI
+  :returns: ValveBrowser of the new browser node
+  """
+  valveBrowserNode = slicer.mrmlScene.AddNewNodeByClass(
+    "vtkMRMLSequenceBrowserNode", slicer.mrmlScene.GetUniqueNameByString(name or "HeartValveBrowser"))
+  valveBrowserNode.SetAttribute("ModuleName", "HeartValve")
+  valveBrowser = getValveBrowser(valveBrowserNode)
+  if valveVolumeNode is not None:
+    valveBrowser.valveVolumeNode = valveVolumeNode
+  if valveType is not None:
+    valveBrowser.valveType = valveType
+  if probePosition is not None:
+    valveBrowser.probePosition = probePosition
+  return valveBrowser
 
 
 def getValveModel(heartValveNode):
@@ -94,6 +180,9 @@ def registerCustomLayouts():
   before opening the module GUI."""
 
   layoutManager = slicer.app.layoutManager()
+  if not layoutManager:
+    # no main window
+    return
 
   customLayout = (
     "<layout type=\"vertical\">"
@@ -243,22 +332,18 @@ def setupDefaultLayout(layoutId=CardiacFourUpViewLayoutId):
     sliceCompositeNode = sliceLogic.GetSliceCompositeNode()
     sliceViewNode = sliceLogic.GetSliceNode()
 
-    # Show slice intersections
-    try:
-      # Slicer-4.13 (February 2022) and later
-      sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
-    except:
-      # fall back to older API
-      sliceCompositeNode.SetSliceIntersectionVisibility(True)
+    # Show slice intersections (the display node does not exist yet right after the scene is cleared)
+    sliceDisplayNode = sliceLogic.GetSliceDisplayNode()
+    if sliceDisplayNode:
+      sliceDisplayNode.SetIntersectingSlicesVisibility(True)
 
-    # Show only red slice in 3D view
-    sliceViewNode.SetSliceVisible(sliceViewName == 'Red')
+    sliceViewNode.SetSliceVisible(sliceViewName == DEFAULT_SLICE_VIEW_SHOWN_IN_3D)
 
   setSliceViewsLink(sliceViewNames, oldLink, oldHotLink)
 
 def showSlices(show):
-  if not slicer.app.errorLogModel():
-    # shutting down
+  if not slicer.app.errorLogModel() or not slicer.app.layoutManager():
+    # shutting down, or no main window
     return
 
   # If slice views are linked then changing properties would repeatedly change
@@ -290,11 +375,56 @@ def setSliceViewsLink(viewNames, link, hotlink):
   return oldLink, oldHotLink
 
 
-def setupDefaultSliceOrientation(resetFov=False, valveModel=None, orthoRotationDeg=0,
+def removeLeafletVolumesFromSliceViews():
+  """Remove leaflet (segmentation) volumes from all slice views, restoring each valve's original
+  volume in their place.
+
+  A leaflet volume is only meant to be visible while a leaflet segmentation is being edited in the
+  Valve Segmentation module. If it is left referenced by the slice views of another module, then
+  switching time points on a converted 4D scene can leave the view referencing an empty proxy volume
+  (per-time-point sequences use MissingItemMode=MissingItemSetToDefault, so a time point with no
+  leaflet volume item resets the proxy to an empty default volume), which makes the slice views
+  non-responsive (SlicerHeartPrivate#307).
+
+  For every valve in the scene, any slice-view slot showing that valve's leaflet volume is switched
+  back to the valve's original (ultrasound) volume in the background, or cleared in the
+  foreground/label, so the original volume stays visible instead of a leaflet volume or a blank view.
+  """
+  # Map each leaflet volume proxy to its valve's original volume (None if the valve has no volume).
+  leafletToValveVolumeID = {}
+  for valveBrowserNode in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+    if valveBrowserNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    valveBrowser = getValveBrowser(valveBrowserNode)
+    heartValveNode = valveBrowser.heartValveNode if valveBrowser else None
+    leafletVolumeNode = heartValveNode.GetNodeReference("LeafletVolume") if heartValveNode else None
+    if not leafletVolumeNode:
+      continue
+    valveVolumeNode = valveBrowser.valveVolumeNode
+    leafletToValveVolumeID[leafletVolumeNode.GetID()] = valveVolumeNode.GetID() if valveVolumeNode else None
+  if not leafletToValveVolumeID:
+    return
+
+  for sliceCompositeNode in slicer.util.getNodesByClass("vtkMRMLSliceCompositeNode"):
+    backgroundVolumeID = sliceCompositeNode.GetBackgroundVolumeID()
+    if backgroundVolumeID in leafletToValveVolumeID:
+      # Show the original valve volume where the leaflet volume was, so the view is not left blank.
+      sliceCompositeNode.SetBackgroundVolumeID(leafletToValveVolumeID[backgroundVolumeID])
+    if sliceCompositeNode.GetForegroundVolumeID() in leafletToValveVolumeID:
+      sliceCompositeNode.SetForegroundVolumeID(None)
+    if sliceCompositeNode.GetLabelVolumeID() in leafletToValveVolumeID:
+      sliceCompositeNode.SetLabelVolumeID(None)
+
+
+def setupDefaultSliceOrientation(resetFov=False, valveModelOrBrowser=None, orthoRotationDeg=0,
                                  axialSliceName='Red', ortho1SliceName='Yellow', ortho2SliceName='Green',
-                                 show3DSliceName='Red'):
+                                 show3DSliceName=None, valveModel = None, valveBrowser = None):
   """Sets up views for a specific valve.
-  show3DSliceName is the name of the slice that should be shown in 3D views"""
+  show3DSliceName is the name of the slice that should be shown in 3D views
+  valveModel: can be valve model or browser"""
+
+  if show3DSliceName is None:
+    show3DSliceName = DEFAULT_SLICE_VIEW_SHOWN_IN_3D
 
   layoutManager = slicer.app.layoutManager()
   if not layoutManager:
@@ -303,23 +433,20 @@ def setupDefaultSliceOrientation(resetFov=False, valveModel=None, orthoRotationD
 
   [oldLink, oldHotLink] = setSliceViewsLink([axialSliceName, ortho1SliceName, ortho2SliceName], False, False)
 
-  valveModel.setSliceOrientations(layoutManager.sliceWidget(axialSliceName).sliceLogic().GetSliceNode(),
-                                  layoutManager.sliceWidget(ortho1SliceName).sliceLogic().GetSliceNode(),
-                                  layoutManager.sliceWidget(ortho2SliceName).sliceLogic().GetSliceNode(),
-                                  orthoRotationDeg)
+  valveModelOrBrowser.setSliceOrientations(layoutManager.sliceWidget(axialSliceName).sliceLogic().GetSliceNode(),
+                                           layoutManager.sliceWidget(ortho1SliceName).sliceLogic().GetSliceNode(),
+                                           layoutManager.sliceWidget(ortho2SliceName).sliceLogic().GetSliceNode(),
+                                           orthoRotationDeg)
 
   for sliceViewName in [axialSliceName, ortho1SliceName, ortho2SliceName]:
     sliceLogic = layoutManager.sliceWidget(sliceViewName).sliceLogic()
     sliceCompositeNode = sliceLogic.GetSliceCompositeNode()
     sliceViewNode = sliceLogic.GetSliceNode()
 
-    # Show slice intersections
-    try:
-      # Slicer-4.13 (February 2022) and later
-      sliceLogic.GetSliceDisplayNode().SetIntersectingSlicesVisibility(True)
-    except:
-      # fall back to older API
-      sliceCompositeNode.SetSliceIntersectionVisibility(True)
+    # Show slice intersections (the display node does not exist yet right after the scene is cleared)
+    sliceDisplayNode = sliceLogic.GetSliceDisplayNode()
+    if sliceDisplayNode:
+      sliceDisplayNode.SetIntersectingSlicesVisibility(True)
 
     # Show only red slice in 3D view
     sliceViewNode.SetSliceVisible(sliceViewName == show3DSliceName)
@@ -371,6 +498,50 @@ def getSequenceBrowserNodeForMasterOutputNode(masterOutputNode):
     if browserNode.GetProxyNode(browserNode.GetMasterSequenceNode()) == masterOutputNode:
       return browserNode
   return None
+
+
+def getOrCreateVolumeSequenceBrowserNode(volumeNode):
+  """Get the sequence browser node that drives a valve volume, creating a single-frame volume
+  sequence for a volume that is not part of a sequence.
+
+  The valve time points are stored by the index values of the volume sequence, so a valve needs a
+  volume sequence browser. Static 3D images (CT, a single 3D ultrasound volume) are supported by
+  wrapping the volume node into a sequence with one item: the volume node itself becomes the proxy
+  node of the new browser, so nodes that reference or display it are not affected.
+  :returns: the sequence browser node, or None if volumeNode is None
+  """
+  if volumeNode is None:
+    return None
+  browserNode = getSequenceBrowserNodeForMasterOutputNode(volumeNode)
+  if browserNode:
+    return browserNode
+  sequencesLogic = slicer.modules.sequences.logic()
+  if sequencesLogic.GetFirstBrowserNodeForProxyNode(volumeNode):
+    # The volume is a proxy of a browser without being the master proxy (e.g. it is synchronized
+    # with another sequence): its browser is not a valve volume browser, do not wrap it again
+    return None
+  logging.info(f"Creating a single-frame volume sequence for {volumeNode.GetName()}")
+  sequenceNode = slicer.mrmlScene.AddNewNodeByClass(
+    "vtkMRMLSequenceNode", slicer.mrmlScene.GetUniqueNameByString(f"{volumeNode.GetName()}_Sequence"))
+  sequenceNode.SetIndexName("frame")
+  sequenceNode.SetIndexUnit("")
+  sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+  sequenceNode.SetDataNodeAtValue(volumeNode, "0")
+  browserNode = slicer.mrmlScene.AddNewNodeByClass(
+    "vtkMRMLSequenceBrowserNode", slicer.mrmlScene.GetUniqueNameByString(f"{volumeNode.GetName()}_Browser"))
+  # The volume node itself is used as the proxy node. The sequence is synchronized and the proxy
+  # registered in one modification: the Sequences logic reacts to every browser modification by
+  # generating a proxy for a synchronized sequence without one, which would leave a generated
+  # volume node behind.
+  wasModified = browserNode.StartModify()
+  browserNode.AddSynchronizedSequenceNodeID(sequenceNode.GetID())
+  browserNode.AddProxyNode(volumeNode, sequenceNode, False)
+  browserNode.SetSaveChanges(sequenceNode, True)
+  browserNode.SetIndexDisplayMode(slicer.vtkMRMLSequenceBrowserNode.IndexDisplayAsIndex)
+  browserNode.SetSelectedItemNumber(0)
+  browserNode.EndModify(wasModified)
+  sequencesLogic.UpdateProxyNodesFromSequences(browserNode)
+  return browserNode
 
 
 def getBrowserNodesForSequenceNode(masterSequenceNode):
@@ -465,6 +636,10 @@ def getOrSetValveVolumeNode(valveModel):
 
 
 def updateLegacyHeartValveNodes(unused1=None, unused2=None):
+
+  # TODO: re-enable after finishing refactoring
+  return
+
   import time
   startTime = time.time()
   logging.debug("updateLegacyHeartValveNodes")
@@ -620,7 +795,7 @@ def updateLegacyHeartValveNodes(unused1=None, unused2=None):
   logging.debug(f'updateLegacyHeartValveNodes completed in {stopTime - startTime:.2f} seconds')
 
 
-def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diameter=0.25, glyphSize=1.0, color=None):
+def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diameter=0.25, glyphSize=1.0, displayNode=None):
   markupsCurveNode = markupsClass()
   markupsCurveNode.SetNumberOfPointsPerInterpolatingSegment(20)
   for idx in range(markupsFiducialNode.GetNumberOfControlPoints()):
@@ -639,8 +814,8 @@ def markupsCurveFromMarkupsFiducialNode(markupsFiducialNode, markupsClass, diame
     ValveModel.setGlyphSize(markupsCurveNode, glyphSize)
   if diameter:
     ValveModel.setLineDiameter(markupsCurveNode, diameter)
-  if color:
-    dNode.SetSelectedColor(color)
+  if displayNode:
+    dNode.SetSelectedColor(displayNode.GetColor())
   for attr in markupsFiducialNode.GetAttributeNames():
     markupsCurveNode.SetAttribute(attr, markupsFiducialNode.GetAttribute(attr))
   markupsCurveNode.SetDisplayVisibility(markupsFiducialNode.GetDisplayVisibility())
@@ -669,7 +844,7 @@ def updateLegacyAnnulusCurveNode(scriptedModuleNodes):
         markupsCurveFromMarkupsFiducialNode(annulusContourNode, slicer.vtkMRMLMarkupsClosedCurveNode,
                                             diameter=ValveModel.ANNULUS_CONTOUR_RADIUS*2,
                                             glyphSize=ValveModel.ANNULUS_CONTOUR_MARKUP_SCALE,
-                                            color=annulusContourModel.GetDisplayNode().GetColor())
+                                            displayNode=annulusContourModel.GetDisplayNode())
       scriptedModuleNode.SetNodeReferenceID("AnnulusContourPoints", annulusMarkupNode.GetID())
       moveNodeToHeartValveFolder(valveNodeItemId, annulusMarkupNode)
       annulusMarkupNode.SetLocked(True)
@@ -699,6 +874,25 @@ def removeEmptyLeafletSegments(scriptedModuleNodes):
     slicer.mrmlScene.RemoveNode(parameterNode)
 
 
+def nodeIdsReferencedOutsideRoles(scriptedModuleNode, roles):
+  """IDs of the nodes that the heart valve node references under roles other than *roles*.
+  The legacy upgrades remove the obsolete nodes of a valve subfolder (e.g. the tube models of the
+  "LeafletSurface" folder). A node of another role that the user had placed in that folder (e.g. the
+  valve ROI model dragged into "LeafletSurface") is still needed and must not be removed with them.
+  """
+  allRoles = []
+  scriptedModuleNode.GetNodeReferenceRoles(allRoles)
+  nodeIds = set()
+  for role in allRoles:
+    if role in roles:
+      continue
+    for referenceIndex in range(scriptedModuleNode.GetNumberOfNodeReferences(role)):
+      nodeId = scriptedModuleNode.GetNthNodeReferenceID(role, referenceIndex)
+      if nodeId:
+        nodeIds.add(nodeId)
+  return nodeIds
+
+
 def updateLegacyPapillaryMuscleNodes(scriptedModuleNodes):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
   for scriptedModuleNode in scriptedModuleNodes:
@@ -716,7 +910,7 @@ def updateLegacyPapillaryMuscleNodes(scriptedModuleNodes):
       papillaryMuscleName = papillaryLineModelNode.GetName().replace(" papillary muscle", "")
       markupsCurveNode = \
         markupsCurveFromMarkupsFiducialNode(papillaryLineMarkupNode, slicer.vtkMRMLMarkupsCurveNode, diameter=0.5,
-                                            color=papillaryLineModelNode.GetDisplayNode().GetColor())
+                                            displayNode=papillaryLineModelNode.GetDisplayNode())
       scriptedModuleNode.SetNthNodeReferenceID("PapillaryLineMarkup", papillaryModelIndex, markupsCurveNode.GetID())
       markupsCurveNode.SetName(f"{papillaryMuscleName} papillary muscle")
 
@@ -731,11 +925,12 @@ def updateLegacyPapillaryMuscleNodes(scriptedModuleNodes):
 
     papMusclesFolderId = shNode.GetItemChildWithName(valveNodeItemId, "PapillaryMuscles")
     if papMusclesFolderId:
+      keptNodeIds = nodeIdsReferencedOutsideRoles(scriptedModuleNode, ["PapillaryLineMarkup", "PapillaryLineModel"])
       children = vtk.vtkCollection()
       shNode.GetDataNodesInBranch(papMusclesFolderId, children)
       for childIdx in range(children.GetNumberOfItems()):
         child = children.GetItemAsObject(childIdx)
-        if type(child) is slicer.vtkMRMLModelNode:
+        if type(child) is slicer.vtkMRMLModelNode and child.GetID() not in keptNodeIds:
           slicer.mrmlScene.RemoveNode(child)
 
 
@@ -750,17 +945,24 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
     numSurfaceBoundaryMarkups = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
     numLeafletSurfaceModels = scriptedModuleNode.GetNumberOfNodeReferences("LeafletSurfaceModel")
     if numLegacySurfaceBoundaries:
-      assert numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels
+      if not (numLegacySurfaceBoundaries == numSurfaceBoundaryMarkups == numLeafletSurfaceModels):
+        logging.warning(f"{scriptedModuleNode.GetName()}: number of legacy surface boundaries "
+                        f"({numLegacySurfaceBoundaries}), surface boundary markups ({numSurfaceBoundaryMarkups}) "
+                        f"and leaflet surface models ({numLeafletSurfaceModels}) do not match, skipping")
+        continue
 
       for boundaryModelIndex in range(numLegacySurfaceBoundaries):
         boundaryMarkupNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryModelIndex)
         boundaryModelNode = scriptedModuleNode.GetNthNodeReference("LeafletSurfaceBoundaryModel", boundaryModelIndex)
         markupsCurveNode =\
           markupsCurveFromMarkupsFiducialNode(boundaryMarkupNode, slicer.vtkMRMLMarkupsClosedCurveNode,
-                                              color=boundaryModelNode.GetDisplayNode().GetColor())
+                                              displayNode=boundaryModelNode.GetDisplayNode())
         scriptedModuleNode.SetNthNodeReferenceID("LeafletSurfaceBoundaryMarkup", boundaryModelIndex,
                                                  markupsCurveNode.GetID())
         moveNodeToHeartValveFolder(valveNodeItemId, markupsCurveNode, 'LeafletSurfaceEdit')
+
+      leafletSurfaceRoles = ["LeafletSurfaceModel", "LeafletSurfaceBoundaryMarkup", "LeafletSurfaceBoundaryModel"]
+      keptNodeIds = nodeIdsReferencedOutsideRoles(scriptedModuleNode, leafletSurfaceRoles)
 
       leafletSurfaceEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurfaceEdit")
       if leafletSurfaceEditFolderId:
@@ -768,7 +970,8 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
         shNode.GetDataNodesInBranch(leafletSurfaceEditFolderId, children)
         for childIdx in range(children.GetNumberOfItems()):
           child = children.GetItemAsObject(childIdx)
-          if type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]:
+          if (type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]
+              and child.GetID() not in keptNodeIds):
             slicer.mrmlScene.RemoveNode(child)
 
       leafletSurfaceFolderId = shNode.GetItemChildWithName(valveNodeItemId, "LeafletSurface")
@@ -779,7 +982,7 @@ def updateLegacyLeafletSurfaceBoundaryNodes(scriptedModuleNodes):
         shNode.GetDataNodesInBranch(leafletSurfaceFolderId, children)
         for childIdx in range(children.GetNumberOfItems()):
           child = children.GetItemAsObject(childIdx)
-          if not child.GetAttribute('SegmentID') in segmentIds:
+          if child.GetAttribute('SegmentID') not in segmentIds and child.GetID() not in keptNodeIds:
             slicer.mrmlScene.RemoveNode(child)
 
 
@@ -797,7 +1000,7 @@ def updateLegacyCoaptationModelNodes(scriptedModuleNodes):
         marginLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
         newMarginLineMarkupsCurveNode = \
           markupsCurveFromMarkupsFiducialNode(marginLineMarkupNode, markupsClass=slicer.vtkMRMLMarkupsCurveNode,
-                                              color=marginLineModelNode.GetDisplayNode().GetColor())
+                                              displayNode=marginLineModelNode.GetDisplayNode())
         scriptedModuleNode.SetNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex,
                                                  newMarginLineMarkupsCurveNode.GetID())
         moveNodeToHeartValveFolder(valveNodeItemId, newMarginLineMarkupsCurveNode, 'CoaptationEdit')
@@ -806,18 +1009,21 @@ def updateLegacyCoaptationModelNodes(scriptedModuleNodes):
         baseLineMarkupNode = scriptedModuleNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
         newBaseLineMarkupsCurveNode = \
           markupsCurveFromMarkupsFiducialNode(baseLineMarkupNode, markupsClass=slicer.vtkMRMLMarkupsCurveNode,
-                                              color=baseLineModelNode.GetDisplayNode().GetColor())
+                                              displayNode=baseLineModelNode.GetDisplayNode())
         scriptedModuleNode.SetNthNodeReferenceID("CoaptationBaseLineMarkup", coaptationModelIndex,
                                                  newBaseLineMarkupsCurveNode.GetID())
         moveNodeToHeartValveFolder(valveNodeItemId, newBaseLineMarkupsCurveNode, 'CoaptationEdit')
 
     coaptationEditFolderId = shNode.GetItemChildWithName(valveNodeItemId, "CoaptationEdit")
     if coaptationEditFolderId:
+      keptNodeIds = nodeIdsReferencedOutsideRoles(scriptedModuleNode, ["CoaptationBaseLineMarkup", "CoaptationMarginLineMarkup",
+                                                                        "CoaptationBaseLineModel", "CoaptationMarginLineModel"])
       children = vtk.vtkCollection()
       shNode.GetDataNodesInBranch(coaptationEditFolderId, children)
       for childIdx in range(children.GetNumberOfItems()):
         child = children.GetItemAsObject(childIdx)
-        if type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]:
+        if (type(child) in [slicer.vtkMRMLMarkupsFiducialNode, slicer.vtkMRMLModelNode]
+            and child.GetID() not in keptNodeIds):
           slicer.mrmlScene.RemoveNode(child)
 
 
@@ -838,7 +1044,6 @@ def ensureLeafletVolumeAssociatedWithSegmentations(scriptedModuleNodes):
     # ensure heart valve is parent in subject hierarchy
     segNode = valveModel.getLeafletSegmentationNode()
     shNode.SetItemParent(shNode.GetItemByDataNode(segNode), valveNodeItemId)
-    valveModel.updateValveNodeNames()
 
     # ensure master volume node of segmentation is not the sequence proxy and was extracted from the set frame index
     if valveModel.getValveVolumeSequenceIndex() < 0:
@@ -847,12 +1052,38 @@ def ensureLeafletVolumeAssociatedWithSegmentations(scriptedModuleNodes):
 
     fixedVolumeNode = valveModel.getLeafletVolumeNode()
     if fixedVolumeNode is not None:
-      slicer.mrmlScene.RemoveNode(fixedVolumeNode)
-    useCurrentValveVolumeAsLeafletVolume(valveModel)
+      goToAnalyzedFrame(valveModel)
+      volumeNode = getOrSetValveVolumeNode(valveModel)
+      import numpy as np
+      if not np.array_equal(slicer.util.array(volumeNode.GetID()),
+                            slicer.util.array(fixedVolumeNode.GetID())):
+        slicer.mrmlScene.RemoveNode(fixedVolumeNode)
+        fixedVolumeNode = None
+
+    if fixedVolumeNode is None :
+      useCurrentValveVolumeAsLeafletVolume(valveModel)
+
+    valveModel.updateValveNodeNames()
     fixedVolumeNode = valveModel.getLeafletVolumeNode()
     segNode.SetNodeReferenceID(segNode.GetReferenceImageGeometryReferenceRole(), fixedVolumeNode.GetID())
     logging.debug(f'Setting LeafletVolume for {valveModel.heartValveNode.GetName()} '
                   f'to ({valveModel.getValveVolumeSequenceIndex()} + 1)')
+
+def getSubjectHierarchyItemId(node):
+  """Get the subject hierarchy item of a node. The item is created if the node does not have one yet:
+  some nodes (sequence browser nodes, scripted module nodes) do not get an item automatically when
+  they are added to the scene, and parenting other items under them silently failed without one."""
+  shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+  if not node or not shNode:
+    return 0
+  itemId = shNode.GetItemByDataNode(node)
+  if not itemId:
+    shNode.RequestOwnerPluginSearch(node)
+    itemId = shNode.GetItemByDataNode(node)
+  if not itemId:
+    itemId = shNode.CreateItem(shNode.GetSceneItemID(), node)
+  return itemId
+
 
 def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
   shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
@@ -862,7 +1093,7 @@ def moveNodeToHeartValveFolder(valveNodeItemId, node, subfolderName=None):
       folderItemId = shNode.CreateFolderItem(valveNodeItemId, subfolderName)
   else:
     folderItemId = valveNodeItemId
-  shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
+  shNode.SetItemParent(getSubjectHierarchyItemId(node), folderItemId)
 
 
 def getPlaneIntersectionPoint(axialNode, ortho1Node, ortho2Node):
@@ -953,3 +1184,63 @@ def setMarkupPlaceModeToUnconstrained(markupsNode):
     return
   markupsNode.CreateDefaultDisplayNodes()
   markupsNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
+
+
+def upgradeConvertedMeasurementSequences(unused1=None, unused2=None):
+  """Upgrade the measurement sequences of scenes converted by earlier versions of Converter4DSequences.
+
+  Those versions stored the converted HeartValveMeasurement nodes (and their results tables) with the
+  default missing-item mode, so at every time point without a measurement item the browser replaced
+  the proxy with a blank default node: the measurement disappeared from Valve Quantification and was
+  saved blank. The converter now uses MissingItemIgnore; this applies it to older scenes as well and
+  restores a blanked proxy from the sequence data, so the measurement can be selected at any time point.
+
+  :return: number of upgraded sequences
+  """
+  upgraded = 0
+  ignore = slicer.vtkMRMLSequenceBrowserNode.MissingItemIgnore
+  for browserNode in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+    if browserNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    masterSequenceNode = browserNode.GetMasterSequenceNode()
+    sequenceNodes = vtk.vtkCollection()
+    browserNode.GetSynchronizedSequenceNodes(sequenceNodes, True)
+    for sequenceIndex in range(sequenceNodes.GetNumberOfItems()):
+      sequenceNode = sequenceNodes.GetItemAsObject(sequenceIndex)
+      if sequenceNode.GetNumberOfDataNodes() == 0:
+        continue
+      if sequenceNode.GetNthDataNode(0).GetAttribute("ModuleName") != "HeartValveMeasurement":
+        continue
+      proxyNode = browserNode.GetProxyNode(sequenceNode)
+      # Results (tables, models) referenced by the measurement live in sequences of their own
+      resultSequenceNodes = []
+      if proxyNode:
+        roles = []
+        proxyNode.GetNodeReferenceRoles(roles)
+        for role in roles:
+          for referenceIndex in range(proxyNode.GetNumberOfNodeReferences(role)):
+            referencedNode = proxyNode.GetNthNodeReference(role, referenceIndex)
+            if not referencedNode or referencedNode.GetAttribute("ModuleName") == "HeartValve":
+              continue
+            referencedSequenceNode = browserNode.GetSequenceNode(referencedNode)
+            if referencedSequenceNode:
+              resultSequenceNodes.append(referencedSequenceNode)
+      for node in [sequenceNode] + resultSequenceNodes:
+        if browserNode.GetMissingItemMode(node) != ignore:
+          browserNode.SetMissingItemMode(node, ignore)
+          upgraded += 1
+      if proxyNode and not proxyNode.GetAttribute("ModuleName"):
+        # The proxy was blanked (and saved blank) at a time point without a measurement item: restore
+        # its attributes from the item shown now, or else from the first item.
+        dataNode = None
+        if masterSequenceNode and browserNode.GetSelectedItemNumber() >= 0:
+          indexValue = masterSequenceNode.GetNthIndexValue(browserNode.GetSelectedItemNumber())
+          dataNode = sequenceNode.GetDataNodeAtValue(indexValue, True)
+        if not dataNode:
+          dataNode = sequenceNode.GetNthDataNode(0)
+        for attributeName in dataNode.GetAttributeNames():
+          proxyNode.SetAttribute(attributeName, dataNode.GetAttribute(attributeName))
+        proxyNode.SetHideFromEditors(False)
+  if upgraded:
+    logging.info(f"Upgraded {upgraded} heart valve measurement sequence(s) to MissingItemIgnore")
+  return upgraded

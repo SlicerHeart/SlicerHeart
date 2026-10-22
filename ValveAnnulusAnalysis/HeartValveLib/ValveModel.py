@@ -9,7 +9,7 @@ import PapillaryModel
 import ValveRoi
 import logging
 import HeartValves
-from Constants import *
+import Constants
 from helpers import getBinaryLabelmapRepresentation
 
 
@@ -18,19 +18,14 @@ class ValveModel:
     ANNULUS_CONTOUR_MARKUP_SCALE = 1.3
     ANNULUS_CONTOUR_RADIUS = 0.5
 
-    @property
-    def annulusContourCurve(self):
-        return self.getAnnulusContourMarkupNode()
-
-    @annulusContourCurve.setter
-    def annulusContourCurve(self, node):
-      self.setAnnulusContourMarkupNode(node)
-
     def __init__(self):
-      self.heartValveNode = None
+      self._heartValveNode = None
+      self._observedValveBrowserNode = None
+      self._valveBrowserNodeObserverTag = None
 
+      # Computes a cylindrical ROI based on the annulus contour.
+      # When annulus contour is created then it will be set in the valveRoi
       self.valveRoi = ValveRoi.ValveRoi()
-      self.valveRoi.setAnnulusContourCurve(self.annulusContourCurve)
 
       # List of LeafletModel objects, one for each leaflet segment
       self.leafletModels = []
@@ -41,146 +36,463 @@ class ValveModel:
       # List of PapillaryModel objects, one for each papillary muscle
       self.papillaryModels = []
 
-      self.probePositionPresets = PROBE_POSITION_PRESETS
+      self.metricsResults = {}
 
-      self.valveTypePresets = VALVE_TYPE_PRESETS
+      self.cardiacCyclePhasePresets = Constants.CARDIAC_CYCLE_PHASE_PRESETS
 
-      self.cardiacCyclePhasePresets = CARDIAC_CYCLE_PHASE_PRESETS
+    @property
+    def heartValveNode(self):
+      """:returns Parameter node storing all information related to this valve (vtkMRMLScriptedModuleNode)."""
+      return self._heartValveNode
 
-    def setHeartValveNode(self, node):
-      if self.heartValveNode == node:
+    @heartValveNode.setter
+    def heartValveNode(self, node):
+      if self._heartValveNode == node:
         # no change
         return
-      self.heartValveNode = node
-      if self.heartValveNode:
+      if self._observedValveBrowserNode and self._valveBrowserNodeObserverTag is not None:
+        self._observedValveBrowserNode.RemoveObserver(self._valveBrowserNodeObserverTag)
+      self._observedValveBrowserNode = None
+      self._valveBrowserNodeObserverTag = None
+      self._heartValveNode = node
+      if self._heartValveNode:
+        # The cardiac cycle phase (that the node colors indicate) may be different at each time point,
+        # therefore colors have to be updated when another time point is displayed. The heart valve
+        # proxy node does not invoke a modified event then, so observe the valve browser node.
+        self._observedValveBrowserNode = self.valveBrowserNode
+        if self._observedValveBrowserNode:
+          self._valveBrowserNodeObserverTag = self._observedValveBrowserNode.AddObserver(
+            vtk.vtkCommand.ModifiedEvent, lambda caller, event: self.updateColorsFromCardiacCyclePhase())
         self.setHeartValveNodeDefaults()
         # Update parameters and references
-        self.setAnnulusContourMarkupNode(self.getAnnulusContourMarkupNode())
-        self.setAnnulusContourRadius(self.getAnnulusContourRadius())
 
-        self.setAnnulusLabelsMarkupNode(self.getAnnulusLabelsMarkupNode())
-        self.setValveRoiModelNode(self.getValveRoiModelNode())
+        self.annulusContourCurveNode = self._heartValveNodeReferencedProxyNode("AnnulusContourPoints", forDisplayedHeartValvePhase=False)
+        self.annulusContourRadius = self.annulusContourRadius
 
-    def getHeartValveNode(self):
-      return self.heartValveNode
+        self.valveLabelsNode = self.valveLabelsProxyNode
+        self.valveRoiModelNode = self.valveRoiModelNode
+
+    @property
+    def valveBrowserNode(self):
+      """:returns Valve browser node that contains analyzed time points.
+      It may be just one time point, 4 time points (MS, ES, MD, ED), or a range of time points corresponding
+      to a complete heart cycle."""
+      if not self.heartValveNode:
+        raise RuntimeError("getValveBrowserNode failed: invalid self.heartValveNode")
+      valveBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(self.heartValveNode)
+      return valveBrowserNode
+
+    @property
+    def valveBrowser(self):
+      """:returns Valve browser helper object for the valve browser node."""
+      valveBrowserNode = self.valveBrowserNode
+      if not valveBrowserNode:
+        raise RuntimeError("get valveBrowser failed: invalid valveBrowserNode")
+      valveBrowser = HeartValves.getValveBrowser(valveBrowserNode)
+      return valveBrowser
+
+    @property
+    def annulusContourCurveSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("AnnulusContourPoints")
+
+    @property
+    def annulusContourCurveNode(self):
+      """:returns Markup closed curve storing the annulus contour"""
+      return self._heartValveNodeReferencedProxyNode("AnnulusContourPoints", forDisplayedHeartValvePhase=True)
+
+    @annulusContourCurveNode.setter
+    def annulusContourCurveNode(self, annulusContourMarkupNode):
+      if not self.heartValveNode:
+        logging.error("set annulusContourCurveNode failed: invalid heartValveNode")
+        return
+      self.heartValveNode.SetNodeReferenceID("AnnulusContourPoints",
+                                             annulusContourMarkupNode.GetID() if annulusContourMarkupNode else None)
+      self.applyProbeToRasTransformToNode(annulusContourMarkupNode)
+      if annulusContourMarkupNode:
+        self.moveNodeToHeartValveFolder(annulusContourMarkupNode)
+        self.valveBrowser.makeTimeSequence(annulusContourMarkupNode)
+      self.valveRoi.setAnnulusContourCurve(annulusContourMarkupNode)
+
+    @property
+    def annulusContourRadius(self):
+      """:returns Radius of the annulus contour."""
+      radiusStr = self.heartValveNode.GetAttribute("AnnulusContourRadius")
+      return float(radiusStr) if radiusStr else None
+
+    @annulusContourRadius.setter
+    def annulusContourRadius(self, radius):
+      if not self.heartValveNode:
+        logging.error("set annulusModelRadius failed: invalid heartValveNode")
+        return
+      self.heartValveNode.SetAttribute("AnnulusContourRadius",str(radius))
+
+      if self.annulusContourCurveNode:
+        ValveModel.setLineDiameter(self.annulusContourCurveNode, radius*2)
+        ValveModel.setGlyphSize(self.annulusContourCurveNode, radius*self.ANNULUS_CONTOUR_MARKUP_SCALE*2)
+      if self.valveLabelsNode:
+        ValveModel.setGlyphSize(self.valveLabelsNode, radius*self.ANNULUS_CONTOUR_MARKUP_SCALE*3)
+
+    @property
+    def valveLabelsNode(self):
+      """:returns Markup point list storing labeled landmark points of the displayed time point. The points may or
+      may not be on the annulus contour. None if no labels are specified for the displayed time point (use
+      addValveLabels to get a node that can be edited)."""
+      return self._heartValveNodeReferencedProxyNode("AnnulusLabelsPoints", forDisplayedHeartValvePhase=True)
+
+    @property
+    def valveLabelsProxyNode(self):
+      """:returns Markup point list proxy node that is shared between all time points, regardless of labels
+      being specified for the displayed time point. Use this for observing the node; to read or edit the
+      labels of the displayed time point use valveLabelsNode / addValveLabels."""
+      return self._heartValveNodeReferencedProxyNode("AnnulusLabelsPoints", forDisplayedHeartValvePhase=False)
+
+    @valveLabelsNode.setter
+    def valveLabelsNode(self, labelsMarkupPointsNode):
+      if not self.heartValveNode:
+        logging.error("set valveLabelsNode failed: invalid heartValveNode")
+        return
+      self.heartValveNode.SetNodeReferenceID("AnnulusLabelsPoints",
+                                             labelsMarkupPointsNode.GetID() if labelsMarkupPointsNode else None)
+      self.applyProbeToRasTransformToNode(labelsMarkupPointsNode)
+
+      if labelsMarkupPointsNode:
+        self.valveBrowser.makeTimeSequence(labelsMarkupPointsNode)
+        self.moveNodeToHeartValveFolder(labelsMarkupPointsNode)
+
+    @property
+    def valveLabelsSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("AnnulusLabelsPoints")
+
+    @property
+    def valveRoiModelNode(self):
+      """:returns Model node that displays the valve ROI."""
+      return self._heartValveNodeReferencedProxyNode("ValveRoiModel", forDisplayedHeartValvePhase=True)
+
+    @valveRoiModelNode.setter
+    def valveRoiModelNode(self, modelNode):
+      if not self.heartValveNode:
+        logging.error("setValveRoiModelNode failed: invalid heartValveNode")
+        return
+      self.heartValveNode.SetNodeReferenceID("ValveRoiModel", modelNode.GetID() if modelNode else None)
+      self.applyProbeToRasTransformToNode(modelNode)
+      self.valveRoi.setRoiModelNode(modelNode)
+      if modelNode:
+        self.moveNodeToHeartValveFolder(modelNode)
+        self.valveBrowser.makeTimeSequence(modelNode)
+
+    @property
+    def valveRoiSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("ValveRoiModel")
+
+    @property
+    def valveType(self):
+      return self.heartValveNode.GetAttribute("ValveType") if self.heartValveNode else None
+
+    @property
+    def leafletVolumeSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("LeafletVolume")
+
+    @property
+    def leafletVolumeNode(self):
+      """:returns Volume that is used for leaflet segmentation (to generate leafletSegmentationNode).
+      It is typically isotropic and higher resolution than the original volume."""
+      return self._heartValveNodeReferencedProxyNode("LeafletVolume", forDisplayedHeartValvePhase=True)
+
+    @leafletVolumeNode.setter
+    def leafletVolumeNode(self, leafletVolumeNode):
+      if not self.heartValveNode:
+        logging.error("setLeafletVolumeNode failed: invalid heartValveNode")
+        return
+      self.heartValveNode.SetNodeReferenceID("LeafletVolume",
+                                             leafletVolumeNode.GetID() if leafletVolumeNode else None)
+      self.applyProbeToRasTransformToNode(leafletVolumeNode)
+      if leafletVolumeNode:
+        self.moveNodeToHeartValveFolder(leafletVolumeNode)
+        self.valveBrowser.makeTimeSequence(leafletVolumeNode)
+
+    @property
+    def leafletSegmentationSequenceNode(self):
+      return self._heartValveNodeReferencedSequenceNode("LeafletSegmentation")
+
+    def isNodeSpecifiedForCurrentTimePoint(self, proxyNode):
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(proxyNode)
+      if not sequenceNode:
+        return False
+      valveItemIndex, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      if not indexValue:
+        return False
+      itemNumber = sequenceNode.GetItemNumberFromIndexValue(indexValue)
+      if itemNumber < 0:
+        return False
+      return True
+
+    def _heartValveNodeReferencedSequenceNode(self, referenceRole):
+      referencedNode = self._heartValveNodeReferencedProxyNode(referenceRole, forDisplayedHeartValvePhase=False)
+      if not referencedNode:
+        return None
+      referencedSequenceNode = self.valveBrowserNode.GetSequenceNode(referencedNode)
+      return referencedSequenceNode
+
+    def _heartValveNodeReferencedProxyNode(self, referenceRole, forDisplayedHeartValvePhase):
+      """Get node referenced from the heartValveNode
+      :param forDisplayedHeartValvePhase specifies if the referenced proxy node of the currently displayed
+         heart valve index should be returned. If False then the current referenced node
+         is returned, regardless of the proxy node is specified for the current heart valve phase.
+      :returns Referenced node
+      """
+      referencedProxyNode = self.heartValveNode.GetNodeReference(referenceRole) if self.heartValveNode else None
+      if (not forDisplayedHeartValvePhase) or (not referencedProxyNode):
+        # No need to check if it is for the displayed heart valve phase
+        return referencedProxyNode
+      # Check if segmentation is available for the current heart valve phase
+      if not self.isNodeSpecifiedForCurrentTimePoint(referencedProxyNode):
+        return None
+      return referencedProxyNode
+
+    @property
+    def leafletSegmentationNode(self):
+      """Get leaflet segmentation node
+      :returns Segmentation node storing each valve leaflet as a segment
+      """
+      return self._heartValveNodeReferencedProxyNode("LeafletSegmentation", forDisplayedHeartValvePhase=True)
+
+    @leafletSegmentationNode.setter
+    def leafletSegmentationNode(self, segmentationNode):
+      if not self.heartValveNode:
+        logging.error("setLeafletSegmentationNode failed: invalid heartValveNode")
+        return
+      self.heartValveNode.SetNodeReferenceID("LeafletSegmentation",
+                                             segmentationNode.GetID() if segmentationNode else None)
+      self.applyProbeToRasTransformToNode(segmentationNode)
+      if segmentationNode:
+        self.moveNodeToHeartValveFolder(segmentationNode)
+        self.valveBrowser.makeTimeSequence(segmentationNode)
+      self.updateLeafletModelsFromSegmentation()
+      self.updateCoaptationModels()
 
     def setHeartValveNodeDefaults(self):
       """Initialize HeartValveNode with defaults. Already defined values are not changed."""
+
       shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
       if self.heartValveNode.GetHideFromEditors():
         self.heartValveNode.SetHideFromEditors(False)
         shNode.RequestOwnerPluginSearch(self.heartValveNode)
         shNode.SetItemAttribute(shNode.GetItemByDataNode(self.heartValveNode), "ModuleName", "HeartValve")
 
-      if not self.getAnnulusContourRadius():
+      if not self.annulusContourRadius:
         self.setAnnulusContourRadius(self.ANNULUS_CONTOUR_RADIUS)
 
       if self.getValveVolumeSequenceIndex() < 0:
         self.setValveVolumeSequenceIndex(-1)  # by default it is set to -1 (undefined)
 
-      self.getProbePosition()
-      self.getCardiacCyclePhase()
+      if self.valveLabelsProxyNode is None:
+        self.valveLabelsNode = self.createAnnulusLabelsMarkupNode()
 
-      if not self.getAxialSliceToRasTransformNode():
-        logging.debug("Did not find annulus transform node, create a new one")
-        self.setAxialSliceToRasTransformNode(self.createAxialSliceToRasTransformNode())
+      # Initialize to default value (if not set to some other value already)
+      if not self.heartValveNode.GetAttribute("CardiacCyclePhase"):
+        self.setCardiacCyclePhase("unknown")
 
-      if not self.getAnnulusContourMarkupNode():
-        logging.debug("Did not find contour markup point node, create a new one")
-        self.setAnnulusContourMarkupNode(self.createAnnulusContourMarkupNode())
+    def initializeNewTimePoint(self):
+      """This method is called after a new time point is added."""
+      # By default all properties are copied from the previous time point.
+      # The cardiac cycle phase is unique, so reset it to "unknown".
+      self.setCardiacCyclePhase("unknown")
+      annulusContourMarkupsNode = self.annulusContourCurveNode
+      if annulusContourMarkupsNode:
+        annulusContourMarkupsNode.RemoveAllControlPoints()
+        self.storeAnnulusContour()
 
-      if not self.getAnnulusLabelsMarkupNode():
-        logging.debug("Did not find label markup node, create a new one")
-        self.setAnnulusLabelsMarkupNode(self.createAnnulusLabelsMarkupNode())
+    def addAnnulusContourCurve(self):
+      """Ensure an annulus contour curve exists for the current time point and return it.
 
-      if not self.getValveRoiModelNode():
-        logging.debug("Did not find ROI model node, create a new one")
-        self.setValveRoiModelNode(self.createValveRoiModelNode())
+      If no annulus contour sequence exists yet, a new (empty) curve node is created.
+      If a sequence exists but has no entry for the current time point, a new (empty) entry is added.
+      If the curve is already defined for the current time point it is returned unchanged.
 
-      if not self.getLeafletSegmentationNode():
-        logging.debug("Did not find leaflet segmentation node, create a new one")
-        self.setLeafletSegmentationNode(self.createLeafletSegmentationNode())
+      This method contains no GUI dependencies and can be called from scripts.
 
-      self.updateLeafletModelsFromSegmentation()
+      :returns: annulus contour curve node for the current time point, or None on failure.
+      """
+      # Already defined for the current time point
+      if self.annulusContourCurveNode:
+        return self.annulusContourCurveNode
 
-      self.updateCoaptationModels()
-      self.updatePapillaryModels()
+      annulusContourCurveSequenceNode = self.annulusContourCurveSequenceNode
+      if not annulusContourCurveSequenceNode:
+        # No sequence/proxy exists yet: create the node. The setter creates the time sequence.
+        logging.debug("Did not find annulus contour curve node, create a new one")
+        annulusContourCurveNode = self.createAnnulusCurveNode()
+        self.annulusContourCurveNode = annulusContourCurveNode
+        return annulusContourCurveNode
+
+      # Sequence exists, but no contour for the displayed time point: add an entry so that edits to
+      # the proxy node are saved for this time point instead of being discarded on the next sync.
+      self.valveBrowser.addCurrentTimePointToSequence(annulusContourCurveSequenceNode)
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if annulusContourCurveNode:
+        self.valveBrowserNode.SetSaveChanges(annulusContourCurveSequenceNode, True)
+      else:
+        logging.error("addAnnulusContourCurve: failed to create annulus contour curve for current time point")
+      return annulusContourCurveNode
+
+    def removeAnnulusContourCurve(self):
+      """Remove the annulus contour curve entry for the current time point, if one is specified.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: True if an entry was removed, False otherwise.
+      """
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if not annulusContourCurveNode:
+        return False
+      if not self.isNodeSpecifiedForCurrentTimePoint(annulusContourCurveNode):
+        return False
+      annulusContourCurveSequenceNode = self.valveBrowserNode.GetSequenceNode(annulusContourCurveNode)
+      _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      annulusContourCurveSequenceNode.RemoveDataNodeAtValue(indexValue)
+      return True
+
+    def setAnnulusContourPoints(self, rasPoints):
+      """Set annulus contour control points for the current time point, replacing any existing points.
+
+      If no annulus contour sequence exists yet, the curve node is created automatically.
+      If a sequence exists but has no entry for the current time point, a new entry is added so that
+      the points are stored for this time point (and not just shown on the shared proxy node).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param rasPoints: Nx3 array-like of [R, A, S] coordinates.
+      :returns: annulus contour curve node for the current time point, or None on failure.
+      """
+      annulusContourCurveNode = self.addAnnulusContourCurve()
+      if not annulusContourCurveNode:
+        logging.error("setAnnulusContourPoints failed: could not create annulus contour curve")
+        return None
+
+      wasModify = annulusContourCurveNode.StartModify()
+      annulusContourCurveNode.RemoveAllControlPoints()
+      for p in rasPoints:
+        annulusContourCurveNode.AddControlPoint(vtk.vtkVector3d(p[0], p[1], p[2]))
+      annulusContourCurveNode.EndModify(wasModify)
+      self.storeAnnulusContour()
+      return annulusContourCurveNode
+
+    def addValveLabels(self):
+      """Get the valve labels node for the displayed time point, adding it if it does not exist yet.
+
+      If no valve labels sequence exists yet, the labels node is created. If a sequence exists but has
+      no entry for the displayed time point, a new entry is added so that edits to the proxy node are
+      saved for this time point instead of being discarded on the next sync.
+
+      :returns: valve labels markups node for the displayed time point.
+      """
+      valveLabelsNode = self.valveLabelsNode
+      if valveLabelsNode:
+        return valveLabelsNode
+      valveLabelsSequenceNode = self.valveLabelsSequenceNode
+      if valveLabelsSequenceNode:
+        self.valveBrowser.addCurrentTimePointToSequence(valveLabelsSequenceNode)
+        return self.valveLabelsProxyNode
+      valveLabelsNode = self.createAnnulusLabelsMarkupNode()
+      self.valveLabelsNode = valveLabelsNode
+      return valveLabelsNode
+
+    def setValveLabels(self, labeledPoints):
+      """Set valve label fiducial points for the current time point, replacing any existing labels.
+
+      If no valve labels sequence exists yet, the labels node is created automatically.
+      If a sequence exists but has no entry for the current time point, a new entry is added so that
+      the labels are stored for this time point (and not just shown on the shared proxy node).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param labeledPoints: list of (label_str, R, A, S) tuples.
+      :returns: valve labels markups node for the current time point.
+      """
+      valveLabelsNode = self.addValveLabels()
+      valveLabelsNode.SetLocked(False)
+      wasModify = valveLabelsNode.StartModify()
+      valveLabelsNode.RemoveAllControlPoints()
+      for label, r, a, s in labeledPoints:
+        idx = valveLabelsNode.AddControlPoint(vtk.vtkVector3d(r, a, s))
+        valveLabelsNode.SetNthControlPointLabel(idx, label)
+      valveLabelsNode.EndModify(wasModify)
+      valveLabelsNode.SetLocked(True)
+      return valveLabelsNode
+
+    def addPapillaryMuscleTimePoint(self, papillaryModel):
+      """Add an entry for the current time point to the given papillary muscle's line sequence.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param papillaryModel: PapillaryModel whose line markup should get a new time point entry.
+      :returns: True if an entry was added, False on failure.
+      """
+      sequenceNode = self._papillaryLineSequenceNode(papillaryModel)
+      if sequenceNode is None:
+        return False
+      self.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+      return True
+
+    def removePapillaryMuscleTimePoint(self, papillaryModel):
+      """Remove the current time point entry from the given papillary muscle's line sequence.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param papillaryModel: PapillaryModel whose line markup time point entry should be removed.
+      :returns: True if an entry was removed, False on failure.
+      """
+      sequenceNode = self._papillaryLineSequenceNode(papillaryModel)
+      if sequenceNode is None:
+        return False
+      _, indexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      sequenceNode.RemoveDataNodeAtValue(indexValue)
+      return True
+
+    def setPapillaryLinePoints(self, papillaryModel, rasPoints):
+      """Set the papillary muscle line control points for the current time point.
+
+      If a sequence exists, an entry for the current time point is added so that the points are
+      stored for this time point (and not just shown on the shared proxy node).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param papillaryModel: PapillaryModel to update.
+      :param rasPoints: Nx3 array-like of [R, A, S] coordinates (typically base, tip, chord insertion).
+      :returns: papillary line markup node, or None on failure.
+      """
+      if papillaryModel is None:
+        logging.error("setPapillaryLinePoints failed: invalid papillaryModel")
+        return None
+      papillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
+      if not papillaryMarkupNode:
+        logging.error("setPapillaryLinePoints failed: papillary muscle has no line markup node")
+        return None
+      # If a sequence exists, make sure the current time point has an entry so that edits to the
+      # proxy node are saved for this time point instead of being discarded on the next sync.
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryMarkupNode)
+      if sequenceNode:
+        self.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+      wasModify = papillaryMarkupNode.StartModify()
+      papillaryMarkupNode.RemoveAllControlPoints()
+      for p in rasPoints:
+        papillaryMarkupNode.AddControlPoint(vtk.vtkVector3d(p[0], p[1], p[2]))
+      papillaryMarkupNode.EndModify(wasModify)
+      return papillaryMarkupNode
+
+    def _papillaryLineSequenceNode(self, papillaryModel):
+      """:returns Sequence node for the given papillary muscle's line markup, or None if not found."""
+      if papillaryModel is None:
+        logging.error("papillary muscle time point operation failed: invalid papillaryModel")
+        return None
+      papillaryMarkupNode = papillaryModel.getPapillaryLineMarkupNode()
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryMarkupNode) if papillaryMarkupNode else None
+      if sequenceNode is None:
+        logging.error("papillary muscle time point operation failed: muscle not found in sequence browser")
+      return sequenceNode
 
     def moveNodeToHeartValveFolder(self, node, subfolderName=None):
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
-      if subfolderName:
-        folderItemId = shNode.GetItemChildWithName(valveNodeItemId, subfolderName)
-        if not folderItemId:
-          folderItemId = shNode.CreateFolderItem(valveNodeItemId, subfolderName)
-      else:
-        folderItemId = valveNodeItemId
-      shNode.SetItemParent(shNode.GetItemByDataNode(node), folderItemId)
-
-    def getDefaultAxialSliceToRasTransformMatrix(self):
-      axialSliceToRas = vtk.vtkMatrix4x4()
-      probePosition = self.getProbePosition()
-      probePositionPreset = self.probePositionPresets[probePosition]
-      axialSliceToRas.DeepCopy(createMatrixFromString(probePositionPreset['axialSliceToRasTransformMatrix']))
-      return axialSliceToRas
-
-    def createAxialSliceToRasTransformNode(self):
-      axialSliceToRasTransformNode = slicer.vtkMRMLLinearTransformNode()
-      axialSliceToRasTransformNode.SetName(slicer.mrmlScene.GetUniqueNameByString("AxialSliceToRasTransform"))
-      axialSliceToRasTransformNode.SetMatrixTransformToParent(self.getDefaultAxialSliceToRasTransformMatrix())
-
-      slicer.mrmlScene.AddNode(axialSliceToRasTransformNode)
-      # prevent the node from showing up in SH, as it is not something that users would need to manipulate
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      shNode.SetItemAttribute(shNode.GetItemByDataNode(axialSliceToRasTransformNode),
-                              slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(),
-                              "1")
-      self.moveNodeToHeartValveFolder(axialSliceToRasTransformNode)
-      return axialSliceToRasTransformNode
-
-    def setAxialSliceToRasTransformNode(self, axialSliceToRasTransformNode):
-      if not self.heartValveNode:
-        logging.error("setAxialSliceToRasTransformNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("AxialSliceToRasTransform",
-                                             axialSliceToRasTransformNode.GetID() if axialSliceToRasTransformNode else None)
-
-    def getAxialSliceToRasTransformNode(self):
-      return self.heartValveNode.GetNodeReference("AxialSliceToRasTransform") if self.heartValveNode else None
-
-    def getProbeToRasTransformNode(self):
-      valveVolumeNode = self.getValveVolumeNode()
-      if not valveVolumeNode:
-        return None
-      return valveVolumeNode.GetParentTransformNode()
-
-    def updateProbeToRasTransform(self):
-      """Compute ProbeToRasTransform from volume and probe position
-      and store it in ProbeToRasTransformNode"""
-
-      # Check inputs
-      probeToRasTransformNode = self.getProbeToRasTransformNode()
-      valveVolumeNode = self.getValveVolumeNode()
-      if not probeToRasTransformNode or not valveVolumeNode:
-        return
-      if not valveVolumeNode.GetImageData():
-        logging.warning('updateProbeToRasTransform failed: valve volume does not contain a valid image')
-        return
-
-      # Compute probeToRasTransform so that it centers the volume and orients it approximately
-      # correctly in the RAS coordinate system
-      valveVolumeExtent = valveVolumeNode.GetImageData().GetExtent()
-      valveVolumeCenterIjk = [(valveVolumeExtent[component*2+1]-valveVolumeExtent[component*2]+1)/2.0 for component in range(3)]
-      valveVolumeCenterIjk.append(1)
-      ijkToRasMatrix = vtk.vtkMatrix4x4()
-      valveVolumeNode.GetIJKToRASMatrix(ijkToRasMatrix)
-      valveVolumeCenterRas = ijkToRasMatrix.MultiplyPoint(valveVolumeCenterIjk)
-      probeToRasTransform = vtk.vtkTransform()
-      probeToRasTransformMatrix = vtk.vtkMatrix4x4()
-      self.getDefaultProbeToRasOrientation(probeToRasTransformMatrix)
-      probeToRasTransform.SetMatrix(probeToRasTransformMatrix)
-      probeToRasTransform.Translate(-valveVolumeCenterRas[0],-valveVolumeCenterRas[1],-valveVolumeCenterRas[2])
-      probeToRasTransformNode.SetMatrixTransformToParent(probeToRasTransform.GetMatrix())
+      HeartValves.moveNodeToHeartValveFolder(HeartValves.getSubjectHierarchyItemId(self.heartValveNode), node, subfolderName)
 
     def getDisplayedValveVolumeSequenceIndex(self):
       """Get currently displayed item index of valve volume sequence"""
@@ -194,86 +506,32 @@ class ValveModel:
         return 0
       return volumeSequenceBrowserNode.GetSelectedItemNumber()
 
-    def setValveVolumeNode(self, valveVolumeNode):
+    def applyProbeToRasTransformToNode(self, nodeToApplyTo=None):
+      if nodeToApplyTo is not None:
+        probeToRasTransformNode = self.valveBrowser.probeToRasTransformNode
+        nodeToApplyTo.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
+
+    def onProbeToRasTransformNodeChanged(self):
+      # Called when a different node is set as probeToRasTransform
       if not self.heartValveNode:
-        logging.error("setValveVolumeNode failed: invalid heartValveNode")
         return
-      self.heartValveNode.SetNodeReferenceID("ValveVolume", valveVolumeNode.GetID() if valveVolumeNode else None)
 
-      # Create probeToRasTransformNode if does not exist yet
-      probeToRasTransformNodeId = None
-      if valveVolumeNode:
-        if not valveVolumeNode.GetParentTransformNode():
-          probeToRasTransformNode = slicer.vtkMRMLLinearTransformNode()
-          probeToRasTransformNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ProbeToRasTransform"))
-          slicer.mrmlScene.AddNode(probeToRasTransformNode)
-          valveVolumeNode.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID())
-        #slicer.vtkMRMLSubjectHierarchyNode.CreateSubjectHierarchyNode(
-        #  valveVolumeNode.GetScene(), slicer.vtkMRMLSubjectHierarchyNode.GetAssociatedSubjectHierarchyNode(valveVolumeNode),
-        #  None, valveVolumeNode.GetName(), valveVolumeNode)
-        self.updateProbeToRasTransform()
-        HeartValves.setSequenceBrowserNodeDisplayIndex(self)
-
-      # Put valve under probeToRas transform (Probe coordinate system)
-      self.applyProbeToRasTransformToNode(self.getAnnulusContourMarkupNode())
-      self.applyProbeToRasTransformToNode(self.getAnnulusLabelsMarkupNode())
-      self.applyProbeToRasTransformToNode(self.getValveRoiModelNode())
-      self.applyProbeToRasTransformToNode(self.getLeafletSegmentationNode())
-      self.applyProbeToRasTransformToNode(self.getClippedVolumeNode())
-      self.applyProbeToRasTransformToNode(self.getLeafletVolumeNode())
+      # Put valve under probeToRas transform (Probe coordinate system).
+      # The proxy nodes are shared between time points, so they have to be updated even if they are
+      # not specified for the displayed time point.
+      for referenceRole in ["AnnulusContourPoints", "AnnulusLabelsPoints", "ValveRoiModel", "LeafletSegmentation",
+                            "LeafletVolume"]:
+        self.applyProbeToRasTransformToNode(
+          self._heartValveNodeReferencedProxyNode(referenceRole, forDisplayedHeartValvePhase=False))
+      for papillaryModelIndex in range(self.heartValveNode.GetNumberOfNodeReferences("PapillaryLineMarkup")):
+        self.applyProbeToRasTransformToNode(
+          self.heartValveNode.GetNthNodeReference("PapillaryLineMarkup", papillaryModelIndex))
 
       # Update parent transform in leaflet surface models
       self.updateLeafletModelsFromSegmentation()
       self.updateCoaptationModels()
 
-    def applyProbeToRasTransformToNode(self, nodeToApplyTo=None):
-      if nodeToApplyTo is not None:
-        probeToRasTransformNode = self.getProbeToRasTransformNode()
-        nodeToApplyTo.SetAndObserveTransformNodeID(probeToRasTransformNode.GetID() if probeToRasTransformNode else None)
-
-    def getValveVolumeNode(self):
-      return self.heartValveNode.GetNodeReference("ValveVolume") if self.heartValveNode else None
-
-    def setLeafletVolumeNode(self, clippedValveVolumeNode):
-      if not self.heartValveNode:
-        logging.error("setLeafletVolumeNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("LeafletVolume",
-                                             clippedValveVolumeNode.GetID() if clippedValveVolumeNode else None)
-      self.applyProbeToRasTransformToNode(clippedValveVolumeNode)
-      self.moveNodeToHeartValveFolder(clippedValveVolumeNode)
-
-    def getLeafletVolumeNode(self):
-      """:returns Volume that is used for leaflet segmentation (to generate LeafletSegmentationNode)"""
-      return self.heartValveNode.GetNodeReference("LeafletVolume") if self.heartValveNode else None
-
-    def getClippedVolumeNode(self):
-      """:returns Volume that is used clipped to the valve ROI for volume rendering"""
-      return self.heartValveNode.GetNodeReference("ClippedVolume") if self.heartValveNode else None
-
-    def setClippedVolumeNode(self, clippedValveVolumeNode):
-      if not self.heartValveNode:
-        logging.error("setClippedVolumeNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("ClippedVolume",
-                                             clippedValveVolumeNode.GetID() if clippedValveVolumeNode else None)
-      self.applyProbeToRasTransformToNode(clippedValveVolumeNode)
-
-    # Annulus contour points
-    def getAnnulusContourMarkupNode(self):
-      return self.heartValveNode.GetNodeReference("AnnulusContourPoints") if self.heartValveNode else None
-
-    def setAnnulusContourMarkupNode(self, annulusContourMarkupNode):
-      if not self.heartValveNode:
-        logging.error("setAnnulusContourMarkupNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("AnnulusContourPoints",
-                                             annulusContourMarkupNode.GetID() if annulusContourMarkupNode else None)
-      self.applyProbeToRasTransformToNode(annulusContourMarkupNode)
-      self.moveNodeToHeartValveFolder(annulusContourMarkupNode)
-      self.valveRoi.setAnnulusContourCurve(annulusContourMarkupNode)
-
-    def createAnnulusContourMarkupNode(self):
+    def createAnnulusCurveNode(self):
       markupsLogic = slicer.modules.markups.logic()
       annulusMarkupNode = markupsLogic.AddNewMarkupsNode('vtkMRMLMarkupsClosedCurveNode')
       annulusMarkupNode.SetNumberOfPointsPerInterpolatingSegment(20)
@@ -288,18 +546,6 @@ class ValveModel:
       ValveModel.setGlyphSize(annulusMarkupNode, self.ANNULUS_CONTOUR_RADIUS*self.ANNULUS_CONTOUR_MARKUP_SCALE*2)
       self.moveNodeToHeartValveFolder(annulusMarkupNode)
       return annulusMarkupNode
-
-    # Annulus contour labels
-    def getAnnulusLabelsMarkupNode(self):
-      return self.heartValveNode.GetNodeReference("AnnulusLabelsPoints") if self.heartValveNode else None
-
-    def setAnnulusLabelsMarkupNode(self, annulusLabelsMarkupNode):
-      if not self.heartValveNode:
-        logging.error("setAnnulusLabelsMarkupNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("AnnulusLabelsPoints",
-                                             annulusLabelsMarkupNode.GetID() if annulusLabelsMarkupNode else None)
-      self.applyProbeToRasTransformToNode(annulusLabelsMarkupNode)
 
     def createAnnulusLabelsMarkupNode(self):
       markupsLogic = slicer.modules.markups.logic()
@@ -320,8 +566,17 @@ class ValveModel:
 
     def getValveVolumeSequenceIndex(self):
       """"Get item index of analyzed valve volume in the volume sequence. Returns -1 if index value is undefined."""
-      indexStr = self.heartValveNode.GetAttribute("ValveVolumeSequenceIndex")
-      return int(indexStr) if indexStr is not None else -1
+      valveBrowser = self.valveBrowser
+      valveItemIndex, indexValue = valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      if indexValue is None:
+        # no time points in the valve sequence
+        return -1
+      volumeSequenceNode = valveBrowser.volumeSequenceNode
+      if not volumeSequenceNode:
+        # no volume sequence is selected
+        return -1
+      volumeIndex = volumeSequenceNode.GetItemNumberFromIndexValue(indexValue)
+      return volumeIndex
 
     def setValveVolumeSequenceIndex(self, index):
       if not self.heartValveNode:
@@ -331,35 +586,6 @@ class ValveModel:
       self.updateValveNodeNames()
       if self.getLeafletVolumeNode():
         HeartValves.useCurrentValveVolumeAsLeafletVolume(self)
-
-    # Annulus contour line radius
-    def getAnnulusContourRadius(self):
-      radiusStr = self.heartValveNode.GetAttribute("AnnulusContourRadius")
-      return float(radiusStr) if radiusStr else None
-
-    def setAnnulusContourRadius(self, radius):
-      if not self.heartValveNode:
-        logging.error("setAnnulusModelRadius failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetAttribute("AnnulusContourRadius",str(radius))
-
-      if self.getAnnulusContourMarkupNode():
-        ValveModel.setLineDiameter(self.annulusContourCurve, radius*2)
-        ValveModel.setGlyphSize(self.annulusContourCurve, radius*self.ANNULUS_CONTOUR_MARKUP_SCALE*2)
-      if self.getAnnulusLabelsMarkupNode():
-        ValveModel.setGlyphSize(self.annulusContourCurve, radius*self.ANNULUS_CONTOUR_MARKUP_SCALE*3)
-
-    # Annulus contour line
-    def getValveRoiModelNode(self):
-      return self.heartValveNode.GetNodeReference("ValveRoiModel") if self.heartValveNode else None
-
-    def setValveRoiModelNode(self, modelNode):
-      if not self.heartValveNode:
-        logging.error("setValveRoiModelNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("ValveRoiModel", modelNode.GetID() if modelNode else None)
-      self.applyProbeToRasTransformToNode(modelNode)
-      self.valveRoi.setRoiModelNode(modelNode)
 
     def createValveRoiModelNode(self):
       modelsLogic = slicer.modules.models.logic()
@@ -373,22 +599,33 @@ class ValveModel:
       modelNode.GetDisplayNode().SetOpacity(0.1)
       modelNode.GetDisplayNode().BackfaceCullingOff()
 
-      self.valveRoi.setRoiModelNode(modelNode)
+      self.valveRoiModelNode = modelNode
 
       return modelNode  # Annulus contour line
 
-    def getLeafletSegmentationNode(self):
-      return self.heartValveNode.GetNodeReference("LeafletSegmentation") if self.heartValveNode else None
+    def initializeValveRoi(self):
+      """Ensure the valve ROI model exists for the current time point and fit it to the annulus contour
+      (what the "Add ROI" button of the Valve Segmentation module does). The ROI defines the geometry of
+      the leaflet segmentation, so it is needed before initializeLeafletSegmentation.
 
-    def setLeafletSegmentationNode(self, segmentationNode):
-      if not self.heartValveNode:
-        logging.error("setLeafletSegmentationNode failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetNodeReferenceID("LeafletSegmentation",
-                                             segmentationNode.GetID() if segmentationNode else None)
-      self.applyProbeToRasTransformToNode(segmentationNode)
-      self.updateLeafletModelsFromSegmentation()
-      self.updateCoaptationModels()
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: valve ROI model node of the current time point, or None if there is no annulus contour.
+      """
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if annulusContourCurveNode is None or annulusContourCurveNode.GetNumberOfControlPoints() == 0:
+        logging.warning("initializeValveRoi failed: no annulus contour at the current time point")
+        return None
+      roiModelNode = self.valveRoiModelNode
+      if not roiModelNode:
+        if self.valveRoiSequenceNode is None:
+          roiModelNode = self.createValveRoiModelNode()
+        else:
+          self.valveBrowser.addCurrentTimePointToSequence(self.valveRoiSequenceNode)
+          roiModelNode = self.valveRoiModelNode
+      self.valveRoi.setAnnulusContourCurve(annulusContourCurveNode)
+      self.valveRoi.updateRoi()
+      return roiModelNode
 
     def createLeafletSegmentationNode(self):
       segmentationNode = slicer.vtkMRMLSegmentationNode()
@@ -398,6 +635,442 @@ class ValveModel:
       self.moveNodeToHeartValveFolder(segmentationNode)
       self.updateValveNodeNames()
       return segmentationNode
+
+    def initializeLeafletSegmentation(self):
+      """Initialize leaflet volume and segmentation for the current time point.
+
+      If they already exist for this time point this is a no-op.
+      If a sequence exists but is missing an entry for this time point, a new entry is added.
+      If no sequence exists yet, new nodes are created.
+      Segment definitions (name, color, terminology) are copied from an existing time point.
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :returns: leaflet segmentation node for the current time point, or None on failure.
+      """
+      import HeartValveLib
+
+      # Ensure leaflet volume exists for this time point
+      leafletVolumeNode = self.leafletVolumeNode
+      if not leafletVolumeNode:
+        HeartValveLib.goToAnalyzedFrame(self)
+        volumeNode = self.valveBrowser.valveVolumeNode
+        name = slicer.mrmlScene.GetUniqueNameByString(f"{self.heartValveNode.GetName()}-segmented")
+        newLeafletVolumeNode = slicer.modules.volumes.logic().CloneVolume(volumeNode, name)
+        leafletVolumeSequenceNode = self.leafletVolumeSequenceNode
+        if leafletVolumeSequenceNode:
+          self.valveBrowser.addCurrentTimePointToSequence(leafletVolumeSequenceNode)
+          self.valveBrowserNode.SetSaveChanges(leafletVolumeSequenceNode, True)
+          leafletVolumeNode = self.leafletVolumeNode
+          leafletVolumeNode.CopyContent(newLeafletVolumeNode)
+          # The missing sequence item was created as an empty default node. Write the cloned
+          # volume content into the sequence item, otherwise it would remain empty.
+          slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(self.valveBrowserNode, leafletVolumeNode)
+          # Remove the temporary clone along with its display nodes (they would be left in the scene otherwise)
+          for displayNodeIndex in reversed(range(newLeafletVolumeNode.GetNumberOfDisplayNodes())):
+            slicer.mrmlScene.RemoveNode(newLeafletVolumeNode.GetNthDisplayNode(displayNodeIndex))
+          slicer.mrmlScene.RemoveNode(newLeafletVolumeNode)
+        else:
+          self.leafletVolumeNode = newLeafletVolumeNode
+        leafletVolumeNode = self.leafletVolumeNode
+
+      # Ensure leaflet segmentation exists for this time point
+      leafletSegmentationNode = self.leafletSegmentationNode
+      if not leafletSegmentationNode:
+        leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+        if leafletSegmentationSequenceNode:
+          self.valveBrowser.addCurrentTimePointToSequence(leafletSegmentationSequenceNode)
+          self.valveBrowserNode.SetSaveChanges(leafletSegmentationSequenceNode, True)
+        else:
+          name = slicer.mrmlScene.GetUniqueNameByString(f"{self.heartValveNode.GetName()}-LeafletSegmentation")
+          newSegNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", name)
+          newSegNode.SetNodeReferenceID(newSegNode.GetReferenceImageGeometryReferenceRole(),
+                                        leafletVolumeNode.GetID())
+          newSegNode.CreateDefaultDisplayNodes()
+          newSegNode.GetDisplayNode().SetRemoveUnusedDisplayProperties(False)
+          self.leafletSegmentationNode = newSegNode
+        leafletSegmentationNode = self.leafletSegmentationNode
+
+        # Add the leaflet segments of the other time points (empty). The valve mask segment is not
+        # copied: it is regenerated from the current time point's valve ROI below.
+        ValveModel.addMissingSegments(leafletSegmentationNode.GetSegmentation(), self.getLeafletSegmentDefinitions())
+
+      # Make sure the segmentation uses the leaflet volume as its source (reference geometry)
+      # volume. Segmentations restored from a sequence item may not have this reference.
+      if leafletSegmentationNode and leafletVolumeNode:
+        leafletSegmentationNode.SetNodeReferenceID(
+          leafletSegmentationNode.GetReferenceImageGeometryReferenceRole(), leafletVolumeNode.GetID())
+
+      # Make sure display properties of the leaflet volume and segmentation can be stored for this
+      # time point. If a display node is driven by a display sequence without an item for this time
+      # point then it is reset to defaults on every sequence browser update and the user cannot
+      # control visibility.
+      self.valveBrowser.addCurrentTimePointToDisplaySequences(self.leafletVolumeNode)
+      self.valveBrowser.addCurrentTimePointToDisplaySequences(leafletSegmentationNode)
+
+      # Generate the valve mask segment ("Annulus mask") from the current time point's valve ROI.
+      # If no valve ROI is defined for this time point yet then this is a no-op; the mask is
+      # (re)generated when setLeafletSegmentation or updateValveMaskSegment is called later.
+      self.updateValveMaskSegment()
+
+      return leafletSegmentationNode
+
+    # Leaflet segments belong to the valve, not to a time point: the leaflet segmentation of every
+    # time point has the same segments (ID, name, color and terminology), only their content differs.
+    # The methods below keep it that way. The valve mask segment is excluded, it is generated for each
+    # time point from that time point's valve ROI.
+
+    @staticmethod
+    def getSegmentDefinition(segment):
+      """Name, color and terminology of a segment: what is needed to add an empty copy of it."""
+      terminologyRef = vtk.reference("")
+      segment.GetTag("TerminologyEntry", terminologyRef)
+      return {"name": segment.GetName(), "color": list(segment.GetColor()), "terminology": terminologyRef.get() or ""}
+
+    @staticmethod
+    def setSegmentDefinition(segment, definition):
+      """Set name, color and terminology of a segment (if they differ, to not modify the segmentation needlessly)."""
+      if ValveModel.getSegmentDefinition(segment) == definition:
+        return
+      segment.SetName(definition["name"])
+      segment.SetColor(definition["color"])
+      if definition["terminology"]:
+        segment.SetTag("TerminologyEntry", definition["terminology"])
+      else:
+        segment.RemoveTag("TerminologyEntry")
+
+    @staticmethod
+    def addMissingSegments(segmentation, segmentDefinitions):
+      """Add an empty segment for each {segmentId: definition} that the segmentation lacks.
+      :returns: IDs of the added segments"""
+      addedSegmentIds = []
+      for segmentId, definition in segmentDefinitions.items():
+        if segmentation.GetSegment(segmentId):
+          continue
+        newSegmentId = segmentation.AddEmptySegment(segmentId, definition["name"], definition["color"])
+        segment = segmentation.GetSegment(newSegmentId)
+        if segment and definition["terminology"]:
+          segment.SetTag("TerminologyEntry", definition["terminology"])
+        addedSegmentIds.append(newSegmentId)
+      return addedSegmentIds
+
+    @staticmethod
+    def segmentHasContent(segmentation, segmentId):
+      """True if the segment exists and is not empty in the source representation of the segmentation."""
+      import numpy as np
+      from vtk.util import numpy_support
+      segment = segmentation.GetSegment(segmentId)
+      if not segment:
+        return False
+      representation = segment.GetRepresentation(segmentation.GetSourceRepresentationName())
+      if representation is None:
+        return False
+      if representation.IsA("vtkPolyData"):
+        return representation.GetNumberOfPoints() > 0
+      if representation.IsEmpty() or not representation.GetPointData().GetScalars():
+        return False
+      # Binary labelmaps may be shared between segments: only voxels with this segment's label count
+      voxels = numpy_support.vtk_to_numpy(representation.GetPointData().GetScalars())
+      return bool(np.any(voxels == segment.GetLabelValue()))
+
+    def getLeafletSegmentationTimePoints(self):
+      """Leaflet segmentation of each time point that has one, as [(indexValue, segmentationNode)].
+
+      For the displayed time point the proxy node is returned instead of the sequence item, because
+      edits of the proxy node are written to the item (a change made to the item directly would be
+      overwritten by the proxy node's content).
+      """
+      leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+      if not leafletSegmentationSequenceNode:
+        return []
+      _, displayedIndexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      timePoints = []
+      for itemIndex in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+        indexValue = leafletSegmentationSequenceNode.GetNthIndexValue(itemIndex)
+        if indexValue == displayedIndexValue and self.leafletSegmentationNode:
+          segmentationNode = self.leafletSegmentationNode
+        else:
+          segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(itemIndex)
+        if segmentationNode:
+          timePoints.append((indexValue, segmentationNode))
+      return timePoints
+
+    @staticmethod
+    def terminologiesEqual(terminology1, terminology2):
+      if not terminology1 or not terminology2:
+        return False
+      return slicer.modules.terminologies.logic().AreTerminologyEntriesEqual(terminology1, terminology2)
+
+    @staticmethod
+    def _getIdentifyingTerminologies(segmentation, segmentIds):
+      """Terminologies that identify a segment: set for exactly one of the segments of the segmentation
+      (a generic terminology, such as the default "Tissue", may be shared by all leaflets)."""
+      terminologies = [ValveModel.getSegmentDefinition(segmentation.GetSegment(segmentId))["terminology"]
+                       for segmentId in segmentIds]
+      return [terminology for terminology in terminologies if terminology
+              and len([other for other in terminologies if ValveModel.terminologiesEqual(terminology, other)]) == 1]
+
+    def getLeafletSegmentDefinitions(self, mergeByTerminology=True):
+      """{segmentId: definition} of the leaflet segments of all time points (first definition found wins).
+
+      :param mergeByTerminology: leave out a segment whose identifying terminology is already known under
+        another ID: it is the same leaflet (time points segmented before the segment IDs were kept in sync
+        may use different IDs for it).
+      """
+      import HeartValveLib
+      definitions = {}
+      for _, segmentationNode in self.getLeafletSegmentationTimePoints():
+        segmentation = segmentationNode.GetSegmentation()
+        segmentIds = [segmentId for segmentId in segmentation.GetSegmentIDs() if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID]
+        identifyingTerminologies = ValveModel._getIdentifyingTerminologies(segmentation, segmentIds)
+        for segmentId in segmentIds:
+          if segmentId in definitions:
+            continue
+          definition = ValveModel.getSegmentDefinition(segmentation.GetSegment(segmentId))
+          if (mergeByTerminology and definition["terminology"] in identifyingTerminologies
+              and any(ValveModel.terminologiesEqual(definition["terminology"], known["terminology"]) for known in definitions.values())):
+            continue
+          definitions[segmentId] = definition
+      return definitions
+
+    def addMissingLeafletSegments(self):
+      """Give every time point's leaflet segmentation the leaflet segments of all the others (empty).
+      A time point that has a leaflet under another ID (identified by its terminology) is not given a
+      second, empty segment for it.
+      :returns: True if any segment was added."""
+      import HeartValveLib
+      definitions = self.getLeafletSegmentDefinitions()
+      added = False
+      for _, segmentationNode in self.getLeafletSegmentationTimePoints():
+        segmentation = segmentationNode.GetSegmentation()
+        segmentIds = [segmentId for segmentId in segmentation.GetSegmentIDs() if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID]
+        identifyingTerminologies = ValveModel._getIdentifyingTerminologies(segmentation, segmentIds)
+        missingDefinitions = {segmentId: definition for segmentId, definition in definitions.items()
+                              if not any(ValveModel.terminologiesEqual(definition["terminology"], terminology)
+                                         for terminology in identifyingTerminologies)}
+        if ValveModel.addMissingSegments(segmentation, missingDefinitions):
+          added = True
+      return added
+
+    def mergeLeafletSegmentByTerminology(self, segmentId, ignoredTerminologies=()):
+      """Move a segment of the displayed time point to the ID of the leaflet that has its terminology.
+
+      A leaflet may be segmented with a new segment that is given the leaflet's terminology afterwards.
+      If another leaflet segment of the valve has that terminology and is empty (or missing) at the
+      displayed time point, the new segment replaces it at this time point. The segment's own ID is
+      removed from the other time points where it is empty (it had only been added to keep the
+      segments of all time points the same).
+
+      :param ignoredTerminologies: terminologies that do not identify a leaflet (e.g. the default one)
+      :returns: the segment's new ID, or None if it was not moved
+      """
+      segmentationNode = self.leafletSegmentationNode
+      segmentation = segmentationNode.GetSegmentation() if segmentationNode else None
+      segment = segmentation.GetSegment(segmentId) if segmentation else None
+      if not segment:
+        return None
+      terminology = ValveModel.getSegmentDefinition(segment)["terminology"]
+      if not terminology or any(ValveModel.terminologiesEqual(terminology, ignored) for ignored in ignoredTerminologies):
+        return None
+      targetSegmentId = None
+      for otherSegmentId, definition in self.getLeafletSegmentDefinitions(mergeByTerminology=False).items():
+        if (otherSegmentId != segmentId and ValveModel.terminologiesEqual(definition["terminology"], terminology)
+            and not ValveModel.segmentHasContent(segmentation, otherSegmentId)):
+          targetSegmentId = otherSegmentId
+          break
+      if not targetSegmentId:
+        return None
+
+      displayNode = segmentationNode.GetDisplayNode()
+      displayProperties = []
+      if displayNode:
+        displayProperties = [(getattr(displayNode, f"Set{name}"), getattr(displayNode, f"Get{name}")(segmentId))
+                             for name in ValveModel._SEGMENT_DISPLAY_PROPERTIES]
+      segmentIndex = segmentation.GetSegmentIndex(segmentId)
+      if segmentation.GetSegment(targetSegmentId):
+        segmentation.RemoveSegment(targetSegmentId)
+        segmentIndex = segmentation.GetSegmentIndex(segmentId)
+      segmentation.RemoveSegment(segmentId)
+      segmentation.AddSegment(segment, targetSegmentId)
+      segmentation.SetSegmentIndex(targetSegmentId, segmentIndex)
+      for setter, value in displayProperties:
+        setter(targetSegmentId, value)
+      if not self.getTimePointsWithLeafletSegmentContent(segmentId):
+        self.removeLeafletSegmentFromAllTimePoints(segmentId)
+      return targetSegmentId
+
+    _SEGMENT_DISPLAY_PROPERTIES = ["SegmentVisibility", "SegmentVisibility3D", "SegmentVisibility2DFill",
+                                   "SegmentVisibility2DOutline", "SegmentOpacity3D", "SegmentOpacity2DFill",
+                                   "SegmentOpacity2DOutline"]
+
+    def copyLeafletSegmentToAllTimePoints(self, segmentId):
+      """Add the segment of the displayed time point (empty) to the leaflet segmentation of every other
+      time point, or update its name, color and terminology where it exists already."""
+      segment = self.leafletSegmentationNode.GetSegmentation().GetSegment(segmentId) if self.leafletSegmentationNode else None
+      if not segment:
+        logging.error(f"copyLeafletSegmentToAllTimePoints: segment {segmentId} not found at the displayed time point")
+        return
+      definition = ValveModel.getSegmentDefinition(segment)
+      for _, segmentationNode in self.getLeafletSegmentationTimePoints():
+        if segmentationNode is self.leafletSegmentationNode:
+          continue
+        otherSegment = segmentationNode.GetSegmentation().GetSegment(segmentId)
+        if otherSegment:
+          ValveModel.setSegmentDefinition(otherSegment, definition)
+        else:
+          ValveModel.addMissingSegments(segmentationNode.GetSegmentation(), {segmentId: definition})
+
+    def getTimePointsWithLeafletSegmentContent(self, segmentId):
+      """Index values of the time points, other than the displayed one, where the segment is not empty."""
+      return [indexValue for indexValue, segmentationNode in self.getLeafletSegmentationTimePoints()
+              if segmentationNode is not self.leafletSegmentationNode
+              and ValveModel.segmentHasContent(segmentationNode.GetSegmentation(), segmentId)]
+
+    def removeLeafletSegmentFromAllTimePoints(self, segmentId):
+      """Remove the segment, and its display properties, from the leaflet segmentation of every time point."""
+      for _, segmentationNode in self.getLeafletSegmentationTimePoints():
+        if segmentationNode.GetSegmentation().GetSegment(segmentId):
+          segmentationNode.GetSegmentation().RemoveSegment(segmentId)
+      # Display properties of a segment that no longer exists would be left in the display node of
+      # each time point (RemoveUnusedDisplayProperties is off for leaflet segmentations).
+      displayNode = self.leafletSegmentationNode.GetDisplayNode() if self.leafletSegmentationNode else None
+      if not displayNode:
+        return
+      displayNode.RemoveSegmentDisplayProperties(segmentId)
+      displaySequenceNode = self.valveBrowserNode.GetSequenceNode(displayNode)
+      if displaySequenceNode:
+        for itemIndex in range(displaySequenceNode.GetNumberOfDataNodes()):
+          itemDisplayNode = displaySequenceNode.GetNthDataNode(itemIndex)
+          if itemDisplayNode:
+            itemDisplayNode.RemoveSegmentDisplayProperties(segmentId)
+
+    def getTimePointName(self, indexValue):
+      """Short description of a time point for messages, e.g. 'mid-systole (volume index 4)'."""
+      heartValveNode = self.valveBrowser.heartValveSequenceNode.GetDataNodeAtValue(indexValue)
+      phase = heartValveNode.GetAttribute("CardiacCyclePhase") if heartValveNode else None
+      volumeSequenceNode = self.valveBrowser.volumeSequenceNode
+      volumeIndex = volumeSequenceNode.GetItemNumberFromIndexValue(indexValue) if volumeSequenceNode else -1
+      frame = f"volume index {volumeIndex + 1}" if volumeIndex >= 0 else f"index value {indexValue}"
+      return f"{phase} ({frame})" if phase and phase != "unknown" else frame
+
+    def updateValveMaskSegment(self):
+      """Create or update the valve mask segment ("Annulus mask") of the leaflet segmentation for
+      the current time point.
+
+      The mask is generated from the current time point's valve ROI (clipping model), therefore it
+      is specific to each time point and must be regenerated instead of copied between time points.
+
+      :returns: True on success, False on failure.
+      """
+      import HeartValveLib
+      import vtkSegmentationCorePython as vtkSegmentationCore
+
+      leafletSegmentationNode = self.leafletSegmentationNode
+      if not leafletSegmentationNode:
+        logging.error("updateValveMaskSegment failed: no leaflet segmentation for the current time point")
+        return False
+
+      # Imported locally because the ValveSegmentation module depends on HeartValveLib
+      from ValveSegmentation import ValveSegmentationLogic
+      try:
+        leafletMaskOrientedImageData = ValveSegmentationLogic.getLeafletVolumeClippedAxisAligned(self)
+      except Exception as err:
+        logging.warning(f"updateValveMaskSegment: could not compute valve mask image: {err}")
+        return False
+      if not leafletMaskOrientedImageData:
+        logging.warning("updateValveMaskSegment: could not compute valve mask image")
+        return False
+
+      segmentation = leafletSegmentationNode.GetSegmentation()
+      valveMaskSegment = segmentation.GetSegment(HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      if valveMaskSegment:
+        slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+          leafletMaskOrientedImageData, leafletSegmentationNode, HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      else:
+        valveMaskSegment = vtkSegmentationCore.vtkSegment()
+        valveMaskSegment.SetName("Annulus mask")
+        valveMaskSegment.AddRepresentation(
+          vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName(),
+          leafletMaskOrientedImageData)
+        segmentation.AddSegment(valveMaskSegment, HeartValveLib.VALVE_MASK_SEGMENT_ID)
+
+      # Default appearance: blue, semi-transparent, hidden (matches the ValveSegmentation module)
+      valveMaskSegment.SetColor(0, 0, 1)
+      displayNode = leafletSegmentationNode.GetDisplayNode()
+      if displayNode:
+        displayNode.SetSegmentOpacity(HeartValveLib.VALVE_MASK_SEGMENT_ID, 0.3)
+        displayNode.SetSegmentVisibility2DOutline(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+        displayNode.SetSegmentVisibility3D(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+        displayNode.SetSegmentVisibility(HeartValveLib.VALVE_MASK_SEGMENT_ID, False)
+
+      # Use the mask geometry as reference image geometry of the segmentation
+      volumeIjkToRasMatrix = vtk.vtkMatrix4x4()
+      leafletMaskOrientedImageData.GetImageToWorldMatrix(volumeIjkToRasMatrix)
+      leafletMaskGeometry = vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(
+        volumeIjkToRasMatrix, leafletMaskOrientedImageData)
+      segmentation.SetConversionParameter(
+        vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName(),
+        leafletMaskGeometry)
+      return True
+
+    def setLeafletSegmentation(self, sourceSegmentationNode, segmentIDs=None):
+      """Replace the leaflet segmentation content for the current time point with segments copied
+      from sourceSegmentationNode.
+
+      The leaflet volume and segmentation for the current time point are created if needed (see
+      initializeLeafletSegmentation), so this can be used to populate a brand new time point in a
+      single call. All existing segments in the current time point's leaflet segmentation are removed
+      and replaced with copies of the requested segments from sourceSegmentationNode. Segment IDs are
+      preserved so that the same anatomical structure keeps a consistent ID across time points (which
+      is what segmentation propagation workflows rely on).
+
+      The valve mask segment ("Annulus mask") is never copied from the source: it is generated
+      from the current time point's valve ROI, so a new one is created instead (see
+      updateValveMaskSegment).
+
+      This method contains no GUI dependencies and can be called from scripts.
+
+      :param sourceSegmentationNode: vtkMRMLSegmentationNode whose segments should be copied.
+      :param segmentIDs: optional list of segment IDs to copy. If None, all segments are copied.
+      :returns: leaflet segmentation node for the current time point, or None on failure.
+      """
+      import HeartValveLib
+
+      if not sourceSegmentationNode:
+        logging.error("setLeafletSegmentation failed: invalid sourceSegmentationNode")
+        return None
+
+      leafletSegmentationNode = self.initializeLeafletSegmentation()
+      if not leafletSegmentationNode:
+        logging.error("setLeafletSegmentation failed: could not initialize leaflet segmentation")
+        return None
+
+      sourceSegmentation = sourceSegmentationNode.GetSegmentation()
+      targetSegmentation = leafletSegmentationNode.GetSegmentation()
+      if segmentIDs is None:
+        segmentIDs = list(sourceSegmentation.GetSegmentIDs())
+      # The valve mask is specific to each time point, never copy it from the source
+      segmentIDs = [segmentID for segmentID in segmentIDs if segmentID != HeartValveLib.VALVE_MASK_SEGMENT_ID]
+
+      wasModify = leafletSegmentationNode.StartModify()
+      # Remove existing segments so the result is a clean replacement.
+      for segmentID in list(targetSegmentation.GetSegmentIDs()):
+        targetSegmentation.RemoveSegment(segmentID)
+      # Copy the requested segments (geometry and properties), preserving segment IDs.
+      for segmentID in segmentIDs:
+        if not sourceSegmentation.GetSegment(segmentID):
+          logging.warning(f"setLeafletSegmentation: segment '{segmentID}' not found in source, skipping")
+          continue
+        targetSegmentation.CopySegmentFromSegmentation(sourceSegmentation, segmentID)
+      leafletSegmentationNode.EndModify(wasModify)
+
+      # Generate a new valve mask segment from this time point's valve ROI
+      self.updateValveMaskSegment()
+
+      # Leaflet models must reflect the new set of segments
+      self.updateLeafletModelsFromSegmentation()
+
+      return leafletSegmentationNode
 
     def removePapillaryModel(self, papillaryModelIndex):
       papillaryModel = self.papillaryModels[papillaryModelIndex]
@@ -419,9 +1092,11 @@ class ValveModel:
       if papillaryLineMarkupNode:
         papillaryMuscleName = papillaryLineMarkupNode.GetName().replace(" papillary muscle", "")
       else:
-        papillaryMuscleName = self.valveTypePresets[self.getValveType()]["papillaryNames"][papillaryModelIndex]
+        papillaryMuscleName = self.valveTypePreset["papillaryNames"][papillaryModelIndex]
       if not papillaryLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode')
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         #markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'PapillaryMuscles')
@@ -430,10 +1105,15 @@ class ValveModel:
 
       papillaryLineMarkupNode.SetName(f"{papillaryMuscleName} papillary muscle")
       self.applyProbeToRasTransformToNode(papillaryLineMarkupNode)
-      annulusContourMarkupsNode = self.getAnnulusContourMarkupNode()
       ValveModel.setGlyphSize(papillaryLineMarkupNode, papillaryModel.markupGlyphScale)
-      papillaryLineMarkupNode.GetDisplayNode().SetSelectedColor(annulusContourMarkupsNode.GetDisplayNode().GetSelectedColor())
+      # Same color as the annulus contour. The contour may not be defined for the displayed time point
+      # (or at all), so get the color from the cardiac cycle phase instead of from the contour node.
+      papillaryLineMarkupNode.GetDisplayNode().SetSelectedColor(self.getBaseColor())
       papillaryModel.setPapillaryLineMarkupNode(papillaryLineMarkupNode)
+
+      papillaryLineSequenceNode = self.valveBrowserNode.GetSequenceNode(papillaryLineMarkupNode)
+      if papillaryLineSequenceNode is None:
+        self.valveBrowser.makeTimeSequence(papillaryLineMarkupNode)
 
       return papillaryModel
 
@@ -445,7 +1125,7 @@ class ValveModel:
       return None
 
     def updatePapillaryModels(self):
-      papillaryMuscleNames = self.valveTypePresets[self.getValveType()]["papillaryNames"]
+      papillaryMuscleNames = self.valveTypePreset["papillaryNames"]
       numberOfPapillaryModels = len(papillaryMuscleNames)
 
       # Remove all orphan papillary models
@@ -456,6 +1136,23 @@ class ValveModel:
       for papillaryModelIndex in range(numberOfPapillaryModels):
         self.updatePapillaryModel(papillaryModelIndex)
 
+    def getLeafletNodeSegmentId(self, leafletNode):
+      """Get ID of the leaflet segment that a leaflet surface node belongs to.
+      The ID is stored in a node attribute, but nodes stored in a sequence are reset to default (losing
+      their attributes) when a time point is displayed where they are not specified. In that case the
+      ID is retrieved from the items of the node's sequence."""
+      segmentId = leafletNode.GetAttribute('SegmentID')
+      if segmentId:
+        return segmentId
+      sequenceNode = self.valveBrowserNode.GetSequenceNode(leafletNode)
+      if sequenceNode:
+        for itemIndex in range(sequenceNode.GetNumberOfDataNodes()):
+          storedNode = sequenceNode.GetNthDataNode(itemIndex)
+          segmentId = storedNode.GetAttribute('SegmentID') if storedNode else None
+          if segmentId:
+            return segmentId
+      return None
+
     def removeLeafletNodeReference(self, referenceRole, segmentId):
       if not self.heartValveNode:
         logging.error("removeLeafletNodeReference failed: invalid heartValveNode")
@@ -463,7 +1160,7 @@ class ValveModel:
       numberOfReferences = self.heartValveNode.GetNumberOfNodeReferences(referenceRole)
       for referenceIndex in range(numberOfReferences):
         referencedNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
-        if referencedNode is not None and referencedNode.GetAttribute('SegmentID') == segmentId:
+        if referencedNode is not None and self.getLeafletNodeSegmentId(referencedNode) == segmentId:
           self.heartValveNode.RemoveNthNodeReferenceID(referenceRole, referenceIndex)
 
     def getLeafletNodeReference(self, referenceRole, segmentId):
@@ -473,7 +1170,7 @@ class ValveModel:
       numberOfReferences = self.heartValveNode.GetNumberOfNodeReferences(referenceRole)
       for referenceIndex in range(numberOfReferences):
         referencedNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
-        if referencedNode is not None and referencedNode.GetAttribute('SegmentID') == segmentId:
+        if referencedNode is not None and self.getLeafletNodeSegmentId(referencedNode) == segmentId:
           return referencedNode
       # not found
       return None
@@ -487,7 +1184,7 @@ class ValveModel:
       existingReferenceUpdated = False
       for referenceIndex in range(numberOfReferences):
         referencedNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
-        if referencedNode is not None and referencedNode.GetAttribute('SegmentID') == segmentId:
+        if referencedNode is not None and self.getLeafletNodeSegmentId(referencedNode) == segmentId:
           self.heartValveNode.SetNthNodeReferenceID(referenceRole, referenceIndex, node.GetID() if node else None)
           existingReferenceUpdated = True
           break
@@ -503,13 +1200,40 @@ class ValveModel:
           return leafletModel
       return None
 
-    def removeLeafletModel(self, segmentId):
+    def removeLeafletModel(self, segmentId, removeNodes=True):
+      """Remove the leaflet model of a segment.
+      :param removeNodes: if True then the leaflet surface nodes (and their sequences) are removed from the
+        scene, too. The nodes are shared between all time points, so they must be kept if the leaflet is
+        still segmented at another time point.
+      """
+      if removeNodes:
+        for referenceRole in ["LeafletSurfaceModel", "LeafletSurfaceBoundaryMarkup"]:
+          leafletNode = self.getLeafletNodeReference(referenceRole, segmentId)
+          self.removeLeafletNodeReference(referenceRole, segmentId)
+          self.valveBrowser.removeNodeWithSequence(leafletNode)
       for leafletModel in self.leafletModels:
         if leafletModel.segmentId == segmentId:
-          self.removeLeafletNodeReference("LeafletSurfaceModel", segmentId)
-          self.removeLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId)
           self.leafletModels.remove(leafletModel)
           return
+
+    def getLeafletSegmentIdsAtOtherTimePoints(self):
+      """Get IDs of leaflet segments that are specified at any time point other than the displayed one."""
+      import HeartValveLib
+      from HeartValveLib.util import getAllSegmentIDs
+      segmentIds = set()
+      leafletSegmentationSequenceNode = self.leafletSegmentationSequenceNode
+      if not leafletSegmentationSequenceNode:
+        return segmentIds
+      _, displayedIndexValue = self.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+      for itemIndex in range(leafletSegmentationSequenceNode.GetNumberOfDataNodes()):
+        if leafletSegmentationSequenceNode.GetNthIndexValue(itemIndex) == displayedIndexValue:
+          # the proxy node is more up-to-date for the displayed time point than the sequence item
+          continue
+        segmentationNode = leafletSegmentationSequenceNode.GetNthDataNode(itemIndex)
+        if segmentationNode:
+          segmentIds.update(getAllSegmentIDs(segmentationNode))
+      segmentIds.discard(HeartValveLib.VALVE_MASK_SEGMENT_ID)
+      return segmentIds
 
     def addLeafletModel(self, segmentId):
       leafletModel = self.findLeafletModel(segmentId)
@@ -517,7 +1241,7 @@ class ValveModel:
         leafletModel = LeafletModel.LeafletModel()
         self.leafletModels.append(leafletModel)
 
-      segmentationNode = self.getLeafletSegmentationNode()
+      segmentationNode = self.leafletSegmentationNode
       leafletModel.setSegmentationNode(segmentationNode)
       leafletModel.setSegmentId(segmentId)
 
@@ -529,6 +1253,7 @@ class ValveModel:
         modelsLogic = slicer.modules.models.logic()
         polyData = vtk.vtkPolyData()
         modelNode = modelsLogic.AddModel(polyData)
+        modelNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + " SurfaceModel"))
         self.moveNodeToHeartValveFolder(modelNode, 'LeafletSurface')
         modelNode.GetDisplayNode().SetColor(segmentColor)
         modelNode.GetDisplayNode().BackfaceCullingOff()
@@ -540,15 +1265,17 @@ class ValveModel:
         modelNode.GetDisplayNode().SetPower(10)
         self.setLeafletNodeReference("LeafletSurfaceModel", segmentId, modelNode)
         leafletSurfaceModelNode = modelNode
-      leafletSurfaceModelNode.SetName(segmentName + " SurfaceModel")
+      ValveModel.updateLeafletNodeName(leafletSurfaceModelNode, segmentName + " SurfaceModel")
       self.applyProbeToRasTransformToNode(leafletSurfaceModelNode)
       leafletModel.setSurfaceModelNode(leafletSurfaceModelNode)
 
       leafletSurfaceBoundaryMarkupNode = self.getLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId)
       if not leafletSurfaceBoundaryMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsClosedCurveNode')
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         markupNode.SetNumberOfPointsPerInterpolatingSegment(20)
-        markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + "SurfaceBoundaryMarkup"))
+        markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentName + " SurfaceBoundaryMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
         self.moveNodeToHeartValveFolder(markupNode, 'LeafletSurfaceEdit')
@@ -556,21 +1283,24 @@ class ValveModel:
         markupNode.GetDisplayNode().SetColor(0,0,1)
         self.setLeafletNodeReference("LeafletSurfaceBoundaryMarkup", segmentId, markupNode)
         leafletSurfaceBoundaryMarkupNode = markupNode
-      leafletSurfaceBoundaryMarkupNode.SetName(segmentName + " SurfaceBoundaryMarkup")
+      ValveModel.updateLeafletNodeName(leafletSurfaceBoundaryMarkupNode, segmentName + " SurfaceBoundaryMarkup")
       self.applyProbeToRasTransformToNode(leafletSurfaceBoundaryMarkupNode)
       leafletModel.setSurfaceBoundaryMarkupNode(leafletSurfaceBoundaryMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(leafletSurfaceBoundaryMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(leafletSurfaceBoundaryMarkupNode)
 
       # Move items to folders - for legacy scenes
       self.moveNodeToHeartValveFolder(leafletSurfaceModelNode, 'LeafletSurface')
       self.moveNodeToHeartValveFolder(leafletSurfaceBoundaryMarkupNode, 'LeafletSurfaceEdit')
 
     def updateLeafletModelsFromSegmentation(self):
+      import HeartValveLib
       segmentIds = []
-      segmentationNode = self.getLeafletSegmentationNode()
+      segmentationNode = self.leafletSegmentationNode
       if segmentationNode:
         from HeartValveLib.util import getAllSegmentIDs
         for segmentId in getAllSegmentIDs(segmentationNode):
-          if segmentId == VALVE_MASK_SEGMENT_ID:
+          if segmentId == HeartValveLib.VALVE_MASK_SEGMENT_ID:
             continue
           segmentIds.append(segmentId)
 
@@ -578,41 +1308,54 @@ class ValveModel:
       for leafletModel in self.leafletModels:
         segmentIdsInLeafletModels.append(leafletModel.segmentId)
 
+      # The leaflet surface nodes are shared between all time points. A leaflet that is not segmented at
+      # the displayed time point may still be segmented at another one: its nodes (and the heart valve
+      # node's references to them) must then be kept, otherwise displaying a time point with fewer
+      # leaflets would destroy the leaflet surfaces of all the other time points.
+      segmentIdsAtOtherTimePoints = self.getLeafletSegmentIdsAtOtherTimePoints()
+
       # Keep only those leaflet models that have an ID that matches one of the current segments
       for segmentIdInLeafletModel in segmentIdsInLeafletModels:
         if segmentIdInLeafletModel not in segmentIds:
           # segment is deleted, remove associated leaflet model
-          self.removeLeafletModel(segmentIdInLeafletModel)
+          self.removeLeafletModel(segmentIdInLeafletModel,
+                                  removeNodes=segmentIdInLeafletModel not in segmentIdsAtOtherTimePoints)
 
-      # cleanup legacy leaflet surface nodes
-      numSurfaceBoundaryMarkups = self.heartValveNode.GetNumberOfNodeReferences("LeafletSurfaceBoundaryMarkup")
-      for boundaryMarkupIndex in reversed(range(numSurfaceBoundaryMarkups)):
-        boundaryMarkupNode = self.heartValveNode.GetNthNodeReference("LeafletSurfaceBoundaryMarkup", boundaryMarkupIndex)
-        surfaceModelNode = self.heartValveNode.GetNthNodeReference("LeafletSurfaceModel", boundaryMarkupIndex)
-        if not boundaryMarkupNode.GetAttribute('SegmentID') in segmentIds:
-          slicer.mrmlScene.RemoveNode(boundaryMarkupNode)
-          slicer.mrmlScene.RemoveNode(surfaceModelNode)
+      # cleanup leaflet surface nodes that do not belong to any leaflet model (e.g., in legacy scenes)
+      for referenceRole in ["LeafletSurfaceBoundaryMarkup", "LeafletSurfaceModel"]:
+        for referenceIndex in reversed(range(self.heartValveNode.GetNumberOfNodeReferences(referenceRole))):
+          leafletNode = self.heartValveNode.GetNthNodeReference(referenceRole, referenceIndex)
+          if not leafletNode:
+            continue
+          segmentId = self.getLeafletNodeSegmentId(leafletNode)
+          if segmentId in segmentIds or segmentId in segmentIdsAtOtherTimePoints:
+            continue
+          self.heartValveNode.RemoveNthNodeReferenceID(referenceRole, referenceIndex)
+          self.valveBrowser.removeNodeWithSequence(leafletNode)
 
       # Add any missing leaflet models
       for segmentId in segmentIds:
         self.addLeafletModel(segmentId)
 
-      self.findAndRemoveOrphanNodes(validSegmentIDs=segmentIds)
+    @staticmethod
+    def updateLeafletNodeName(node, name):
+      """Rename a leaflet node after its segment, keeping the node names of the scene unique.
 
-    def findAndRemoveOrphanNodes(self, validSegmentIDs):
-      shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-      valveNodeItemId = shNode.GetItemByDataNode(self.heartValveNode)
-      toDelete = []
-      for subFolderId in ["LeafletSurfaceEdit", "LeafletSurface"]:
-        folderItemId = shNode.GetItemChildWithName(valveNodeItemId, subFolderId)
-        shNode.GetItemChildren(folderItemId, childItemIDs := vtk.vtkIdList())
-        for index in range(childItemIDs.GetNumberOfIds()):
-          dataNode = shNode.GetItemDataNode(childItemIDs.GetId(index))
-          if not dataNode.GetAttribute('SegmentID') in validSegmentIDs:
-            toDelete.append(dataNode)
-      for node in toDelete:
-        logging.debug(f"Found orphan node. Removing {node.GetName()}")
-        slicer.mrmlScene.RemoveNode(node)
+      The leaflet nodes of a valve are proxy nodes shared by all time points; several valves (and
+      their leaflets of the same name) may exist in one scene, so the name gets a suffix if needed.
+      A node that is already named after the segment (possibly with such a suffix) is left alone.
+      """
+      if node.GetName() and node.GetName().startswith(name):
+        return
+      node.SetName(slicer.mrmlScene.GetUniqueNameByString(name))
+
+    def getCoaptationsForLeaflet(self, leafletModel):
+      coaptations = []
+      for coaptation in self.coaptationModels:
+        connectedLeaflets = coaptation.getConnectedLeaflets(self)
+        if leafletModel in connectedLeaflets:
+          coaptations.append(coaptation)
+      return coaptations
 
     def removeCoaptationModel(self, coaptationModelIndex):
       coaptationModel = self.coaptationModels[coaptationModelIndex]
@@ -623,9 +1366,13 @@ class ValveModel:
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationMarginLineMarkup", coaptationModelIndex)
       self.heartValveNode.RemoveNthNodeReferenceID("CoaptationSurfaceModel", coaptationModelIndex)
       self.coaptationModels.remove(coaptationModel)
-      slicer.mrmlScene.RemoveNode(coaptationSurfaceModelNode)
-      slicer.mrmlScene.RemoveNode(baseLineMarkupNode)
-      slicer.mrmlScene.RemoveNode(marginLineMarkupNode)
+      # Remove the nodes along with their sequences, otherwise the sequences would be left behind
+      self.valveBrowser.removeNodeWithSequence(coaptationSurfaceModelNode)
+      self.valveBrowser.removeNodeWithSequence(baseLineMarkupNode)
+      self.valveBrowser.removeNodeWithSequence(marginLineMarkupNode)
+
+    def getCoaptationModelSequenceNode(self, coaptationModelNode):
+      return self.valveBrowserNode.GetSequenceNode(coaptationModelNode)
 
     def addCoaptationModel(self, coaptationModelIndex=-1):
       if coaptationModelIndex<0:
@@ -657,10 +1404,14 @@ class ValveModel:
         coaptationSurfaceModelNode = modelNode
       self.applyProbeToRasTransformToNode(coaptationSurfaceModelNode)
       coaptationModel.setSurfaceModelNode(coaptationSurfaceModelNode)
+      if self.valveBrowserNode.GetSequenceNode(coaptationSurfaceModelNode) is None:
+        self.valveBrowser.makeTimeSequence(coaptationSurfaceModelNode)
 
       baseLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationBaseLineMarkup", coaptationModelIndex)
       if not baseLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"BaseLineMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
@@ -671,10 +1422,14 @@ class ValveModel:
         baseLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(baseLineMarkupNode)
       coaptationModel.setBaseLineMarkupNode(baseLineMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(baseLineMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(baseLineMarkupNode)
 
       marginLineMarkupNode = self.heartValveNode.GetNthNodeReference("CoaptationMarginLineMarkup", coaptationModelIndex)
       if not marginLineMarkupNode:
         markupNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
+        # Display nodes are not created automatically while the scene is batch processing (e.g. conversion)
+        markupNode.CreateDefaultDisplayNodes()
         markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString(namePrefix+"MarginLineMarkup"))
         markupNode.SetMarkupLabelFormat("") # don't add labels (such as A-1, A-2, ...) by default, the user will assign labels
         markupNode.SetLocked(True) # prevent accidental changes
@@ -686,6 +1441,8 @@ class ValveModel:
         marginLineMarkupNode = markupNode
       self.applyProbeToRasTransformToNode(marginLineMarkupNode)
       coaptationModel.setMarginLineMarkupNode(marginLineMarkupNode)
+      if self.valveBrowserNode.GetSequenceNode(marginLineMarkupNode) is None:
+        self.valveBrowser.makeTimeSequence(marginLineMarkupNode)
 
       coaptationModel.updateSurfaceModelName(self)
       return coaptationModel
@@ -714,20 +1471,16 @@ class ValveModel:
       """
       import numpy as np
 
-      interpolatedPoints = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurve).T
+      interpolatedPoints = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurveNode).T
       planePosition, planeNormal = planeFit(interpolatedPoints)
 
-      valveTypeName = self.heartValveNode.GetAttribute("ValveType")
-      if not valveTypeName:
-        valveTypeName = "unknown"
-      valveType = self.valveTypePresets[valveTypeName]
 
       probeToRasMatrix = vtk.vtkMatrix4x4()
-      slicer.vtkMRMLTransformNode.GetMatrixTransformBetweenNodes(self.getProbeToRasTransformNode(), None, probeToRasMatrix)
+      slicer.vtkMRMLTransformNode.GetMatrixTransformBetweenNodes(self.valveBrowser.probeToRasTransformNode, None, probeToRasMatrix)
       planeNormal_Probe = np.append(planeNormal, 0)
       planeNormal_Ras = probeToRasMatrix.MultiplyPoint(planeNormal_Probe)
 
-      if valveType["approximateFlowDirection"] == "posterior":
+      if self.valveTypePreset["approximateFlowDirection"] == "posterior":
         # heart posterior direction in RAS: [0,-1,0]
         approximateFlowDirection_Ras = [0,-1,0]
       else:
@@ -741,33 +1494,35 @@ class ValveModel:
       return planePosition, planeNormal
 
     def resampleAnnulusContourMarkups(self, samplingDistance):
-      self.annulusContourCurve.ResampleCurveWorld(samplingDistance)
+      self.annulusContourCurveNode.ResampleCurveWorld(samplingDistance)
 
     def smoothAnnulusContour(self, numberOfFourierCoefficients, samplingDistance):
       from HeartValveLib.util import smoothCurveFourier
-      wasModify = self.annulusContourCurve.StartModify()
-      smoothCurveFourier(self.annulusContourCurve, numberOfFourierCoefficients, samplingDistance)
-      self.annulusContourCurve.EndModify(wasModify)
+      wasModify = self.annulusContourCurveNode.StartModify()
+      smoothCurveFourier(self.annulusContourCurveNode, numberOfFourierCoefficients, samplingDistance)
+      self.annulusContourCurveNode.EndModify(wasModify)
 
     def hasStoredAnnulusContour(self):
-      return self.annulusContourCurve.GetAttribute("AnnulusContourCoordinates") is not None
+      if not self.annulusContourCurveNode:
+        return None
+      return self.annulusContourCurveNode.GetAttribute("AnnulusContourCoordinates") is not None
 
     def storeAnnulusContour(self):
-      arr = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurve)
-      self.annulusContourCurve.SetAttribute("AnnulusContourCoordinates", str(arr.tobytes()))
+      arr = slicer.util.arrayFromMarkupsControlPoints(self.annulusContourCurveNode)
+      self.annulusContourCurveNode.SetAttribute("AnnulusContourCoordinates", str(arr.tobytes()))
 
     def restoreAnnulusContour(self):
-      originalPoints = self.annulusContourCurve.GetAttribute("AnnulusContourCoordinates")
+      originalPoints = self.annulusContourCurveNode.GetAttribute("AnnulusContourCoordinates")
       if not originalPoints:
         return
       import numpy as np
       arr = np.frombuffer(eval(originalPoints), dtype=np.float64)
-      wasModify = self.annulusContourCurve.StartModify()
-      slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourCurve, arr.reshape(-1, 3))
-      self.annulusContourCurve.EndModify(wasModify)
+      wasModify = self.annulusContourCurveNode.StartModify()
+      slicer.util.updateMarkupsControlPointsFromArray(self.annulusContourCurveNode, arr.reshape(-1, 3))
+      self.annulusContourCurveNode.EndModify(wasModify)
 
-    def setNonLabeledMarkupsVisibility(self, visible, unselectAll = True):
-      annulusMarkupNode = self.getAnnulusContourMarkupNode()
+    def setAnnulusContourControlPointVisibility(self, visible, unselectAll = True):
+      annulusMarkupNode = self.annulusContourCurveNode
       if not annulusMarkupNode:
         return
       try:
@@ -778,8 +1533,7 @@ class ValveModel:
         numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
       wasModify = annulusMarkupNode.StartModify()
       for i in range(0, numberOfControlPoints):
-        if not annulusMarkupNode.GetNthControlPointLabel(i):
-          annulusMarkupNode.SetNthControlPointVisibility(i, visible)
+        annulusMarkupNode.SetNthControlPointVisibility(i, visible)
         if unselectAll and annulusMarkupNode.GetNthControlPointSelected(i):
           annulusMarkupNode.SetNthControlPointSelected(i, False)
       annulusMarkupNode.EndModify(wasModify)
@@ -787,13 +1541,11 @@ class ValveModel:
     def getAllMarkupLabels(self):
       """Get a list of all annulus point labels"""
       labels = []
-      annulusMarkupNode = self.getAnnulusLabelsMarkupNode()
-      try:
-        # Slicer-4.13 (February 2022) and later
-        numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
-      except:
-        # fall back to older API
-        numberOfControlPoints = annulusMarkupNode.GetNumberOfFiducials()
+      annulusMarkupNode = self.valveLabelsNode
+      if not annulusMarkupNode:
+        # no labels are specified for the displayed time point
+        return labels
+      numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
       for i in range(0, numberOfControlPoints):
         try:
           # Slicer-4.13 (February 2022) and later
@@ -806,7 +1558,10 @@ class ValveModel:
       return labels
 
     def getAnnulusLabelsMarkupIndexByLabel(self, label):
-      annulusMarkupNode = self.getAnnulusLabelsMarkupNode()
+      annulusMarkupNode = self.valveLabelsNode
+      if not annulusMarkupNode:
+        # no labels are specified for the displayed time point
+        return -1
       try:
         # Slicer-4.13 (February 2022) and later
         numberOfControlPoints = annulusMarkupNode.GetNumberOfControlPoints()
@@ -834,10 +1589,10 @@ class ValveModel:
       pos = [0,0,0]
       try:
         # Current API (Slicer-4.13 February 2022)
-        self.getAnnulusLabelsMarkupNode().GetNthControlPointPosition(annulusMarkupIndex, pos)
+        self.valveLabelsNode.GetNthControlPointPosition(annulusMarkupIndex, pos)
       except:
         # Legacy API
-        self.getAnnulusLabelsMarkupNode().GetNthFiducialPosition(annulusMarkupIndex, pos)
+        self.valveLabelsNode.GetNthFiducialPosition(annulusMarkupIndex, pos)
       return np.array(pos)
 
     def getAnnulusMarkupPositionsByLabels(self, labels):
@@ -847,192 +1602,30 @@ class ValveModel:
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
       if annulusMarkupIndex<0:
         return
-      self.getAnnulusLabelsMarkupNode().RemoveNthControlPoint(annulusMarkupIndex)
+      self.valveLabelsNode.RemoveNthControlPoint(annulusMarkupIndex)
+      self.valveLabelsNode.Modified()
 
     def setAnnulusMarkupLabel(self, label, position):
+      valveLabelsNode = self.addValveLabels()
       annulusMarkupIndex = self.getAnnulusLabelsMarkupIndexByLabel(label)
       if annulusMarkupIndex>=0:
-        try:
-          # Current API (Slicer-4.13 February 2022)
-          self.getAnnulusLabelsMarkupNode().SetNthControlPointPosition(annulusMarkupIndex, position[0], position[1], position[2])
-        except:
-          # Legacy API
-          self.getAnnulusLabelsMarkupNode().SetNthFiducialPosition(annulusMarkupIndex, position[0], position[1], position[2])
+        valveLabelsNode.SetNthControlPointPosition(annulusMarkupIndex, position[0], position[1], position[2])
       else:
-        self.getAnnulusLabelsMarkupNode().AddControlPoint(vtk.vtkVector3d(position), label)
-
-    def getDefaultProbeToRasOrientation(self, probeToRasTransformMatrix):
-      probePosition = self.getProbePosition()
-      probePositionPreset = self.probePositionPresets[probePosition]
-      probeToRasTransformMatrix.DeepCopy(createMatrixFromString(probePositionPreset['probeToRasTransformMatrix']))
-
-    def setProbePosition(self, probePosition):
-      if not self.heartValveNode:
-        logging.error("setProbePosition failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetAttribute("ProbePosition", probePosition)
-      self.updateProbeToRasTransform()
-
-    def getProbePosition(self):
-      if not self.heartValveNode:
-        logging.error("getProbePosition failed: invalid heartValveNode")
-        return None
-      probePosition = self.heartValveNode.GetAttribute("ProbePosition")
-      if not probePosition:
-        probePosition = PROBE_POSITION_UNKNOWN
-        self.setProbePosition(probePosition)
-      return probePosition
-
-    def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
-
-      axialSliceToRasTransformNode = self.getAxialSliceToRasTransformNode()
-      axialSliceToRas = vtk.vtkMatrix4x4()
-      axialSliceToRasTransformNode.GetMatrixTransformToParent(axialSliceToRas)
-
-      paraAxialOrientationCode = 0
-
-      # Axial (red) - not rotated by orthoRotationDeg
-      axialNode.SetSliceToRASByNTP(
-        axialSliceToRas.GetElement(0, 2), axialSliceToRas.GetElement(1, 2), axialSliceToRas.GetElement(2, 2),
-        axialSliceToRas.GetElement(0, 0), axialSliceToRas.GetElement(1, 0), axialSliceToRas.GetElement(2, 0),
-        axialSliceToRas.GetElement(0, 3), axialSliceToRas.GetElement(1, 3), axialSliceToRas.GetElement(2, 3),
-        paraAxialOrientationCode)
-
-      # Rotate around Z axis
-      axialSliceToRasRotated = vtk.vtkMatrix4x4()
-      rotationTransform = vtk.vtkTransform()
-      rotationTransform.RotateZ(orthoRotationDeg)
-      vtk.vtkMatrix4x4.Multiply4x4(axialSliceToRas, rotationTransform.GetMatrix(), axialSliceToRasRotated)
-
-      rotationTransform = vtk.vtkTransform()
-      probePositionPreset = self.probePositionPresets[self.getProbePosition()]
-
-      # Ortho1 (yellow)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho1SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      ortho1Node.SetSliceToRASByNTP(
-        rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-        rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-        rotatedSliceToRas.GetElement(0, 3), rotatedSliceToRas.GetElement(1, 3), rotatedSliceToRas.GetElement(2, 3),
-        paraAxialOrientationCode)
-
-      # Ortho2 (green)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho2SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      ortho2Node.SetSliceToRASByNTP(
-        rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-        rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-        rotatedSliceToRas.GetElement(0, 3), rotatedSliceToRas.GetElement(1, 3), rotatedSliceToRas.GetElement(2, 3),
-        paraAxialOrientationCode)
-
-    def setSlicePositionAndOrientation(self, axialNode, ortho1Node, ortho2Node, position, orthoRotationDeg, axialSliceToRas=None):
-
-      if axialSliceToRas is None:
-        axialSliceToRasTransformNode = self.getAxialSliceToRasTransformNode()
-        axialSliceToRas = vtk.vtkMatrix4x4()
-        axialSliceToRasTransformNode.GetMatrixTransformToParent(axialSliceToRas)
-
-      paraAxialOrientationCode = 0
-
-      # Axial (red) - not rotated by orthoRotationDeg
-      if axialNode:
-        axialNode.SetSliceToRASByNTP(
-          axialSliceToRas.GetElement(0, 2), axialSliceToRas.GetElement(1, 2), axialSliceToRas.GetElement(2, 2),
-          axialSliceToRas.GetElement(0, 0), axialSliceToRas.GetElement(1, 0), axialSliceToRas.GetElement(2, 0),
-          position[0], position[1], position[2],
-          paraAxialOrientationCode)
-
-      # Rotate around Z axis
-      axialSliceToRasRotated = vtk.vtkMatrix4x4()
-      rotationTransform = vtk.vtkTransform()
-      # import math
-      # orthoRotationDeg = math.atan2(directionVector[1], directionVector[0])/math.pi*180.0
-      rotationTransform.RotateZ(orthoRotationDeg)
-      vtk.vtkMatrix4x4.Multiply4x4(axialSliceToRas, rotationTransform.GetMatrix(), axialSliceToRasRotated)
-
-      rotationTransform = vtk.vtkTransform()
-      probePositionPreset = self.probePositionPresets[self.getProbePosition()]
-
-      # Ortho1 (yellow)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho1SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      if ortho1Node:
-        ortho1Node.SetSliceToRASByNTP(
-          rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-          rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-          position[0], position[1], position[2],
-          paraAxialOrientationCode)
-
-      # Ortho2 (green)
-      rotationXYZ = probePositionPreset['axialSliceToOrtho2SliceRotationsDeg']
-      rotationTransform.SetMatrix(axialSliceToRasRotated)
-      rotationTransform.RotateX(rotationXYZ[0])
-      rotationTransform.RotateY(rotationXYZ[1])
-      rotationTransform.RotateZ(rotationXYZ[2])
-      rotatedSliceToRas = rotationTransform.GetMatrix()
-      if ortho2Node:
-        ortho2Node.SetSliceToRASByNTP(
-          rotatedSliceToRas.GetElement(0, 2), rotatedSliceToRas.GetElement(1, 2), rotatedSliceToRas.GetElement(2, 2),
-          rotatedSliceToRas.GetElement(0, 0), rotatedSliceToRas.GetElement(1, 0), rotatedSliceToRas.GetElement(2, 0),
-          position[0], position[1], position[2],
-          paraAxialOrientationCode)
+        valveLabelsNode.AddControlPoint(vtk.vtkVector3d(position), label)
 
     def updateValveNodeNames(self):
-      valveType = self.heartValveNode.GetAttribute("ValveType")
-      if not valveType:
-        valveType = "unknown"
-      valveName = valveType[0].upper()+valveType[1:]
-      cardiacCyclePhase = self.heartValveNode.GetAttribute("CardiacCyclePhase")
-      if not cardiacCyclePhase:
-        cardiacCyclePhase = "unknown"
-      cardiacCyclePhaseName = self.cardiacCyclePhasePresets[cardiacCyclePhase]["shortname"]
-      volumeSequenceIndex = self.getVolumeSequenceIndexAsDisplayedString(self.getValveVolumeSequenceIndex())
-      volumeSequenceIndex = f"_f{volumeSequenceIndex}" if not volumeSequenceIndex == "NA" else ""
+      # Placeholder for now, we'll see if sequence browser can fully take care of node renames
+      pass
 
-      # heart valve name
-      heartValveNodeName = f"{valveName}Valve-{cardiacCyclePhaseName}{volumeSequenceIndex}"
-      currentNodeName = self.heartValveNode.GetName()
-      if not currentNodeName.startswith(heartValveNodeName): # need to update
-        self.heartValveNode.SetName(slicer.mrmlScene.GetUniqueNameByString(heartValveNodeName))
+    @property
+    def probePositionPreset(self):
+      # return probe position preset object for this valve
+      return Constants.PROBE_POSITION_PRESETS[self.valveBrowser.probePosition]
 
-      # segmentation node name
-      segmentationNodeName = f"{valveName}Valve-Segmentation-{cardiacCyclePhaseName}{volumeSequenceIndex}"
-      leafletSegmentation = self.getLeafletSegmentationNode()
-      if not leafletSegmentation:
-        return
-      currentNodeName = leafletSegmentation.GetName()
-      if not currentNodeName.startswith(segmentationNodeName):  # need to update
-        leafletSegmentation.SetName(slicer.mrmlScene.GetUniqueNameByString(segmentationNodeName))
-
-      leafletVolumeNode = self.getLeafletVolumeNode()
-      if leafletVolumeNode is not None:
-        leafletVolumeNode.SetName(f"{self.heartValveNode.GetName()}-segmented")
-
-    def setValveType(self, valveType):
-      if not self.heartValveNode:
-        logging.error("setValveType failed: invalid heartValveNode")
-        return
-      self.heartValveNode.SetAttribute("ValveType", valveType)
-      self.updateValveNodeNames()
-
-    def getValveType(self):
-      valveType = self.heartValveNode.GetAttribute("ValveType")
-      if not valveType:
-        valveType = "unknown"
-        self.setValveType(valveType)
-      return valveType
+    @property
+    def valveTypePreset(self):
+      # return preset object of this valve type
+      return Constants.VALVE_TYPE_PRESETS[self.valveBrowser.valveType]
 
     def setCardiacCyclePhase(self, cardiacCyclePhase):
       if not self.heartValveNode:
@@ -1040,20 +1633,46 @@ class ValveModel:
         return
       self.heartValveNode.SetAttribute("CardiacCyclePhase", cardiacCyclePhase)
       self.updateValveNodeNames()
+      self.updateColorsFromCardiacCyclePhase()
 
-      if self.getAnnulusContourMarkupNode() and self.getAnnulusContourMarkupNode().GetDisplayNode():
-        self.getAnnulusContourMarkupNode().GetDisplayNode().SetSelectedColor(self.getBaseColor())
-        self.getAnnulusContourMarkupNode().GetDisplayNode().SetColor(self.getBaseColor())
-      if self.getAnnulusLabelsMarkupNode() and self.getAnnulusLabelsMarkupNode().GetDisplayNode():
-        self.getAnnulusLabelsMarkupNode().GetDisplayNode().SetSelectedColor(self.getBaseColor())
-        self.getAnnulusLabelsMarkupNode().GetDisplayNode().SetColor(self.getDarkColor())
+    def updateColorsFromCardiacCyclePhase(self):
+      """Color of the annulus contour and the labels indicates the cardiac cycle phase. The nodes are
+      shared between time points, so this has to be updated whenever the displayed time point changes."""
+      if not self.heartValveNode:
+        return
+      valveBrowserNode = self.valveBrowserNode
+      if not valveBrowserNode:
+        return
+      # Get the phase from the sequence item of the displayed time point and not from the proxy node:
+      # this may be called before the proxy node is updated for a newly selected time point.
+      cardiacCyclePhase = None
+      heartValveSequenceNode = valveBrowserNode.GetMasterSequenceNode()
+      itemNumber = valveBrowserNode.GetSelectedItemNumber()
+      if heartValveSequenceNode and 0 <= itemNumber < heartValveSequenceNode.GetNumberOfDataNodes():
+        storedHeartValveNode = heartValveSequenceNode.GetNthDataNode(itemNumber)
+        if storedHeartValveNode:
+          cardiacCyclePhase = storedHeartValveNode.GetAttribute("CardiacCyclePhase")
+      if not cardiacCyclePhase:
+        cardiacCyclePhase = self.getCardiacCyclePhase()
+      if cardiacCyclePhase not in self.cardiacCyclePhasePresets:
+        return
+      baseColor = self.cardiacCyclePhasePresets[cardiacCyclePhase]["color"]
+      darkColor = [component / 2.0 for component in baseColor]
+      annulusContourCurveNode = self.annulusContourCurveNode
+      if annulusContourCurveNode and annulusContourCurveNode.GetDisplayNode():
+        annulusContourCurveNode.GetDisplayNode().SetSelectedColor(baseColor)
+        annulusContourCurveNode.GetDisplayNode().SetColor(baseColor)
+      valveLabelsNode = self.valveLabelsNode
+      if valveLabelsNode and valveLabelsNode.GetDisplayNode():
+        valveLabelsNode.GetDisplayNode().SetSelectedColor(baseColor)
+        valveLabelsNode.GetDisplayNode().SetColor(darkColor)
 
     def getCardiacCyclePhase(self):
+      # A missing attribute means the phase was never set (e.g. a converted or scripted node).
+      # This getter must not call initializeNewTimePoint(): that would clear the annulus contour
+      # (and overwrite its stored backup) as a side effect of merely reading the phase.
       cardiacCyclePhase = self.heartValveNode.GetAttribute("CardiacCyclePhase")
-      if not cardiacCyclePhase:
-        cardiacCyclePhase = "unknown"
-        self.setCardiacCyclePhase(cardiacCyclePhase)
-      return cardiacCyclePhase
+      return cardiacCyclePhase if cardiacCyclePhase else "unknown"
 
     def getBaseColor(self):
       cardiacCyclePhaseColor = self.cardiacCyclePhasePresets[self.getCardiacCyclePhase()]["color"]
@@ -1061,7 +1680,7 @@ class ValveModel:
 
     def getDarkColor(self):
       cardiacCyclePhaseColor = self.cardiacCyclePhasePresets[self.getCardiacCyclePhase()]["color"]
-      return [cardiacCyclePhaseColor[0]/2.0, cardiacCyclePhaseColor[1]/2.0, cardiacCyclePhaseColor[1]/2.0]
+      return [cardiacCyclePhaseColor[0]/2.0, cardiacCyclePhaseColor[1]/2.0, cardiacCyclePhaseColor[2]/2.0]
 
     def getAnnulusMarkupLabels(self):
       import numpy as np
@@ -1071,8 +1690,8 @@ class ValveModel:
         pointPositionAnnulus = self.getAnnulusMarkupPositionByLabel(label)
         from HeartValveLib.util import getClosestPointPositionAlongCurve
         closestPointPositionOnAnnulusCurve =\
-          getClosestPointPositionAlongCurve(self.annulusContourCurve, pointPositionAnnulus)
-        if np.linalg.norm(pointPositionAnnulus - closestPointPositionOnAnnulusCurve) > self.getAnnulusContourRadius() * 1.5 + 1.0:
+          getClosestPointPositionAlongCurve(self.annulusContourCurveNode, pointPositionAnnulus)
+        if np.linalg.norm(pointPositionAnnulus - closestPointPositionOnAnnulusCurve) > self.annulusContourRadius * 1.5 + 1.0:
           # it is not a label on the annulus (for example, centroid), ignore it
           continue
         annulusMarkupLabels.append(label)
@@ -1101,9 +1720,9 @@ class ValveModel:
         segmentInfo.append({
           "pointLabel": label,
           "closestPointIdOnAnnulusCurve":
-            getClosestCurvePointIndexToPosition(self.annulusContourCurve, pointPositionAnnulus),
+            getClosestCurvePointIndexToPosition(self.annulusContourCurveNode, pointPositionAnnulus),
           "closestPointPositionOnAnnulusCurve":
-            getClosestPointPositionAlongCurve(self.annulusContourCurve, pointPositionAnnulus)
+            getClosestPointPositionAlongCurve(self.annulusContourCurveNode, pointPositionAnnulus)
         })
 
       # Sort based on closestPointIdOnAnnulusCurve1
@@ -1121,7 +1740,7 @@ class ValveModel:
         curveSegmentStartLabel = segmentInfoSorted[labelIndex % len(segmentInfoSorted)]
         curveSegmentEndLabel = segmentInfoSorted[(labelIndex + 1) % len(segmentInfoSorted)]
 
-        curveSegmentLength = self.annulusContourCurve.GetCurveLengthBetweenStartEndPointsWorld(
+        curveSegmentLength = self.annulusContourCurveNode.GetCurveLengthBetweenStartEndPointsWorld(
           curveSegmentStartLabel["closestPointIdOnAnnulusCurve"],
           curveSegmentEndLabel["closestPointIdOnAnnulusCurve"])
 
@@ -1129,12 +1748,12 @@ class ValveModel:
           # Split halfway between start and end label
           segmentLabel = curveSegmentStartLabel["pointLabel"]
           curveSegmentDividerPointPosition = \
-            getPositionAlongCurve(self.annulusContourCurve,
+            getPositionAlongCurve(self.annulusContourCurveNode,
                                   curveSegmentStartLabel["closestPointIdOnAnnulusCurve"],
                                   curveSegmentLength / 2.0)
-          curveSegmentDividerPointIndex = getClosestCurvePointIndexToPosition(self.annulusContourCurve,
+          curveSegmentDividerPointIndex = getClosestCurvePointIndexToPosition(self.annulusContourCurveNode,
                                                                               curveSegmentDividerPointPosition)
-          curveSegmentDividerPointPosition = getClosestPointPositionAlongCurve(self.annulusContourCurve,
+          curveSegmentDividerPointPosition = getClosestPointPositionAlongCurve(self.annulusContourCurveNode,
                                                                                curveSegmentDividerPointPosition)
           lengthAfter = curveSegmentLength / 2.0
           lengthBefore = curveSegmentLength / 2.0
@@ -1142,10 +1761,10 @@ class ValveModel:
           # Split at start label
           segmentLabel = curveSegmentStartLabel["pointLabel"] + "-" + curveSegmentEndLabel["pointLabel"]
           curveSegmentDividerPointIndex = \
-            getClosestCurvePointIndexToPosition(self.annulusContourCurve,
+            getClosestCurvePointIndexToPosition(self.annulusContourCurveNode,
                                                 curveSegmentStartLabel["closestPointPositionOnAnnulusCurve"])
           curveSegmentDividerPointPosition = \
-            getClosestPointPositionAlongCurve(self.annulusContourCurve,
+            getClosestPointPositionAlongCurve(self.annulusContourCurveNode,
                                               curveSegmentStartLabel["closestPointPositionOnAnnulusCurve"])
           lengthAfter = curveSegmentLength
           lengthBefore = 0
@@ -1160,53 +1779,111 @@ class ValveModel:
 
       return segmentInfoSorted
 
+    def getMergedLeafletLabelmap(self, segmentIds=None):
+      """Get the union of the leaflet segments as a binary labelmap (vtkOrientedImageData in the
+      segmentation's Probe coordinate system), without modifying the segmentation.
+      :param segmentIds: segment IDs to merge; all leaflet models by default
+      :returns: vtkOrientedImageData with 0/1 voxels, or None if there is nothing to merge
+      """
+      segmentationNode = self.leafletSegmentationNode
+      if not segmentationNode:
+        return None
+      if segmentIds is None:
+        segmentIds = [leafletModel.segmentId for leafletModel in self.leafletModels]
+      segmentIds = [segmentId for segmentId in segmentIds if segmentationNode.GetSegmentation().GetSegment(segmentId)]
+      if not segmentIds:
+        return None
+      import vtkSegmentationCorePython as vtkSegmentationCore
+      segmentIdsArray = vtk.vtkStringArray()
+      for segmentId in segmentIds:
+        segmentIdsArray.InsertNextValue(segmentId)
+      mergedLabelmap = vtkSegmentationCore.vtkOrientedImageData()
+      if not segmentationNode.GenerateMergedLabelmapForAllSegments(
+          mergedLabelmap, vtkSegmentationCore.vtkSegmentation.EXTENT_UNION_OF_EFFECTIVE_SEGMENTS, None, segmentIdsArray):
+        return None
+      extent = mergedLabelmap.GetExtent()
+      if extent[0] > extent[1] or extent[2] > extent[3] or extent[4] > extent[5]:
+        return None
+      # The merged labelmap has a different label value for each segment: make it binary
+      threshold = vtk.vtkImageThreshold()
+      threshold.SetInputData(mergedLabelmap)
+      threshold.ThresholdByLower(0)
+      threshold.SetInValue(0)
+      threshold.SetOutValue(1)
+      threshold.SetOutputScalarType(vtk.VTK_UNSIGNED_CHAR)
+      threshold.Update()
+      imageToWorldMatrix = vtk.vtkMatrix4x4()
+      mergedLabelmap.GetImageToWorldMatrix(imageToWorldMatrix)
+      binaryLabelmap = vtkSegmentationCore.vtkOrientedImageData()
+      binaryLabelmap.ShallowCopy(threshold.GetOutput())
+      binaryLabelmap.SetImageToWorldMatrix(imageToWorldMatrix)
+      return binaryLabelmap
+
     def createValveSurface(self, planePosition, planeNormal, kernelSizeMm=2.0, segmentIds=None, mergeMode=None,
                            smoothInZDirection=False):
       # TODO: kernelSizeMm maybe determine this using the size (diameter?) of the annulus
       """
       Create valve surface from the union of all segmented leaflets.
+
+      The union is computed in a temporary segmentation that is not added to the scene. The leaflet
+      segmentation of the valve is not modified: adding a temporary segment to it (as was done
+      before) wrote into the shared labelmap of the leaflet segments, which lost the first merged
+      leaflet and corrupted the valve mask segment in some segmentations, and every modification was
+      also stored in the valve's sequence item.
+      :param segmentIds: segment IDs to merge; all leaflet models by default
+      :param mergeMode: unused, kept for backward compatibility (the segments are always merged with
+        the maximum operation, i.e. as a union)
+      :param smoothInZDirection: also close the merged leaflets along the annulus plane normal
       """
-      if not mergeMode:
-        mergeMode = slicer.vtkSlicerSegmentationsModuleLogic.MODE_MERGE_MAX
       import vtkSegmentationCorePython as vtkSegmentationCore
+      segmentationNode = self.leafletSegmentationNode
+      if not segmentationNode:
+        return None
 
-      # Create a temporary segment that is a union of all existing segments
-      segmentationNode = self.getLeafletSegmentationNode()
-      allLeafletsSegId = segmentationNode.GetSegmentation().AddEmptySegment()
-
-      if not segmentIds:
-        logging.info("[createValveSurface]: segmentIds were not provided. Getting valve surface from leaflet models directly")
-        segmentIds = [leafletModel.segmentId for leafletModel in self.leafletModels]
-      else:
-        logging.info(f"[createValveSurface]: segmentIds were provided. Getting valve surface by merging {segmentIds}")
-
-      for segId in segmentIds:
-        segmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segId)
-        slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
-          segmentLabelmap, segmentationNode, allLeafletsSegId, mergeMode
-        )
+      allLeafletsLabelmap = self.getMergedLeafletLabelmap(segmentIds)
+      if allLeafletsLabelmap is None:
+        return None
 
       # Apply smoothing to make sure leaflets are closed
-      self.smoothSegment(segmentationNode, allLeafletsSegId, kernelSizeMm, smoothInZDirection=smoothInZDirection)
+      allLeafletsLabelmap = ValveModel.smoothLabelmap(allLeafletsLabelmap, kernelSizeMm=kernelSizeMm,
+                                                     smoothInZDirection=smoothInZDirection)
+
+      # Temporary segmentation (not added to the scene) that holds the union segment. It uses the
+      # conversion parameters of the leaflet segmentation so that the closed surface is generated the
+      # same way as the leaflet surfaces.
+      allLeafletsSegmentationNode = slicer.vtkMRMLSegmentationNode()
+      allLeafletsSegmentationNode.GetSegmentation().CopyConversionParameters(segmentationNode.GetSegmentation())
+      allLeafletsSegmentationNode.GetSegmentation().SetSourceRepresentationName(
+        vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName())
+      allLeafletsSegId = allLeafletsSegmentationNode.AddSegmentFromBinaryLabelmapRepresentation(allLeafletsLabelmap, "All leaflets")
+      if not allLeafletsSegId:
+        return None
+
+      # The closed surface representation has to be created explicitly (it is not generated on demand)
+      if not allLeafletsSegmentationNode.CreateClosedSurfaceRepresentation():
+        logging.warning("createValveSurface: could not create the closed surface of the merged leaflets")
+        return None
+      if allLeafletsSegmentationNode.GetClosedSurfaceInternalRepresentation(allLeafletsSegId) is None:
+        return None
 
       # Temporary node, we don't add it to the scene
       allLeafletsSurfaceModelNode = slicer.vtkMRMLModelNode()
       allLeafletsSurfaceBoundaryMarkupNode = slicer.vtkMRMLMarkupsClosedCurveNode()
 
       allLeafletsModel = LeafletModel.LeafletModel()
-      allLeafletsModel.setSegmentationNode(segmentationNode)
+      allLeafletsModel.setSegmentationNode(allLeafletsSegmentationNode)
       allLeafletsModel.setSegmentId(allLeafletsSegId)
       allLeafletsModel.setSurfaceModelNode(allLeafletsSurfaceModelNode)
       allLeafletsModel.setSurfaceBoundaryMarkupNode(allLeafletsSurfaceBoundaryMarkupNode)
 
       #allLeafletsModel.autoDetectSurfaceBoundary(self, planePosition, planeNormal)
-      allLeafletsModel.createSurfaceBoundaryFromCurve(planePosition, planeNormal, self.annulusContourCurve)
+      allLeafletsModel.createSurfaceBoundaryFromCurve(planePosition, planeNormal, self.annulusContourCurveNode)
       allLeafletsModel.updateSurface()
 
       allLeafletsSurfacePolyData = allLeafletsSurfaceModelNode.GetPolyData()
 
-      # Delete temporary segment
-      segmentationNode.RemoveSegment(allLeafletsSegId)
+      if allLeafletsSurfacePolyData is None:
+        return None
 
       # check if surface
       edges = vtk.vtkFeatureEdges()
@@ -1240,16 +1917,28 @@ class ValveModel:
       :param smoothInZDirection Useful for closing leaflets without smoothing their surface
       :param method Smoothing method: closing, median
       """
+      selectedSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segmentId)
+      modifierLabelmap = ValveModel.smoothLabelmap(selectedSegmentLabelmap, kernelSizeMm, kernelSizePixel,
+                                                   smoothInZDirection, method)
+      if modifierLabelmap is None:
+        # segment is empty, nothing to do
+        return
+      slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(modifierLabelmap, segmentationNode, segmentId)
+
+    @staticmethod
+    def smoothLabelmap(selectedSegmentLabelmap, kernelSizeMm=None, kernelSizePixel=None, smoothInZDirection=True,
+                       method='closing'):
+      """
+      Smooth a binary labelmap by applying morphological closing (or median filtering).
+      :param selectedSegmentLabelmap: vtkOrientedImageData (not modified)
+      :param kernelSizeMm Diameter of the kernel in mm
+      :param smoothInZDirection Useful for closing leaflets without smoothing their surface
+      :param method Smoothing method: closing, median
+      :returns: smoothed vtkOrientedImageData (padded by the kernel size), or None if the input is empty
+      """
       # based on SegmentEditorSmoothingEffects/smoothSelectedSegment.py
 
       import vtkSegmentationCorePython as vtkSegmentationCore
-
-      selectedSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segmentId)
-
-      #segmentation = segmentationNode.GetSegmentation()
-      #selectedSegment = segmentation.GetSegment(selectedSegmentID)
-      #selectedSegmentLabelmap = selectedSegment.GetRepresentation(
-      #  vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationBinaryLabelmapRepresentationName())
 
       if kernelSizeMm:
         selectedSegmentLabelmapSpacing = [1.0, 1.0, 1.0]
@@ -1258,6 +1947,8 @@ class ValveModel:
         # size rounded to nearest odd number. If kernel size is even then image gets shifted.
         kernelSizePixel = [int(round((kernelSizeMm / selectedSegmentLabelmapSpacing[componentIndex] + 1) / 2) * 2 - 1) for
                            componentIndex in range(3)]
+      else:
+        kernelSizePixel = list(kernelSizePixel)
 
       if not smoothInZDirection:
         kernelSizePixel[2] = 1
@@ -1268,7 +1959,7 @@ class ValveModel:
         originalExtent[2] > originalExtent[3] or
         originalExtent[4] > originalExtent[5]):
         # segment is empty, nothing to do
-        return
+        return None
 
       newExtent = [0, 0, 0, 0, 0, 0]
       newExtent[0] = originalExtent[0] - kernelSizePixel[0]
@@ -1310,17 +2001,127 @@ class ValveModel:
       modifierLabelmap = vtkSegmentationCore.vtkOrientedImageData()
       modifierLabelmap.ShallowCopy(smoothingFilter.GetOutput())
       modifierLabelmap.SetImageToWorldMatrix(imageToWorldMatrix)
+      return modifierLabelmap
 
-      slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(modifierLabelmap, segmentationNode, segmentId)
+    #######################################################
+    # Deprecated methods
 
-    def getCoaptationsForLeaflet(self, leafletModel):
-      coaptations = []
-      for coaptation in self.coaptationModels:
-        connectedLeaflets = coaptation.getConnectedLeaflets(self)
-        if leafletModel in connectedLeaflets:
-          coaptations.append(coaptation)
-      return coaptations
+    def getDefaultAxialSliceToRasTransformMatrix(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.defaultAxialSliceToRasTransformMatrix
 
+    def getAxialSliceToRasTransformNode(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.axialSliceToRasTransformNode
+
+    def getProbeToRasTransformNode(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.probeToRasTransformNode
+
+    def setValveVolumeNode(self, valveVolumeNode):
+      # this property is now stored in the valve sequence
+      self.valveBrowser.valveVolumeNode = valveVolumeNode
+
+    def getValveVolumeNode(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.valveVolumeNode
+
+    def setProbePosition(self, probePosition):
+      # this property is now stored in the valve sequence
+      self.valveBrowser.probePosition = probePosition
+
+    def getProbePosition(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.probePosition
+
+    def setSliceOrientations(self, axialNode, ortho1Node, ortho2Node, orthoRotationDeg):
+      # this is now implemented in the valve sequence
+      self.valveBrowser.setSliceOrientations(axialNode, ortho1Node, ortho2Node, orthoRotationDeg)
+
+    def setSlicePositionAndOrientation(self, axialNode, ortho1Node, ortho2Node, position, orthoRotationDeg, axialSliceToRas=None):
+      # this is now implemented in the valve sequence
+      self.valveBrowser.setSlicePositionAndOrientation(axialNode, ortho1Node, ortho2Node, position, orthoRotationDeg, axialSliceToRas)
+
+    def setValveType(self, valveType):
+      # this property is now stored in the valve sequence
+      self.valveBrowser.valveType = valveType
+
+    def getValveType(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.valveType
+
+    def getClippedVolumeNode(self):
+      # this property is now stored in the valve sequence
+      return self.valveBrowser.clippedValveVolumeNode
+
+    def setClippedVolumeNode(self, clippedValveVolumeNode):
+      # this property is now stored in the valve sequence
+      self.valveBrowser.clippedValveVolumeNode = clippedValveVolumeNode
+
+    def getHeartValveNode(self):
+      """Kept for backward compatibility"""
+      return self.heartValveNode
+
+    def setHeartValveNode(self, node):
+      """Kept for backward compatibility"""
+      self.heartValveNode = node
+
+    def getValveBrowserNode(self):
+      """Kept for backward compatibility"""
+      return self.valveBrowserNode
+
+    def getValveBrowser(self):
+      """Kept for backward compatibility"""
+      return self.valveBrowser
+
+    def getLeafletSegmentationNode(self):
+      """Kept for backward compatibility"""
+      return self.leafletSegmentationNode
+
+    def setLeafletSegmentationNode(self, segmentationNode):
+      """Kept for backward compatibility"""
+      self.leafletSegmentationNode = segmentationNode
+
+    def getAnnulusLabelsMarkupNode(self):
+      """Kept for backward compatibility"""
+      return self.valveLabelsNode
+
+    def setAnnulusLabelsMarkupNode(self, annulusLabelsMarkupNode):
+      """Kept for backward compatibility"""
+      self.valveLabelsNode = annulusLabelsMarkupNode
+
+    def getAnnulusContourRadius(self):
+      """Kept for backward compatibility"""
+      return self.annulusContourRadius
+
+    def setAnnulusContourRadius(self, radius):
+      """Kept for backward compatibility"""
+      self.annulusContourRadius = radius
+
+    def setLeafletVolumeNode(self, leafletVolumeNode):
+      """Kept for backward compatibility"""
+      self.leafletVolumeNode = leafletVolumeNode
+
+    def getLeafletVolumeNode(self):
+      """Kept for backward compatibility"""
+      return self.leafletVolumeNode
+
+    # Annulus contour points
+    def getAnnulusContourMarkupNode(self):
+      """Kept for backward compatibility"""
+      return self.annulusContourCurveNode
+
+    def setAnnulusContourMarkupNode(self, annulusContourMarkupNode):
+      """Kept for backward compatibility"""
+      self.annulusContourCurveNode = annulusContourMarkupNode
+
+    def getValveRoiModelNode(self):
+      """Kept for backward compatibility"""
+      return self.valveRoiModelNode
+
+    def setValveRoiModelNode(self, modelNode):
+      """Kept for backward compatibility"""
+      self.valveRoiModelNode = modelNode
 
 # source: http://stackoverflow.com/questions/12299540/plane-fitting-to-4-or-more-xyz-points
 def planeFit(points):
@@ -1552,12 +2353,8 @@ def getPointProjectionToLine(point, lineStart, lineEnd):
 
 
 def createMatrixFromString(transformMatrixString):
-  transformMatrix = vtk.vtkMatrix4x4()
-  transformMatrixArray = list(map(float, filter(None, transformMatrixString.split(' '))))
-  for r in range(4):
-    for c in range(4):
-      transformMatrix.SetElement(r, c, transformMatrixArray[r * 4 + c])
-  return transformMatrix
+  from HeartValveLib.util import createMatrixFromString
+  return createMatrixFromString(transformMatrixString)
 
 
 def createVtkMatrixFromArray(transformArray):

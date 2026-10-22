@@ -3,6 +3,49 @@
 #
 
 
+class Signal:
+
+  def __init__(self):
+    # Slots are kept in connection order so that emit() is deterministic (a set would fire
+    # slots in arbitrary order, making event-ordering bugs intermittent).
+    self._slots = []
+
+  def connect(self, slot):
+    if callable(slot):
+      if slot not in self._slots:
+        self._slots.append(slot)
+    else:
+      raise ValueError("The provided argument is not a callable")
+
+  def disconnect(self, slot):
+    if slot in self._slots:
+      self._slots.remove(slot)
+
+  def disconnectAll(self):
+    self._slots = []
+
+  def emit(self, *args):
+    # Isolate slot failures: multiple independent modules subscribe to the same signal, and an
+    # exception in one module's handler must not cancel the updates of the others.
+    import logging, traceback
+    for slot in list(self._slots):
+      try:
+        slot(*args)
+      except Exception:
+        logging.error(f"Signal slot {slot!r} failed:\n{traceback.format_exc()}")
+
+
+def reload(packageName, submoduleNames):
+  import imp
+  f, filename, description = imp.find_module(packageName)
+  package = imp.load_module(packageName, f, filename, description)
+  for submoduleName in submoduleNames:
+    f, filename, description = imp.find_module(submoduleName, package.__path__)
+    try:
+      imp.load_module(packageName + '.' + submoduleName, f, filename, description)
+    finally:
+      f.close()
+
 
 def timer(func):
   """ This decorator can be used for profiling a method/function by printing the elapsed time after execution.
@@ -39,7 +82,8 @@ def getPointsOnPlane(planePosition, planeNormal, curvePoly):
   cutEdges.Update()
   intersection = cutEdges.GetOutput()
   intersectionPoints = intersection.GetPoints()
-  n = intersectionPoints.GetNumberOfPoints()
+  # The cutter output has no points at all if the curve does not intersect the plane
+  n = intersectionPoints.GetNumberOfPoints() if intersectionPoints else 0
   points = np.zeros([3,n])
   pos = [0.0, 0.0, 0.0]
   for i in range(n):
@@ -133,7 +177,7 @@ def smoothCurveFourier(markupsNode, numberOfFourierCoefficients, controlPointDis
 
   samplingDistance = 1.0 # Fourier-smoothed curve will be computed using this resolution
   interpolatedPoints = getSampledInterpolatedPointsAsArray(interpolatedPoints, samplingDistance)
-  if interpolatedPoints.size == 0:
+  if len(interpolatedPoints) == 0:
     logging.warning("smoothCurveFourier failed: no points are available")
     return
 
@@ -389,3 +433,13 @@ def getAllSegmentIDs(segmentationNode):
   segmentation = segmentationNode.GetSegmentation()
   segmentation.GetSegmentIDs(segmentIDs)
   return [segmentIDs.GetValue(idx) for idx in range(segmentIDs.GetNumberOfValues())]
+
+
+def createMatrixFromString(transformMatrixString):
+  import vtk
+  transformMatrix = vtk.vtkMatrix4x4()
+  transformMatrixArray = list(map(float, filter(None, transformMatrixString.split(' '))))
+  for r in range(4):
+    for c in range(4):
+      transformMatrix.SetElement(r, c, transformMatrixArray[r * 4 + c])
+  return transformMatrix

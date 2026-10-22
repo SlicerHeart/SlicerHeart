@@ -34,21 +34,27 @@ class ValveRoi:
 
   def setRoiModelNode(self, destination):
     self.roiModelNode = destination
-
-    # initialize with defaults
-    if self.roiModelNode:
-      if not self.roiModelNode.GetAttribute(self.PARAM_SCALE):
-        self.roiModelNode.SetAttribute(self.PARAM_SCALE, "120")
-      if not self.roiModelNode.GetAttribute(self.PARAM_TOP_DISTANCE):
-        self.roiModelNode.SetAttribute(self.PARAM_TOP_DISTANCE, "10")
-      if not self.roiModelNode.GetAttribute(self.PARAM_TOP_SCALE):
-        self.roiModelNode.SetAttribute(self.PARAM_TOP_SCALE, "50")
-      if not self.roiModelNode.GetAttribute(self.PARAM_BOTTOM_DISTANCE):
-        self.roiModelNode.SetAttribute(self.PARAM_BOTTOM_DISTANCE, "30")
-      if not self.roiModelNode.GetAttribute(self.PARAM_BOTTOM_SCALE):
-        self.roiModelNode.SetAttribute(self.PARAM_BOTTOM_SCALE, "50")
-
+    self.initializeDefaultRoiGeometry()
     self.updateRoi()
+
+  def initializeDefaultRoiGeometry(self):
+    """Fill in default values for any missing ROI geometry parameter attributes.
+
+    The geometry parameters are stored as attributes of the ROI model node. They can be missing on
+    a newly created node, or on a node that was created as a new (default) item of a ROI model
+    sequence for a new time point.
+    """
+    if not self.roiModelNode:
+      return
+    defaultGeometryParams = {
+      self.PARAM_SCALE: "120",
+      self.PARAM_TOP_DISTANCE: "10",
+      self.PARAM_TOP_SCALE: "50",
+      self.PARAM_BOTTOM_DISTANCE: "30",
+      self.PARAM_BOTTOM_SCALE: "50"}
+    for paramName, defaultValue in defaultGeometryParams.items():
+      if not self.roiModelNode.GetAttribute(paramName):
+        self.roiModelNode.SetAttribute(paramName, defaultValue)
 
   def setAnnulusContourCurve(self, source):
     self.annulusContourCurve = source
@@ -97,6 +103,7 @@ class ValveRoi:
         closestPointDistance = closestPointFinder.EvaluateFunctionAndGetClosestPoint(point1Pos, point2Pos)
         if abs(closestPointDistance) < maxDistanceOfBoundaryPoint:
           numberOfBoundaryPoints += 1
+      # The coaptation line may have no points (e.g. it is not specified at the displayed time point)
       if numberOfPoints and float(numberOfBoundaryPoints)/float(numberOfPoints) > 0.75:
         # If at least 75% of points are near the leaflet surface then we consider this coaptation line
         # as a boundary of this leaflet.
@@ -167,7 +174,7 @@ class ValveRoi:
     from HeartValveLib.util import getClosestCurvePointIndexToPosition
     # Find out if the segment is between (when going in increasing point index direction)
     # or outside the two intersection points.
-    annulusContour = self.valveModel.annulusContourCurve
+    annulusContour = self.valveModel.annulusContourCurveNode
 
     annulusContourStartPointId = getClosestCurvePointIndexToPosition(annulusContour, leafletBoundaryPoints[:,0])
     annulusContourEndPointId = getClosestCurvePointIndexToPosition(annulusContour, leafletBoundaryPoints[:, -1])
@@ -209,6 +216,8 @@ class ValveRoi:
     return leafletBoundaryPoints
 
   def setRoiGeometry(self, params):
+    if not self.roiModelNode:
+      raise RuntimeError("Cannot set ROI geometry before setting a valid ROI model node")
     wasModified = self.roiModelNode.StartModify()
     for paramName in self.GEOMETRY_PARAMS:
       self.roiModelNode.SetAttribute(paramName, str(params[paramName])) # 0-100
@@ -217,8 +226,12 @@ class ValveRoi:
 
   def getRoiGeometry(self):
     params = {}
-    for paramName in self.GEOMETRY_PARAMS:
-      params[paramName] = float(self.roiModelNode.GetAttribute(paramName))
+    if self.roiModelNode:
+      for paramName in self.GEOMETRY_PARAMS:
+        attribute = self.roiModelNode.GetAttribute(paramName)
+        if attribute is None:
+          continue
+        params[paramName] = float(attribute)
     return params
 
   def updateRoi(self):
@@ -246,6 +259,10 @@ class ValveRoi:
       self.roiModelNode.SetAndObservePolyData(clippingPolyData)
       self.roiModelNode.Modified()
       return
+
+    # Geometry parameter attributes can be missing if the ROI model was created as a new (default)
+    # item of a ROI model sequence for a new time point.
+    self.initializeDefaultRoiGeometry()
 
     scale = float(self.roiModelNode.GetAttribute(self.PARAM_SCALE)) * 0.01
     topDistance = float(self.roiModelNode.GetAttribute(self.PARAM_TOP_DISTANCE))
