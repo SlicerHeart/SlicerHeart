@@ -529,6 +529,12 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
     messages = quantLogic.computeMetrics(papillary)
     self.assertTrue(any("landmarks are required" in m for m in messages), messages)
 
+    # Without the MA/MP landmarks the valve cannot be split (a real scene labelled with the
+    # commissures only raised an IndexError from createSplittingPlane)
+    valveModel.setValveLabels([("SRC", *contour[1]), ("SLC", *contour[4]), ("IRC", *contour[7]), ("ILC", *contour[10])])
+    messages = quantLogic.computeMetrics(cavc)
+    self.assertTrue(any("MA and MP" in m for m in messages), messages)
+
   # ---------------------------------------------------------------------------------------------
   # Widget
   # ---------------------------------------------------------------------------------------------
