@@ -233,13 +233,30 @@
         </property>
         <layout class="QFormLayout" name="formLayout_7">
          <item row="0" column="0">
+          <widget class="QLabel" name="flowMetricsMethodLabel">
+           <property name="text">
+            <string>Method:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="flowMetricsMethodSelector">
+           <property name="toolTip">
+            <string>Plane probe: velocity is sampled on the measurement plane (with the sampling distance), in the mask or where the speed is above the threshold. Disc sampling (slicerheart_4dflow): velocity is sampled on a disc (radius is half of the smaller plane size), with mask-normalized interpolation, so velocities outside the lumen do not leak in.</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>flowMetricsMethod</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
           <widget class="QLabel" name="label_7">
            <property name="text">
             <string>Output model:</string>
            </property>
           </widget>
          </item>
-         <item row="0" column="1">
+         <item row="1" column="1">
           <widget class="qMRMLNodeComboBox" name="outputFlowMetricsModelSelector">
            <property name="toolTip">
             <string>Model node that contains speed vectors as point data</string>
@@ -275,14 +292,14 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
+         <item row="2" column="0">
           <widget class="QLabel" name="label_10">
            <property name="text">
             <string>Output summary table:</string>
            </property>
           </widget>
          </item>
-         <item row="1" column="1">
+         <item row="2" column="1">
           <layout class="QHBoxLayout" name="horizontalLayout_2">
            <item>
             <widget class="qMRMLNodeComboBox" name="outputFlowMetricsSummaryTableSelector">
@@ -325,14 +342,14 @@
            </item>
           </layout>
          </item>
-         <item row="3" column="0">
+         <item row="4" column="0">
           <widget class="QLabel" name="label_9">
            <property name="text">
             <string>Output table:</string>
            </property>
           </widget>
          </item>
-         <item row="3" column="1">
+         <item row="4" column="1">
           <layout class="QHBoxLayout" name="horizontalLayout">
            <item>
             <widget class="qMRMLNodeComboBox" name="outputFlowMetricsTableSelector">
@@ -382,7 +399,7 @@
            </item>
           </layout>
          </item>
-         <item row="2" column="1">
+         <item row="3" column="1">
           <widget class="ctkCollapsibleGroupBox" name="SummaryTableViewGroupBox">
            <property name="title">
             <string>View</string>
@@ -416,7 +433,7 @@
            </layout>
           </widget>
          </item>
-         <item row="4" column="1">
+         <item row="5" column="1">
           <widget class="ctkCollapsibleGroupBox" name="FlowMetricsTableViewGroupBox">
            <property name="title">
             <string>View</string>
@@ -453,20 +470,37 @@
         </layout>
        </widget>
       </item>
-      <item row="8" column="0" colspan="2">
+      <item row="9" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Streamlines</string>
         </property>
         <layout class="QFormLayout" name="formLayout">
          <item row="0" column="0">
+          <widget class="QLabel" name="streamlinesMethodLabel">
+           <property name="text">
+            <string>Method:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="streamlinesMethodSelector">
+           <property name="toolTip">
+            <string>Streamlines: instantaneous streamlines in each frame (VTK). Pathlines (slicerheart_4dflow): time-resolved particle paths, emitted from the measurement plane at every frame, traced for one cardiac cycle (heart rate is used). Maximum length and bidirectional options only apply to streamlines.</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>streamlinesMethod</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
           <widget class="QLabel" name="label_5">
            <property name="text">
             <string>Maximum length:</string>
            </property>
           </widget>
          </item>
-         <item row="0" column="1">
+         <item row="1" column="1">
           <widget class="ctkSliderWidget" name="streamlinesMaximumLengthSliderWidget">
            <property name="toolTip">
             <string>Distance between sampling points in the plane.</string>
@@ -491,14 +525,14 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
+         <item row="2" column="0">
           <widget class="QLabel" name="label_12">
            <property name="text">
             <string>Bidirectional:</string>
            </property>
           </widget>
          </item>
-         <item row="1" column="1">
+         <item row="2" column="1">
           <widget class="QCheckBox" name="checkBox">
            <property name="text">
             <string/>
@@ -508,14 +542,14 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="0">
+         <item row="4" column="0">
           <widget class="QLabel" name="label_13">
            <property name="text">
             <string>Output streamlines:</string>
            </property>
           </widget>
          </item>
-         <item row="3" column="1">
+         <item row="4" column="1">
           <widget class="qMRMLNodeComboBox" name="streamlinesOutputModelSelector">
            <property name="toolTip">
             <string>Model node that contains streamlines computed from the input plane. Sampling distance, speed threshold, input mask, maximum length, and bidirectional parameters are taken into account.</string>
@@ -551,14 +585,14 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
+         <item row="3" column="0">
           <widget class="QLabel" name="label_16">
            <property name="text">
             <string>Compute all metrics:</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
+         <item row="3" column="1">
           <widget class="QCheckBox" name="streamlinesComputeAllMetricsCheckBox">
            <property name="toolTip">
             <string>Compute vorticity, velocity vector, etc., which might be useful, but makes centerlines takes 4x more storage space</string>
@@ -574,7 +608,7 @@
         </layout>
        </widget>
       </item>
-      <item row="9" column="0" colspan="2">
+      <item row="10" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Speed image</string>
@@ -643,7 +677,7 @@
         </layout>
        </widget>
       </item>
-      <item row="10" column="0" colspan="2">
+      <item row="11" column="0" colspan="2">
        <widget class="QPushButton" name="analyzeButton">
         <property name="enabled">
          <bool>true</bool>
@@ -657,6 +691,106 @@
         <property name="default">
          <bool>true</bool>
         </property>
+       </widget>
+      </item>
+      <item row="13" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="massConservationGroupBox">
+        <property name="title">
+         <string>Mass conservation</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="massConservationFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="inflowTablesLabel">
+           <property name="text">
+            <string>Inflow tables:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="qMRMLCheckableNodeComboBox" name="inflowTablesSelector">
+           <property name="toolTip">
+            <string>Flow metrics tables (FlowRate column) of the inflow planes.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLTableNode</string>
+            </stringlist>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="outflowTablesLabel">
+           <property name="text">
+            <string>Outflow tables:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="qMRMLCheckableNodeComboBox" name="outflowTablesSelector">
+           <property name="toolTip">
+            <string>Flow metrics tables (FlowRate column) of the outflow planes.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLTableNode</string>
+            </stringlist>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="outputMassConservationTableLabel">
+           <property name="text">
+            <string>Output table:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputMassConservationTableSelector">
+           <property name="toolTip">
+            <string>Inflow and outflow volume per heart beat, difference, percent error.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLTableNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Mass conservation</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputMassConservationTable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0" colspan="2">
+          <widget class="QPushButton" name="computeMassConservationButton">
+           <property name="toolTip">
+            <string>Compare net flow volume per heart beat of the inflow and outflow planes (slicerheart_4dflow).</string>
+           </property>
+           <property name="text">
+            <string>Compute mass conservation</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
       <item row="6" column="0" colspan="2">
@@ -716,6 +850,452 @@
         </layout>
        </widget>
       </item>
+      <item row="12" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="hemodynamicsGroupBox">
+        <property name="title">
+         <string>Hemodynamics</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="hemodynamicsFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="bloodDensityLabel">
+           <property name="text">
+            <string>Blood density:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkDoubleSpinBox" name="bloodDensitySpinBox">
+           <property name="toolTip">
+            <string>Blood density used for kinetic energy and pressure.</string>
+           </property>
+           <property name="suffix">
+            <string> kg/m3</string>
+           </property>
+           <property name="decimals">
+            <number>0</number>
+           </property>
+           <property name="minimum">
+            <double>900.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>1200.000000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>10.000000000000000</double>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>bloodDensity</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="bloodViscosityLabel">
+           <property name="text">
+            <string>Blood viscosity:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkDoubleSpinBox" name="bloodViscositySpinBox">
+           <property name="toolTip">
+            <string>Dynamic viscosity of blood, used for energy loss, wall shear stress, and pressure.</string>
+           </property>
+           <property name="suffix">
+            <string> mPa*s</string>
+           </property>
+           <property name="decimals">
+            <number>2</number>
+           </property>
+           <property name="minimum">
+            <double>1.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>10.000000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>bloodViscosity</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="outputVorticityLabel">
+           <property name="text">
+            <string>Vorticity:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputVorticityVolumeSelector">
+           <property name="toolTip">
+            <string>Vorticity magnitude (1/s) in the lumen, browsed with the flow field.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLScalarVolumeNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Vorticity</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputVorticityVolume</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="outputHelicityLabel">
+           <property name="text">
+            <string>Helicity:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputHelicityVolumeSelector">
+           <property name="toolTip">
+            <string>Relative helicity (cosine of the angle between velocity and vorticity, -1..1) in the lumen.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLScalarVolumeNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Helicity</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputHelicityVolume</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="outputKineticEnergyLabel">
+           <property name="text">
+            <string>Kinetic energy:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputKineticEnergyVolumeSelector">
+           <property name="toolTip">
+            <string>Kinetic energy density (J/m3) in the lumen.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLScalarVolumeNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Kinetic energy</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputKineticEnergyVolume</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="outputViscousDissipationLabel">
+           <property name="text">
+            <string>Energy loss:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputViscousDissipationVolumeSelector">
+           <property name="toolTip">
+            <string>Viscous energy loss rate per unit volume (W/m3) in the lumen.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLScalarVolumeNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Energy loss</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputViscousDissipationVolume</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="0">
+          <widget class="QLabel" name="outputHemodynamicsTableLabel">
+           <property name="text">
+            <string>Energy table:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputHemodynamicsTableSelector">
+           <property name="toolTip">
+            <string>Per-frame lumen totals: kinetic energy (mJ), energy loss rate (mW), mean vorticity, mean speed.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLTableNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Hemodynamics</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputHemodynamicsTable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="0">
+          <widget class="QLabel" name="outputWallShearStressLabel">
+           <property name="text">
+            <string>Wall shear stress:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputWallShearStressModelSelector">
+           <property name="toolTip">
+            <string>Lumen surface with wall shear stress (Pa) of each frame, time-averaged wall shear stress (TAWSS) and oscillatory shear index (OSI).</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLModelNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Wall shear stress</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputWallShearStressModel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="0">
+          <widget class="QLabel" name="outputPressureLabel">
+           <property name="text">
+            <string>Relative pressure:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputPressureVolumeSelector">
+           <property name="toolTip">
+            <string>Relative pressure (mmHg) in the lumen from the pressure Poisson equation (zero mean in the lumen).</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLScalarVolumeNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Relative pressure</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputPressureVolume</string>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="0">
+          <widget class="QLabel" name="pressureDropPlaneLabel">
+           <property name="text">
+            <string>Pressure drop to plane:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="1">
+          <widget class="qMRMLNodeComboBox" name="pressureDropPlaneSelector">
+           <property name="toolTip">
+            <string>Second plane for pressure drop computation: pressure near the measurement plane minus pressure near this plane.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLMarkupsPlaneNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Plane</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>false</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">pressureDropPlane</string>
+           </property>
+          </widget>
+         </item>
+         <item row="10" column="0">
+          <widget class="QLabel" name="outputPressureDropTableLabel">
+           <property name="text">
+            <string>Pressure drop table:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="10" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputPressureDropTableSelector">
+           <property name="toolTip">
+            <string>Pressure drop (mmHg) between the measurement plane and the second plane in each frame.</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLTableNode</string>
+            </stringlist>
+           </property>
+           <property name="baseName">
+            <string>Pressure drop</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputPressureDropTable</string>
+           </property>
+          </widget>
+         </item>
+         <item row="11" column="0" colspan="2">
+          <widget class="QPushButton" name="computeHemodynamicsButton">
+           <property name="toolTip">
+            <string>Compute selected hemodynamic outputs (slicerheart_4dflow) in the mask segment (lumen). Recommended to use a divergence-free filtered flow field.</string>
+           </property>
+           <property name="text">
+            <string>Compute hemodynamics</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
@@ -736,26 +1316,9 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>ctkCollapsibleButton</class>
-   <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkCollapsibleGroupBox</class>
-   <extends>QGroupBox</extends>
-   <header>ctkCollapsibleGroupBox.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkDoubleSpinBox</class>
-   <extends>QWidget</extends>
-   <header>ctkDoubleSpinBox.h</header>
-  </customwidget>
-  <customwidget>
-   <class>ctkSliderWidget</class>
-   <extends>QWidget</extends>
-   <header>ctkSliderWidget.h</header>
+   <class>qMRMLCheckableNodeComboBox</class>
+   <extends>qMRMLNodeComboBox</extends>
+   <header>qMRMLCheckableNodeComboBox.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>
@@ -778,9 +1341,228 @@
    <extends>qMRMLWidget</extends>
    <header>qMRMLSegmentSelectorWidget.h</header>
   </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkComboBox</class>
+   <extends>QComboBox</extends>
+   <header>ctkComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkDoubleSpinBox</class>
+   <extends>QWidget</extends>
+   <header>ctkDoubleSpinBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
+  </customwidget>
  </customwidgets>
  <resources/>
  <connections>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputVorticityVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputHelicityVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputKineticEnergyVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputViscousDissipationVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputHemodynamicsTableSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputWallShearStressModelSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputPressureVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>pressureDropPlaneSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputPressureDropTableSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>inflowTablesSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outflowTablesSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Analyze4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputMassConservationTableSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
   <connection>
    <sender>Analyze4DFlow</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>

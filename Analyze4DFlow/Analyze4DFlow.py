@@ -1,7 +1,9 @@
+import enum
 import logging
 import os
 from typing import Annotated, Optional, Union
 
+import numpy as np
 import vtk
 
 import slicer
@@ -23,6 +25,16 @@ from slicer import vtkMRMLPlotChartNode
 from slicer import vtkMRMLPlotSeriesNode
 from slicer import vtkMRMLSegmentationNode
 from slicer import vtkMRMLTableNode
+
+
+class _LazyFlowLibraryBridge:
+    # Import4DFlowLib is in the Import4DFlow module folder, which may not be in the Python path yet when this module is loaded
+    def __getattr__(self, name):
+        from Import4DFlowLib import FlowLibraryBridge
+        return getattr(FlowLibraryBridge, name)
+
+
+FlowLibraryBridge = _LazyFlowLibraryBridge()
 
 #
 # Analyze4DFlow
@@ -53,6 +65,31 @@ This file was originally developed by Andras Lasso (PerkLab, Queen's University)
 # Analyze4DFlowParameterNode
 #
 
+# Methods marked with (slicerheart_4dflow) are implemented in the slicerheart_4dflow Python package
+# (https://github.com/JolleyLab/slicerheart_4dflow), which is installed when first used.
+
+class FlowMetricsMethodEnum(enum.Enum):
+    PlaneProbe = 1
+    DiscSampling = 2
+
+    def label(self):
+        return {
+            FlowMetricsMethodEnum.PlaneProbe: "plane probe",
+            FlowMetricsMethodEnum.DiscSampling: "disc sampling (slicerheart_4dflow)",
+        }[self]
+
+
+class StreamlinesMethodEnum(enum.Enum):
+    Streamlines = 1
+    Pathlines = 2
+
+    def label(self):
+        return {
+            StreamlinesMethodEnum.Streamlines: "streamlines (instantaneous)",
+            StreamlinesMethodEnum.Pathlines: "pathlines (time-resolved, slicerheart_4dflow)",
+        }[self]
+
+
 @parameterNodeWrapper
 class Analyze4DFlowParameterNode:
     """
@@ -75,6 +112,21 @@ class Analyze4DFlowParameterNode:
     streamlinesComputeAllMetrics: bool = False
     speedVolumeProjectedToPlane: bool = False  # if True then signed speed vector is projected to the measurement plane normal
     outputFlowMetricsPlotChart: vtkMRMLPlotChartNode
+    flowMetricsMethod: FlowMetricsMethodEnum
+    streamlinesMethod: StreamlinesMethodEnum
+    # Hemodynamics (slicerheart_4dflow), computed in the mask segment
+    bloodDensity: Annotated[float, WithinRange(900, 1200)] = 1060.0  # kg/m3
+    bloodViscosity: Annotated[float, WithinRange(1, 10)] = 3.5  # mPa*s
+    outputVorticityVolume: vtkMRMLScalarVolumeNode
+    outputHelicityVolume: vtkMRMLScalarVolumeNode
+    outputKineticEnergyVolume: vtkMRMLScalarVolumeNode
+    outputViscousDissipationVolume: vtkMRMLScalarVolumeNode
+    outputHemodynamicsTable: vtkMRMLTableNode
+    outputWallShearStressModel: vtkMRMLModelNode
+    outputPressureVolume: vtkMRMLScalarVolumeNode
+    pressureDropPlane: vtkMRMLMarkupsPlaneNode
+    outputPressureDropTable: vtkMRMLTableNode
+    outputMassConservationTable: vtkMRMLTableNode
 
 #
 # Analyze4DFlowWidget
@@ -125,10 +177,11 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputFlowFieldSelector.setNodeTypeLabel("Flow Field (grid transform)", "vtkMRMLTransformNode")
         self.ui.inputFlowFieldSelector.setNodeTypeLabel("Flow Field (vector volume)", "vtkMRMLVectorVolumeNode")
         self.ui.inputFlowFieldSelector.noneEnabled = False
-        # For now, we do not require "FlowField" attribute for model nodes to make it easy to use any model node as input.
+        # Only transforms are required to have the "FlowField" attribute (most transforms in a scene are not flow fields).
+        # Model and vector volume nodes are accepted without it, so that velocity fields loaded from files
+        # (e.g. CFD results or velocity sequences in NRRD files) can be analyzed directly.
         # self.ui.inputFlowFieldSelector.addAttribute("vtkMRMLModelNode", "SlicerHeart.Type", "FlowField")
         self.ui.inputFlowFieldSelector.addAttribute("vtkMRMLTransformNode", "SlicerHeart.Type", "FlowField")
-        self.ui.inputFlowFieldSelector.addAttribute("vtkMRMLVectorVolumeNode", "SlicerHeart.Type", "FlowField")
 
         # Create logic class. Logic implements all computations that should be possible to run
         # in batch mode, without a graphical user interface.
@@ -150,6 +203,8 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.setHeartRateFromDicomButton.connect('clicked(bool)', self.onSetHeartRateFromDicomButton)
         self.ui.setHeartRateFromLengthButton.connect('clicked(bool)', self.onSetHeartRateFromLengthButton)
         self.ui.heartRateBpmDoubleSpinBox.connect('editingFinished()', self.onHeartRateEdited)
+        self.ui.computeHemodynamicsButton.connect('clicked(bool)', self.onComputeHemodynamicsButton)
+        self.ui.computeMassConservationButton.connect('clicked(bool)', self.onComputeMassConservationButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -254,6 +309,14 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             #self.ui.FlowMetricsTableView.firstRowLocked = True
             self.ui.FlowMetricsTableView.firstRowLocked = False
 
+        # Library methods only apply to image flow fields
+        imageFlowField = self._parameterNode.inputFlowField is not None and self.logic._flowFieldKind(self._parameterNode.inputFlowField) != "model"
+        self.ui.computeHemodynamicsButton.enabled = imageFlowField
+        streamlines = self._parameterNode.streamlinesMethod == StreamlinesMethodEnum.Streamlines
+        for widget in [self.ui.label_5, self.ui.streamlinesMaximumLengthSliderWidget, self.ui.label_12, self.ui.checkBox,
+                       self.ui.label_16, self.ui.streamlinesComputeAllMetricsCheckBox]:
+            widget.enabled = streamlines
+
         heartRateBpm = 0.0
         try:
             heartRateBpm = self.logic.heartRateBpm(self._parameterNode.inputFlowField)
@@ -316,12 +379,17 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             if self._parameterNode.outputFlowMetricsSummaryTable and self.ui.heartRateBpmDoubleSpinBox.value <= 0:
                 raise ValueError("Please set a valid heart rate value for computing output flow metrics.")
 
+            libraryFlowMetrics = self._parameterNode.flowMetricsMethod == FlowMetricsMethodEnum.DiscSampling
+            pathlines = self._parameterNode.streamlinesMethod == StreamlinesMethodEnum.Pathlines
+            if (libraryFlowMetrics or pathlines) and self.logic._flowFieldKind(self._parameterNode.inputFlowField) == "model":
+                raise ValueError("Disc sampling and pathlines are only available for image flow fields (not for models)")
+
             self.addLog("Analyze flow field...")
             self.logic.sampleFlowFieldWithPlane(
                 self._parameterNode.inputPlane,
                 self._parameterNode.inputFlowField,
                 self._parameterNode.samplingDistance,
-                self._parameterNode.outputStreamlinesModel,
+                None if pathlines else self._parameterNode.outputStreamlinesModel,
                 self._parameterNode.outputFlowMetricsModel,
                 self._parameterNode.inputMaskSegmentation,
                 self._parameterNode.inputMaskSegmentID,
@@ -333,7 +401,27 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._parameterNode.speedVolumeProjectedToPlane,
                 self._parameterNode.outputMaskedFlowField)
 
-            if self._parameterNode.outputFlowMetricsTable or self._parameterNode.outputFlowMetricsSummaryTable:
+            if pathlines and self._parameterNode.outputStreamlinesModel:
+                self.logic.createPathlines(
+                    self._parameterNode.outputStreamlinesModel,
+                    self._parameterNode.inputFlowField,
+                    self._parameterNode.inputPlane,
+                    self._parameterNode.inputMaskSegmentation,
+                    self._parameterNode.inputMaskSegmentID,
+                    seedSpacingMm=self._parameterNode.samplingDistance,
+                    terminalSpeedMPerSec=self._parameterNode.speedThreshold)
+
+            if libraryFlowMetrics and (self._parameterNode.outputFlowMetricsTable or self._parameterNode.outputFlowMetricsSummaryTable):
+                self.addLog("Compute flow metrics table (disc sampling)...")
+                self.logic.computeFlowMetricsTableDiscSampling(
+                    self._parameterNode.inputPlane,
+                    self._parameterNode.inputFlowField,
+                    self._parameterNode.inputMaskSegmentation,
+                    self._parameterNode.inputMaskSegmentID,
+                    self._parameterNode.speedThreshold,
+                    self._parameterNode.outputFlowMetricsTable,
+                    self._parameterNode.outputFlowMetricsSummaryTable)
+            elif self._parameterNode.outputFlowMetricsTable or self._parameterNode.outputFlowMetricsSummaryTable:
                 self.addLog("Compute flow metrics table...")
                 self.logic.computeFlowMetricsTable(
                     self._parameterNode.outputFlowMetricsModel,
@@ -342,6 +430,51 @@ class Analyze4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                     self._parameterNode.speedThreshold,
                     self._parameterNode.outputFlowMetricsTable,
                     self._parameterNode.outputFlowMetricsSummaryTable)
+
+    def onComputeHemodynamicsButton(self) -> None:
+        with slicer.util.tryWithErrorDisplay("Failed to compute hemodynamics.", waitCursor=True):
+            parameterNode = self._parameterNode
+            if not parameterNode.inputFlowField:
+                raise ValueError("Please select 'Flow field' input.")
+            if not parameterNode.inputMaskSegmentation or not parameterNode.inputMaskSegmentID:
+                raise ValueError("Please select the lumen segment as 'Mask'.")
+            viscosityPaS = parameterNode.bloodViscosity / 1000.0
+            volumeOutputs = [parameterNode.outputVorticityVolume, parameterNode.outputHelicityVolume,
+                             parameterNode.outputKineticEnergyVolume, parameterNode.outputViscousDissipationVolume]
+            computed = False
+            if any(volumeOutputs) or parameterNode.outputHemodynamicsTable:
+                self.logic.computeHemodynamics(parameterNode.inputFlowField, parameterNode.inputMaskSegmentation, parameterNode.inputMaskSegmentID,
+                    *volumeOutputs, parameterNode.outputHemodynamicsTable, parameterNode.bloodDensity, viscosityPaS)
+                computed = True
+            if parameterNode.outputWallShearStressModel:
+                self.logic.computeWallShearStress(parameterNode.inputFlowField, parameterNode.inputMaskSegmentation, parameterNode.inputMaskSegmentID,
+                    parameterNode.outputWallShearStressModel, viscosityPaS)
+                computed = True
+            if parameterNode.outputPressureVolume or parameterNode.outputPressureDropTable:
+                self.logic.computeRelativePressure(parameterNode.inputFlowField, parameterNode.inputMaskSegmentation, parameterNode.inputMaskSegmentID,
+                    parameterNode.outputPressureVolume, parameterNode.inputPlane, parameterNode.pressureDropPlane,
+                    parameterNode.outputPressureDropTable, parameterNode.bloodDensity, viscosityPaS)
+                computed = True
+            if not computed:
+                raise ValueError("Select at least one hemodynamics output.")
+
+    def onComputeMassConservationButton(self) -> None:
+        with slicer.util.tryWithErrorDisplay("Failed to compute mass conservation.", waitCursor=True):
+            inflowTables = self.ui.inflowTablesSelector.checkedNodes()
+            outflowTables = self.ui.outflowTablesSelector.checkedNodes()
+            if not inflowTables or not outflowTables:
+                raise ValueError("Select at least one inflow and one outflow flow metrics table.")
+            rrMs = None
+            if self._parameterNode.inputFlowField:
+                rrMs = self.logic.cycleDurationMs(self._parameterNode.inputFlowField)
+            outputTable = self._parameterNode.outputMassConservationTable
+            if not outputTable:
+                outputTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Mass conservation")
+                self._parameterNode.outputMassConservationTable = outputTable
+            self.logic.computeMassConservation(inflowTables, outflowTables, outputTable, rrMs)
+            slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpTableView)
+            slicer.app.applicationLogic().GetSelectionNode().SetActiveTableID(outputTable.GetID())
+            slicer.app.applicationLogic().PropagateTableSelection()
 
     def onShowFlowMetricsPlotButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to create plot."):
@@ -616,14 +749,39 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         return None
 
     @staticmethod
+    def isVelocityVectorVolume(vectorVolumeNode):
+        """True if a vector volume that is not tagged as flow field looks like a velocity field: it has 3 components and
+        it is marked as spatial vectors, or its voxel value quantity is velocity, or its unit is a velocity unit.
+        Other 3-component vector volumes (for example, RGB color images) are not velocity fields.
+        Note that in some Slicer versions vector volumes loaded from NRRD files lose the spatial vector type and the voxel
+        value quantity and units; such volumes have to be selected as flow field manually."""
+        imageData = vectorVolumeNode.GetImageData()
+        if not imageData or imageData.GetNumberOfScalarComponents() != 3:
+            return False
+        if hasattr(vectorVolumeNode, "GetVoxelVectorType") and vectorVolumeNode.GetVoxelVectorType() == slicer.vtkMRMLVolumeNode.VoxelVectorTypeSpatial:
+            return True
+        quantity = vectorVolumeNode.GetVoxelValueQuantity()
+        if quantity and (quantity.GetCodeValue() or "").strip().lower() == "velocity":
+            return True
+        units = vectorVolumeNode.GetVoxelValueUnits()
+        if units and (units.GetCodeValue() or "").strip().lower().replace(" ", "") in Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC:
+            return True
+        return False
+
+    @staticmethod
     def findFirstFlowFieldNode():
         """Return the first flow field node found in the scene: a transform or vector volume node tagged with
-        "SlicerHeart.Type"="FlowField", or otherwise the first model node whose mesh is an
-        unstructured grid with a supported velocity array ("V" or "Velocity")."""
+        "SlicerHeart.Type"="FlowField", otherwise the first vector volume that looks like a velocity field (see
+        isVelocityVectorVolume, for example a velocity field loaded from file), or otherwise the first model node whose
+        mesh is an unstructured grid with a supported velocity array ("V" or "Velocity")."""
         for nodeClassName in ["vtkMRMLTransformNode", "vtkMRMLVectorVolumeNode"]:
             for node in slicer.util.getNodesByClass(nodeClassName):
                 if node.GetAttribute("SlicerHeart.Type") == "FlowField":
                     return node
+
+        for vectorVolumeNode in slicer.util.getNodesByClass("vtkMRMLVectorVolumeNode"):
+            if Analyze4DFlowLogic.isVelocityVectorVolume(vectorVolumeNode):
+                return vectorVolumeNode
 
         for modelNode in slicer.util.getNodesByClass("vtkMRMLModelNode"):
             mesh = modelNode.GetMesh()
@@ -775,6 +933,36 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                 continue
             self._addNodeToSequenceBrowser(node, sequenceBrowserNode)
 
+    VELOCITY_UNIT_TO_METER_PER_SEC = {"m/s": 1.0, "cm/s": 0.01, "mm/s": 0.001}
+
+    @staticmethod
+    def createVelocityUnits(unit="m/s"):
+        """Create the coded entry that describes a velocity unit ("m/s", "cm/s" or "mm/s") for vtkMRMLScalarVolumeNode.SetVoxelValueUnits."""
+        if unit not in Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC:
+            raise ValueError(f"Unsupported velocity unit '{unit}'. Supported units: {', '.join(Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC.keys())}")
+        meanings = {"m/s": "meter per second", "cm/s": "centimeter per second", "mm/s": "millimeter per second"}
+        units = slicer.vtkCodedEntry()
+        units.SetValueSchemeMeaning(unit, "UCUM", meanings[unit])
+        return units
+
+    @staticmethod
+    def velocityUnitScaleToMeterPerSec(flowFieldNode):
+        """Factor that converts the flow field's stored velocity values to m/s (the unit used by all computations).
+        The unit is read from the voxel value units of a vector volume flow field (vtkMRMLScalarVolumeNode.GetVoxelValueUnits,
+        which is stored in the "units" field of the component axis in NRRD files): "m/s", "cm/s" or "mm/s".
+        Flow fields without this information (transforms, models, volumes without units) are assumed to be in m/s."""
+        if not flowFieldNode.IsA("vtkMRMLScalarVolumeNode"):
+            return 1.0
+        voxelValueUnits = flowFieldNode.GetVoxelValueUnits()
+        velocityUnit = voxelValueUnits.GetCodeValue() if voxelValueUnits else None
+        if not velocityUnit:
+            return 1.0
+        velocityUnit = velocityUnit.strip().lower().replace(" ", "")
+        if velocityUnit not in Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC:
+            raise ValueError(f"Unsupported voxel value unit '{velocityUnit}' of flow field {flowFieldNode.GetName()}."
+                             f" Supported velocity units: {', '.join(Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC.keys())}")
+        return Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC[velocityUnit]
+
     @staticmethod
     def _createVelocityImageFromFlowField(flowFieldNode, magnitudeVolumeNode):
         """Create a temporary vector volume node (added to the scene, in world coordinates) that holds the velocity
@@ -802,6 +990,18 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         velocityImage = vtk.vtkImageData()
         velocityImage.DeepCopy(imageData)
         velocityImageNode.SetAndObserveImageData(velocityImage)
+        scaleToMeterPerSec = Analyze4DFlowLogic.velocityUnitScaleToMeterPerSec(flowFieldNode)
+        if scaleToMeterPerSec != 1.0:
+            # Computations are done in m/s; convert in a float copy of the voxels
+            import numpy as np
+            velocityArray = slicer.util.arrayFromVolume(velocityImageNode)
+            if not np.issubdtype(velocityArray.dtype, np.floating):
+                velocityImage.AllocateScalars(vtk.VTK_FLOAT, 3)
+                convertedArray = slicer.util.arrayFromVolume(velocityImageNode)
+                convertedArray[:] = slicer.util.arrayFromVolume(flowFieldNode)
+                velocityArray = convertedArray
+            velocityArray *= scaleToMeterPerSec
+            slicer.util.arrayFromVolumeModified(velocityImageNode)
         return velocityImageNode
 
     @staticmethod
@@ -812,6 +1012,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         velocityImage = vtk.vtkImageData()
         velocityImage.DeepCopy(displacementImageNode.GetImageData())
         vectorVolumeNode.SetAndObserveImageData(velocityImage)
+        vectorVolumeNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("m/s"))
 
     def _sampleImageFrame(self, flowFieldNode, magnitudeVolumeNode, outputFlowMetricsModel,
             maskSegmentationNode, maskSegmentID, streamlinesSpeedThresholdMPerSec,
@@ -845,9 +1046,12 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             if maskSegmentationNode and maskSegmentID:
                 # Vessel mask is set by segmentation
 
-                # Export mask segment to labelmap node
+                # Export mask segment to labelmap node, in the geometry of the segmentation (which may be finer than the flow
+                # field, as the automatic lumen): resampling it to the flow field grid would lose that resolution, and
+                # nearest neighbor resampling of a finer aligned grid is ambiguous where the coarse voxel centers lie on the
+                # boundaries of the fine voxels
                 maskLabelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "__tmp__Mask labelmap")
-                slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode, displacementImageNode)
+                slicer.vtkSlicerSegmentationsModuleLogic.ExportSegmentsToLabelmapNode(maskSegmentationNode, [maskSegmentID], maskLabelmapNode)
                 slicer.mrmlScene.RemoveNode(maskLabelmapNode.GetDisplayNode().GetColorNode())
 
                 # Probe mask image with model
@@ -1766,6 +1970,21 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
         self._restoreFlowFieldVisibility(savedTransformVisibility)
 
+        self._writeFlowMetricsTables(metrics, metricNames, flowFieldNode, sequenceBrowserNode is not None,
+                                     outputFlowMetricsTableNode, outputFlowMetricsSummaryTableNode)
+
+    FLOW_METRIC_NAMES = ["Time", "Area", "PositiveArea", "NegativeArea",
+                         "FlowRate", "PositiveFlowRate", "NegativeFlowRate",
+                         "MeanVelocity", "MaxVelocity", "MinVelocity", "StdDevVelocity", "ProjectedSpeed",
+                         "Percentile1Velocity", "Percentile5Velocity", "Percentile95Velocity", "Percentile99Velocity",
+                         "PositiveVolume", "NegativeVolume"]
+
+    def _writeFlowMetricsTables(self, metrics, metricNames, flowFieldNode, isSequence, outputFlowMetricsTableNode, outputFlowMetricsSummaryTableNode):
+        """Write per-frame flow metrics (metrics: frames x metricNames array, SI-like units: m/s, mm2, ml/s) and
+        the summary metrics (forward/backward volume, etc.) to the output tables."""
+        import numpy as np
+        import vtk
+
         if outputFlowMetricsTableNode:
             savedMetrics = [
                 ["Time", 1, "ms", ""],
@@ -1806,7 +2025,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
         if outputFlowMetricsSummaryTableNode:
 
-            if not sequenceBrowserNode:
+            if not isSequence:
                 raise RuntimeError("Flow metrics summary requires the flow field to be in a sequence (it needs heart rate and multiple time points).")
 
             outputFlowMetricsSummaryTableNode.RemoveAllColumns()
@@ -1972,6 +2191,606 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         return pos_area, neg_area
 
 
+    #
+    # Methods implemented in slicerheart_4dflow
+    #
+
+    def _imageFlowFieldArrays(self, flowFieldNode):
+        """Velocity (t, k, j, i, 3) mm/s RAS, voxel to world matrix, frame times (ms) of an image flow field."""
+        if self._flowFieldKind(flowFieldNode) == "model":
+            raise ValueError("This method requires an image flow field (grid transform or vector volume), not a model")
+        if not slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode):
+            raise ValueError("This method requires a time-resolved flow field (in a sequence)")
+        return FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+
+    def lumenMask(self, flowFieldNode, maskSegmentationNode, maskSegmentID, required=False):
+        """Mask segment (k, j, i) bool array on the voxel grid of the flow field."""
+        if not maskSegmentationNode or not maskSegmentID:
+            if required:
+                raise ValueError("This method requires a lumen (mask) segmentation")
+            return None
+        return FlowLibraryBridge.maskFromSegment(maskSegmentationNode, maskSegmentID, FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode))
+
+    def lumenFraction(self, flowFieldNode, maskSegmentationNode, maskSegmentID):
+        """Fraction (k, j, i) float32 of each voxel of the flow field inside the mask segment (partial voxels at the
+        boundary of a segment on a finer grid), None if no segment is specified."""
+        if not maskSegmentationNode or not maskSegmentID:
+            return None
+        return FlowLibraryBridge.maskFractionFromSegment(maskSegmentationNode, maskSegmentID, FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode))
+
+    def cycleDurationMs(self, flowFieldNode):
+        """RR interval from the heart rate, or from the acquisition length if the heart rate is not available."""
+        try:
+            return 60000.0 / self.heartRateBpm(flowFieldNode)
+        except RuntimeError:
+            return 60000.0 / self.computeHeartRateBpmFromAcquisitionLength(flowFieldNode)
+
+    @staticmethod
+    def sampleVelocityOnDisc(velocity, voxelToWorld, plane, lumenMask=None, samplingDistanceMm=None):
+        """Velocity vectors (t, n, 3) at regular sample points of the measurement disc (plane dict: centre, normal, radius),
+        inside the lumen if a mask is given: bool, or the fraction of each voxel in the lumen (normalized interpolation,
+        as slicerheart_4dflow.plane_flow).
+        Returns (vectors, samplePointsWorld, unitNormal, areaPerSampleMm2, outsideImageFraction)."""
+        import scipy.ndimage
+        library = FlowLibraryBridge.ensureLibrary()
+        from slicerheart_4dflow.qa import plane_samples
+        points, coordinates, normal, areaPerSample, outside = plane_samples(
+            velocity.shape[1:4], voxelToWorld, plane["centre"], plane["normal"], plane["radius"], samplingDistanceMm)
+        weight = None
+        if lumenMask is not None and coordinates.shape[1]:
+            lumenFloat = lumenMask.astype(float)
+            weight = scipy.ndimage.map_coordinates(lumenFloat, coordinates, order=1, mode="constant", cval=0.0)
+            # samples on the lumen boundary at half-voxel sampling have a weight of exactly 0.5: excluded with a tolerance
+            # (as plane_flow), so that rounding does not decide
+            inside = weight > 0.5 + 1e-6
+            coordinates, weight, points = coordinates[:, inside], weight[inside], points[inside]
+        vectors = np.zeros((velocity.shape[0], coordinates.shape[1], 3))
+        for frameIndex in range(velocity.shape[0]):
+            for component in range(3):
+                field = velocity[frameIndex, ..., component]
+                if lumenMask is not None:
+                    field = field * lumenMask
+                vectors[frameIndex, :, component] = scipy.ndimage.map_coordinates(field, coordinates, order=1, mode="nearest")
+        if weight is not None:
+            vectors /= weight[np.newaxis, :, np.newaxis]
+        return vectors, points, normal, areaPerSample, outside
+
+    def computeFlowMetricsTableDiscSampling(self, crossSectionPlaneNode, flowFieldNode, maskSegmentationNode=None, maskSegmentID=None,
+                                            speedThresholdMPerSec=0.1, outputFlowMetricsTableNode=None, outputFlowMetricsSummaryTableNode=None,
+                                            samplingDistanceMm=None, radiusMm=None):
+        """Flow metrics computed by sampling the velocity on a disc (slicerheart_4dflow plane sampling), with the same output
+        table columns as computeFlowMetricsTable. The disc radius is half of the smaller plane size (or radiusMm).
+        Samples are inside the mask segment; if there is no mask then samples where the speed is above the threshold.
+        Returns the per-frame metrics dictionary (flow rate in ml/s, velocities in m/s)."""
+        velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
+        lumenMask = self.lumenFraction(flowFieldNode, maskSegmentationNode, maskSegmentID)
+        plane = FlowLibraryBridge.planeParameters(crossSectionPlaneNode, radiusMm)
+        vectors, _, normal, areaPerSampleMm2, outside = self.sampleVelocityOnDisc(velocity, voxelToWorld, plane, lumenMask, samplingDistanceMm)
+        if outside > 0:
+            logging.warning(f"{outside * 100:.1f}% of the measurement disc is outside the image")
+        metricNames = self.FLOW_METRIC_NAMES
+        metrics = np.zeros([velocity.shape[0], len(metricNames)])
+        for frameIndex in range(velocity.shape[0]):
+            speedMPerSec = vectors[frameIndex] / FlowLibraryBridge.M_PER_S_TO_MM_PER_S
+            if lumenMask is None:
+                speedMPerSec = speedMPerSec[np.linalg.norm(speedMPerSec, axis=1) > speedThresholdMPerSec]
+            frameMetrics = self._frameFlowMetrics(speedMPerSec, normal, areaPerSampleMm2)
+            frameMetrics["Time"] = timesMs[frameIndex]
+            for name, value in frameMetrics.items():
+                metrics[frameIndex, metricNames.index(name)] = value
+        self._writeFlowMetricsTables(metrics, metricNames, flowFieldNode, True, outputFlowMetricsTableNode, outputFlowMetricsSummaryTableNode)
+        return {name: metrics[:, metricNames.index(name)] for name in metricNames}
+
+    @staticmethod
+    def _frameFlowMetrics(speedMPerSec, planeNormal, areaPerPointMm2):
+        """Metrics of one frame from velocity vectors (n, 3) m/s at plane sample points, each representing areaPerPointMm2."""
+        metrics = {name: 0.0 for name in ["Area", "PositiveArea", "NegativeArea", "FlowRate", "PositiveFlowRate", "NegativeFlowRate",
+                                          "MeanVelocity", "MaxVelocity", "MinVelocity", "StdDevVelocity", "Percentile1Velocity",
+                                          "Percentile5Velocity", "Percentile95Velocity", "Percentile99Velocity"]}
+        if len(speedMPerSec) == 0:
+            return metrics
+        projectedSpeedMPerSec = speedMPerSec @ np.asarray(planeNormal)
+        velocityMagnitudeMPerSec = np.linalg.norm(speedMPerSec, axis=1)
+        metrics["Area"] = len(speedMPerSec) * areaPerPointMm2
+        metrics["PositiveArea"] = np.sum(projectedSpeedMPerSec >= 0) * areaPerPointMm2
+        metrics["NegativeArea"] = metrics["Area"] - metrics["PositiveArea"]
+        metrics["PositiveFlowRate"] = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec > 0]) * areaPerPointMm2
+        metrics["NegativeFlowRate"] = np.sum(projectedSpeedMPerSec[projectedSpeedMPerSec < 0]) * areaPerPointMm2
+        metrics["FlowRate"] = metrics["PositiveFlowRate"] + metrics["NegativeFlowRate"]
+        metrics["MeanVelocity"] = velocityMagnitudeMPerSec.mean()
+        metrics["MaxVelocity"] = velocityMagnitudeMPerSec.max()
+        metrics["MinVelocity"] = velocityMagnitudeMPerSec.min()
+        metrics["StdDevVelocity"] = velocityMagnitudeMPerSec.std()
+        for percentile in (1, 5, 95, 99):
+            metrics[f"Percentile{percentile}Velocity"] = np.percentile(velocityMagnitudeMPerSec, percentile)
+        return metrics
+
+    def createPathlines(self, outputModelNode, flowFieldNode, crossSectionPlaneNode, maskSegmentationNode=None, maskSegmentID=None,
+                        seedSpacingMm=2.0, durationMs=None, terminalSpeedMPerSec=0.01, emissionFrames=None):
+        """Time-resolved pathlines (slicerheart_4dflow.pathlines_vtk) of particles emitted from the measurement plane disc
+        (inside the mask segment, if specified). Particles are emitted at each frame time in emissionFrames (default: all frames),
+        traced for durationMs (default: one cardiac cycle). Point data: time_ms, index (particle), Speed (m/s), EmissionTime (ms)."""
+        library = FlowLibraryBridge.ensureLibrary()
+        from slicerheart_4dflow.pathlines_fast import pathlines_vtk
+        velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
+        lumenMask = self.lumenMask(flowFieldNode, maskSegmentationNode, maskSegmentID)
+        rrMs = self.cycleDurationMs(flowFieldNode)
+        plane = FlowLibraryBridge.planeParameters(crossSectionPlaneNode)
+        seedMask = lumenMask if lumenMask is not None else np.ones(velocity.shape[1:4], bool)
+        seeds = library.seeds_from_plane(seedMask, voxelToWorld, plane["centre"], plane["normal"], plane["radius"], spacing_mm=seedSpacingMm)
+        if len(seeds) == 0:
+            raise ValueError("No pathline seed points are found on the measurement plane (inside the mask)")
+        numberOfFrames = velocity.shape[0]
+        if emissionFrames is None:
+            emissionFrames = range(numberOfFrames)
+        emissionTimes = np.concatenate([np.full(len(seeds), frame * rrMs / numberOfFrames) for frame in emissionFrames])
+        allSeeds = np.concatenate([seeds] * len(list(emissionFrames)))
+        self.log(f"Tracing {len(allSeeds)} pathlines...")
+        polyData = pathlines_vtk(velocity, voxelToWorld, rrMs, allSeeds, t0_ms=emissionTimes, duration_ms=durationMs,
+                                 mask=lumenMask, terminal_speed_mm_s=terminalSpeedMPerSec * FlowLibraryBridge.M_PER_S_TO_MM_PER_S)
+        # Speed along each pathline from the displacement between consecutive points
+        import vtk.util.numpy_support
+        points = vtk.util.numpy_support.vtk_to_numpy(polyData.GetPoints().GetData()) if polyData.GetNumberOfPoints() else np.zeros((0, 3))
+        timeArray = vtk.util.numpy_support.vtk_to_numpy(polyData.GetPointData().GetArray("time_ms")) if polyData.GetNumberOfPoints() else np.zeros(0)
+        speed = np.zeros(len(points))
+        emission = np.zeros(len(points))
+        lines = polyData.GetLines()
+        lines.InitTraversal()
+        idList = vtk.vtkIdList()
+        while lines.GetNextCell(idList):
+            ids = np.array([idList.GetId(i) for i in range(idList.GetNumberOfIds())])
+            if len(ids) < 2:
+                continue
+            segmentSpeed = np.linalg.norm(np.diff(points[ids], axis=0), axis=1) / np.maximum(np.diff(timeArray[ids]), 1e-6)  # mm/ms = m/s
+            speed[ids] = np.concatenate([segmentSpeed[:1], 0.5 * (segmentSpeed[1:] + segmentSpeed[:-1]), segmentSpeed[-1:]])
+            emission[ids] = timeArray[ids[0]]
+        for name, values in (("Speed", speed), ("EmissionTime", emission)):
+            array = vtk.util.numpy_support.numpy_to_vtk(values, deep=True)
+            array.SetName(name)
+            polyData.GetPointData().AddArray(array)
+        polyData.GetPointData().SetActiveScalars("Speed")
+        FlowLibraryBridge.updateModelFromPolyData(outputModelNode, polyData)
+        self._initializeStreamlinesDisplayNode(outputModelNode, flowFieldNode)
+        return outputModelNode
+
+    def _outputVolumeSequence(self, flowFieldNode, outputVolumeNode, name, arrays_t, voxelToWorld, timesMs):
+        """Store a time sequence of scalar volumes in the output volume node, browsed together with the flow field."""
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        existingBrowser = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputVolumeNode)
+        if existingBrowser:
+            sequenceNode = existingBrowser.GetSequenceNode(outputVolumeNode)
+        else:
+            sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", f"{outputVolumeNode.GetName()} sequence")
+            sequenceNode.SetIndexName("time")
+            sequenceNode.SetIndexUnit("ms")
+            sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+        flowFieldSequenceNode = browserNode.GetSequenceNode(flowFieldNode)
+        sequenceNode.RemoveAllDataNodes()
+        for frameIndex in range(arrays_t.shape[0]):
+            volumeNode = slicer.vtkMRMLScalarVolumeNode()
+            slicer.util.updateVolumeFromArray(volumeNode, np.ascontiguousarray(arrays_t[frameIndex], dtype=np.float32))
+            FlowLibraryBridge.setVoxelToWorld(volumeNode, voxelToWorld)
+            sequenceNode.SetDataNodeAtValue(volumeNode, flowFieldSequenceNode.GetNthIndexValue(frameIndex))
+        if not existingBrowser:
+            browserNode.AddProxyNode(outputVolumeNode, sequenceNode, False)
+            browserNode.SetSaveChanges(sequenceNode, False)
+            browserNode.SetOverwriteProxyName(sequenceNode, False)
+        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
+        if not outputVolumeNode.GetDisplayNode():
+            outputVolumeNode.CreateDefaultDisplayNodes()
+        outputVolumeNode.GetDisplayNode().SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
+        return outputVolumeNode
+
+    def computeHemodynamics(self, flowFieldNode, maskSegmentationNode, maskSegmentID, outputVorticityVolume=None, outputHelicityVolume=None,
+                            outputKineticEnergyVolume=None, outputViscousDissipationVolume=None, outputTable=None,
+                            densityKgPerM3=1060.0, viscosityPaS=0.0035):
+        """Velocity-derived hemodynamic maps inside the lumen (slicerheart_4dflow.derivatives), as volume sequences browsed with
+        the flow field: vorticity magnitude (1/s), relative helicity (-1..1), kinetic energy density (J/m3), viscous dissipation
+        (W/m3); and per-frame lumen totals in outputTable (kinetic energy mJ, energy loss rate mW, mean vorticity 1/s)."""
+        library = FlowLibraryBridge.ensureLibrary()
+        velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
+        lumenMask = self.lumenMask(flowFieldNode, maskSegmentationNode, maskSegmentID, required=True)
+        outputs = {"vorticity": outputVorticityVolume, "helicity": outputHelicityVolume,
+                   "kineticEnergy": outputKineticEnergyVolume, "viscousDissipation": outputViscousDissipationVolume}
+        maps = {name: np.zeros(velocity.shape[:4], np.float32) for name, node in outputs.items() if node}
+        for frameIndex in range(velocity.shape[0]):
+            self.log(f"Computing hemodynamics... ({frameIndex + 1}/{velocity.shape[0]})")
+            frameVelocity = velocity[frameIndex].astype(float)
+            gradient = library.velocity_gradient(frameVelocity, lumenMask, voxelToWorld)
+            if "vorticity" in maps:
+                maps["vorticity"][frameIndex] = np.linalg.norm(library.vorticity(frameVelocity, lumenMask, voxelToWorld, gradient), axis=-1)
+            if "helicity" in maps:
+                maps["helicity"][frameIndex] = library.helicity_density(frameVelocity, lumenMask, voxelToWorld, gradient, normalized=True)
+            if "kineticEnergy" in maps:
+                maps["kineticEnergy"][frameIndex] = library.kinetic_energy_density(frameVelocity, lumenMask, densityKgPerM3)
+            if "viscousDissipation" in maps:
+                maps["viscousDissipation"][frameIndex] = library.viscous_dissipation(frameVelocity, lumenMask, voxelToWorld, gradient, viscosityPaS)
+        for name, array in maps.items():
+            self._outputVolumeSequence(flowFieldNode, outputs[name], name, array, voxelToWorld, timesMs)
+        integrals = None
+        if outputTable:
+            integrals = library.lumen_integrals(velocity, lumenMask, voxelToWorld, densityKgPerM3, viscosityPaS)
+            FlowLibraryBridge.updateTableFromColumns(outputTable, {
+                "Time": timesMs,
+                "KineticEnergy": integrals["kinetic_energy_mJ"],
+                "EnergyLossRate": integrals["energy_loss_mW"],
+                "MeanVorticity": integrals["mean_abs_vorticity_1_s"],
+                "MeanSpeed": integrals["mean_speed_mm_s"] / 10.0,
+                })
+            for column, unit in (("Time", "ms"), ("KineticEnergy", "mJ"), ("EnergyLossRate", "mW"), ("MeanVorticity", "1/s"), ("MeanSpeed", "cm/s")):
+                outputTable.SetColumnUnitLabel(column, unit)
+        return integrals
+
+    def computeWallShearStress(self, flowFieldNode, maskSegmentationNode, maskSegmentID, outputModelNode, viscosityPaS=0.0035):
+        """Wall shear stress (slicerheart_4dflow.wall_shear_stress) on the closed surface of the lumen segment.
+        The output model is browsed with the flow field; point data: WSS (Pa vector), WSSMagnitude (Pa) of the current frame,
+        TAWSS (time-averaged WSS magnitude, Pa) and OSI (oscillatory shear index)."""
+        library = FlowLibraryBridge.ensureLibrary()
+        import vtk.util.numpy_support
+        velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
+        lumenMask = self.lumenMask(flowFieldNode, maskSegmentationNode, maskSegmentID, required=True)
+        surface = self._closedSurfaceInWorld(maskSegmentationNode, maskSegmentID)
+        normalsFilter = vtk.vtkPolyDataNormals()
+        normalsFilter.SetInputData(surface)
+        normalsFilter.ComputePointNormalsOn()
+        normalsFilter.SplittingOff()
+        normalsFilter.AutoOrientNormalsOn()  # outward
+        normalsFilter.Update()
+        surface = normalsFilter.GetOutput()
+        points = vtk.util.numpy_support.vtk_to_numpy(surface.GetPoints().GetData()).astype(float)
+        inwardNormals = -vtk.util.numpy_support.vtk_to_numpy(surface.GetPointData().GetNormals()).astype(float)
+        self.log(f"Computing wall shear stress at {len(points)} points...")
+        result = library.wall_shear_stress(velocity, lumenMask, voxelToWorld, points=points, normals=inwardNormals, viscosity=viscosityPaS)
+
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        flowFieldSequenceNode = browserNode.GetSequenceNode(flowFieldNode)
+        existingBrowser = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputModelNode)
+        if existingBrowser:
+            sequenceNode = existingBrowser.GetSequenceNode(outputModelNode)
+        else:
+            sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", f"{outputModelNode.GetName()} sequence")
+        sequenceNode.RemoveAllDataNodes()
+        for frameIndex in range(velocity.shape[0]):
+            framePolyData = vtk.vtkPolyData()
+            framePolyData.DeepCopy(surface)
+            for name, values in (("WSS", result["wss"][frameIndex]), ("WSSMagnitude", result["wss_magnitude"][frameIndex]),
+                                 ("TAWSS", result["tawss"]), ("OSI", result["osi"])):
+                array = vtk.util.numpy_support.numpy_to_vtk(np.ascontiguousarray(values, dtype=np.float64), deep=True)
+                array.SetName(name)
+                framePolyData.GetPointData().AddArray(array)
+            framePolyData.GetPointData().SetActiveScalars("WSSMagnitude")
+            frameModel = slicer.vtkMRMLModelNode()
+            frameModel.SetAndObservePolyData(framePolyData)
+            sequenceNode.SetDataNodeAtValue(frameModel, flowFieldSequenceNode.GetNthIndexValue(frameIndex))
+        if not existingBrowser:
+            browserNode.AddProxyNode(outputModelNode, sequenceNode, False)
+            browserNode.SetSaveChanges(sequenceNode, False)
+            browserNode.SetOverwriteProxyName(sequenceNode, False)
+        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
+        if not outputModelNode.GetDisplayNode():
+            outputModelNode.CreateDefaultDisplayNodes()
+        displayNode = outputModelNode.GetDisplayNode()
+        displayNode.SetActiveScalar("WSSMagnitude", vtk.vtkAssignAttribute.POINT_DATA)
+        displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeFileViridis.txt")
+        displayNode.SetScalarRangeFlag(slicer.vtkMRMLDisplayNode.UseManualScalarRange)
+        displayNode.SetScalarRange(0, float(np.percentile(result["wss_magnitude"], 99)) or 1.0)
+        displayNode.ScalarVisibilityOn()
+        return result
+
+    def computeRelativePressure(self, flowFieldNode, maskSegmentationNode, maskSegmentID, outputPressureVolume=None,
+                                planeNodeA=None, planeNodeB=None, outputPressureDropTable=None,
+                                densityKgPerM3=1060.0, viscosityPaS=0.0035):
+        """Relative pressure inside the lumen (slicerheart_4dflow.relative_pressure, pressure Poisson equation), in mmHg,
+        as a volume sequence browsed with the flow field. If two measurement planes are specified, the pressure drop
+        (mean pressure in the lumen near plane A minus near plane B) is written to outputPressureDropTable.
+        Returns (pressure (t, k, j, i) mmHg, pressure drop (t) mmHg or None)."""
+        library = FlowLibraryBridge.ensureLibrary()
+        PA_PER_MMHG = 133.322
+        velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
+        lumenMask = self.lumenMask(flowFieldNode, maskSegmentationNode, maskSegmentID, required=True)
+        self.log("Computing relative pressure...")
+        pressurePa, info = library.relative_pressure(velocity.astype(float), lumenMask, voxelToWorld, self.cycleDurationMs(flowFieldNode),
+                                                     density=densityKgPerM3, viscosity=viscosityPaS)
+        pressureMmHg = (pressurePa / PA_PER_MMHG).astype(np.float32)
+        if outputPressureVolume:
+            self._outputVolumeSequence(flowFieldNode, outputPressureVolume, "pressure", pressureMmHg, voxelToWorld, timesMs)
+        pressureDrop = None
+        if planeNodeA and planeNodeB:
+            regions = [self.planeRegionMask(lumenMask, voxelToWorld, FlowLibraryBridge.planeParameters(planeNode)) for planeNode in (planeNodeA, planeNodeB)]
+            for planeNode, region in zip((planeNodeA, planeNodeB), regions):
+                if not region.any():
+                    raise ValueError(f"Plane {planeNode.GetName()} does not intersect the lumen")
+            pressureDrop = library.pressure_drop(pressureMmHg, regions[0], regions[1])
+            if outputPressureDropTable:
+                FlowLibraryBridge.updateTableFromColumns(outputPressureDropTable, {"Time": timesMs, "PressureDrop": pressureDrop})
+                outputPressureDropTable.SetColumnUnitLabel("Time", "ms")
+                outputPressureDropTable.SetColumnUnitLabel("PressureDrop", "mmHg")
+                outputPressureDropTable.SetColumnDescription("PressureDrop", f"Mean pressure near {planeNodeA.GetName()} minus near {planeNodeB.GetName()}")
+        return pressureMmHg, pressureDrop
+
+    @staticmethod
+    def planeRegionMask(lumenMask, voxelToWorld, plane):
+        """Lumen voxels within half a voxel of the plane disc (plane dict: centre, normal, radius)."""
+        shape = lumenMask.shape
+        k, j, i = np.indices(shape)
+        pointsWorld = (np.stack([i, j, k, np.ones(shape)], axis=-1).reshape(-1, 4) @ np.asarray(voxelToWorld).T)[:, :3]
+        offsets = pointsWorld - plane["centre"]
+        normal = np.asarray(plane["normal"])
+        distance = offsets @ normal
+        radial = np.linalg.norm(offsets - distance[:, np.newaxis] * normal, axis=1)
+        halfThickness = 0.5 * float(np.linalg.norm(np.asarray(voxelToWorld)[:3, :3], axis=0).max())
+        return (np.abs(distance) <= halfThickness).reshape(shape) & (radial <= plane["radius"]).reshape(shape) & lumenMask
+
+    def computeMassConservation(self, inflowTableNodes, outflowTableNodes, outputTableNode=None, rrMs=None, label="Mass conservation"):
+        """Compare net flow volume of inflow and outflow planes (slicerheart_4dflow.mass_conservation), from flow metrics tables
+        (FlowRate column, ml/s). Returns the result dictionary (in, out in ml, percent error, ratio)."""
+        library = FlowLibraryBridge.ensureLibrary()
+        flows = {}
+        for tableNode in list(inflowTableNodes) + list(outflowTableNodes):
+            flows[tableNode.GetName()] = slicer.util.arrayFromTableColumn(tableNode, "FlowRate").astype(float)
+        result = library.mass_conservation(flows, [(label, [t.GetName() for t in inflowTableNodes], [t.GetName() for t in outflowTableNodes])], rr_ms=rrMs)[0]
+        if outputTableNode:
+            FlowLibraryBridge.updateTableFromColumns(outputTableNode, {
+                "Check": [label],
+                "Inflow": [result["in"]], "Outflow": [result["out"]], "Difference": [result["difference"]],
+                "PercentError": [result["percent_error"]], "Ratio": [result["ratio"]]})
+            unit = "ml" if rrMs else "ml/s"
+            for column in ("Inflow", "Outflow", "Difference"):
+                outputTableNode.SetColumnUnitLabel(column, unit)
+            outputTableNode.SetColumnUnitLabel("PercentError", "%")
+        return result
+
+    #
+    # Measurement planes and reference flows of test cases
+    #
+
+    @staticmethod
+    def _lumenCrossSection(lumenMask, voxelToWorld, centre, normal, radius):
+        """Lumen cross-section on a disc: (area of the lumen region that contains the centre (mm2), whether that region reaches
+        the rim of the disc, fraction of other lumen regions in the disc, fraction of the disc outside the image).
+        Returns None if the centre is not in the lumen."""
+        import scipy.ndimage
+        from slicerheart_4dflow.qa import plane_samples, plane_basis
+        points, coordinates, _, areaPerSample, outside = plane_samples(lumenMask.shape, voxelToWorld, centre, normal, radius)
+        if len(points) == 0:
+            return None
+        inside = scipy.ndimage.map_coordinates(lumenMask.astype(float), coordinates, order=1) > 0.5
+        step = np.sqrt(areaPerSample)
+        _, axisA, axisB = plane_basis(normal, voxelToWorld)
+        uv = np.rint(np.stack([(points - centre) @ axisA, (points - centre) @ axisB], 1) / step).astype(int)
+        centreUv = -uv.min(0)
+        uv -= uv.min(0)
+        grid = np.zeros(uv.max(0) + 1, bool)
+        grid[uv[inside, 0], uv[inside, 1]] = True
+        labels, _ = scipy.ndimage.label(grid)
+        centreLabel = labels[tuple(np.clip(centreUv, 0, np.array(grid.shape) - 1))]
+        if centreLabel == 0:
+            return None
+        component = labels[uv[:, 0], uv[:, 1]] == centreLabel
+        radialDistance = np.linalg.norm(points - centre, axis=1)
+        reachesRim = bool(np.any(component & (radialDistance > 0.9 * radius)))
+        otherFraction = float((inside & ~component).sum() / max(inside.sum(), 1))
+        return float(component.sum() * areaPerSample), reachesRim, otherFraction, outside
+
+    def findMeasurementPlanes(self, velocity, voxelToWorld, lumenMask, numberOfSites=3, pairDistanceMm=4.0, minimumSiteDistanceMm=30.0,
+                              maximumCandidates=3000):
+        """Automatically place measurement planes in vessels (tubular parts of the lumen) with the highest net flow.
+        Candidate centres are on the lumen centerline (local maxima of the distance to the wall, 2.5-15 mm), ranked by
+        net flow (time-averaged speed times radius squared). A candidate is accepted if the lumen is elongated around it
+        (principal axis, which is used as plane normal, oriented along the mean flow, and aligned with the flow), and the
+        lumen cross-section on the disc is a single region that does not reach the disc rim (the disc radius is the smallest
+        that contains the cross-section) and the flow direction is consistent along the vessel.
+        At each site two planes are placed, pairDistanceMm apart along the vessel, so the flow through them must be the same.
+        velocity: (t, k, j, i, 3) mm/s. Returns a list of plane dicts (name, centre, normal, radius) in world coordinates.
+        The planes are meant as a starting point, to be reviewed by the user."""
+        import scipy.ndimage
+        voxelToWorld = np.asarray(voxelToWorld, float)
+        spacing = np.linalg.norm(voxelToWorld[:3, :3], axis=0)  # i, j, k
+        meanVelocity = np.stack([scipy.ndimage.uniform_filter((velocity[..., c] * lumenMask).mean(axis=0), size=3) for c in range(3)], axis=-1)
+        distanceToWall = scipy.ndimage.distance_transform_edt(lumenMask, sampling=spacing[::-1])
+        ridge = (distanceToWall == scipy.ndimage.maximum_filter(distanceToWall, size=3)) & (distanceToWall >= 2.5) & (distanceToWall <= 15.0) & lumenMask
+        k, j, i = np.nonzero(ridge)
+        score = np.linalg.norm(meanVelocity[k, j, i], axis=1) * distanceToWall[k, j, i] ** 2
+        positions = (np.stack([i, j, k, np.ones_like(i)], axis=1) @ voxelToWorld.T)[:, :3]
+        lk, lj, li = np.nonzero(lumenMask)
+        lumenPositions = (np.stack([li, lj, lk, np.ones_like(li)], axis=1) @ voxelToWorld.T)[:, :3]
+        worldToVoxel = np.linalg.inv(voxelToWorld)
+        sites = []
+        for candidate in np.argsort(-score)[:maximumCandidates]:
+            centre = positions[candidate]
+            if any(np.linalg.norm(centre - site[0]) < minimumSiteDistanceMm for site in sites):
+                continue
+            vesselRadiusMm = float(distanceToWall[k[candidate], j[candidate], i[candidate]])
+            # Vessel axis: principal axis of the lumen around the centre
+            nearby = lumenPositions[np.linalg.norm(lumenPositions - centre, axis=1) < 2.5 * vesselRadiusMm + 2.0] - centre
+            eigenvalues, eigenvectors = np.linalg.eigh(nearby.T @ nearby / len(nearby))
+            if eigenvalues[2] < 2.0 * eigenvalues[1]:
+                continue  # not elongated (e.g., heart chamber)
+            flowDirection = meanVelocity[k[candidate], j[candidate], i[candidate]]
+            normal = eigenvectors[:, 2]
+            if abs(normal @ flowDirection) < 0.7 * np.linalg.norm(flowDirection):
+                continue  # flow is not along the vessel
+            normal = normal * np.sign(normal @ flowDirection)
+            crossSection = None
+            for radius in np.linspace(1.2 * vesselRadiusMm + 1.0, 2.2 * vesselRadiusMm + 3.0, 6):
+                crossSection = self._lumenCrossSection(lumenMask, voxelToWorld, centre, normal, radius)
+                if crossSection is None or not crossSection[1]:
+                    break
+            if crossSection is None:
+                continue
+            area, reachesRim, otherFraction, outside = crossSection
+            if reachesRim or otherFraction > 0.05 or outside > 0 or not (0.4 < area / (np.pi * vesselRadiusMm ** 2) < 2.5):
+                continue
+            consistent = True
+            for offset in (-pairDistanceMm, pairDistanceMm):
+                index = np.rint((worldToVoxel @ np.append(centre + offset * normal, 1.0))[:3]).astype(int)[::-1]
+                if np.any(index < 0) or np.any(index >= lumenMask.shape) or not lumenMask[tuple(index)]:
+                    consistent = False
+                    break
+                direction = meanVelocity[tuple(index)]
+                if direction @ normal < 0.85 * np.linalg.norm(direction):
+                    consistent = False
+                    break
+            if not consistent:
+                continue
+            sites.append((centre, normal, float(radius)))
+            if len(sites) == numberOfSites:
+                break
+        planes = []
+        for siteIndex, (centre, normal, radius) in enumerate(sites):
+            for suffix, offset in (("a", -0.5 * pairDistanceMm), ("b", 0.5 * pairDistanceMm)):
+                planes.append({"name": f"site{siteIndex + 1}_{suffix}", "centre": centre + offset * normal, "normal": normal, "radius": radius})
+        if not planes:
+            logging.warning("No measurement plane could be placed automatically")
+        return planes
+
+    @staticmethod
+    def createPlaneNode(plane, name=None):
+        planeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", name or plane["name"])
+        planeNode.SetPlaneType(planeNode.PlaneTypePointNormal)
+        planeNode.AddControlPointWorld(vtk.vtkVector3d(*plane["centre"]))
+        planeNode.SetNormalWorld(plane["normal"])
+        planeNode.SetSizeMode(planeNode.SizeModeAbsolute)
+        planeNode.SetSize(2 * plane["radius"], 2 * plane["radius"])
+        return planeNode
+
+    def writeTestCaseFlows(self, caseDirectory, flowFieldNode, planeNodes=None, samplingDistanceMm=0.5, overwritePlanes=False):
+        """Write measurement planes and plane flows of a test case written by Import4DFlowLogic.exportTestCase.
+
+        Planes: the specified plane nodes, otherwise the existing planes of the case (which may have been edited by the user),
+        otherwise automatically placed planes (findMeasurementPlanes). The planes are written into the annotations folder of the
+        case and described in annotations/annotations.json. Plane flows are computed by the plane probe method of this module,
+        in the lumen of the case. outputs/flows.json contains for each plane the per-frame flow rate (ml/s) and the net, forward,
+        backward volume and peak velocity, and conservation checks for plane pairs; outputs/quality_report.json the quality
+        report of the flow field.
+        """
+        import Import4DFlow
+        importLogic = Import4DFlow.Import4DFlowLogic()
+        library = FlowLibraryBridge.ensureLibrary()
+        manifest = importLogic.readTestCaseJson(caseDirectory, "manifest")
+        acquisition = importLogic.readTestCaseJson(caseDirectory, "acquisition", {})
+        annotations = importLogic.readTestCaseJson(caseDirectory, "annotations", {})
+        annotationsDirectory = os.path.join(caseDirectory, importLogic.TEST_CASE_ANNOTATIONS_DIRECTORY)
+
+        velocity, voxelToWorld, timesMs = self._imageFlowFieldArrays(flowFieldNode)
+        lumenDescription = annotations["lumen"]
+        lumenPath = os.path.join(annotationsDirectory, lumenDescription["file"])
+        # On the image grid (voxels at least half in the lumen) for placing planes, and on the grid of the segmentation (which
+        # may be finer than the image) for the plane probe
+        lumenMask, _ = library.read_segmentation(lumenPath, segment=lumenDescription.get("segment"),
+                                                 reference=(velocity.shape[1:4], voxelToWorld), world="RAS")
+        segmentationMask, segmentationVoxelToWorld = library.read_segmentation(lumenPath, segment=lumenDescription.get("segment"), world="RAS")
+
+        existingPlaneFiles = [f for f in annotations.get("planes", {}).get("files", []) if os.path.isfile(os.path.join(annotationsDirectory, f))]
+        temporaryNodes = []
+        try:
+            if planeNodes or overwritePlanes or not existingPlaneFiles:
+                for filename in existingPlaneFiles:
+                    os.remove(os.path.join(annotationsDirectory, filename))
+                software = importLogic.testCaseSoftware("Analyze 4D Flow")
+                if planeNodes:
+                    planes = [dict(FlowLibraryBridge.planeParameters(node), name=node.GetName()) for node in planeNodes]
+                    planesDescription = importLogic.testCaseAnnotationDescription("manual", software)
+                else:
+                    parameters = {"numberOfSites": 3, "pairDistanceMm": 4.0, "minimumSiteDistanceMm": 30.0, "maximumCandidates": 3000}
+                    planes = self.findMeasurementPlanes(velocity, voxelToWorld, lumenMask, **parameters)
+                    planesDescription = importLogic.testCaseAnnotationDescription("automatic", software, {
+                        "name": "Analyze4DFlowLogic.findMeasurementPlanes",
+                        "description": "Sites with the highest net flow on the lumen centerline, in tubular vessel segments where the flow"
+                                       " direction is consistent. At each site two planes are placed along the vessel (suffix _a and _b), so"
+                                       " the flow through them must be the same. Plane normal is the vessel axis, disc radius is the smallest"
+                                       " that contains the lumen cross-section. Meant as a starting point for review.",
+                        "parameters": parameters,
+                        "inputs": [importLogic.TEST_CASE_FILES["velocity"],
+                                   f"{importLogic.TEST_CASE_ANNOTATIONS_DIRECTORY}/{lumenDescription['file']}"],
+                        })
+                planeFiles = []
+                for plane in planes:
+                    planeNode = self.createPlaneNode(plane)
+                    temporaryNodes.append(planeNode)
+                    filename = f"{plane['name']}.mrk.json"
+                    if not slicer.util.saveNode(planeNode, os.path.join(annotationsDirectory, filename)):
+                        raise RuntimeError(f"Failed to write {os.path.join(annotationsDirectory, filename)}")
+                    planeFiles.append(filename)
+                annotations["planes"] = dict({"files": planeFiles}, **planesDescription)
+                importLogic.writeTestCaseJson(caseDirectory, "annotations", annotations)
+            else:
+                planesRas = library.read_planes([os.path.join(annotationsDirectory, f) for f in existingPlaneFiles], world="RAS")
+                planes = [dict(plane, name=name) for name, plane in planesRas.items()]
+
+            # Lumen segmentation node for the plane probe method. The plane probe samples the whole (square) plane, while the
+            # measurement region is the disc of the plane: the mask is restricted to the lumen within the disc radius.
+            lumenSegmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "__temp_lumen__")
+            temporaryNodes.append(lumenSegmentationNode)
+            voxelPositions = None
+
+            rrMs = acquisition.get("rr_ms") or self.cycleDurationMs(flowFieldNode)
+            referencePlanes = {}
+            for plane in planes:
+                self.log(f"Computing flow through {plane['name']}...")
+                if voxelPositions is None:
+                    k, j, i = np.indices(segmentationMask.shape)
+                    voxelPositions = (np.stack([i, j, k, np.ones(segmentationMask.shape)], axis=-1) @ np.asarray(segmentationVoxelToWorld).T)[..., :3]
+                offsets = voxelPositions - plane["centre"]
+                axialDistance = offsets @ plane["normal"]
+                radialDistance = np.linalg.norm(offsets - axialDistance[..., np.newaxis] * plane["normal"], axis=-1)
+                maximumSpacing = float(np.linalg.norm(np.asarray(voxelToWorld)[:3, :3], axis=0).max())
+                discMask = segmentationMask & (radialDistance <= plane["radius"]) & (np.abs(axialDistance) <= 3 * maximumSpacing)
+                FlowLibraryBridge.setSegmentFromMask(lumenSegmentationNode, "lumen", discMask, segmentationVoxelToWorld)
+                planeNode = self.createPlaneNode(plane, f"__temp_{plane['name']}__")
+                temporaryNodes.append(planeNode)
+                flowMetricsModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "__temp_flow_metrics__")
+                temporaryNodes.append(flowMetricsModel)
+                tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "__temp_flow_table__")
+                temporaryNodes.append(tableNode)
+                summaryNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "__temp_flow_summary__")
+                temporaryNodes.append(summaryNode)
+                self.sampleFlowFieldWithPlane(planeNode, flowFieldNode, samplingDistanceMm, None, flowMetricsModel, lumenSegmentationNode, "lumen")
+                self.computeFlowMetricsTable(flowMetricsModel, planeNode, flowFieldNode, 0.0, tableNode, summaryNode)
+                flowRate = slicer.util.arrayFromTableColumn(tableNode, "FlowRate").astype(float)
+                summary = {summaryNode.GetTable().GetColumnName(c): summaryNode.GetTable().GetValue(0, c).ToDouble()
+                           for c in range(summaryNode.GetTable().GetNumberOfColumns())}
+                for temporaryNode in (flowMetricsModel.GetDisplayNode(),):
+                    if temporaryNode:
+                        temporaryNodes.append(temporaryNode)
+                referencePlanes[plane["name"]] = {
+                    "net_volume_mL": float(np.mean(flowRate) * rrMs / 1000.0),
+                    "net_volume_trapezoid_mL": summary["TotalVolume"],
+                    "forward_volume_mL": summary["ForwardVolume"],
+                    "backward_volume_mL": summary["BackwardVolume"],
+                    "peak_velocity_mm_s": summary["PeakVelocity"] * 10.0,
+                    "area_mm2": [float(a) for a in slicer.util.arrayFromTableColumn(tableNode, "Area")],
+                    "flow_rate_ml_s": [float(q) for q in flowRate],
+                    }
+            pairs = sorted({name.rsplit("_", 1)[0] for name in referencePlanes if name.endswith(("_a", "_b"))})
+            flows = {
+                "software": f"SlicerHeart Analyze 4D Flow plane probe (Slicer {slicer.app.applicationVersion})",
+                "sampling_distance_mm": samplingDistanceMm,
+                "time_ms": [float(t) for t in timesMs],
+                "rr_ms": rrMs,
+                "planes": referencePlanes,
+                "conservation_checks": [[pair, [f"{pair}_a"], [f"{pair}_b"]] for pair in pairs
+                                        if f"{pair}_a" in referencePlanes and f"{pair}_b" in referencePlanes],
+                "ratio_checks": [],
+                }
+            importLogic.writeTestCaseJson(caseDirectory, "flows", flows)
+
+            # Quality report of the corrected flow field
+            report = importLogic.computeQualityReport(flowFieldNode, lumenMask, studyId=manifest["case_id"])
+            with open(os.path.join(caseDirectory, importLogic.TEST_CASE_FILES["quality_report"]), "w", encoding="utf-8") as file:
+                file.write(library.to_json(report))
+        finally:
+            for node in temporaryNodes:
+                # Remove sequences that sampleFlowFieldWithPlane created for the temporary output nodes
+                browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(node)
+                if browserNode:
+                    sequenceNode = browserNode.GetSequenceNode(node)
+                    browserNode.RemoveSynchronizedSequenceNode(sequenceNode.GetID())
+                    slicer.mrmlScene.RemoveNode(sequenceNode)
+                slicer.mrmlScene.RemoveNode(node)
+        return flows
+
+
 #
 # Analyze4DFlowTest
 #
@@ -2130,12 +2949,13 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
 
         self.delayDisplay("Test passed")
 
-    def _createSyntheticFlowFields(self, dims, spacingMm, originMm, frameSpeedsMPerSec):
+    def _createSyntheticFlowFields(self, dims, spacingMm, originMm, frameSpeedsMPerSec, vectorVolumeVelocityUnit="m/s"):
         """Create a sequence browser with a magnitude volume sequence and the same synthetic flow field stored both
-        as a grid transform sequence and as a vector volume sequence. The flow is along the S axis, with the given
+        as a grid transform sequence (m/s) and as a vector volume sequence (in vectorVolumeVelocityUnit, recorded in the
+        voxel value units of the vector volumes). The flow is along the S axis, with the given
         speed in each frame inside a central column (|R| and |A| below a quarter of the volume size) and zero elsewhere.
         Returns (transformFlowFieldNode, vectorVolumeFlowFieldNode, velocityArrays), where velocityArrays[frame] is the
-        velocity image of a frame (k, j, i, component)."""
+        velocity image of a frame (k, j, i, component) in m/s."""
         import numpy as np
 
         browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", "FlowBrowser")
@@ -2149,6 +2969,7 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
         magnitudeSequenceNode = createSequenceNode("Magnitude")
         transformSequenceNode = createSequenceNode("Flow field transform")
         vectorVolumeSequenceNode = createSequenceNode("Flow field vector volume")
+        vectorVolumeScale = 1.0 / Analyze4DFlowLogic.VELOCITY_UNIT_TO_METER_PER_SEC[vectorVolumeVelocityUnit]
 
         velocityArrays = []
         k, j, i = np.indices(tuple(reversed(dims)))
@@ -2175,17 +2996,23 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
             vectorVolumeNode.SetAndObserveImageData(velocityImage)
             vectorVolumeNode.CopyOrientation(magnitudeVolumeNode)
             vectorVolumeNode.SetAttribute("SlicerHeart.Type", "FlowField")
+            vectorVolumeNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits(vectorVolumeVelocityUnit))
             velocityArray = slicer.util.arrayFromVolume(vectorVolumeNode)
             velocityArray[:] = 0.0
             velocityArray[insideColumn, 2] = speedMPerSec
             slicer.util.arrayFromVolumeModified(vectorVolumeNode)
             velocityArrays.append(velocityArray.copy())
-            vectorVolumeSequenceNode.SetDataNodeAtValue(vectorVolumeNode, indexValue)
 
+            # The transform stores m/s
             transformNode = slicer.vtkMRMLTransformNode()
             transformNode.SetAttribute("SlicerHeart.Type", "FlowField")
             Analyze4DFlowLogic._setTransformFromDisplacementImage(transformNode, vectorVolumeNode)
             transformSequenceNode.SetDataNodeAtValue(transformNode, indexValue)
+
+            # The vector volume stores the requested unit
+            velocityArray *= vectorVolumeScale
+            slicer.util.arrayFromVolumeModified(vectorVolumeNode)
+            vectorVolumeSequenceNode.SetDataNodeAtValue(vectorVolumeNode, indexValue)
 
         browserNode.SetAndObserveMasterSequenceNodeID(magnitudeSequenceNode.GetID())
         browserNode.AddSynchronizedSequenceNodeID(transformSequenceNode.GetID())
@@ -2202,8 +3029,9 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
         return transformFlowFieldNode, vectorVolumeFlowFieldNode, velocityArrays
 
     def test_AnalyzeTransformAndVectorVolumeFlowField(self):
-        """The same flow field stored as a grid transform sequence and as a vector volume sequence
-        must give the same flow metrics, speed volume, and masked flow field.
+        """The same flow field stored as a grid transform sequence (m/s) and as a vector volume sequence (mm/s,
+        declared in the voxel value units of the volumes) must give the same flow metrics, speed volume,
+        and masked flow field.
         """
         import numpy as np
 
@@ -2214,8 +3042,12 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
 
         self.delayDisplay("Create synthetic flow fields")
         transformFlowFieldNode, vectorVolumeFlowFieldNode, velocityArrays = self._createSyntheticFlowFields(
-            dims, spacingMm, originMm, frameSpeedsMPerSec)
+            dims, spacingMm, originMm, frameSpeedsMPerSec, vectorVolumeVelocityUnit="mm/s")
         logic = Analyze4DFlowLogic()
+        self.assertAlmostEqual(logic.velocityUnitScaleToMeterPerSec(transformFlowFieldNode), 1.0)
+        # The proxy node gets the units of the sequence items
+        self.assertEqual(vectorVolumeFlowFieldNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
+        self.assertAlmostEqual(logic.velocityUnitScaleToMeterPerSec(vectorVolumeFlowFieldNode), 0.001)
         self.assertEqual(logic.findFirstFlowFieldNode().GetAttribute("SlicerHeart.Type"), "FlowField")
         self.assertEqual(logic._flowFieldKind(transformFlowFieldNode), "transform")
         self.assertEqual(logic._flowFieldKind(vectorVolumeFlowFieldNode), "volume")
@@ -2274,6 +3106,7 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
                 maskedVelocityArray = slicer.util.arrayFromGridTransform(outputMaskedFlowField).copy()
             else:
                 maskedVelocityArray = slicer.util.arrayFromVolume(outputMaskedFlowField).copy()
+                self.assertEqual(outputMaskedFlowField.GetVoxelValueUnits().GetCodeValue(), "m/s")
             results[kind] = (metrics, summary, speedVolumeArray, maskedVelocityArray)
 
         # Sanity check against the known flow (the plane is fully inside the flow column)
@@ -2285,7 +3118,7 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
             np.testing.assert_allclose(metrics["FlowRate"], [speed * areaMm2 for speed in frameSpeedsMPerSec], rtol=1e-4, err_msg=kind)
             self.assertAlmostEqual(summary["PeakVelocity"], 100 * max(frameSpeedsMPerSec), places=3, msg=kind)
             self.assertAlmostEqual(speedVolumeArray.max(), frameSpeedsMPerSec[-1], places=5, msg=kind)
-            # Every voxel with flow is above the speed threshold, so masking does not change the field
+            # Every voxel with flow is above the speed threshold, so masking does not change the field (output is in m/s)
             np.testing.assert_allclose(maskedVelocityArray, velocityArrays[-1], atol=1e-6, err_msg=kind)
 
         # Both storage types must give the same results
