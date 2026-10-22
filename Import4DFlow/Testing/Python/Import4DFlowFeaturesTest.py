@@ -1642,13 +1642,14 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         flowFieldNode = self.createFlowField(volumeNodeSet, True, unwrap=True)
         segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
         planeNode = phantom.createMeasurementPlane(name="vessel")
-        caseDirectory = os.path.join(self.temporaryDirectory("TestCase"), "Phantom0001")
+        datasetDirectory, caseId = self.temporaryDirectory("TestCase"), "Phantom0001"
         startTime = time.time()
-        self.logic.exportTestCaseWithFlows(flowFieldNode, caseDirectory, lumenSegmentationNode=segmentationNode, lumenSegmentId=segmentId,
-            planeNodes=[planeNode], metadata={"vendor": "siemens"})
+        self.logic.exportTestCaseWithFlows(flowFieldNode, datasetDirectory, caseId, lumenSegmentationNode=segmentationNode,
+            lumenSegmentId=segmentId, planeNodes=[planeNode], metadata={"vendor": "siemens"})
         self.report.text(f"Export time: {time.time() - startTime:.1f} s")
         library = FlowLibraryBridge.ensureLibrary()
-        case = library.load_case(caseDirectory)  # LPS, as a user of slicerheart_4dflow would read it
+        self.report.checkEqual("Data set has the exported case", library.dataset_cases(datasetDirectory), [caseId])
+        case = library.load_case(datasetDirectory, caseId)  # LPS, as a user of slicerheart_4dflow would read it
         lpsFromRas = np.diag([-1.0, -1.0, 1.0])
         expected = np.stack([phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]) * 1000.0 @ lpsFromRas
         self.report.checkClose("Velocity in the files equals the analytic velocity (LPS components, mm/s)",
@@ -1675,21 +1676,25 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkClose("slicerheart_4dflow net flow volume from the files", float(np.mean(libraryFlow) * rrMs / 1000.0), expectedNetVolume,
             rtol=0.05, unit="ml")
         self.report.checkTrue("Wrap counts record aliasing", bool(np.any(case["wrap_count_t"] != 0)))
-        self.report.checkEqual("Manifest", case["manifest"], {"format_version": 3, "case_id": "Phantom0001", "license": "internal", "doi": None})
+        manifest = Import4DFlowLogic.readTestCaseJson(datasetDirectory, caseId, "manifest")
+        self.report.checkEqual("Manifest of the data set", [manifest["format_version"], manifest["license"], manifest["doi"]], [4, "internal", None])
+        self.report.checkTrue("Inputs and outputs of the case are in inputs/<case> and outputs/<case>",
+            os.path.isfile(os.path.join(datasetDirectory, "inputs", caseId, "acquisition", "velocity_raw.seq.nrrd"))
+            and os.path.isfile(os.path.join(datasetDirectory, "outputs", caseId, "velocity.seq.nrrd")))
         self.report.checkEqual("Acquisition description records the vendor", case["acquisition"]["vendor"], "siemens")
         self.report.checkEqual("Processing description records the processing", case["processing"]["processing"]["phaseUnwrapping"], "TemporalUnwrap")
         self.report.checkEqual("Annotations description: specified lumen and planes",
             [case["annotations"]["lumen"]["method"], case["annotations"]["planes"]["method"], case["annotations"]["planes"]["files"]],
             ["manual", "manual", ["vessel.mrk.json"]])
         import nrrd
-        for root, _, files in os.walk(caseDirectory):
+        for root, _, files in os.walk(datasetDirectory):
             for filename in files:
                 if filename.endswith(".nrrd"):
                     header = nrrd.read_header(os.path.join(root, filename))
                     names = [value for key, value in header.items() if key.endswith("_Name")]
                     self.report.checkTrue(f"{filename}: no node names in the header", all(name in ("lumen",) for name in names), names)
         for key in ("manifest", "acquisition", "processing", "annotations"):
-            with open(os.path.join(caseDirectory, Import4DFlowLogic.TEST_CASE_FILES[key]), encoding="utf-8") as file:
+            with open(Import4DFlowLogic.testCasePath(datasetDirectory, caseId, key), encoding="utf-8") as file:
                 descriptionText = file.read()
             for word in ["Phantom browser", "DICOM", "PatientName", "StudyDate"]:
                 self.report.checkTrue(f"{key} description does not contain '{word}'", word not in descriptionText)
@@ -1699,7 +1704,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         originalWraps = self.logic.getWrapCounts(flowFieldNode)
         slicer.mrmlScene.Clear()
         startTime = time.time()
-        loaded = self.logic.loadTestCase(caseDirectory)
+        loaded = self.logic.loadTestCase(datasetDirectory, caseId)
         self.report.text(f"Loading time: {time.time() - startTime:.1f} s")
         loadedVelocity, _, _ = FlowLibraryBridge.velocityArrayFromFlowField(loaded["flowFieldNode"])
         self.report.checkClose("Loaded test case: flow field equals the exported flow field", float(np.abs(loadedVelocity - originalVelocity).max()), 0.0,
@@ -1708,7 +1713,20 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             int(np.count_nonzero(self.logic.getWrapCounts(loaded["flowFieldNode"]) != originalWraps)), 0)
         self.report.checkTrue("Loaded test case: lumen and planes are loaded", loaded["lumenSegmentationNode"] is not None and len(loaded["planeNodes"]) == 1)
         self.report.checkEqual("Loaded test case: lumen segmentation file can be saved back to the case",
-            os.path.normpath(loaded["lumenSegmentationNode"].GetStorageNode().GetFileName()), os.path.normpath(os.path.join(caseDirectory, "annotations", "lumen.seg.nrrd")))
+            os.path.normpath(loaded["lumenSegmentationNode"].GetStorageNode().GetFileName()),
+            os.path.normpath(os.path.join(datasetDirectory, "inputs", caseId, "annotations", "lumen.seg.nrrd")))
+
+        # Regenerating the outputs: loaded from the inputs only, processed with the default processing of test cases
+        slicer.mrmlScene.Clear()
+        regenerated = self.logic.loadTestCase(datasetDirectory, caseId, useOutputs=False)
+        frames = self.velocityFrames(regenerated["flowFieldNode"])
+        expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
+        regeneratedError = max(float(np.abs(f - e)[inside].mean()) for f, e in zip(frames, expectedFrames))
+        self.report.checkClose("Loaded from the inputs only (default processing, wraps not read from the outputs):"
+            " mean velocity error in the vessel", regeneratedError, 0.0, atol=0.03, unit="m/s")
+        processing = json.loads(self.logic._getSequenceFromProxyNode(regenerated["flowFieldNode"]).GetAttribute("SlicerHeart.processing"))
+        self.report.checkEqual("Loaded from the inputs only: default unwrapping method", processing["phaseUnwrapping"],
+            Import4DFlowLogic.TEST_CASE_DEFAULT_UNWRAP_MODE)
 
     @reportedTest("slicerheart_4dflow methods in the GUI",
         "Library methods are selected in the module GUI (noise mask, background fit, Laplacian unwrapping, divergence-free filter),"
@@ -1761,19 +1779,28 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         widget.onCreatePcmraButton()
         self.report.screenshot("Import 4D Flow module GUI with slicerheart_4dflow methods", kind="window")
 
-        caseDirectory = os.path.join(self.temporaryDirectory("GuiTestCase"), "Phantom0002")
-        parameterNode.exportDirectory = caseDirectory
+        datasetDirectory, caseId = self.temporaryDirectory("GuiTestCase"), "Phantom0002"
+        parameterNode.exportDirectory = datasetDirectory
         parameterNode.exportFormat = Import4DFlowLogic.EXPORT_FORMAT_TEST_CASE
-        widget.onExportButton()
-        self.report.checkTrue("[GUI] Test case is exported", os.path.isfile(os.path.join(caseDirectory, "manifest.json")))
-        processingDescription = Import4DFlowLogic.readTestCaseJson(caseDirectory, "processing")
-        annotations = Import4DFlowLogic.readTestCaseJson(caseDirectory, "annotations")
+        self.report.checkEqual("[GUI] Case ID suggested for a new data set", Import4DFlowLogic.nextTestCaseId(datasetDirectory), "Case0001")
+        askTestCaseId = widget.askTestCaseId
+        widget.askTestCaseId = lambda directory: caseId  # instead of the dialog
+        try:
+            widget.onExportButton()
+        finally:
+            widget.askTestCaseId = askTestCaseId
+        self.report.checkTrue("[GUI] Test case is exported into the data set",
+            os.path.isfile(os.path.join(datasetDirectory, "manifest.json")) and os.path.isdir(os.path.join(datasetDirectory, "inputs", caseId)))
+        processingDescription = Import4DFlowLogic.readTestCaseJson(datasetDirectory, caseId, "processing")
+        annotations = Import4DFlowLogic.readTestCaseJson(datasetDirectory, caseId, "annotations")
         self.report.checkEqual("[GUI] Test case records the processing", processingDescription["processing"]["backgroundSubtraction"], "WarMsacFit")
         self.report.checkEqual("[GUI] Measurement planes are placed automatically", annotations["planes"]["method"], "automatic")
         self.report.checkEqual("[GUI] Automatic planes are described by the algorithm", annotations["planes"]["algorithm"]["name"],
             "Analyze4DFlowLogic.findMeasurementPlanes")
         slicer.mrmlScene.Clear()
-        loaded = widget.loadTestCase(caseDirectory)
+        self.report.checkEqual("[GUI] Case folder selected in the load dialog is resolved to the data set and case",
+            Import4DFlowLogic.testCaseFromDirectory(os.path.join(datasetDirectory, "inputs", caseId)), (datasetDirectory, caseId))
+        loaded = widget.loadTestCase(datasetDirectory, caseId)
         self.report.checkTrue("[GUI] Test case is loaded", loaded is not None and parameterNode.outputFlowField == loaded["flowFieldNode"])
         frames = self.velocityFrames(parameterNode.outputFlowField)
         loadedError = max(float(np.abs(f - e)[phantom.insideVessel].mean()) for f, e in zip(frames, expectedFrames))
@@ -1785,15 +1812,16 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         " Laplacian unwrapping and robust background correction are applied, and the flow through the planes must"
         " agree with the plane flows of the case (outputs/flows.json).")
     def test_28_ClinicalTestCase(self):
-        caseDirectories = FlowTestingUtils.testCaseDirectories()
-        if not caseDirectories:
-            self.skipTest(f"No 4D flow test case is available (set {FlowTestingUtils.TEST_CASES_ENV_VARIABLE} in the environment or in .env.local)")
-        caseDirectory = caseDirectories[0]
-        self.report.text(f"Test case: {os.path.basename(caseDirectory)}")
+        testCases = FlowTestingUtils.testCases()
+        if not testCases:
+            self.skipTest(f"No 4D flow test case is available (set {FlowTestingUtils.TEST_CASES_ENV_VARIABLE} in the environment or in .env.local"
+                          " to the folder of a data set of test cases)")
+        datasetDirectory, caseId = testCases[0]
+        self.report.text(f"Test case: {caseId}")
         library = FlowLibraryBridge.ensureLibrary()
-        case = library.load_case(caseDirectory, world="RAS")
+        case = library.load_case(datasetDirectory, caseId, world="RAS")
         startTime = time.time()
-        loaded = self.logic.loadTestCase(caseDirectory)
+        loaded = self.logic.loadTestCase(datasetDirectory, caseId)
         self.report.text(f"Loading time: {time.time() - startTime:.1f} s")
         flowFieldNode = loaded["flowFieldNode"]
         velocity, voxelToWorld, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
