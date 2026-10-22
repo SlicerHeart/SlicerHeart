@@ -35,6 +35,10 @@ REPORT_DIR_ENV_VARIABLE = "SLICERHEART_TEST_REPORT_DIR"
 # Environment variable (or .env.local entry) that specifies the folder of an anonymized 4D flow MRI DICOM data set
 REAL_DATA_ENV_VARIABLE = "MRI_4D_FLOW_TEST_DATA"
 
+# Environment variable (or .env.local entry) that specifies the folder of 4D flow test cases in Slicer-native file format
+# (<folder>/<vendor>/<case>/manifest.json, written by Export4DFlowTestCases.py). Same variable as in slicerheart_4dflow tests.
+TEST_CASES_ENV_VARIABLE = "SLICERHEART_4DFLOW_CLINICAL_DATA"
+
 # Siemens CS 4D flow component images store phase in the range of [-4096, 4096)
 PHASE_MAX_VALUE = 4096
 
@@ -74,6 +78,27 @@ def environmentValue(name, default=None):
     return default
 
 
+def testCaseDirectories():
+    """Folders of the available 4D flow test cases (Slicer-native format), smallest first."""
+    root = environmentValue(TEST_CASES_ENV_VARIABLE)
+    if not root or not os.path.isdir(root):
+        return []
+    caseDirectories = []
+    for vendor in sorted(os.listdir(root)):
+        vendorDirectory = os.path.join(root, vendor)
+        if not os.path.isdir(vendorDirectory):
+            continue
+        for case in sorted(os.listdir(vendorDirectory)):
+            if os.path.isfile(os.path.join(vendorDirectory, case, "manifest.json")):
+                caseDirectories.append(os.path.join(vendorDirectory, case))
+
+    def caseSize(caseDirectory):
+        velocityRawPath = os.path.join(caseDirectory, "inputs", "velocity_raw.seq.nrrd")
+        return os.path.getsize(velocityRawPath) if os.path.isfile(velocityRawPath) else 0
+
+    return sorted(caseDirectories, key=caseSize)
+
+
 def gitDescription():
     """Short description of the current SlicerHeartPrivate source code version."""
     try:
@@ -84,6 +109,19 @@ def gitDescription():
         return commit + (" (with local changes)" if status else "")
     except Exception:
         return "unknown"
+
+
+def voxelValueUnitsKeptInSequence():
+    """Voxel value units and quantity of a volume are kept when it is stored in a sequence (not in all Slicer versions:
+    vtkMRMLScalarVolumeNode::CopyContent did not copy them)."""
+    volumeNode = slicer.vtkMRMLScalarVolumeNode()
+    units = slicer.vtkCodedEntry()
+    units.SetValueSchemeMeaning("m/s", "UCUM", "meter per second")
+    volumeNode.SetVoxelValueUnits(units)
+    sequenceNode = slicer.vtkMRMLSequenceNode()
+    storedNode = sequenceNode.SetDataNodeAtValue(volumeNode, "0")
+    storedUnits = storedNode.GetVoxelValueUnits() if storedNode else None
+    return bool(storedUnits and storedUnits.GetCodeValue() == "m/s")
 
 
 def isVectorFieldDisplayAvailable():
@@ -119,7 +157,15 @@ class TestReport:
         self.tests = []
         self.currentTest = None
         self.imageCounter = 0
+        self.numberOfTests = None
+        # Progress of the run, written while it runs (one line at the start and end of each test, flushed at once),
+        # so that a slow or hanging test is visible (Run4DFlowFeatureTests.py relays it)
+        self.progressFile = open(os.path.join(self.outputDir, "progress.log"), "w", encoding="utf-8")
         self.environment = self._collectEnvironment()
+
+    def progress(self, text):
+        self.progressFile.write(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
+        self.progressFile.flush()
 
     @staticmethod
     def _collectEnvironment():
@@ -153,12 +199,23 @@ class TestReport:
         }
         self.tests.append(self.currentTest)
         logging.info(f"===== {self.suiteName}: {title} ({name}) =====")
+        self.progress(f"[{len(self.tests)}/{self.numberOfTests or '?'}] start   {name}: {title}")
 
     def endTest(self, status, error=None, durationSec=0.0):
         self.currentTest["status"] = status
         self.currentTest["error"] = error
         self.currentTest["durationSec"] = durationSec
         logging.info(f"===== {self.currentTest['name']}: {status} ({durationSec:.1f}s) =====")
+        counts = {}
+        for test in self.tests:
+            if test["status"]:
+                counts[test["status"]] = counts.get(test["status"], 0) + 1
+        message = ""
+        if error:
+            lines = str(error).strip().splitlines()
+            message = f": {lines[-1][:200]}" if lines else ""
+        self.progress(f"[{len(self.tests)}/{self.numberOfTests or '?'}] {status:7s} {self.currentTest['name']}"
+                      f" ({durationSec:.1f} s){message} | " + ", ".join(f"{n} {s.lower()}" for s, n in sorted(counts.items())))
         self.currentTest = None
         self.write()
 
@@ -423,6 +480,8 @@ class FeatureTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.report = TestReport(cls.REPORT_SUITE_NAME, cls.REPORT_TITLE, cls.REPORT_DESCRIPTION)
+        cls.report.numberOfTests = len(unittest.TestLoader().getTestCaseNames(cls))
+        cls.report.progress(f"{cls.report.numberOfTests} tests: {cls.REPORT_SUITE_NAME} in Slicer {slicer.app.applicationVersion}")
         # Write Python stack trace if the application crashes (to find the test step that caused it)
         import faulthandler
         cls._crashLogFile = open(os.path.join(cls.report.outputDir, "crash-traceback.txt"), "w")
@@ -437,14 +496,17 @@ class FeatureTestCase(unittest.TestCase):
         faulthandler.disable()
         cls._crashLogFile.close()
         cls.report.write()
+        cls.report.progress("finished")
+        cls.report.progressFile.close()
         logging.info(f"Test report written to {os.path.join(cls.report.outputDir, 'report.md')}")
 
-    # If a test runs longer than this then the Python stack is written to crash-traceback.txt (to find where it hangs)
+    # If a test runs longer than this then the Python stack is written to crash-traceback.txt (to find where it hangs),
+    # and again after each further period, so that a hang (same stack) can be told from slow progress
     HANG_TIMEOUT_SEC = 600
 
     def setUp(self):
         import faulthandler
-        faulthandler.dump_traceback_later(self.HANG_TIMEOUT_SEC, repeat=False, file=self._crashLogFile)
+        faulthandler.dump_traceback_later(self.HANG_TIMEOUT_SEC, repeat=True, file=self._crashLogFile)
         self.addCleanup(faulthandler.cancel_dump_traceback_later)
         slicer.mrmlScene.Clear()
         slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)

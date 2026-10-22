@@ -10,6 +10,7 @@ Run from the Slicer Python console:
     slicer.testing.runUnitTest([r"<path>/Import4DFlow/Testing/Python"], "Import4DFlowFeaturesTest")
 """
 
+import json
 import logging
 import math
 import os
@@ -28,7 +29,8 @@ import FlowTestingUtils
 from FlowTestingUtils import FlowPhantom, reportedTest
 
 import Import4DFlow
-from Import4DFlow import Import4DFlowLogic, BackgroundSubtractionMethodEnum, UnwrapModeEnum
+from Import4DFlow import Import4DFlowLogic, BackgroundSubtractionMethodEnum, UnwrapModeEnum, NoiseMaskMethodEnum, DivergenceFilterMethodEnum
+from Import4DFlowLib import FlowLibraryBridge
 
 
 # Tolerance of velocity comparisons (m/s): phase values are stored as integers (1 raw unit = venc/4096),
@@ -384,6 +386,15 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkEqual(f"[{storage}] Velocity encoding attribute", sequenceNode.GetAttribute("SlicerHeart.vencCmPerSec"), ",".join([str(vencCmPerSec)] * 3))
             frameNode = sequenceNode.GetNthDataNode(peakFrame)
             self.report.checkEqual(f"[{storage}] Frame node SlicerHeart.Type attribute", frameNode.GetAttribute("SlicerHeart.Type"), "FlowField")
+            if not storeInTransform:
+                if FlowTestingUtils.voxelValueUnitsKeptInSequence():
+                    units = frameNode.GetVoxelValueUnits()
+                    quantity = frameNode.GetVoxelValueQuantity()
+                    self.report.checkEqual(f"[{storage}] Frame voxel value units", units.GetCodeValue() if units else None, "m/s")
+                    self.report.checkEqual(f"[{storage}] Frame voxel value quantity", quantity.GetCodeMeaning() if quantity else None, "velocity")
+                else:
+                    self.report.text(f"[{storage}] Frame voxel value units are not checked: this Slicer version does not keep"
+                                     " voxel value units of volumes stored in sequences.")
 
             FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
             if storeInTransform:
@@ -550,9 +561,10 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         resetError = max(float(np.abs(f - e).max()) for f, e in zip(self.velocityFrames(flowFieldNode), expectedFrames))
         self.report.checkTrue("After reset, the flow field is computed without unwrapping", resetError > 0.5, f"{resetError:.3f} m/s", "> 0.5 m/s")
 
-        with self.assertRaises(NotImplementedError):
-            self.logic.laplacianUnwrap(flowFieldNode)
-        self.report.checkTrue("Laplacian unwrapping reports that it is not implemented", True)
+        self.logic.laplacianUnwrap(flowFieldNode)
+        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.checkVelocityFrames("Laplacian unwrapping (slicerheart_4dflow) after reset", self.velocityFrames(flowFieldNode), expectedFrames,
+            velocityQuantizationMPerSec(vencCmPerSec))
         with self.assertRaises(RuntimeError):
             self.logic.temporalUnwrap(flowFieldNode, 1, 5.0)
         self.report.checkTrue("Temporal unwrapping with non-zero reference frame is rejected", True)
@@ -878,6 +890,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkEqual("Image set name in GUI", widget.ui.inputVolumeNodeSetSelector.currentText, "Phantom, Flow (20240102)")
             self.report.checkTrue("Convert button is enabled", widget.ui.convertButton.enabled)
             parameterNode = widget._parameterNode
+            # This test checks the flow field computed with temporal unwrapping (Laplacian + temporal is the default)
+            parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
 
             # Vector volume storage
             widget.ui.storeInTransformCheckBox.checked = False
@@ -943,9 +957,11 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.checkVelocityFrames("[GUI] Temporal unwrapping, then recompute", self.velocityFrames(flowFieldNode), expectedFrames,
                 velocityQuantizationMPerSec(vencCmPerSec))
             parameterNode.unwrapMode = UnwrapModeEnum.LaplacianUnwrap
-            with self.assertRaises(NotImplementedError):
-                widget.onComputePhaseUnwrappingButton()
-            self.report.checkTrue("[GUI] Laplacian unwrapping reports an error", True)
+            widget.onComputePhaseUnwrappingButton()
+            widget.onRecomputeFlowFieldButton()
+            self.checkVelocityFrames("[GUI] Laplacian unwrapping (slicerheart_4dflow), then recompute", self.velocityFrames(flowFieldNode), expectedFrames,
+                velocityQuantizationMPerSec(vencCmPerSec))
+            parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
 
             # Recompute with background subtraction
             parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.LinearFit
@@ -1318,6 +1334,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkEqual("[GUI] Image sets listed in GUI", widget.ui.inputVolumeNodeSetSelector.count, 1)
             self.report.checkTrue("[GUI] Convert button is enabled", widget.ui.convertButton.enabled)
             parameterNode = widget._parameterNode
+            # This test compares unwrapping methods with temporal unwrapping (Laplacian + temporal is the default)
+            parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
 
             flowFieldNodes = {}
             for storeInTransform in [False, True]:
@@ -1368,10 +1386,16 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         widget.onRecomputeFlowFieldButton()
         self.report.checkClose("[GUI] Temporal unwrapping again gives the same flow field (max. difference)",
             max(float(np.abs(a - b).max()) for a, b in zip(self.velocityFrames(flowFieldNode), temporalFrames)), 0.0, atol=1e-6, unit="m/s")
-        parameterNode.unwrapMode = UnwrapModeEnum.LaplacianUnwrap
-        with self.assertRaises(NotImplementedError):
-            widget.onComputePhaseUnwrappingButton()
-        self.report.checkTrue("[GUI] Laplacian unwrapping reports an error", True)
+        parameterNode.unwrapMode = UnwrapModeEnum.LaplacianThenTemporalUnwrap
+        widget.onComputePhaseUnwrappingButton()
+        widget.onRecomputeFlowFieldButton()
+        laplacianFrames = self.velocityFrames(flowFieldNode)
+        sameVoxels = np.mean([np.mean(np.all(np.abs(a - b) < 1e-6, axis=-1)) for a, b in zip(laplacianFrames, temporalFrames)])
+        self.report.checkTrue("[GUI] Laplacian + temporal unwrapping (slicerheart_4dflow) agrees with temporal unwrapping",
+            sameVoxels > 0.99, f"{100 * sameVoxels:.2f}% of voxels", "> 99%")
+        parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
+        widget.onComputePhaseUnwrappingButton()
+        widget.onRecomputeFlowFieldButton()
 
         # Export
         exportDir = os.path.join(workDir, "export")
@@ -1387,3 +1411,470 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 max(float(np.abs(slicer.util.arrayFromVolume(loadedSequenceNode.GetNthDataNode(i)) - temporalFrames[i]).max())
                     for i in range(loadedSequenceNode.GetNumberOfDataNodes())), 0.0, atol=1e-5, unit="m/s")
         self.report.screenshot("Clinical data set: module GUI after export", kind="window")
+
+    # slicerheart_4dflow methods
+
+    def addRandomPhaseInAir(self, volumeNodeSet, phantom, seed=0):
+        """Replace the phase in the air (background) by random values in each frame, as in real images,
+        where the phase of noise voxels is random."""
+        rng = np.random.default_rng(seed)
+        air = phantom.magnitudeVolumeArray() < 10
+        for componentVolumeNode in volumeNodeSet["componentVolumeNodes"]:
+            sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
+            for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
+                frameNode = sequenceNode.GetNthDataNode(frameIndex)
+                array = slicer.util.arrayFromVolume(frameNode)
+                array[air] = rng.integers(-FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE, np.count_nonzero(air))
+                slicer.util.arrayFromVolumeModified(frameNode)
+        return air
+
+    @reportedTest("Background phase correction by slicerheart_4dflow methods",
+        "A linear or quadratic background phase error is added to the component images of a phantom with realistic proportions."
+        " The slicerheart_4dflow robust polynomial fits (least squares, MSAC, weighted least squares, wrap-around rejection + MSAC)"
+        " must remove at least 80% of the error from stationary tissue and the vessel, as the SlicerHeart fits do.")
+    def test_21_LibraryBackgroundCorrection(self):
+        vencCmPerSec = 150.0
+        phantom = FlowPhantom(vesselRadiusMm=5.0, tissueRadiusMm=30.0)
+        stationaryTissue = phantom.stationaryTissueMask()
+        peakFrame = phantom.peakFrameIndex()
+        expectedPeak = phantom.velocityVolumeArray(peakFrame)
+        rows = []
+        for offsetName, phaseOffset, order in [("linear offset", phantom.linearPhaseOffset(), 1), ("quadratic offset", phantom.quadraticPhaseOffset(), 2)]:
+            offsetError = float(np.abs(phaseOffset[stationaryTissue]).mean() / FlowTestingUtils.PHASE_MAX_VALUE * vencCmPerSec / 100.0)
+            methods = [BackgroundSubtractionMethodEnum.QuadraticFit, BackgroundSubtractionMethodEnum.OlsFit, BackgroundSubtractionMethodEnum.MsacFit,
+                       BackgroundSubtractionMethodEnum.WrlsFit, BackgroundSubtractionMethodEnum.WarMsacFit]
+            for method in methods:
+                for perFrame in ([False, True] if method == BackgroundSubtractionMethodEnum.WarMsacFit else [False]):
+                    slicer.mrmlScene.Clear()
+                    volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec, phaseOffset=phaseOffset)
+                    flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+                        volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+                    startTime = time.time()
+                    self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, method, 10.0,
+                        backgroundPolynomialOrder=max(order, 2), backgroundPerFrame=perFrame)
+                    duration = time.time() - startTime
+                    frame = self.velocityFrames(flowFieldNode)[peakFrame]
+                    tissueError = float(np.abs(frame[stationaryTissue]).mean())
+                    vesselError = float(np.abs(frame - expectedPeak)[phantom.insideVessel].mean())
+                    label = f"[{offsetName}, {method.label()}{', per frame' if perFrame else ''}]"
+                    rows.append([offsetName, method.label() + (", per frame" if perFrame else ""), offsetError, tissueError, vesselError, duration])
+                    self.report.checkClose(f"{label} Mean residual velocity in stationary tissue", tissueError, 0.0, atol=0.2 * offsetError, unit="m/s")
+                    self.report.checkClose(f"{label} Mean velocity error in the vessel", vesselError, 0.0, atol=0.2 * offsetError, unit="m/s")
+        self.report.table(["Background error", "Method", "Mean background error (m/s)", "Mean residual in stationary tissue (m/s)",
+            "Mean velocity error in vessel (m/s)", "Time (s)"], rows)
+
+    @reportedTest("Laplacian phase unwrapping (slicerheart_4dflow)",
+        "Velocity encoding (70 cm/s) is below the peak velocity (100 cm/s). Laplacian 3D, Laplacian 4D and Laplacian 3D + temporal"
+        " unwrapping must find the same wraps as the analytic solution, store them in the phase wrap segmentations (so they can be"
+        " edited manually, as temporal unwrapping results), and the corrected flow field must match the analytic velocity.")
+    def test_22_LaplacianUnwrap(self):
+        vencCmPerSec = 70.0
+        phantom = FlowPhantom()
+        expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
+        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(volumeNodeSet, True, unwrap=True)
+        temporalWraps = self.logic.getWrapCounts(flowFieldNode)
+        rows = []
+        for mode in [UnwrapModeEnum.LaplacianUnwrap, UnwrapModeEnum.Laplacian4DUnwrap, UnwrapModeEnum.LaplacianThenTemporalUnwrap]:
+            startTime = time.time()
+            self.logic.laplacianUnwrap(flowFieldNode, mode, 5.0)
+            duration = time.time() - startTime
+            self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            wraps = self.logic.getWrapCounts(flowFieldNode)
+            self.report.checkTrue(f"[{mode.label()}] Phase wrap segmentations are created",
+                all(flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", c) for c in range(3)))
+            differentVoxels = int(np.count_nonzero(wraps != temporalWraps))
+            self.report.checkEqual(f"[{mode.label()}] Voxels with different wraps than temporal unwrapping", differentVoxels, 0)
+            self.checkVelocityFrames(f"[{mode.label()}]", self.velocityFrames(flowFieldNode), expectedFrames, velocityQuantizationMPerSec(vencCmPerSec))
+            processing = json.loads(self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.processing"))
+            self.report.checkEqual(f"[{mode.label()}] Unwrapping method is recorded in the flow field", processing["phaseUnwrapping"], mode.name)
+            rows.append([mode.label(), int(np.count_nonzero(wraps)), differentVoxels, duration])
+        self.report.table(["Method", "Wrapped voxels", "Different from temporal unwrapping", "Time (s)"], rows)
+
+        # Results can be edited: remove the 1x positive wraps of component 3 in the peak frame
+        peakFrame = phantom.peakFrameIndex()
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+        segmentationNode = flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", 2)
+        segmentId = "Wrap-Pos-1x" if segmentationNode.GetSegmentation().GetSegment("Wrap-Pos-1x") else "Wrap-Neg-1x"
+        slicer.util.updateSegmentBinaryLabelmapFromArray(np.zeros(phantom.radialDistanceMm.shape, np.uint8), segmentationNode, segmentId,
+            flowFieldNode.GetNodeReference("magnitudeVolume"))
+        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        editedError = float(np.abs(self.velocityFrames(flowFieldNode)[peakFrame] - expectedFrames[peakFrame]).max())
+        self.report.checkTrue("Editing the phase wrap segmentation changes the flow field", editedError > 0.5, f"{editedError:.2f} m/s", "> 0.5 m/s")
+
+    @reportedTest("Noise mask by magnitude and velocity noise (slicerheart_4dflow)",
+        "The phase of noise voxels (air) is random, as in real images. The slicerheart_4dflow noise mask (low magnitude by Otsu"
+        " threshold, or random phase) must set velocity to zero in the air and keep the velocity in the vessel and tissue.")
+    def test_23_LibraryNoiseMask(self):
+        vencCmPerSec = 150.0
+        phantom = FlowPhantom()
+        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
+        air = self.addRandomPhaseInAir(volumeNodeSet, phantom)
+        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 0.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
+            noiseMaskMethod=NoiseMaskMethodEnum.BockNoiseMask)
+        frames = self.velocityFrames(flowFieldNode)
+        maxAirSpeed = max(float(np.linalg.norm(frame[air], axis=-1).max()) for frame in frames)
+        self.report.checkClose("Maximum speed in the air (random phase)", maxAirSpeed, 0.0, atol=1e-6, unit="m/s")
+        expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
+        self.checkVelocityFrames("Velocity in the vessel and tissue", frames, expectedFrames, velocityQuantizationMPerSec(vencCmPerSec), mask=~air)
+        processing = json.loads(self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.processing"))
+        self.report.checkEqual("Noise mask method is recorded in the flow field", processing["noiseMask"], "BockNoiseMask")
+
+    @reportedTest("Divergence-free filtering (slicerheart_4dflow)",
+        "Noise is added to the phantom velocity. Divergence-free filtering in the vessel segmentation must reduce the divergence and"
+        " the velocity error in the vessel. Filtering without lumen segmentation must be rejected.")
+    def test_24_DivergenceFreeFiltering(self):
+        vencCmPerSec = 150.0
+        phantom = FlowPhantom(numberOfFrames=4)
+        rng = np.random.default_rng(1)
+        noise = [rng.normal(0, 60, phantom.radialDistanceMm.shape) for _ in range(3)]  # raw units, about 2 cm/s
+        library = FlowLibraryBridge.ensureLibrary()
+        expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
+        interior = phantom.radialDistanceMm < phantom.vesselRadiusMm - 2.0
+        interior[:3], interior[-3:], interior[:, :3], interior[:, -3:], interior[:, :, :3], interior[:, :, -3:] = False, False, False, False, False, False
+        rows = []
+        for method in [DivergenceFilterMethodEnum.NoFilter, DivergenceFilterMethodEnum.FdmProjection, DivergenceFilterMethodEnum.RelaxedProjection,
+                       DivergenceFilterMethodEnum.LerayProjection, DivergenceFilterMethodEnum.DivergenceFreeWavelet]:
+            slicer.mrmlScene.Clear()
+            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
+            for component, componentVolumeNode in enumerate(volumeNodeSet["componentVolumeNodes"]):
+                sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
+                for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
+                    array = slicer.util.arrayFromVolume(sequenceNode.GetNthDataNode(frameIndex))
+                    array[:] = np.clip(array + noise[component], -FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE - 1)
+                    slicer.util.arrayFromVolumeModified(sequenceNode.GetNthDataNode(frameIndex))
+            flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=True)
+            segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+            lumenMask = self.logic.getLumenMask(flowFieldNode, segmentationNode, segmentId)
+            if method == DivergenceFilterMethodEnum.FdmProjection:
+                with self.assertRaises(ValueError):
+                    self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
+                        divergenceFilterMethod=method)
+                self.report.checkTrue("Divergence-free filtering without lumen segmentation is rejected", True)
+            startTime = time.time()
+            self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
+                divergenceFilterMethod=method, lumenMask=lumenMask)
+            duration = time.time() - startTime
+            velocity, voxelToWorld, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+            divergence = np.mean([library.divergence_stats(velocity[t], lumenMask, voxelToWorld)["div_rms"] for t in range(velocity.shape[0])])
+            error = float(np.mean([np.abs(velocity[t][interior] / 1000.0 - expectedFrames[t][interior]).mean() for t in range(velocity.shape[0])]))
+            rows.append([method.label(), divergence, error, duration])
+        self.report.table(["Method", "Divergence RMS in the vessel (1/s)", "Mean velocity error in the vessel interior (m/s)", "Time (s)"], rows)
+        for row in rows[1:]:
+            self.report.checkTrue(f"[{row[0]}] Divergence is reduced", row[1] < rows[0][1], f"{row[1]:.3g}", f"< {rows[0][1]:.3g}")
+        self.report.checkTrue("[finite difference projection] Velocity error is not increased", rows[1][2] <= rows[0][2] * 1.05,
+            f"{rows[1][2]:.4f}", f"<= {rows[0][2] * 1.05:.4f}")
+
+    @reportedTest("Encoding check, PC-MRA, lumen estimation and quality report (slicerheart_4dflow)",
+        "The encoding check must accept the correct velocity component mapping and reject a mapping with an inverted component."
+        " The lumen segmentation estimated from the PC-MRA must cover the vessel. The quality report must flag the venc as"
+        " inadequate when the velocity is aliased.")
+    def test_25_QualityChecks(self):
+        phantom = FlowPhantom()
+        volumeNodeSet = phantom.createComponentImagesInScene(150.0)
+        flowFieldNode = self.createFlowField(volumeNodeSet, False)
+        segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+        lumenMask = self.logic.getLumenMask(flowFieldNode, segmentationNode, segmentId)
+        result = self.logic.checkEncodingDirections(flowFieldNode, lumenMask)
+        self.report.text("Correct mapping: " + self.logic.encodingCheckSummary(result))
+        self.report.checkTrue("Correct component mapping is consistent", result["consistent"])
+
+        # Invert one component (wrong sign flag)
+        wrongConfiguration = list(FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL)
+        wrongConfiguration[2] = (wrongConfiguration[2][0], not wrongConfiguration[2][1])
+        wrongVolumeNodeSet = phantom.createComponentImagesInScene(150.0)
+        wrongFlowFieldNode = self.logic.createFlowFieldFromComponentVolumes(wrongVolumeNodeSet["componentVolumeNodes"],
+            [not invert if axis == 2 else invert for axis, invert in enumerate(wrongVolumeNodeSet["componentVolumeNodesInvertToRasDirection"])],
+            wrongVolumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+        self.logic.updateFlowFieldFromComponentVolumes(wrongFlowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        wrongResult = self.logic.checkEncodingDirections(wrongFlowFieldNode, lumenMask)
+        self.report.text("Mapping with inverted S component: " + self.logic.encodingCheckSummary(wrongResult))
+        self.report.checkTrue("Mapping with an inverted component is inconsistent", not wrongResult["consistent"])
+
+        pcmraNode = self.logic.createPcmraVolume(flowFieldNode)
+        pcmra = slicer.util.arrayFromVolume(pcmraNode)
+        self.report.checkTrue("PC-MRA is brighter in the vessel than in the tissue",
+            pcmra[phantom.insideVessel].mean() > 10 * pcmra[phantom.stationaryTissueMask()].mean())
+        lumenSegmentationNode, lumenSegmentId = self.logic.createLumenSegmentation(flowFieldNode)
+        estimatedLumen = self.logic.getLumenMask(flowFieldNode, lumenSegmentationNode, lumenSegmentId)
+        dice = 2 * np.count_nonzero(estimatedLumen & phantom.insideVessel) / (np.count_nonzero(estimatedLumen) + np.count_nonzero(phantom.insideVessel))
+        self.report.checkTrue("Estimated lumen overlaps the vessel (Dice)", dice > 0.7, f"{dice:.2f}", "> 0.7")
+        # The lumen segment is on a grid twice as fine as the image, and keeps that resolution for editing
+        from Import4DFlowLib import FlowLibraryBridge
+        segmentMask, segmentVoxelToWorld = FlowLibraryBridge.segmentLabelmap(lumenSegmentationNode, lumenSegmentId)
+        imageSpacing = np.linalg.norm(FlowLibraryBridge.voxelToWorld(FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode))[:3, :3], axis=0)
+        segmentSpacing = np.linalg.norm(segmentVoxelToWorld[:3, :3], axis=0)
+        self.report.checkTrue("Lumen segment is on a grid twice as fine as the image", np.allclose(segmentSpacing, imageSpacing / 2),
+            np.round(segmentSpacing, 3).tolist(), f"{np.round(imageSpacing / 2, 3).tolist()}")
+        lumenFraction = FlowLibraryBridge.maskFractionFromSegment(lumenSegmentationNode, lumenSegmentId,
+                                                                   FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode))
+        partialVoxels = np.count_nonzero((lumenFraction > 0) & (lumenFraction < 1))
+        self.report.checkTrue("Lumen fraction on the image grid has partial voxels at the wall", partialVoxels > 0, partialVoxels, "> 0")
+        self.report.checkTrue("Lumen fraction is the fraction of fine voxels", np.allclose(lumenFraction * 8, np.round(lumenFraction * 8), atol=1e-4))
+
+        report = self.logic.computeQualityReport(flowFieldNode, lumenMask)
+        self.report.checkTrue("[venc 150 cm/s] Quality report: venc is adequate", report["venc"]["venc_adequate"])
+        tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Quality report")
+        self.logic.qualityReportToTable(report, tableNode)
+        self.report.checkTrue("Quality report table is created", tableNode.GetNumberOfRows() > 10, tableNode.GetNumberOfRows(), "> 10")
+        markdown = self.logic.qualityReportToMarkdown(report)
+        self.report.checkTrue("Quality report markdown is created", len(markdown) > 100)
+
+        slicer.mrmlScene.Clear()
+        aliasedVolumeNodeSet = phantom.createComponentImagesInScene(70.0)
+        aliasedFlowFieldNode = self.createFlowField(aliasedVolumeNodeSet, False, unwrap=True)
+        aliasedReport = self.logic.computeQualityReport(aliasedFlowFieldNode, phantom.insideVessel)
+        self.report.checkTrue("[venc 70 cm/s] Quality report: venc is not adequate", not aliasedReport["venc"]["venc_adequate"])
+
+    @reportedTest("Test case export and loading (Slicer-native files for slicerheart_4dflow)",
+        "The flow field (aliased phantom with background error, unwrapped and background corrected) is exported as a test case."
+        " The files are read by slicerheart_4dflow.slicer_io (without Slicer) and must contain the analytic velocity in LPS"
+        " components, the raw (aliased) velocity, the wraps, the geometry, measurement planes, plane flows, and the descriptions"
+        " of the acquisition, processing and annotations, and no identifying information. Loading the test case into Slicer (without DICOM) must reproduce the flow field and the phase"
+        " wrap segmentations.")
+    def test_26_TestCaseExportAndLoad(self):
+        vencCmPerSec = 70.0
+        phantom = FlowPhantom()
+        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(volumeNodeSet, True, unwrap=True)
+        segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+        planeNode = phantom.createMeasurementPlane(name="vessel")
+        caseDirectory = os.path.join(self.temporaryDirectory("TestCase"), "Phantom0001")
+        startTime = time.time()
+        self.logic.exportTestCaseWithFlows(flowFieldNode, caseDirectory, lumenSegmentationNode=segmentationNode, lumenSegmentId=segmentId,
+            planeNodes=[planeNode], metadata={"vendor": "siemens"})
+        self.report.text(f"Export time: {time.time() - startTime:.1f} s")
+        library = FlowLibraryBridge.ensureLibrary()
+        case = library.load_case(caseDirectory)  # LPS, as a user of slicerheart_4dflow would read it
+        lpsFromRas = np.diag([-1.0, -1.0, 1.0])
+        expected = np.stack([phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]) * 1000.0 @ lpsFromRas
+        self.report.checkClose("Velocity in the files equals the analytic velocity (LPS components, mm/s)",
+            float(np.abs(case["velocity_t"] - expected).max()), 0.0, atol=velocityQuantizationMPerSec(vencCmPerSec) * 1000.0, unit="mm/s")
+        ijkToRas = slicer.util.arrayFromVTKMatrix(phantom.ijkToRasMatrix())
+        self.report.checkClose("Voxel to world (LPS) matrix", float(np.abs(case["voxel_to_world"] - np.diag([-1, -1, 1, 1]) @ ijkToRas).max()), 0.0, atol=1e-4)
+        self.report.checkClose("Frame times", float(np.abs(case["time_ms"] - np.array(phantom.frameTimesMs)).max()), 0.0, atol=1e-3, unit="ms")
+        self.report.checkTrue("Raw velocity is aliased (within venc in each encoded component)",
+            bool(np.all(np.abs(case["velocity_raw_encoded_t"]) <= case["venc_encoded_mm_s"] + 1e-3)))
+        self.report.checkEqual("Wrap counts are integers per encoded component", str(case["wrap_count_t"].dtype), "int16")
+        # Wraps are per encoded component: world velocity = encoding_to_world (raw + 2 venc wraps)
+        unwrapped = (case["velocity_raw_encoded_t"] + 2 * case["venc_encoded_mm_s"] * case["wrap_count_t"]) @ case["encoding_to_world"].T
+        inside = phantom.insideVessel
+        self.report.checkClose("Raw velocity + 2 venc x wraps equals the corrected velocity in the vessel",
+            float(np.abs(unwrapped[:, inside] - case["velocity_t"][:, inside]).max()), 0.0, atol=1e-2, unit="mm/s")
+        self.report.checkEqual("Lumen segmentation", int(np.count_nonzero(case["lumen"] != inside)), 0)
+        self.report.checkEqual("Planes", list(case["planes"].keys()), ["vessel"])
+        np.testing.assert_allclose(case["planes"]["vessel"]["normal"], lpsFromRas @ phantom.vesselAxis, atol=1e-6)
+        rrMs = case["rr_ms"]
+        expectedNetVolume = np.mean([phantom.expectedFlowRateMlPerSec(i) for i in range(phantom.numberOfFrames)]) * rrMs / 1000.0
+        self.report.checkClose("Net flow volume (plane probe, outputs/flows.json)", case["flows"]["planes"]["vessel"]["net_volume_mL"], expectedNetVolume,
+            rtol=0.05, unit="ml")
+        libraryFlow = library.plane_flow(case["velocity_t"], case["voxel_to_world"], lumen_mask=case["lumen"], **case["planes"]["vessel"])["flow"] / 1000.0
+        self.report.checkClose("slicerheart_4dflow net flow volume from the files", float(np.mean(libraryFlow) * rrMs / 1000.0), expectedNetVolume,
+            rtol=0.05, unit="ml")
+        self.report.checkTrue("Wrap counts record aliasing", bool(np.any(case["wrap_count_t"] != 0)))
+        self.report.checkEqual("Manifest", case["manifest"], {"format_version": 3, "case_id": "Phantom0001", "license": "internal", "doi": None})
+        self.report.checkEqual("Acquisition description records the vendor", case["acquisition"]["vendor"], "siemens")
+        self.report.checkEqual("Processing description records the processing", case["processing"]["processing"]["phaseUnwrapping"], "TemporalUnwrap")
+        self.report.checkEqual("Annotations description: specified lumen and planes",
+            [case["annotations"]["lumen"]["method"], case["annotations"]["planes"]["method"], case["annotations"]["planes"]["files"]],
+            ["manual", "manual", ["vessel.mrk.json"]])
+        import nrrd
+        for root, _, files in os.walk(caseDirectory):
+            for filename in files:
+                if filename.endswith(".nrrd"):
+                    header = nrrd.read_header(os.path.join(root, filename))
+                    names = [value for key, value in header.items() if key.endswith("_Name")]
+                    self.report.checkTrue(f"{filename}: no node names in the header", all(name in ("lumen",) for name in names), names)
+        for key in ("manifest", "acquisition", "processing", "annotations"):
+            with open(os.path.join(caseDirectory, Import4DFlowLogic.TEST_CASE_FILES[key]), encoding="utf-8") as file:
+                descriptionText = file.read()
+            for word in ["Phantom browser", "DICOM", "PatientName", "StudyDate"]:
+                self.report.checkTrue(f"{key} description does not contain '{word}'", word not in descriptionText)
+
+        # Load into Slicer without DICOM
+        originalVelocity, _, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+        originalWraps = self.logic.getWrapCounts(flowFieldNode)
+        slicer.mrmlScene.Clear()
+        startTime = time.time()
+        loaded = self.logic.loadTestCase(caseDirectory)
+        self.report.text(f"Loading time: {time.time() - startTime:.1f} s")
+        loadedVelocity, _, _ = FlowLibraryBridge.velocityArrayFromFlowField(loaded["flowFieldNode"])
+        self.report.checkClose("Loaded test case: flow field equals the exported flow field", float(np.abs(loadedVelocity - originalVelocity).max()), 0.0,
+            atol=1e-3, unit="mm/s")
+        self.report.checkEqual("Loaded test case: phase wrap segmentations are restored",
+            int(np.count_nonzero(self.logic.getWrapCounts(loaded["flowFieldNode"]) != originalWraps)), 0)
+        self.report.checkTrue("Loaded test case: lumen and planes are loaded", loaded["lumenSegmentationNode"] is not None and len(loaded["planeNodes"]) == 1)
+        self.report.checkEqual("Loaded test case: lumen segmentation file can be saved back to the case",
+            os.path.normpath(loaded["lumenSegmentationNode"].GetStorageNode().GetFileName()), os.path.normpath(os.path.join(caseDirectory, "annotations", "lumen.seg.nrrd")))
+
+    @reportedTest("slicerheart_4dflow methods in the GUI",
+        "Library methods are selected in the module GUI (noise mask, background fit, Laplacian unwrapping, divergence-free filter),"
+        " the flow field is created from the phantom images, quality checks are run by the GUI buttons, and the flow field is"
+        " exported as a test case and loaded back.")
+    def test_27_LibraryGuiWorkflow(self):
+        vencCmPerSec = 70.0
+        phantom = FlowPhantom(vesselRadiusMm=6.0, tissueRadiusMm=30.0, numberOfFrames=6)
+        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec, phaseOffset=phantom.quadraticPhaseOffset())
+        slicer.util.selectModule("Import4DFlow")
+        widget = slicer.modules.import4dflow.widgetRepresentation().self()
+        widget._volumeNodesSets = {"phantom": volumeNodeSet}
+        widget.ui.inputVolumeNodeSetSelector.clear()
+        widget.ui.inputVolumeNodeSetSelector.addItem("Phantom", "phantom")
+        parameterNode = widget._parameterNode
+        parameterNode.inputVolumeNodeSet = "phantom"
+        parameterNode.unwrapMode = UnwrapModeEnum.LaplacianThenTemporalUnwrap
+        parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.WarMsacFit
+        parameterNode.backgroundPolynomialOrder = 2
+        parameterNode.noiseMaskMethod = NoiseMaskMethodEnum.MagnitudeThreshold
+        slicer.app.processEvents()
+        self.report.checkTrue("[GUI] Polynomial order is enabled for slicerheart_4dflow background fit", widget.ui.backgroundPolynomialOrderSpinBox.enabled)
+        parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.QuadraticFit
+        slicer.app.processEvents()
+        self.report.checkTrue("[GUI] Polynomial order is disabled for SlicerHeart background fit", not widget.ui.backgroundPolynomialOrderSpinBox.enabled)
+        parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.WarMsacFit
+        self.report.checkEqual("[GUI] Unwrapping method combobox shows the selected method",
+            widget.ui.unwrappingMethodSelector.currentText, UnwrapModeEnum.LaplacianThenTemporalUnwrap.label())
+        widget.onConvertButton()
+        flowFieldNode = parameterNode.outputFlowField
+        self.report.checkTrue("[GUI] Flow field is created", flowFieldNode is not None)
+        expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
+        frames = self.velocityFrames(flowFieldNode)
+        vesselError = max(float(np.abs(f - e)[phantom.insideVessel].mean()) for f, e in zip(frames, expectedFrames))
+        self.report.checkClose("[GUI] Mean velocity error in the vessel (Laplacian + temporal unwrapping, robust background fit)", vesselError, 0.0, atol=0.03, unit="m/s")
+
+        widget.onCreateLumenButton()
+        self.report.checkTrue("[GUI] Lumen segmentation is created and selected", parameterNode.lumenSegmentation is not None and parameterNode.lumenSegmentID)
+        segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+        parameterNode.lumenSegmentation = segmentationNode
+        parameterNode.lumenSegmentID = segmentId
+        parameterNode.divergenceFilterMethod = DivergenceFilterMethodEnum.FdmProjection
+        widget.onRecomputeFlowFieldButton()
+        processing = json.loads(self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.processing"))
+        self.report.checkEqual("[GUI] Divergence filter is applied", processing["divergenceFilter"], "FdmProjection")
+        widget.onCheckEncodingButton()
+        self.report.checkTrue("[GUI] Encoding check result is shown", "consistent" in widget.ui.qualityReportTextBrowser.toPlainText())
+        widget.onComputeQualityReportButton()
+        self.report.checkTrue("[GUI] Quality report is shown", len(widget.ui.qualityReportTextBrowser.toPlainText()) > 100)
+        widget.onCreatePcmraButton()
+        self.report.screenshot("Import 4D Flow module GUI with slicerheart_4dflow methods", kind="window")
+
+        caseDirectory = os.path.join(self.temporaryDirectory("GuiTestCase"), "Phantom0002")
+        parameterNode.exportDirectory = caseDirectory
+        parameterNode.exportFormat = Import4DFlowLogic.EXPORT_FORMAT_TEST_CASE
+        widget.onExportButton()
+        self.report.checkTrue("[GUI] Test case is exported", os.path.isfile(os.path.join(caseDirectory, "manifest.json")))
+        processingDescription = Import4DFlowLogic.readTestCaseJson(caseDirectory, "processing")
+        annotations = Import4DFlowLogic.readTestCaseJson(caseDirectory, "annotations")
+        self.report.checkEqual("[GUI] Test case records the processing", processingDescription["processing"]["backgroundSubtraction"], "WarMsacFit")
+        self.report.checkEqual("[GUI] Measurement planes are placed automatically", annotations["planes"]["method"], "automatic")
+        self.report.checkEqual("[GUI] Automatic planes are described by the algorithm", annotations["planes"]["algorithm"]["name"],
+            "Analyze4DFlowLogic.findMeasurementPlanes")
+        slicer.mrmlScene.Clear()
+        loaded = widget.loadTestCase(caseDirectory)
+        self.report.checkTrue("[GUI] Test case is loaded", loaded is not None and parameterNode.outputFlowField == loaded["flowFieldNode"])
+        frames = self.velocityFrames(parameterNode.outputFlowField)
+        loadedError = max(float(np.abs(f - e)[phantom.insideVessel].mean()) for f, e in zip(frames, expectedFrames))
+        self.report.checkClose("[GUI] Loaded test case is processed as recorded (mean velocity error in the vessel)", loadedError, 0.0, atol=0.03, unit="m/s")
+
+    @reportedTest("Clinical test cases (Slicer-native files, no DICOM import)",
+        "The smallest available clinical test case (see FlowTestingUtils.TEST_CASES_ENV_VARIABLE) is loaded without DICOM import."
+        " The flow field computed with the recorded processing must match the velocity in the case files. slicerheart_4dflow"
+        " Laplacian unwrapping and robust background correction are applied, and the flow through the planes must"
+        " agree with the plane flows of the case (outputs/flows.json).")
+    def test_28_ClinicalTestCase(self):
+        caseDirectories = FlowTestingUtils.testCaseDirectories()
+        if not caseDirectories:
+            self.skipTest(f"No 4D flow test case is available (set {FlowTestingUtils.TEST_CASES_ENV_VARIABLE} in the environment or in .env.local)")
+        caseDirectory = caseDirectories[0]
+        self.report.text(f"Test case: {os.path.basename(caseDirectory)}")
+        library = FlowLibraryBridge.ensureLibrary()
+        case = library.load_case(caseDirectory, world="RAS")
+        startTime = time.time()
+        loaded = self.logic.loadTestCase(caseDirectory)
+        self.report.text(f"Loading time: {time.time() - startTime:.1f} s")
+        flowFieldNode = loaded["flowFieldNode"]
+        velocity, voxelToWorld, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+        self.report.checkClose("Flow field computed by the recorded processing equals the case velocity", float(np.abs(velocity - case["velocity_t"]).max()), 0.0,
+            atol=1.0, unit="mm/s")
+        lumen = case["lumen"]
+        lumenSegmentation = loaded["lumenSegmentationNode"]
+        lumenSegmentId = lumenSegmentation.GetSegmentation().GetNthSegmentID(0)
+        self.logic.laplacianUnwrap(flowFieldNode, UnwrapModeEnum.LaplacianThenTemporalUnwrap, 5.0)
+        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.WarMsacFit, 10.0,
+            lumenMask=self.logic.getLumenMask(flowFieldNode, lumenSegmentation, lumenSegmentId))
+        corrected, _, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+        result = self.logic.checkEncodingDirections(flowFieldNode, lumen)
+        self.report.checkTrue("Encoding directions are consistent", result["consistent"], self.logic.encodingCheckSummary(result))
+        rows = []
+        rrMs = case["rr_ms"]
+        for name, reference in case["flows"]["planes"].items():
+            flow = library.plane_flow(corrected, voxelToWorld, lumen_mask=lumen, **case["planes"][name])["flow"] / 1000.0
+            net = float(np.mean(flow) * rrMs / 1000.0)
+            rows.append([name, reference["net_volume_mL"], net])
+            self.report.checkClose(f"[{name}] Net flow volume with slicerheart_4dflow corrections", net, reference["net_volume_mL"],
+                atol=max(1.0, 0.15 * abs(reference["net_volume_mL"])), unit="ml")
+        self.report.table(["Plane", "Case net volume (ml)", "slicerheart_4dflow corrections, net volume (ml)"], rows)
+        self.logic.setFlowFieldVisualizationToDefault(flowFieldNode)
+        FlowTestingUtils.showVolumeInSliceViews(loaded["magnitudeVolumeNode"])
+        self.report.screenshot("Clinical test case loaded without DICOM import")
+
+    @reportedTest("Default unwrapping method, unwrapping plausibility check, fallback to temporal unwrapping",
+        "Laplacian + temporal unwrapping is the default for new flow fields. Temporal unwrapping counts a wrap where the velocity"
+        " changes by more than venc between frames, so random phase in voxels with signal accumulates false wraps: the"
+        " plausibility check must warn (implausible speed or wraps remaining in the last frame), and must not warn for"
+        " correctly unwrapped data. If slicerheart_4dflow is not available, the GUI must use temporal unwrapping.")
+    def test_29_UnwrappingDefaultAndPlausibilityCheck(self):
+        parameterNode = self.logic.getParameterNode()
+        self.report.checkEqual("Default unwrapping method of a new parameter node", parameterNode.unwrapMode.name,
+            UnwrapModeEnum.LaplacianThenTemporalUnwrap.name)
+
+        # Correctly unwrapped aliased phantom: no warning
+        vencCmPerSec = 70.0
+        phantom = FlowPhantom()
+        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
+        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+        warnings = self.logic.temporalUnwrap(flowFieldNode, 0, 5.0)
+        self.report.checkEqual("[aliased phantom] Temporal unwrapping warnings", warnings, [])
+        warnings = self.logic.laplacianUnwrap(flowFieldNode, UnwrapModeEnum.LaplacianThenTemporalUnwrap, 5.0)
+        self.report.checkEqual("[aliased phantom] Laplacian + temporal unwrapping warnings", warnings, [])
+
+        # Random phase in a part of the tissue (signal above the noise threshold): temporal unwrapping accumulates false wraps
+        slicer.mrmlScene.Clear()
+        volumeNodeSet = phantom.createComponentImagesInScene(150.0)
+        rng = np.random.default_rng(3)
+        noisyTissue = phantom.stationaryTissueMask() & (rng.random(phantom.radialDistanceMm.shape) < 0.3)
+        for componentVolumeNode in volumeNodeSet["componentVolumeNodes"]:
+            sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
+            for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
+                array = slicer.util.arrayFromVolume(sequenceNode.GetNthDataNode(frameIndex))
+                array[noisyTissue] = rng.integers(-FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE, np.count_nonzero(noisyTissue))
+                slicer.util.arrayFromVolumeModified(sequenceNode.GetNthDataNode(frameIndex))
+        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+        warnings = self.logic.temporalUnwrap(flowFieldNode, 0, 5.0)
+        self.report.text("Warnings of temporal unwrapping with random phase in 30% of the tissue voxels: " + " / ".join(warnings))
+        self.report.checkTrue("[random phase in tissue] Temporal unwrapping gives a plausibility warning", len(warnings) > 0, len(warnings), "> 0")
+        stored = json.loads(self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.phaseUnwrappingWarnings"))
+        self.report.checkEqual("Warnings are stored in the flow field", stored, warnings)
+        self.report.checkTrue("Warning recommends Laplacian + temporal unwrapping", all("Laplacian" in w for w in warnings))
+
+        # Fallback to temporal unwrapping in the GUI if slicerheart_4dflow is not available
+        slicer.util.selectModule("Import4DFlow")
+        widget = slicer.modules.import4dflow.widgetRepresentation().self()
+        widget._parameterNode.unwrapMode = UnwrapModeEnum.LaplacianThenTemporalUnwrap
+        originalEnsureLibrary = FlowLibraryBridge.ensureLibrary
+
+        def unavailableLibrary(*args, **kwargs):
+            raise RuntimeError("slicerheart_4dflow Python package is required but it was not installed")
+
+        FlowLibraryBridge.ensureLibrary = unavailableLibrary
+        try:
+            widget.computePhaseUnwrapping(flowFieldNode)
+        finally:
+            FlowLibraryBridge.ensureLibrary = originalEnsureLibrary
+        self.report.checkEqual("[slicerheart_4dflow not available] Temporal unwrapping is used",
+            self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.phaseUnwrapping"), UnwrapModeEnum.TemporalUnwrap.name)
