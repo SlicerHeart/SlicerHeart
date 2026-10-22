@@ -295,7 +295,21 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "CFD")
         modelNode.SetAndObserveMesh(phantom.createFlowModelMesh(1, "V"))
         vectorVolumeNode = phantom.createVolumeNode(phantom.velocityVolumeArray(1), "Velocity volume", "vtkMRMLVectorVolumeNode", addToScene=True)
-        self.report.checkTrue("Untagged vector volume is not preferred over model", self.logic.findFirstFlowFieldNode() == modelNode)
+        self.report.checkTrue("Untagged generic vector volume (for example, an RGB image) is not preferred over model",
+            self.logic.findFirstFlowFieldNode() == modelNode)
+        # Untagged vector volumes that look like velocity fields (for example, loaded from a file)
+        for description, setVelocity, resetVelocity in [
+                ("spatial vectors", lambda: vectorVolumeNode.SetVoxelVectorType(slicer.vtkMRMLVolumeNode.VoxelVectorTypeSpatial),
+                    lambda: vectorVolumeNode.SetVoxelVectorType(slicer.vtkMRMLVolumeNode.VoxelVectorTypeUndefined)),
+                ("velocity quantity", lambda: vectorVolumeNode.SetVoxelValueQuantity(Import4DFlowLogic.createVelocityQuantity()),
+                    lambda: vectorVolumeNode.SetVoxelValueQuantity(None)),
+                ("velocity unit (mm/s)", lambda: vectorVolumeNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("mm/s")),
+                    lambda: vectorVolumeNode.SetVoxelValueUnits(None))]:
+            setVelocity()
+            self.report.checkTrue(f"Untagged vector volume with {description} is preferred over model", self.logic.findFirstFlowFieldNode() == vectorVolumeNode)
+            resetVelocity()
+        self.report.checkTrue("Untagged generic vector volume is not preferred over model (after removing the velocity markers)",
+            self.logic.findFirstFlowFieldNode() == modelNode)
         vectorVolumeNode.SetAttribute("SlicerHeart.Type", "FlowField")
         self.report.checkTrue("Tagged vector volume is preferred over model", self.logic.findFirstFlowFieldNode() == vectorVolumeNode)
         transformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", "Flow transform")
@@ -1212,3 +1226,270 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkTrue("[GUI] Missing Sequence Registration extension is reported", "Sequence registration" in str(context.exception),
                 str(context.exception))
             self.report.text("Sequence Registration extension is not installed: only the error reporting is tested.")
+
+    # slicerheart_4dflow methods
+
+    def createLibraryFlowField(self, phantom, kind="volume"):
+        """Flow field (image) with vessel segmentation. Returns (flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId)."""
+        flowFieldNode, magnitudeVolumeNode = self.createFlowField(phantom, kind)
+        segmentationNode, segmentId = phantom.createVesselSegmentation(magnitudeVolumeNode)
+        return flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId
+
+    @reportedTest("Flow metrics by disc sampling (slicerheart_4dflow)",
+        "The disc sampling method (slicerheart_4dflow plane sampling with mask-normalized interpolation) fills the same flow metrics"
+        " tables as the plane probe method. Per-frame and summary metrics must match the analytic phantom and the plane probe method,"
+        " for both image flow field storage formats.")
+    def test_18_FlowMetricsDiscSampling(self):
+        phantom = FlowPhantom()
+        rows = []
+        for kind in ["transform", "volume"]:
+            slicer.mrmlScene.Clear()
+            flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, kind)
+            planeNode = phantom.createMeasurementPlane()
+            table = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Disc sampling metrics")
+            summaryTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Disc sampling summary")
+            startTime = time.time()
+            self.logic.computeFlowMetricsTableDiscSampling(planeNode, flowFieldNode, segmentationNode, segmentId, 0.0, table, summaryTable)
+            discTime = time.time() - startTime
+            metrics = tableToDict(table)
+            summaryMetrics = {name: values[0] for name, values in tableToDict(summaryTable).items()}
+            self.report.checkEqual(f"[{KIND_NAMES[kind]}] Disc sampling table has the same columns as the plane probe table",
+                sorted(metrics.keys()), sorted(["Time", "Area", "PositiveArea", "NegativeArea", "FlowRate", "PositiveFlowRate", "NegativeFlowRate",
+                "MeanVelocity", "MaxVelocity", "MinVelocity", "Percentile1Velocity", "Percentile5Velocity", "Percentile95Velocity",
+                "Percentile99Velocity", "StdDevVelocity"]))
+            self.checkMetricsAgainstPhantom(f"[disc sampling, {KIND_NAMES[kind]}]", phantom, metrics, summaryMetrics, flowRtol=0.03, areaRtol=0.08)
+            startTime = time.time()
+            _, probeMetrics, probeSummary = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, speedThreshold=0.0)
+            probeTime = time.time() - startTime
+            difference = max(abs(a - b) for a, b in zip(metrics["FlowRate"], probeMetrics["FlowRate"]))
+            peakFlow = max(abs(q) for q in probeMetrics["FlowRate"])
+            self.report.checkClose(f"[{KIND_NAMES[kind]}] Disc sampling and plane probe flow rates agree (max. difference)", difference, 0.0,
+                atol=0.03 * peakFlow, unit="ml/s")
+            rows.append([KIND_NAMES[kind], summaryMetrics["ForwardVolume"], probeSummary["ForwardVolume"], discTime, probeTime])
+        self.report.table(["Storage", "Forward volume, disc sampling (ml)", "Forward volume, plane probe (ml)", "Disc sampling time (s)", "Plane probe time (s)"], rows)
+
+        # Vector volume flow field stored in mm/s (voxel value units): slicerheart_4dflow methods must use the unit
+        sequenceNode = self.importLogic._getSequenceFromProxyNode(flowFieldNode)
+        for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
+            frameNode = sequenceNode.GetNthDataNode(frameIndex)
+            slicer.util.arrayFromVolume(frameNode)[:] *= 1000.0
+            slicer.util.arrayFromVolumeModified(frameNode)
+            frameNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("mm/s"))
+        flowFieldNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("mm/s"))
+        mmPerSecTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Disc sampling metrics (mm/s flow field)")
+        self.logic.computeFlowMetricsTableDiscSampling(planeNode, flowFieldNode, segmentationNode, segmentId, 0.0, mmPerSecTable)
+        difference = max(abs(a - b) for a, b in zip(tableToDict(mmPerSecTable)["FlowRate"], metrics["FlowRate"]))
+        self.report.checkClose("[vector volume in mm/s] Disc sampling flow rates equal the flow rates of the m/s flow field (max. difference)",
+            difference, 0.0, atol=1e-3 * max(abs(q) for q in metrics["FlowRate"]), unit="ml/s")
+
+    @reportedTest("Pathlines (slicerheart_4dflow)",
+        "Time-resolved pathlines are emitted from the measurement plane in the vessel at peak systole and traced for 30 ms."
+        " In Poiseuille flow particles move along the vessel axis at constant radius: they must stay in the vessel and travel the"
+        " distance given by the time integral of the analytic velocity (linearly interpolated between frames).")
+    def test_19_Pathlines(self):
+        phantom = FlowPhantom()
+        flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, "volume")
+        planeNode = phantom.createMeasurementPlane()
+        pathlinesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Pathlines")
+        peakFrame = phantom.peakFrameIndex()
+        durationMs = 30.0  # particles near the centerline travel about 30 mm (they would leave the field of view in a longer time)
+        self.logic.createPathlines(pathlinesNode, flowFieldNode, planeNode, segmentationNode, segmentId, seedSpacingMm=3.0,
+                                   durationMs=durationMs, emissionFrames=[peakFrame])
+        polyData = pathlinesNode.GetPolyData()
+        self.report.checkTrue("Pathlines are created", polyData.GetNumberOfLines() > 10, polyData.GetNumberOfLines(), "> 10")
+        for arrayName in ["time_ms", "Speed", "EmissionTime"]:
+            self.report.checkTrue(f"Pathlines have '{arrayName}' point data", polyData.GetPointData().GetArray(arrayName) is not None)
+        points = vtk.util.numpy_support.vtk_to_numpy(polyData.GetPoints().GetData())
+        times = vtk.util.numpy_support.vtk_to_numpy(polyData.GetPointData().GetArray("time_ms"))
+        radial = phantom.radialDistance(points)
+        self.report.checkTrue("Pathline points are in the vessel", np.mean(radial < phantom.vesselRadiusMm + 1.0) > 0.99,
+            f"{100 * np.mean(radial < phantom.vesselRadiusMm + 1.0):.1f}%", "> 99%")
+
+        # Expected axial displacement: (1 - r^2/R^2) * integral of vmax(t), frames uniformly spanning the cardiac cycle
+        rrMs = self.logic.cycleDurationMs(flowFieldNode)
+        frameTimes = np.arange(phantom.numberOfFrames + 1) * rrMs / phantom.numberOfFrames
+        vmax = np.array([phantom.maxVelocity(i) for i in range(phantom.numberOfFrames)] + [phantom.maxVelocity(0)])
+        errors = []
+        lines = polyData.GetLines()
+        lines.InitTraversal()
+        idList = vtk.vtkIdList()
+        while lines.GetNextCell(idList):
+            ids = [idList.GetId(i) for i in range(idList.GetNumberOfIds())]
+            if len(ids) < 2 or radial[ids[0]] > 0.7 * phantom.vesselRadiusMm:
+                continue
+            t0, t1 = times[ids[0]], times[ids[-1]]
+            if t1 - t0 < 0.6 * durationMs:
+                continue  # left the field of view (path points are recorded at the tracer time steps, so the last partial step is missing)
+            sampleTimes = np.linspace(t0, t1, 200)
+            integral = np.trapezoid(np.interp(sampleTimes % rrMs, frameTimes, vmax), sampleTimes)  # m/s * ms = mm
+            expected = (1 - (radial[ids[0]] / phantom.vesselRadiusMm) ** 2) * integral
+            measured = (points[ids[-1]] - points[ids[0]]) @ phantom.vesselAxis
+            errors.append(abs(measured - expected) / max(abs(expected), 1e-6))
+        self.report.checkTrue("Pathlines that are traced for the full duration", len(errors) > 5, len(errors), "> 5")
+        self.report.checkClose("Median relative error of the pathline displacement along the vessel", float(np.median(errors)), 0.0, atol=0.1)
+        FlowTestingUtils.showVolumeInSliceViews(magnitudeVolumeNode, phantom.centerRas)
+        FlowTestingUtils.reset3DView()
+        self.report.screenshot("Pathlines emitted from the measurement plane at peak systole")
+
+    @reportedTest("Hemodynamics: vorticity, helicity, kinetic energy, energy loss (slicerheart_4dflow)",
+        "Velocity-derived maps are computed in the vessel and stored in volume sequences that are browsed with the flow field."
+        " In Poiseuille flow the vorticity magnitude is 2 vmax r / R^2, the relative helicity is zero, the kinetic energy is"
+        " (rho/2) integral of v^2 (= rho pi R^2 L vmax^2 / 6) and the viscous energy loss rate is mu integral of (dv/dr)^2 (= 2 pi mu L vmax^2).")
+    def test_20_Hemodynamics(self):
+        phantom = FlowPhantom()
+        flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, "volume")
+        outputs = [slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", name) for name in ["Vorticity", "Helicity", "Kinetic energy", "Energy loss"]]
+        table = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Hemodynamics")
+        startTime = time.time()
+        self.logic.computeHemodynamics(flowFieldNode, segmentationNode, segmentId, *outputs, table)
+        self.report.text(f"Computation time: {time.time() - startTime:.1f} s")
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        for outputNode in outputs:
+            self.report.checkTrue(f"'{outputNode.GetName()}' is browsed with the flow field", browserNode.GetSequenceNode(outputNode) is not None)
+        peakFrame = phantom.peakFrameIndex()
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+        vmax = phantom.maxVelocity(peakFrame) * 1000  # mm/s
+        R = phantom.vesselRadiusMm
+        interior = phantom.radialDistanceMm < 0.7 * R
+        # Exclude the image faces where the vessel exits (one-sided derivatives)
+        interior[:2], interior[-2:], interior[:, :2], interior[:, -2:], interior[:, :, :2], interior[:, :, -2:] = False, False, False, False, False, False
+        vorticity = slicer.util.arrayFromVolume(outputs[0])
+        expectedVorticity = 2 * vmax * phantom.radialDistanceMm / R ** 2
+        self.report.checkClose("Mean vorticity magnitude at peak systole (r < 0.7 R)", float(vorticity[interior].mean()), float(expectedVorticity[interior].mean()),
+            rtol=0.1, unit="1/s")
+        helicity = slicer.util.arrayFromVolume(outputs[1])
+        self.report.checkClose("Mean relative helicity", float(np.abs(helicity[interior]).mean()), 0.0, atol=0.05)
+        metrics = tableToDict(table)
+        self.report.checkEqual("Hemodynamics table rows", len(metrics["KineticEnergy"]), phantom.numberOfFrames)
+        lumenVolumeMm3 = float(np.count_nonzero(phantom.insideVessel)) * float(np.prod(phantom.spacingMm))
+        lengthMm = lumenVolumeMm3 / (math.pi * R ** 2)
+        expectedKineticEnergyMJ = 1060 * math.pi * (R * 1e-3) ** 2 * (lengthMm * 1e-3) * (vmax * 1e-3) ** 2 / 6 * 1e3
+        self.report.checkClose("Kinetic energy at peak systole", metrics["KineticEnergy"][peakFrame], expectedKineticEnergyMJ, rtol=0.15, unit="mJ")
+        expectedEnergyLossMW = 2 * math.pi * 0.0035 * (lengthMm * 1e-3) * (vmax * 1e-3) ** 2 * 1e3
+        self.report.checkClose("Viscous energy loss rate at peak systole", metrics["EnergyLossRate"][peakFrame], expectedEnergyLossMW, rtol=0.3, unit="mW")
+        FlowTestingUtils.showVolumeInSliceViews(outputs[0], phantom.centerRas)
+        self.report.screenshot("Vorticity magnitude at peak systole")
+
+    @reportedTest("Wall shear stress (slicerheart_4dflow)",
+        "Wall shear stress is computed on the closed surface of the vessel segment. In Poiseuille flow WSS = 2 mu vmax / R along"
+        " the vessel wall (away from the open ends), TAWSS is the time average of its magnitude and OSI is 0.5 (1 - |mean WSS| / TAWSS).")
+    def test_21_WallShearStress(self):
+        phantom = FlowPhantom()
+        flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, "volume")
+        wssModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Wall shear stress")
+        startTime = time.time()
+        result = self.logic.computeWallShearStress(flowFieldNode, segmentationNode, segmentId, wssModel)
+        self.report.text(f"Computation time: {time.time() - startTime:.1f} s, {len(result['points'])} wall points")
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        self.report.checkTrue("Wall shear stress model is browsed with the flow field", browserNode.GetSequenceNode(wssModel) is not None)
+        for arrayName in ["WSS", "WSSMagnitude", "TAWSS", "OSI"]:
+            self.report.checkTrue(f"Model has '{arrayName}' point data", wssModel.GetPolyData().GetPointData().GetArray(arrayName) is not None)
+        # Wall points along the vessel, away from the image faces
+        points = result["points"]
+        ijkToRas = slicer.util.arrayFromVTKMatrix(phantom.ijkToRasMatrix())
+        ijk = (np.linalg.inv(ijkToRas) @ np.c_[points, np.ones(len(points))].T)[:3].T
+        dims = np.array(phantom.dims)
+        valid = np.all((ijk > 4) & (ijk < dims - 5), axis=1)
+        peakFrame = phantom.peakFrameIndex()
+        expectedPeakWss = 2 * 0.0035 * phantom.maxVelocity(peakFrame) / (phantom.vesselRadiusMm * 1e-3)
+        self.report.checkClose("Median WSS magnitude at peak systole", float(np.median(result["wss_magnitude"][peakFrame][valid])), expectedPeakWss,
+            rtol=0.3, unit="Pa")
+        expectedTawss = 2 * 0.0035 * np.mean([abs(phantom.maxVelocity(i)) for i in range(phantom.numberOfFrames)]) / (phantom.vesselRadiusMm * 1e-3)
+        self.report.checkClose("Median TAWSS", float(np.median(result["tawss"][valid])), expectedTawss, rtol=0.3, unit="Pa")
+        forward = sum(max(phantom.maxVelocity(i), 0) for i in range(phantom.numberOfFrames))
+        backward = sum(max(-phantom.maxVelocity(i), 0) for i in range(phantom.numberOfFrames))
+        expectedOsi = 0.5 * (1 - (forward - backward) / (forward + backward))
+        self.report.checkClose("Median OSI", float(np.median(result["osi"][valid])), expectedOsi, atol=0.05)
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+        FlowTestingUtils.reset3DView()
+        self.report.screenshot("Wall shear stress magnitude at peak systole")
+
+    @reportedTest("Relative pressure and pressure drop (slicerheart_4dflow)",
+        "Relative pressure is computed by the pressure Poisson equation in the vessel of a steady Poiseuille flow (single frame at"
+        " peak velocity, so there is no temporal acceleration): the pressure drop between two planes L apart along the vessel is"
+        " 4 mu vmax L / R^2.")
+    def test_22_Pressure(self):
+        phantom = FlowPhantom(numberOfFrames=1, firstFrameTimeMs=180.0, systoleDurationMs=360.0)
+        flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, "volume")
+        distanceMm = 20.0
+        planeA = phantom.createMeasurementPlane(name="Plane A")
+        planeB = phantom.createMeasurementPlane(name="Plane B")
+        planeA.SetCenterWorld(*(phantom.centerRas - 0.5 * distanceMm * phantom.vesselAxis))
+        planeB.SetCenterWorld(*(phantom.centerRas + 0.5 * distanceMm * phantom.vesselAxis))
+        pressureVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Pressure")
+        table = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Pressure drop")
+        pressure, drop = self.logic.computeRelativePressure(flowFieldNode, segmentationNode, segmentId, pressureVolume, planeA, planeB, table)
+        expectedDropMmHg = 4 * 0.0035 * phantom.maxVelocity(0) * (distanceMm * 1e-3) / (phantom.vesselRadiusMm * 1e-3) ** 2 / 133.322
+        self.report.checkClose("Pressure drop between the planes", float(drop[0]), expectedDropMmHg, rtol=0.3, unit="mmHg")
+        self.report.checkEqual("Pressure drop table rows", len(tableToDict(table)["PressureDrop"]), 1)
+        self.report.checkTrue("Pressure is finite", bool(np.all(np.isfinite(pressure))))
+        FlowTestingUtils.showVolumeInSliceViews(pressureVolume, phantom.centerRas)
+        self.report.screenshot("Relative pressure in steady Poiseuille flow")
+
+    @reportedTest("Mass conservation (slicerheart_4dflow)",
+        "Flow metrics tables of two planes on the same vessel are compared: the net flow volume per heart beat must be the same.")
+    def test_23_MassConservation(self):
+        phantom = FlowPhantom()
+        flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, "volume")
+        tables = []
+        for name, offset in [("Inflow", -8.0), ("Outflow", 8.0)]:
+            planeNode = phantom.createMeasurementPlane(name=name)
+            planeNode.SetCenterWorld(*(phantom.centerRas + offset * phantom.vesselAxis))
+            table = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", f"{name} flow")
+            self.logic.computeFlowMetricsTableDiscSampling(planeNode, flowFieldNode, segmentationNode, segmentId, 0.0, table)
+            tables.append(table)
+        resultTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Mass conservation")
+        result = self.logic.computeMassConservation([tables[0]], [tables[1]], resultTable, self.logic.cycleDurationMs(flowFieldNode))
+        self.report.checkClose("Inflow - outflow difference", result["percent_error"], 0.0, atol=2.0, unit="%")
+        self.report.checkTrue("Net flow volume is positive", result["in"] > 0, f"{result['in']:.2f} ml")
+        self.report.checkEqual("Mass conservation table columns", sorted(tableToDict(resultTable).keys()),
+            sorted(["Check", "Inflow", "Outflow", "Difference", "PercentError", "Ratio"]))
+
+    @reportedTest("slicerheart_4dflow methods in the GUI",
+        "Flow metrics method and streamlines method are selected in the GUI, hemodynamic outputs are computed by the"
+        " 'Compute hemodynamics' button and mass conservation by the 'Compute mass conservation' button.")
+    def test_24_LibraryGuiWorkflow(self):
+        from Analyze4DFlow import FlowMetricsMethodEnum, StreamlinesMethodEnum
+        phantom = FlowPhantom()
+        flowFieldNode, magnitudeVolumeNode, segmentationNode, segmentId = self.createLibraryFlowField(phantom, "volume")
+        planeNode = phantom.createMeasurementPlane()
+        slicer.util.selectModule("Analyze4DFlow")
+        widget = slicer.modules.analyze4dflow.widgetRepresentation().self()
+        parameterNode = widget._parameterNode
+        parameterNode.inputFlowField = flowFieldNode
+        parameterNode.inputPlane = planeNode
+        parameterNode.inputMaskSegmentation = segmentationNode
+        parameterNode.inputMaskSegmentID = segmentId
+        parameterNode.samplingDistance = 3.0
+        parameterNode.speedThreshold = 0.0
+        parameterNode.flowMetricsMethod = FlowMetricsMethodEnum.DiscSampling
+        parameterNode.streamlinesMethod = StreamlinesMethodEnum.Pathlines
+        parameterNode.outputFlowMetricsTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics")
+        parameterNode.outputFlowMetricsSummaryTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics summary")
+        parameterNode.outputStreamlinesModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Pathlines")
+        slicer.app.processEvents()
+        self.report.checkEqual("[GUI] Flow metrics method combobox shows the selected method",
+            widget.ui.flowMetricsMethodSelector.currentText, FlowMetricsMethodEnum.DiscSampling.label())
+        self.report.checkTrue("[GUI] Streamline-only options are disabled for pathlines", not widget.ui.streamlinesMaximumLengthSliderWidget.enabled)
+        widget.onAnalyzeButton()
+        metrics = tableToDict(parameterNode.outputFlowMetricsTable)
+        expectedPeakFlow = phantom.expectedFlowRateMlPerSec(phantom.peakFrameIndex())
+        self.report.checkClose("[GUI] Disc sampling peak flow rate", max(metrics["FlowRate"]), expectedPeakFlow, rtol=0.03, unit="ml/s")
+        self.report.checkTrue("[GUI] Pathlines are created", parameterNode.outputStreamlinesModel.GetPolyData().GetNumberOfLines() > 0)
+
+        parameterNode.outputVorticityVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Vorticity")
+        parameterNode.outputHemodynamicsTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Hemodynamics")
+        parameterNode.outputWallShearStressModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "WSS")
+        parameterNode.outputPressureVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "Pressure")
+        widget.onComputeHemodynamicsButton()
+        self.report.checkEqual("[GUI] Hemodynamics table rows", len(tableToDict(parameterNode.outputHemodynamicsTable).get("KineticEnergy", [])), phantom.numberOfFrames)
+        self.report.checkTrue("[GUI] Wall shear stress is computed", parameterNode.outputWallShearStressModel.GetPolyData() is not None
+            and parameterNode.outputWallShearStressModel.GetPolyData().GetPointData().GetArray("TAWSS") is not None)
+        self.report.checkTrue("[GUI] Pressure volume is created", parameterNode.outputPressureVolume.GetImageData() is not None)
+
+        widget.ui.inflowTablesSelector.setCheckState(parameterNode.outputFlowMetricsTable, 2)
+        widget.ui.outflowTablesSelector.setCheckState(parameterNode.outputFlowMetricsTable, 2)
+        widget.onComputeMassConservationButton()
+        massConservation = tableToDict(parameterNode.outputMassConservationTable)
+        self.report.checkClose("[GUI] Mass conservation of a plane with itself", massConservation["PercentError"][0], 0.0, atol=1e-6, unit="%")
+        self.report.screenshot("Analyze 4D Flow module GUI with slicerheart_4dflow outputs", kind="window")
