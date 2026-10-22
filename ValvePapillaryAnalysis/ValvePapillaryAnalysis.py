@@ -63,19 +63,10 @@ class ValvePapillaryAnalysisWidget(ScriptedLoadableModuleWidget):
     self.valveModel = None
 
   def onReload(self):
-    logging.debug("Reloading {}".format(self.moduleName))
+    from HeartValveLib.util import reload
+    reload(packageName='HeartValveLib',
+           submoduleNames=['LeafletModel', 'ValveRoi', 'ValveModel', 'HeartValves'])
 
-    packageName = 'HeartValveLib'
-    submoduleNames=['LeafletModel', 'ValveRoi', 'ValveModel', 'ValveSeries', 'HeartValves']
-    import imp
-    f, filename, description = imp.find_module(packageName)
-    package = imp.load_module(packageName, f, filename, description)
-    for submoduleName in submoduleNames:
-      f, filename, description = imp.find_module(submoduleName, package.__path__)
-      try:
-          imp.load_module(packageName+'.'+submoduleName, f, filename, description)
-      finally:
-          f.close()
     ScriptedLoadableModuleWidget.onReload(self)
 
   def enter(self):
