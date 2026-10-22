@@ -17,12 +17,13 @@ The extension currently includes the following features (new features are added 
   - [Viewer Link Creator](ViewerLinkCreator/README.md): generate a link with encoded arguments (user name, application, scene file path) to share a scene with users of a web viewer application.
   - Slicer Startup Accelerator (`Utilities/SlicerStartupAccelerator`): scripts for faster startup of Slicer by preloading application files into operating system caches, and for launching Slicer directly into the Simplified Viewer with a loading screen (Windows).
 - Quantification:
-  - Valve annulus analysis: specify basic heart valve properties and annulus contour.
+  - [Valve annulus analysis](Docs/HeartValveSequences.md): specify basic heart valve properties and annulus contour, at any number of time points of a 4D image.
   - Valve segmentation: module for volumetric segmentation of heart valves.
   - Leaflet analysis: create valve leaflet surface models from volumetric valve segmentation.
   - Valve papillary analysis: allow specify papillary muscles and chords to compute angles and lengths.
   - [Valve quantification](Docs/ValveQuantification.md): automatic computation heart valve annulus, leaflet, and papillary metrics
   - Valve batch export: run valve quantification and export results for a large cohort of data.
+  - [Converter 4D Sequences](Docs/HeartValveSequences.md#converting-existing-scenes): convert scenes created with earlier SlicerHeart versions (one HeartValve node per frame) to the sequence-based valve format.
   - [Orifice area](Docs/OrificeArea.md): measure cross-sectional area of openings in a model, for example to quantify regurgitant orifice area.
   - [Annulus Shape Analyzer](Docs/AnnulusShapeAnalyzer.md): make population-wise observations on dynamic annular shape.
   - [Fluoro Flow Calculator](Docs/FluoroFlowCalculator.md): measuring Qp-split using readily available fluoroscopy sequences.
