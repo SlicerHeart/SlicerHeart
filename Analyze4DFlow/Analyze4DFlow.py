@@ -1093,8 +1093,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             # Apply mask to displacement image if further processing is requested
             if maskLabelmapNode and (outputStreamlinesModel or outputSpeedVolume or outputMaskedFlowField):
                 displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
-                maskImageArray = slicer.util.arrayFromVolume(maskLabelmapNode)
-                displacementImageArray[maskImageArray==0, :] = 0
+                # The mask on the grid of the flow field (voxels at least half in the segment), not the exported labelmap,
+                # which is in the geometry of the segmentation
+                maskImageArray = FlowLibraryBridge.maskFromSegment(maskSegmentationNode, maskSegmentID, displacementImageNode)
+                displacementImageArray[~maskImageArray, :] = 0
             elif outputMaskedFlowField and not maskLabelmapNode:
                 # No segmentation mask — apply speed threshold as a 3D mask
                 displacementImageArray = slicer.util.arrayFromVolume(displacementImageNode)
