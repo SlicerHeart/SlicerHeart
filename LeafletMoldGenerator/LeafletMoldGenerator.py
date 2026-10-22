@@ -435,7 +435,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def getAverageValveRadius(self):
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     numberOfPoints = annulusControlPoints.shape[1]
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
@@ -450,7 +450,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def createRimTube(self):
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     numberOfPoints = annulusControlPoints.shape[1]
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     transformWorldToPlaneMatrix = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
@@ -518,7 +518,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def createRimStiffener(self, valveRimTopHeight, valveRimBottomHeight):
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     numberOfLandmarkPoints = 80
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
@@ -539,7 +539,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     for pointIndex in range(numberOfLandmarkPoints):
       pointOnCircle = valveRadiusSizeCirclePoints_Probe[0:3,pointIndex]
       closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex] = \
-        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurve, pointOnCircle)
+        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurveNode, pointOnCircle)
       closestCorrespondingAnnulusPoints_Probe[3,pointIndex] = 1
 
     ###########
@@ -645,7 +645,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
   def makeOrientationMarkerUsingSkirtWarp(self, markerText, markerRasVector, scaledDiskToProbeTspTransform):
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
 
     # before warping, skirt had inner radius 'averageValveRadius' and outer radius 'skirtOuterRadius'
@@ -736,7 +736,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     import HeartValveLib
     # import math
     numberOfLandmarkPoints = 80
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -755,7 +755,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     for pointIndex in range(numberOfLandmarkPoints):
       pointOnCircle = valveRadiusSizeCirclePoints_Probe[0:3,pointIndex]
       closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex] = \
-        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurve, pointOnCircle)
+        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurveNode, pointOnCircle)
       closestCorrespondingAnnulusPoints_Probe[3,pointIndex] = 1
 
     if self.shrinkRimSpinBox.value > 0:
@@ -850,7 +850,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     moldBox = vtk.vtkCubeSource()
     moldBox.SetBounds(-boxLength/2.0, boxLength/2.0, -boxLength/2.0, boxLength/2.0,zMin,zMax)
     #
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -885,7 +885,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     rectPrism = vtk.vtkCubeSource()
     rectPrism.SetBounds(xMin, xMax, yMin, yMax,zMin,zMax)
     #
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -955,7 +955,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     triangleExtrusion.CappingOn()
 
     # Get ProbeToAnnulus and AnnulusToProve transforms
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -1350,7 +1350,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     #get annuls to probe transform
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [planePosition, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     ProbeToAnnulusTransform = HeartValveLib.getTransformToPlane(planePosition, planeNormal)
     AnnulusToProbeTransform = np.linalg.inv(ProbeToAnnulusTransform)
@@ -1392,7 +1392,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
     for pointIndex in range(numberOfTunnels):
       pointOnCircle = valveRadiusSizeCirclePoints_Probe[0:3,pointIndex]
       closestCorrespondingAnnulusPoints_Probe[0:3,pointIndex] = \
-        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurve, pointOnCircle)
+        getClosestPointPositionAlongCurve(self.valveModel.annulusContourCurveNode, pointOnCircle)
       closestCorrespondingAnnulusPoints_Probe[3,pointIndex] = 1
 
     # take shrinkSpinBox setting into consideration for tunnels placed above rim
@@ -1741,7 +1741,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     # get planeNormal unit vector for valve
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [_, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     planeNormalUnitVector = (1 / np.linalg.norm(planeNormal)) * planeNormal
 
@@ -1782,7 +1782,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     # get planeNormal unit vector for valve
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [_, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     planeNormalUnitVector = (1 / np.linalg.norm(planeNormal)) * planeNormal
 
@@ -1823,7 +1823,7 @@ class LeafletMoldGeneratorWidget(ScriptedLoadableModuleWidget):
 
     # get planeNormal unit vector for valve
     import HeartValveLib
-    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurve).T
+    annulusControlPoints = slicer.util.arrayFromMarkupsControlPoints(self.valveModel.annulusContourCurveNode).T
     [_, planeNormal] = HeartValveLib.planeFit(annulusControlPoints)
     planeNormalUnitVector = (1 / np.linalg.norm(planeNormal)) * planeNormal
 
