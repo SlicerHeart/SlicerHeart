@@ -6,26 +6,26 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>402</width>
-    <height>661</height>
+    <width>475</width>
+    <height>806</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Heart valve:</string>
+      <string>Valve series:</string>
      </property>
     </widget>
    </item>
    <item row="0" column="1">
-    <widget class="qMRMLNodeComboBox" name="heartValveSelector">
+    <widget class="qMRMLNodeComboBox" name="heartValveBrowserSelector">
      <property name="toolTip">
       <string>Select heart valve node that will be segmented</string>
      </property>
      <property name="nodeTypes">
       <stringlist>
-       <string>vtkMRMLScriptedModuleNode</string>
+       <string>vtkMRMLSequenceBrowserNode</string>
       </stringlist>
      </property>
      <property name="showHidden">
@@ -35,7 +35,7 @@
       <bool>false</bool>
      </property>
      <property name="baseName">
-      <string>HeartValve</string>
+      <string/>
      </property>
      <property name="addEnabled">
       <bool>false</bool>
@@ -56,55 +56,62 @@
     </widget>
    </item>
    <item row="1" column="1">
-    <layout class="QHBoxLayout" name="horizontalLayout_3">
+    <widget class="qMRMLNodeComboBox" name="valveVolumeSelector">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="toolTip">
+      <string>Segmented heart valve volume. Selection cannot be changed in this module.</string>
+     </property>
+     <property name="nodeTypes">
+      <stringlist>
+       <string>vtkMRMLScalarVolumeNode</string>
+      </stringlist>
+     </property>
+     <property name="showChildNodeTypes">
+      <bool>false</bool>
+     </property>
+     <property name="addEnabled">
+      <bool>false</bool>
+     </property>
+     <property name="renameEnabled">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="label_13">
+     <property name="text">
+      <string>Time points:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="label_14">
+     <property name="text">
+      <string>Segmentation:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <layout class="QHBoxLayout" name="horizontalLayout_7">
      <item>
-      <widget class="qMRMLNodeComboBox" name="valveVolumeSelector">
-       <property name="enabled">
-        <bool>false</bool>
-       </property>
-       <property name="toolTip">
-        <string>Segmented heart valve volume. Selection cannot be changed in this module.</string>
-       </property>
-       <property name="nodeTypes">
-        <stringlist>
-         <string>vtkMRMLScalarVolumeNode</string>
-        </stringlist>
-       </property>
-       <property name="showChildNodeTypes">
-        <bool>false</bool>
-       </property>
-       <property name="addEnabled">
-        <bool>false</bool>
-       </property>
-       <property name="renameEnabled">
-        <bool>true</bool>
+      <widget class="QPushButton" name="addSegmentationButton">
+       <property name="text">
+        <string>Add</string>
        </property>
       </widget>
      </item>
      <item>
-      <widget class="QLabel" name="label_10">
+      <widget class="QPushButton" name="removeSegmentationButton">
        <property name="text">
-        <string>  Index:</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="valveVolumeSequenceIndexValue">
-       <property name="text">
-        <string>0</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="showSegmentedVolumeButton">
-       <property name="text">
-        <string>Show</string>
+        <string>Remove</string>
        </property>
       </widget>
      </item>
     </layout>
    </item>
-   <item row="2" column="0" colspan="2">
+   <item row="5" column="0" colspan="2">
     <widget class="ctkCheckablePushButton" name="hideSlicerHeartDataButton">
      <property name="toolTip">
       <string>Only display data from the currently selected valve. Check for automatically hiding data upon selection.</string>
@@ -120,23 +127,23 @@
      </property>
     </widget>
    </item>
-   <item row="3" column="0" colspan="2">
+   <item row="6" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
      <property name="text">
       <string>Valve region</string>
      </property>
      <property name="collapsed">
-      <bool>true</bool>
+      <bool>false</bool>
      </property>
      <layout class="QFormLayout" name="formLayout_4">
-      <item row="0" column="0">
+      <item row="1" column="0">
        <widget class="QLabel" name="label_4">
         <property name="text">
          <string>Scale:</string>
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
+      <item row="1" column="1">
        <widget class="ctkSliderWidget" name="clippingModelScaleSliderWidget">
         <property name="toolTip">
          <string>Scale of clipping frustum in percentage. 100 corresponds to the exact size of the annulus.</string>
@@ -155,14 +162,14 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
          <string>Top distance:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <widget class="ctkSliderWidget" name="clippingModelTopDistanceSliderWidget">
         <property name="toolTip">
          <string>Clipping model top plane distance from center plane.</string>
@@ -181,14 +188,14 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
          <string>Top scale:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="ctkSliderWidget" name="clippingModelTopScaleSliderWidget">
         <property name="toolTip">
          <string>Scale of clipping ellipse at top plane.</string>
@@ -207,14 +214,14 @@
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
          <string>Bottom distance:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="4" column="1">
        <widget class="ctkSliderWidget" name="clippingModelBottomDistanceSliderWidget">
         <property name="toolTip">
          <string>Clipping model bottom plane distance from center plane.</string>
@@ -233,14 +240,14 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="5" column="0">
        <widget class="QLabel" name="label_12">
         <property name="text">
          <string>Bottom scale:</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="5" column="1">
        <widget class="ctkSliderWidget" name="clippingModelBottomScaleSliderWidget">
         <property name="toolTip">
          <string>Scale of clipping ellipse at bottom plane.</string>
@@ -259,7 +266,7 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="0" colspan="2">
+      <item row="6" column="0" colspan="2">
        <widget class="QPushButton" name="clippingModelUseAsEditorMaskButton">
         <property name="toolTip">
          <string>Restricts editable area to the annulus region.</string>
@@ -269,7 +276,7 @@
         </property>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="QPushButton" name="clippingModelSequenceApplyButton">
         <property name="toolTip">
          <string>Create a clipped copy of the input image sequence. May make volume rendering and browsing faster.</string>
@@ -279,10 +286,28 @@
         </property>
        </widget>
       </item>
+      <item row="0" column="0" colspan="2">
+       <layout class="QHBoxLayout" name="horizontalLayout_8">
+        <item>
+         <widget class="QPushButton" name="addValveRoiButton">
+          <property name="text">
+           <string>Add</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="removeValveRoiButton">
+          <property name="text">
+           <string>Remove</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
      </layout>
     </widget>
    </item>
-   <item row="6" column="0" colspan="2">
+   <item row="9" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="segmentationEditingCollapsibleButton">
      <property name="text">
       <string>Leaflet segmentation</string>
@@ -296,7 +321,7 @@
         <property name="segmentationNodeSelectorVisible">
          <bool>false</bool>
         </property>
-        <property name="masterVolumeNodeSelectorVisible">
+        <property name="sourceVolumeNodeSelectorVisible">
          <bool>true</bool>
         </property>
        </widget>
@@ -304,7 +329,7 @@
      </layout>
     </widget>
    </item>
-   <item row="9" column="0" colspan="2">
+   <item row="12" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="displaySettingsCollapsibleButton">
      <property name="text">
       <string>Display</string>
@@ -374,26 +399,33 @@
      </layout>
     </widget>
    </item>
+   <item row="3" column="1">
+    <widget class="QFrame" name="valveSequenceBrowserFrame">
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Raised</enum>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+     </layout>
+    </widget>
+   </item>
   </layout>
  </widget>
  <customwidgets>
-  <customwidget>
-   <class>qMRMLNodeComboBox</class>
-   <extends>QWidget</extends>
-   <header>qMRMLNodeComboBox.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLWidget</class>
-   <extends>QWidget</extends>
-   <header>qMRMLWidget.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSegmentEditorWidget</class>
-   <extends>qMRMLWidget</extends>
-   <header>qMRMLSegmentEditorWidget.h</header>
-  </customwidget>
   <customwidget>
    <class>ctkCheckablePushButton</class>
    <extends>ctkPushButton</extends>
@@ -414,6 +446,23 @@
    <class>ctkSliderWidget</class>
    <extends>QWidget</extends>
    <header>ctkSliderWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentEditorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentEditorWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
