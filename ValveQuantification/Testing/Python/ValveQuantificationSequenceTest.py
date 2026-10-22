@@ -508,6 +508,18 @@ class ValveQuantificationSequenceTestTest(SlicerHeartTestCase):
     self.assertTrue(any("circumference" in name for name in rows), rows)
     self.assertIn("Mitral-Aortic valve plane angle", rows)
 
+  def test_measurement_node_of_unavailable_preset_reports_instead_of_failing(self):
+    """A scene of another lab had measurement nodes of presets that live in other extensions
+    ("RightVentricle"): computing them raised an AttributeError on the missing preset."""
+    factory = NewFormatValveFactory()
+    valveBrowser = self._createMitralValve(factory, (1,))
+    quantLogic = self._quantLogic()
+    measurementNode = self._createMeasurementNode("RightVentricle", {"ValveMitralValve": valveBrowser.heartValveNode})
+    self.assertIsNone(quantLogic.getMeasurementPreset(measurementNode))
+    messages = quantLogic.computeMetrics(measurementNode)
+    self.assertTrue(any("RightVentricle" in m and "not available" in m for m in messages), messages)
+    self.assertEqual(quantLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode), [])
+
   def test_cavc_presets_report_missing_inputs(self):
     """Missing coaptations or landmarks must produce messages, not exceptions."""
     factory = NewFormatValveFactory()
