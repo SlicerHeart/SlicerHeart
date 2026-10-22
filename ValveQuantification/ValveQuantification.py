@@ -2,6 +2,8 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from ValveQuantificationLib.MeasurementPreset import *
 import ValveQuantificationLib
+from HeartValveLib.util import reload
+from HeartValveWidgets.ValveSequenceBrowserWidget import ValveSequenceBrowserWidget
 
 #
 # ValveQuantification
@@ -113,27 +115,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
-    # Create MRML nodes that act as widgets
-    # We have to create separate markups node for each point field to be able to activate each
-    # point place widget separately.
-    markupsLogic = slicer.modules.markups.logic()
-    for i in range(self.maxNumberPointFields):
-      markupNode = slicer.mrmlScene.GetNodeByID(markupsLogic.AddNewFiducialNode())
-      markupNode.SetHideFromEditors(True)
-      markupNode.SetAttribute(slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(), "1") # prevent the node from showing up in SH
-      markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlace"+str(i)))
-      markupNode.SetSingletonTag("ValveQuantificationPointPlace"+str(i)) # don't delete it if scene is closed
-      markupNode.SetSaveWithScene(False)
-      markupNode.GetDisplayNode().SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlaceDisplay"+str(i)))
-      markupNode.GetDisplayNode().SetSingletonTag("ValveQuantificationPointPlace"+str(i)) # don't delete it if scene is closed
-      markupNode.GetDisplayNode().SetHideFromEditors(True)
-      markupNode.GetDisplayNode().SetSaveWithScene(False)
-      markupNode.SetMarkupLabelFormat("") # don't add labels
-      self.pointFieldMarkupsNode.append(markupNode)
+    self.setupPointFieldMarkupNodes()
 
     valveFormLayout = qt.QFormLayout()
     self.layout.addLayout(valveFormLayout)
 
+    self.setupValveSequenceBrowserWidget(valveFormLayout)
     self.setupHeartValveMeasurementSelector(valveFormLayout)
     self.setupValvesSection()
     self.setupFieldsSection()
@@ -155,6 +142,19 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.onHeartValveMeasurementSelect(self.heartValveMeasurementSelector.currentNode())
 
     self.addGUIObservers()
+
+    # Add a spacer to the layout
+    self.layout.addStretch(1)
+
+  def setupValveSequenceBrowserWidget(self, valveFormLayout):
+    """
+    Create and setup a ValveSequenceBrowserWidget and add it to the layout.
+    """
+    frame = qt.QFrame()
+    frame.setLayout(qt.QHBoxLayout())
+    valveFormLayout.addRow("Time points:", frame)
+    self.valveSequenceBrowserWidget = ValveSequenceBrowserWidget(parent=frame.layout())
+    self.valveSequenceBrowserWidget.readOnly = True
 
   def setupHeartValveMeasurementSelector(self, valveFormLayout):
     self.heartValveMeasurementSelector = slicer.qMRMLNodeComboBox()
@@ -225,10 +225,22 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
                                          lambda toggle: self.onWorkflowStepChanged(self.outputCollapsibleButton,
                                                                                    toggle))
     outputFormLayout = qt.QFormLayout(self.outputCollapsibleButton)
+
+    self.computeAllButton = qt.QPushButton("Compute all phases")
+    self.computeAllButton.toolTip = "Compute metrics for all phases"
+    outputFormLayout.addRow(self.computeAllButton)
+    self.computeAllButton.connect('clicked(bool)', self.computeAllPhaseMetrics)
+
+    self.computeButton = qt.QPushButton("Compute current phase")
+    self.computeButton.toolTip = "Compute metrics for the current phase"
+    outputFormLayout.addRow(self.computeButton)
+    self.computeButton.connect('clicked(bool)', self.computeCurrentPhaseMetrics)
+
     self.computeStatusTextEdit = qt.QPlainTextEdit()
     self.computeStatusTextEdit.setTextInteractionFlags(qt.Qt.TextSelectableByMouse)
     self.computeStatusTextEdit.maximumHeight = 75
     outputFormLayout.addRow(self.computeStatusTextEdit)
+
     self.measurementTree = slicer.qMRMLSubjectHierarchyTreeView()
     self.measurementTree.setMRMLScene(slicer.mrmlScene)
     qSize = qt.QSizePolicy()
@@ -311,6 +323,8 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       self.nodeSelectorWidgets[parameterName].setCurrentNodeID(parameterNode.GetNodeReferenceID(parameterName))
       self.nodeSelectorWidgets[parameterName].blockSignals(oldBlockSignalsState)
 
+    self.updateAnnulusValveWidgets()
+
   def updateParameterNodeFromGUI(self):
     parameterNode = self.getParameterNode()
     oldModifiedState = parameterNode.StartModify()
@@ -349,9 +363,13 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     for parameterName in self.nodeSelectorWidgets:
       self.nodeSelectorWidgets[parameterName].disconnect("currentNodeIDChanged(QString)", self.updateParameterNodeFromGUI)
 
+  def setHeartValveBrowserNode(self, heartValveBrowserNode):
+    self.valveSequenceBrowserWidget.valveBrowserNode = heartValveBrowserNode
+
   def onHeartValveMeasurementSelect(self, node):
     logging.debug("Selected heart valve measurement node: {0}".format(node.GetName() if node else "None"))
     self.setHeartValveMeasurementNode(node)
+    self.setupPointFieldMarkupNodes()
 
   def setHeartValveMeasurementNode(self, heartValveMeasurementNode):
     if heartValveMeasurementNode:
@@ -381,12 +399,43 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.measurementTree.visible = True
     self.measurementTree.setRootItem(shNode.GetItemByDataNode(heartValveMeasurementNode))
 
+  def setupPointFieldMarkupNodes(self):
+    # Create MRML nodes that act as widgets
+    # We have to create separate markups node for each point field to be able to activate each
+    # point place widget separately.
+    self.pointFieldMarkupsNode = []
+
+    markupsLogic = slicer.modules.markups.logic()
+    for i in range(self.maxNumberPointFields):
+      singletonTag = "ValveQuantificationPointPlace"+str(i)
+      markupNode = slicer.mrmlScene.GetSingletonNode(singletonTag, "vtkMRMLMarkupsFiducialNode")
+      if markupNode is None:
+        markupNode = slicer.mrmlScene.GetNodeByID(markupsLogic.AddNewFiducialNode())
+      markupNode.SetHideFromEditors(True)
+      markupNode.SetAttribute(slicer.vtkMRMLSubjectHierarchyConstants.GetSubjectHierarchyExcludeFromTreeAttributeName(), "1") # prevent the node from showing up in SH
+      markupNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlace"+str(i)))
+      markupNode.SetSingletonTag(singletonTag) # don't delete it if scene is closed
+      markupNode.SetSaveWithScene(False)
+      markupNode.SetControlPointLabelFormat("") # don't add labels
+
+      displayNode = slicer.mrmlScene.GetSingletonNode(singletonTag, "vtkMRMLMarkupsDisplayNode")
+      if displayNode is None:
+        markupNode.CreateDefaultDisplayNodes()
+        displayNode = markupNode.GetDisplayNode()
+      markupNode.SetAndObserveDisplayNodeID(displayNode.GetID())
+      displayNode.SetName(slicer.mrmlScene.GetUniqueNameByString("ValveQuantificationPointPlaceDisplay"+str(i)))
+      displayNode.SetSingletonTag(singletonTag) # don't delete it if scene is closed
+      displayNode.SetHideFromEditors(True)
+      displayNode.SetSaveWithScene(False)
+
+      self.pointFieldMarkupsNode.append(markupNode)
+
   def setDefinitionUrl(self, url):
     if self.definitionsWidget:
       self.definitionsWidget.webView().url = url
 
   def onPresetChanged(self, presetIndex=-1):
-    slicer.presetSelector = self.presetSelector
+    # slicer.presetSelector = self.presetSelector
     presetId = self.presetSelector.itemData(self.presetSelector.currentIndex)
     heartValveMeasurementNode = self.getHeartValveMeasurementNode()
     if heartValveMeasurementNode:
@@ -528,7 +577,7 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           # point is constrained to the annulus contour, show slider to allow adjustment
           if pointPositionAnnulus is not None:
             from HeartValveLib.util import getClosestCurvePointIndexToPosition
-            annulusContourCurve = valveModel.annulusContourCurve
+            annulusContourCurve = valveModel.annulusContourCurveNode
             closestPointIdOnAnnulusCurve = \
               getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
             pointDistanceAlongCurve = \
@@ -595,15 +644,66 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     self.annulusLabelsMarkupNodes[inputValveIndex] = labelsMarkupNode
     if labelsMarkupNode:
       self.annulusLabelsMarkupNodeObservers[inputValveIndex].append(
+        labelsMarkupNode.AddObserver(vtk.vtkCommand.ModifiedEvent,
+                                     lambda caller, event, valveId=inputValveIds[inputValveIndex]:
+                                     self.onAnnulusLabelMarkupModified(valveId)))
+      self.annulusLabelsMarkupNodeObservers[inputValveIndex].append(
         labelsMarkupNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                                      lambda caller, event, valveId=inputValveIds[inputValveIndex]:
                                      self.onAnnulusLabelMarkupModified(valveId)))
+    self.updateValveSequenceBrowserWidget()
+    self.updateAnnulusValveWidgets()
 
-  def onAnnulusLabelMarkupModified(self, valveId):
+  def updateValveSequenceBrowserWidget(self):
+    """
+    Update ValveSequenceBrowserWidget to track the selected valve.
+    """
+    driverValveBrowserNode = None
+    linkedValveBrowserNodes = []
+
+    if self.measurementPreset:
+      for valveId in self.measurementPreset.inputValveIds:
+        valveModel = self.inputValveModels.get(valveId)
+        if valveModel is None:
+          continue
+        valveBrowser = valveModel.getValveBrowserNode()
+        if valveBrowser is None:
+          continue
+
+        if driverValveBrowserNode is None:
+          # The first valve browser node is the driver.
+          driverValveBrowserNode = valveBrowser
+          continue
+        linkedValveBrowserNodes.append(valveBrowser)
+
+    self.setHeartValveBrowserNode(driverValveBrowserNode)
+    self.valveSequenceBrowserWidget.linkedValveBrowserNodes = linkedValveBrowserNodes
+
+  def updateAnnulusValveWidgets(self):
     if not self.measurementPreset:
       return
 
-    # TODO: update GUI from MRML in one method (currently in onPresetChanged, onAnnulusLabelMarkupModified, onInputFieldValueChanged)
+    inputFields = self.measurementPreset.inputFields
+    for inputFieldIndex in range(len(inputFields)):
+      field = inputFields[inputFieldIndex]
+      valveId = None
+      if FIELD_VALVE_ID not in field.keys():
+        continue
+      valveId = field[FIELD_VALVE_ID]
+      self.updateAnnulusValveSlider(valveId)
+
+  def onAnnulusLabelMarkupModified(self, valveId):
+    # If we update the GUI immediately, then the curve may not be updated yet.
+    qt.QTimer.singleShot(0, lambda: self.updateAnnulusValveSlider(valveId))
+
+  def updateAnnulusValveSlider(self, valveId):
+    if not self.measurementPreset:
+      return
+
+    if len(self.inputReferenceValueSliders) == 0:
+      return
+
+    valveModel = self.inputValveModels[valveId] if valveId in self.inputValveModels.keys() else None
 
     # Update GUI from label markups (markup points may have been added or deleted)
     inputFields = self.measurementPreset.inputFields
@@ -615,14 +715,19 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         continue
       if valveId != field[FIELD_VALVE_ID]:
         continue
+      if inputFieldIndex >= len(self.inputReferenceValueSliders) \
+          or inputFieldIndex >= len(self.inputReferenceRequiredCheckBoxes) \
+          or inputFieldIndex >= len(self.inputReferencePointPlaceWidgets):
+        continue
 
       positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
       if positionSlider.hasFocus():
         # the user adjusting point position using this slider right now
         continue
 
-      valveModel = self.inputValveModels[valveId]
-      pointPositionAnnulus = valveModel.getAnnulusMarkupPositionByLabel(field[FIELD_NAME])
+      requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
+
+      pointPositionAnnulus = valveModel.getAnnulusMarkupPositionByLabel(field[FIELD_NAME]) if valveModel else None
       if pointPositionAnnulus is None:
         # landmark is not present
         if positionSlider.minimum != positionSlider.maximum:
@@ -633,29 +738,58 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           positionSlider.blockSignals(sliderWasBlocked)
       else:
         # landmark is present
-        if positionSlider.minimum == positionSlider.maximum:
-          # Previously it was not present, update slider
-          from HeartValveLib.util import getClosestCurvePointIndexToPosition
-          annulusContourCurve = valveModel.annulusContourCurve
-          closestPointIdOnAnnulusCurve = \
-            getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
-          pointDistanceAlongCurve = \
-            annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
-          wasBlocked = positionSlider.blockSignals(True)
-          positionSlider.minimum = pointDistanceAlongCurve-20
-          positionSlider.maximum = pointDistanceAlongCurve+20
-          positionSlider.value = pointDistanceAlongCurve
-          positionSlider.blockSignals(wasBlocked)
-          requiredCheckBox = self.inputReferenceRequiredCheckBoxes[inputFieldIndex]
-          if not requiredCheckBox.checked:
-            requiredCheckBox.checked = True
+        from HeartValveLib.util import getClosestCurvePointIndexToPosition
+        annulusContourCurve = valveModel.annulusContourCurveNode
+        curveLength = annulusContourCurve.GetCurveLengthWorld()
+        closestPointIdOnAnnulusCurve = \
+          getClosestCurvePointIndexToPosition(annulusContourCurve, pointPositionAnnulus)
+        pointDistanceAlongCurve = \
+          annulusContourCurve.GetCurveLengthWorld(0, closestPointIdOnAnnulusCurve)
+        wasBlocked = positionSlider.blockSignals(True)
+        positionSlider.minimum = 0
+        positionSlider.maximum = curveLength
+        positionSlider.value = pointDistanceAlongCurve
+        positionSlider.blockSignals(wasBlocked)
 
-  def updateOutput(self):
+      positionSlider.enabled = not valveModel is None
+
+      requiredCheckBox.enabled = not valveModel is None
+      requiredCheckBox.checked = not pointPositionAnnulus is None
+
+      markupsPlaceWidget = self.inputReferencePointPlaceWidgets[inputFieldIndex]
+      markupsPlaceWidget.enabled = not valveModel is None
+
+
+  def computeCurrentPhaseMetrics(self):
 
     # Compute metrics and populate the output table
     heartValveMeasurementNode = self.getHeartValveMeasurementNode()
 
     messages = self.logic.computeMetrics(heartValveMeasurementNode)
+
+    self.computeStatusTextEdit.plainText = '\n'.join(messages)
+
+    # Not sure why but it seems that the initial hiding of columns has no effect and we have to
+    # repeat it here.
+    self.measurementTree.setColumnHidden(self.measurementTree.model().idColumn, True)
+    self.measurementTree.setColumnHidden(self.measurementTree.model().transformColumn, True)
+
+    self.measurementTree.resizeColumnToContents(0)
+
+  def computeAllPhaseMetrics(self):
+    heartValveMeasurementNode = self.getHeartValveMeasurementNode()
+    valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+    valveBrowserNode = valveBrowser.valveBrowserNode
+
+    originalIndex = valveBrowserNode.GetSelectedItemNumber()
+    messages = []
+    try:
+      for timePointIndex in range(valveBrowserNode.GetNumberOfItems()):
+        valveBrowserNode.SetSelectedItemNumber(timePointIndex)
+        messages += self.logic.computeMetrics(heartValveMeasurementNode)
+    finally:
+      # Restore the original time point even if computation fails for a time point
+      valveBrowserNode.SetSelectedItemNumber(originalIndex)
 
     self.computeStatusTextEdit.plainText = '\n'.join(messages)
 
@@ -714,12 +848,14 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       if field[FIELD_ON_ANNULUS_CONTOUR] is True:
         from HeartValveLib.util import getClosestPointPositionAlongCurve
         closestPointOnAnnulusCurve = \
-          getClosestPointPositionAlongCurve(valveModel.annulusContourCurve, pointPositionAnnulus)
+          getClosestPointPositionAlongCurve(valveModel.annulusContourCurveNode, pointPositionAnnulus)
         pointPosition = closestPointOnAnnulusCurve
       else:
         # NB: no snapping or restriction
         pointPosition = pointPositionAnnulus
 
+      valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+      valveBrowser.addCurrentTimePointToSequence(valveModel.valveLabelsSequenceNode)
       valveModel.setAnnulusMarkupLabel(label, pointPosition)
       self.measurementPreset.onInputFieldChanged(field[FIELD_ID], self.inputValveModels, self.inputFieldValues, computeDependentValues=True)
 
@@ -731,7 +867,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
       valveModel = self.inputValveModels[field[FIELD_VALVE_ID]]
       if value is not None:
         from HeartValveLib.util import getPositionAlongCurve
-        updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, value)
+        updatedPointPos = getPositionAlongCurve(valveModel.annulusContourCurveNode, 0, value)
+
+        # Ensure that we can save the current time point
+        valveBrowser = self.valveSequenceBrowserWidget.valveBrowser
+        valveBrowser.addCurrentTimePointToSequence(valveModel.valveLabelsSequenceNode)
+
         valveModel.setAnnulusMarkupLabel(
           field[FIELD_NAME],
           updatedPointPos
@@ -758,12 +899,12 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
           if pointPositionAnnulus is None:
             # landmark is not present, add it
             from HeartValveLib.util import getPositionAlongCurve
-            pointPos = getPositionAlongCurve(valveModel.annulusContourCurve, 0, 0)
+            pointPos = getPositionAlongCurve(valveModel.annulusContourCurveNode, 0, 0)
             valveModel.setAnnulusMarkupLabel(field[FIELD_NAME], pointPos)
             positionSlider = self.inputReferenceValueSliders[inputFieldIndex]
             sliderWasBlocked = positionSlider.blockSignals(True)
             positionSlider.minimum = 0
-            positionSlider.maximum = valveModel.annulusContourCurve.GetCurveLengthWorld()
+            positionSlider.maximum = valveModel.annulusContourCurveNode.GetCurveLengthWorld()
             positionSlider.value = 0
             positionSlider.blockSignals(sliderWasBlocked)
             self.onInputFieldValueChanged(inputFieldIndex, 0)
@@ -794,9 +935,6 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
         HeartValveLib.setupDefaultLayout()
         HeartValveLib.showSlices(False)
         self.measurementPreset.onInputFieldChanged(None, self.inputValveModels, self.inputFieldValues)
-      elif widget==self.outputCollapsibleButton:
-        self.updateOutput()
-
 
 class ValveQuantificationLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual
@@ -909,6 +1047,7 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
     """
     self.setUp()
     self.test_ValveQuantificationMitral()
+    self.test_ValveQuantificationOutput()
 
   def getHeartValveNode(self, nameFragment):
     """Find heart valve node in the scene that contins the specified name fragment in its name"""
@@ -946,6 +1085,7 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
                        ["PM", [-88.52909851074219, -95.75225830078125, 95.63932800292969], 16.6],
                        ["AL", [-116.85599517822266, -81.13494110107422, 92.84961700439453], None]]
 
+    browserNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLSequenceBrowserNode")
     self.runSingleCase(presetName, valveNodes, referencePoints)
 
   def runSingleCase(self, presetName, valveNodes, referencePoints):
@@ -963,34 +1103,39 @@ class ValveQuantificationTest(ScriptedLoadableModuleTest):
     for nodeSelectorIndex, heartValveNode in enumerate(valveNodes):
       valveQuantificationGui.inputValveNodeSelectors[nodeSelectorIndex].setCurrentNode(heartValveNode)
 
+    valveBrowserNode = valveQuantificationGui.valveSequenceBrowserWidget.valveBrowser.valveBrowserNode
+
     self.delayDisplay("Set reference points.")
     valveQuantificationGui.fieldsCollapsibleButton.collapsed = False
-    for pointLabel, pointCoordinate, sliderPosition in referencePoints:
-      self.delayDisplay(f"Define reference point {pointLabel}")
 
-      # Find reference point index
-      foundPoint = False
-      for pointIndex in range(len(valveQuantificationGui.inputReferenceNameLabels)):
-        if valveQuantificationGui.inputReferenceNameLabels[pointIndex].text == f"{pointLabel} point":
-          foundPoint = True
-          break
-      self.assertTrue(foundPoint, f"Reference point {pointLabel} not found")
+    for index in range(valveBrowserNode.GetNumberOfItems()):
+      valveBrowserNode.SetSelectedItemNumber(index)
 
-      #valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].checked = True
-      slicer.app.processEvents()
-      valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].click()
-      slicer.app.processEvents()
-      if sliderPosition is not None:
-        valveQuantificationGui.inputReferenceValueSliders[pointIndex].value = sliderPosition
+      for pointLabel, pointCoordinate, sliderPosition in referencePoints:
+        self.delayDisplay(f"Define reference point {pointLabel}")
 
-      #valveQuantificationGui.inputReferencePointPlaceWidgets = []
-      #valveQuantificationGui.inputReferenceResetButtons = []
-      #valveQuantificationGui.inputReferenceValueSliders[pointIndex].value += 5 + pointIndex * 0.3
+        # Find reference point index
+        foundPoint = False
+        for pointIndex in range(len(valveQuantificationGui.inputReferenceNameLabels)):
+          if valveQuantificationGui.inputReferenceNameLabels[pointIndex].text == f"{pointLabel} point":
+            foundPoint = True
+            break
+        self.assertTrue(foundPoint, f"Reference point {pointLabel} not found")
 
-      # slicer.modules.ValveQuantificationWidget.inputReferenceRequiredCheckBoxes[0].click()
-      # slicer.modules.ValveQuantificationWidget.inputReferenceValueSliders[0].value = 93
+        #valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].checked = True
+        slicer.app.processEvents()
+        valveQuantificationGui.inputReferenceRequiredCheckBoxes[pointIndex].click()
+        slicer.app.processEvents()
+        if sliderPosition is not None:
+          valveQuantificationGui.inputReferenceValueSliders[pointIndex].value = sliderPosition
 
     self.delayDisplay("Compute results.")
     valveQuantificationGui.outputCollapsibleButton.collapsed = False
 
     self.delayDisplay("Completed test_ValveQuantificationMitral.")
+
+  def test_ValveQuantificationOutput(self):
+    self.delayDisplay("Start test_ValveQuantificationOutput.")
+    valveQuantificationGui = slicer.modules.ValveQuantificationWidget
+    valveQuantificationGui.computeAllButton.click()
+    self.delayDisplay("Completed test_ValveQuantificationOutput.")

@@ -247,20 +247,20 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     # main valve (e.g. mitral, lavv)
     mainValveModel = inputValveModels[self._requiredValveType]
     planePositionMV, planeNormalMV = mainValveModel.getAnnulusContourPlane()
-    mainAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(mainValveModel.annulusContourCurve).T
+    mainAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(mainValveModel.annulusContourCurveNode).T
     self.createAnnulusPlaneModel(mainValveModel, mainAnnulusPoints, planePositionMV, planeNormalMV,
                                  name=f"{self.inputValveNames[self._requiredValveType]} Annulus plane")
 
     if mainValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel) is None:
       mainValveModel.setAnnulusMarkupLabel(
-        self._valveCenterLabel, np.mean(slicer.util.arrayFromMarkupsCurvePoints(mainValveModel.annulusContourCurve).T, axis=1)
+        self._valveCenterLabel, np.mean(slicer.util.arrayFromMarkupsCurvePoints(mainValveModel.annulusContourCurveNode).T, axis=1)
       )
 
     # tricuspid plane
     try:
       tricuspidValveModel = inputValveModels["TricuspidValve"]
       planePositionTV, planeNormalTV = tricuspidValveModel.getAnnulusContourPlane()
-      tricuspidAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(tricuspidValveModel.annulusContourCurve).T
+      tricuspidAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(tricuspidValveModel.annulusContourCurveNode).T
       self.createAnnulusPlaneModel(tricuspidValveModel, tricuspidAnnulusPoints, planePositionTV, planeNormalTV,
                                    name="TV Annulus plane")
     except KeyError:
@@ -269,7 +269,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
 
     if tricuspidValveModel.getAnnulusMarkupPositionByLabel(self._valveCenterLabel) is None:
       tricuspidValveModel.setAnnulusMarkupLabel(
-        self._valveCenterLabel, np.mean(tricuspidValveModel.annulusContourCurve.getInterpolatedPointsAsArray(), axis=1)
+        self._valveCenterLabel, np.mean(tricuspidValveModel.annulusContourCurveNode.getInterpolatedPointsAsArray(), axis=1)
       )
 
 
@@ -295,7 +295,7 @@ class MeasurementPresetPapillaryMitralValve(MeasurementPresetPapillaryAngle):
     # ref axis at 9 o'clock
     ref_axis = tv_center - mv_tv_center
     ref_axis = ref_axis / np.linalg.norm(ref_axis)
-    interpolatedPoints =  slicer.util.arrayFromMarkupsCurvePoints(mitralValveModel.annulusContourCurve).T
+    interpolatedPoints =  slicer.util.arrayFromMarkupsCurvePoints(mitralValveModel.annulusContourCurveNode).T
     from HeartValveLib.util import getSampledInterpolatedPointsAsArray
     resampledMitralAnnulusPoints = getSampledInterpolatedPointsAsArray(interpolatedPoints, 0.1).transpose()
     from scipy.spatial import KDTree
@@ -440,6 +440,13 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
 
     cavcValveModel = inputValveModels["Cavc"]
 
+    requiredLabels = ["R", "L", "LA", "LP", "RA", "RP"]
+    if not self.areRequiredLandmarksAvailable(cavcValveModel, requiredLabels):
+      missingLabels = [label for label, point in zip(requiredLabels, cavcValveModel.getAnnulusMarkupPositionsByLabels(requiredLabels))
+                       if point is None]
+      self.addMessage("The {} landmarks are required for the CAVC papillary muscle measurements".format(", ".join(missingLabels)))
+      return self.metricsMessages
+
     # LC point
     pointR, pointL, pointLA, pointLP = cavcValveModel.getAnnulusMarkupPositionsByLabels(["R", "L", "LA", "LP"])
     [pointLC, _] = HeartValveLib.getLinesIntersectionPoints(pointR, pointL, pointLA, pointLP)
@@ -458,7 +465,7 @@ class MeasurementPresetPapillaryCavc(MeasurementPresetPapillaryAngle):
   def addSeptalBasedRotationalAngles(self, cavcValveModel, pointLC, pointRC):
     # common annulus plane
     planePosition, planeNormal = cavcValveModel.getAnnulusContourPlane()
-    mitralAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(cavcValveModel.annulusContourCurve).T
+    mitralAnnulusPoints = slicer.util.arrayFromMarkupsCurvePoints(cavcValveModel.annulusContourCurveNode).T
     self.createAnnulusPlaneModel(cavcValveModel, mitralAnnulusPoints, planePosition, planeNormal,
                                  name="Common Annulus plane")
 

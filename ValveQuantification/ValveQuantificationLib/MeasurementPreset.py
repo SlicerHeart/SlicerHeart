@@ -67,10 +67,15 @@ class MetricsTable(object):
   def metricTableNode(self):
     return self._metricsTableNode
 
-  def __init__(self, name):
-    self._metricsTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
-    self._metricsTableNode.SetName(name)
-    self._metricsTableNode.SetUseColumnNameAsColumnHeader(True)
+  def __init__(self, name, tableNode=None):
+    if tableNode is None:
+      self._metricsTableNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
+      self._metricsTableNode.SetName(name)
+    else:
+      self._metricsTableNode = tableNode
+
+    self._metricsTableNode.RemoveAllColumns()
+    self._metricsTableNode.SetUseColumnTitleAsColumnHeader(True)
     for col in self.TABLE_COLUMNS:
       self._metricsTableNode.AddColumn().SetName(col)
 
@@ -90,6 +95,8 @@ class MeasurementPreset(object):
     self.name = None # human-readable name
     self.inputValveIds = [] # machine-readable name of input valves
     self.inputValveNames = {} # map from inputValveId to human-readable name
+
+    self.metricsTable = None
 
     # Points or values defined by the user to define input positions for computations:
     # The user may click in a viewer to specify point position directly (FIELD_TYPE_POINT)
@@ -128,16 +135,66 @@ class MeasurementPreset(object):
       heartValveNode = measurementNode.GetNodeReference(role)
       if heartValveNode:
         valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
+        # The leaflet and coaptation models must reflect the displayed time point (they are only updated
+        # by the modules that show them, so they may still describe a previously displayed time point)
+        if valveModel.leafletSegmentationNode:
+          valveModel.updateLeafletModelsFromSegmentation()
+        if heartValveNode.GetNumberOfNodeReferences("CoaptationBaseLineMarkup") > 0:
+          valveModel.updateCoaptationModels()
         inputValveModels[inputValveId] = valveModel
     return self.computeMetrics(inputValveModels, measurementNode)
 
   def computeMetrics(self, inputValveModels, folderNode):
     self.folderNode = folderNode
-    self.clearFolder()
     self.metricsMessages = []
-    self.metricsTable = MetricsTable(self.QUANTIFICATION_RESULTS_IDENTIFIER)
+    if not inputValveModels:
+      # computeMetricsForMeasurementNode skips missing valve references, so an empty dict is a
+      # normal state (e.g. no valve selected yet).
+      return self.metricsMessages
+    self.removeNonSequencedResults()
+    tableNode = self.getResultsTableNode(folderNode)
+
+    valveModel = inputValveModels[next(iter(inputValveModels))]
+    tableSequenceNode = None
+    if tableNode:
+      tableSequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(tableNode)
+
+    if tableSequenceNode:
+      valveModel.valveBrowser.addCurrentTimePointToSequence(tableSequenceNode)
+
+    self.metricsTable = MetricsTable(self.QUANTIFICATION_RESULTS_IDENTIFIER, tableNode)
+
+    if not tableSequenceNode:
+      tableSequenceNode = valveModel.valveBrowser.makeTimeSequence(self.metricsTable.metricTableNode)
+
     self.moveNodeToMeasurementFolder(self.metricsTable.metricTableNode)
     return self.metricsMessages
+
+  def getResultsTableNode(self, folderNode):
+    """Get the existing results table of a measurement.
+    Presets are shared objects (one instance per preset for the whole application), therefore the
+    table of the previous computation cannot be blindly reused: it may belong to another measurement
+    node or to a scene that has been closed since. The table is looked up under the measurement
+    in the subject hierarchy, which also finds the table after the scene is saved and reloaded.
+    :return: table node, None if the measurement has no results table yet
+    """
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    folderItemId = shNode.GetItemByDataNode(folderNode) if folderNode else 0
+    if folderItemId:
+      tableItemIds = vtk.vtkIdList()
+      shNode.GetItemChildren(folderItemId, tableItemIds, "vtkMRMLTableNode")
+      for tableItemIndex in range(tableItemIds.GetNumberOfIds()):
+        tableItemId = tableItemIds.GetId(tableItemIndex)
+        if shNode.GetItemName(tableItemId) == self.QUANTIFICATION_RESULTS_IDENTIFIER:
+          return shNode.GetItemDataNode(tableItemId)
+      return None
+    # The measurement is not in the subject hierarchy (results cannot be nested under it):
+    # reuse the table of the previous computation if it is still in the current scene.
+    if self.metricsTable:
+      tableNode = self.metricsTable.metricTableNode
+      if tableNode and slicer.mrmlScene.IsNodePresent(tableNode):
+        return tableNode
+    return None
 
   def addMeasurement(self, measurement):
     """ puts results into metricsTable and self.metricsMessages """
@@ -166,10 +223,42 @@ class MeasurementPreset(object):
     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
     shNode.RemoveItemChildren(shNode.GetItemByDataNode(self.folderNode))
 
+  def removeNonSequencedResults(self):
+    """Remove the results of a previous computation that are not stored per time point.
+
+    Results that are stored in sequences of the valve browser (metric models, results table) are
+    reused by the presets and hold the results of the other time points, so they are kept. Every
+    other node under the measurement (e.g. the displacement tables, chord models and folders of the
+    phase comparison, color tables) belongs to the previous computation only and would accumulate
+    with every computation otherwise (the old format cleared the whole measurement folder).
+    """
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    folderItemId = shNode.GetItemByDataNode(self.folderNode) if (shNode and self.folderNode) else 0
+    if not folderItemId:
+      return
+    sequencesLogic = slicer.modules.sequences.logic()
+    childItemIds = vtk.vtkIdList()
+    shNode.GetItemChildren(folderItemId, childItemIds, True)
+    nodesToRemove = []
+    for index in range(childItemIds.GetNumberOfIds()):
+      dataNode = shNode.GetItemDataNode(childItemIds.GetId(index))
+      if dataNode is None or sequencesLogic.GetFirstBrowserNodeForProxyNode(dataNode):
+        continue
+      nodesToRemove.append(dataNode)
+    for dataNode in nodesToRemove:
+      slicer.mrmlScene.RemoveNode(dataNode)
+    # Remove the subfolders that are empty now (deepest first)
+    childItemIds = vtk.vtkIdList()
+    shNode.GetItemChildren(folderItemId, childItemIds, True)
+    for index in reversed(range(childItemIds.GetNumberOfIds())):
+      itemId = childItemIds.GetId(index)
+      if shNode.GetItemDataNode(itemId) is None and shNode.GetNumberOfItemChildren(itemId) == 0:
+        shNode.RemoveItem(itemId)
+
   def getAnnulusCircumference(self, valveModel, name='Annulus'):
     return {
       KEY_NAME: '{} circumference (3D)'.format(name),
-      KEY_VALUE: "{:.1f}".format(valveModel.annulusContourCurve.GetCurveLengthWorld()),
+      KEY_VALUE: "{:.1f}".format(valveModel.annulusContourCurveNode.GetCurveLengthWorld()),
       KEY_UNIT: 'mm' }
 
   @staticmethod
@@ -254,8 +343,10 @@ class MeasurementPreset(object):
     result[KEY_UNIT] = 'mm'
     result[KEY_SUCCESS] = True
     createModelMethod = self.createArrowModel if oriented else self.createLineModel
-    lineModel = createModelMethod(result[KEY_NAME], point1_valveModel1, point2_valveModel1)
-    self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, lineModel, shParentFolderId)
+
+    lineModelNode = self.getOrAddMetricModelNode(valveModel1, result[KEY_NAME])
+    lineModelNode = createModelMethod(result[KEY_NAME], point1_valveModel1, point2_valveModel1, currentModelNode=lineModelNode)
+    self.applyProbeToRASAndMoveToMeasurementFolder(valveModel1, lineModelNode, shParentFolderId)
 
     return result
 
@@ -344,7 +435,9 @@ class MeasurementPreset(object):
     if radius is None:
       radius = valveModel.getAnnulusContourRadius() * 1.1
 
-    curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility)
+    curveModel = self.getOrAddMetricModelNode(valveModel, result[KEY_NAME])
+    curveModel = self.createCurveModel(name, curveSegmentPoints, radius, color, 20, visibility, currentModelNode=curveModel)
+
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, curveModel, shParentFolderId)
 
     return result
@@ -443,7 +536,7 @@ class MeasurementPreset(object):
     result[KEY_SUCCESS] = True
     return result
 
-  def createAnnulusPlaneModel(self, valveModel, annulusPoints, planePosition, planeNormal, name="Annulus plane"):
+  def createAnnulusPlaneModel(self, valveModel, annulusPoints, planePosition, planeNormal, name="Annulus plane", currentModelNode=None):
     [_, annulusPointsProjected_Plane, _] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     thickness = 0.2 # mm
@@ -451,17 +544,19 @@ class MeasurementPreset(object):
     planeBoundsMax = annulusPointsProjected_Plane.max(axis=1)[0:2]
     margin = [ (planeBoundsMax[0]-planeBoundsMin[0])*0.05,  (planeBoundsMax[1]-planeBoundsMin[1])*0.05] # make the plane a bit larger than the annulus (by a 5% margin)
     planeBounds = np.array([planeBoundsMin[0]-margin[0], planeBoundsMax[0]+margin[0], planeBoundsMin[1]-margin[1], planeBoundsMax[1]+margin[1], -thickness/2.0, thickness/2.0])
-    annulusPlane = self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color = [0.0,0.0,0.2])
+    if currentModelNode:
+      currentModelNode.SetAndObservePolyData(vtk.vtkPolyData())
+    annulusPlane = self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color = [0.0,0.0,0.2], nodeToBeAddedTo=currentModelNode)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusPlane)
 
-  def createAnnulusContourModelColoredByDistance(self, valveModel, planePosition, planeNormal):
+  def createAnnulusContourModelColoredByDistance(self, valveModel, planePosition, planeNormal, currentModelNode=None):
 
-    nInterpolatedPoints = valveModel.annulusContourCurve.GetCurvePoints().GetNumberOfPoints()
+    nInterpolatedPoints = valveModel.annulusContourCurveNode.GetCurvePoints().GetNumberOfPoints()
     if nInterpolatedPoints < 2:
-      return
+      return None
 
     curvePoints = vtk.vtkPoints()
-    curvePoints.DeepCopy(valveModel.annulusContourCurve.GetCurvePoints())
+    curvePoints.DeepCopy(valveModel.annulusContourCurveNode.GetCurvePoints())
 
     lines = vtk.vtkCellArray()
     lines.InsertNextCell(nInterpolatedPoints+1)
@@ -486,7 +581,7 @@ class MeasurementPreset(object):
     tubeFilter.SetInputData(curvePoly)
     # Make tube radius 5% larger than the original contour so that when both
     # are shown in 3D then the colored tube is visible.
-    tubeFilter.SetRadius(valveModel.annulusContourCurve.GetDisplayNode().GetGlyphSize() * 1.05)
+    tubeFilter.SetRadius(valveModel.annulusContourCurveNode.GetDisplayNode().GetGlyphSize() * 1.05)
     tubeFilter.SetNumberOfSides(20)
     tubeFilter.SetCapping(False)
     tubeFilter.Update()
@@ -514,10 +609,15 @@ class MeasurementPreset(object):
     triangles.Update()
 
     modelsLogic = slicer.modules.models.logic()
-    modelNode = modelsLogic.AddModel(triangles.GetOutput())
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(triangles.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(triangles.GetOutput())
     modelNode.SetName('Annulus contour colored by height')
     displayNode = modelNode.GetDisplayNode()
-    displayNode.SetVisibility(False)
+    if currentModelNode is None:
+      displayNode.SetVisibility(False)
     displayNode.SetActiveScalarName('Distance')
     displayNode.ScalarVisibilityOn()
 
@@ -538,13 +638,17 @@ class MeasurementPreset(object):
       distanceRange = [-magnitude, magnitude]
 
     baseColorNodeId = 'vtkMRMLColorTableNodeFilePlasma.txt'
-    colorNode = slicer.modules.colors.logic().CopyNode(
-      slicer.mrmlScene.GetNodeByID(baseColorNodeId), 'Annulus height')
+    colorNodeName = 'Annulus height'
+    # The model node is reused between computations (and time points), so its private color table
+    # is reused as well: a new color table per computation accumulated in the scene (color nodes
+    # have no subject hierarchy item, so they are not removed with the measurement's other results).
+    colorNode = displayNode.GetColorNode()
+    if colorNode is None or colorNode.GetID() == baseColorNodeId or colorNode.GetName() != colorNodeName:
+      colorNode = slicer.modules.colors.logic().CopyNode(slicer.mrmlScene.GetNodeByID(baseColorNodeId), colorNodeName)
+      slicer.mrmlScene.AddNode(colorNode)
+      colorNode.UnRegister(slicer.mrmlScene)
+      displayNode.SetAndObserveColorNodeID(colorNode.GetID())
     colorNode.GetLookupTable().SetRange(distanceRange)
-    slicer.mrmlScene.AddNode(colorNode)
-    colorNode.UnRegister(slicer.mrmlScene)
-    self.moveNodeToMeasurementFolder(colorNode)
-    displayNode.SetAndObserveColorNodeID(colorNode.GetID())
 
     # Use the color exactly as defined in the colormap
     displayNode.AutoScalarRangeOff()
@@ -552,11 +656,12 @@ class MeasurementPreset(object):
     displayNode.SetScalarRange(distanceRange)  # just in case if switching to manual scalar range
 
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, modelNode)
+    return modelNode
 
   def addAnnulusHeightMeasurements(self, valveModel, planePosition, planeNormal):
     """
     """
-    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     [annulusPointsProjected, _, pointsOnPositiveSideOfPlane] = \
       HeartValveLib.getPointsProjectedToPlane(annulusPoints, planePosition, planeNormal)
     distancesFromValvePlane = np.linalg.norm(annulusPoints-annulusPointsProjected, axis=0)
@@ -572,17 +677,31 @@ class MeasurementPreset(object):
     self.addMeasurement({KEY_NAME: 'Annulus height', KEY_VALUE: "{:.1f}".format(annulusHeightAbove + annulusHeightBelow), KEY_UNIT: 'mm'})
     self.addMeasurement({KEY_NAME: 'Annulus height above', KEY_VALUE: "{:.1f}".format(annulusHeightAbove), KEY_UNIT: 'mm'})
     self.addMeasurement({KEY_NAME: 'Annulus height below', KEY_VALUE: "{:.1f}".format(annulusHeightBelow), KEY_UNIT: 'mm'})
+
     # Add annulus height lines
-    annulusTopLineModel = self.createLineModel('Annulus height (above)', annulusPoints[:,pointsAbovePlane][:,annulusTopPointIndex],
-      annulusPointsProjected[:,pointsAbovePlane][:,annulusTopPointIndex])
+    metricName = 'Annulus height (above)'
+    annulusTopLineModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusTopLineModel = self.createLineModel(metricName, annulusPoints[:,pointsAbovePlane][:,annulusTopPointIndex],
+      annulusPointsProjected[:,pointsAbovePlane][:,annulusTopPointIndex], currentModelNode=annulusTopLineModel)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusTopLineModel)
-    annulusBottomLineModel = self.createLineModel('Annulus height (below)', annulusPoints[:,pointsBelowPlane][:,annulusBottomPointIndex],
-      annulusPointsProjected[:,pointsBelowPlane][:,annulusBottomPointIndex])
+
+    metricName = 'Annulus height (below)'
+    annulusBottomLineModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusBottomLineModel = self.createLineModel(metricName, annulusPoints[:,pointsBelowPlane][:,annulusBottomPointIndex],
+        annulusPointsProjected[:,pointsBelowPlane][:,annulusBottomPointIndex], currentModelNode=annulusBottomLineModel)
     self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, annulusBottomLineModel)
+
     # Add annulus plane model
-    self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal)
+    metricName = 'Annulus plane'
+    annulusPlaneModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusPlaneModel = self.createAnnulusPlaneModel(valveModel, annulusPoints, planePosition, planeNormal,
+                                                     currentModelNode=annulusPlaneModel)
+
     # Add annulus contour colored by annulus height
-    self.createAnnulusContourModelColoredByDistance(valveModel, planePosition, planeNormal)
+    metricName = 'Annulus contour colored by height'
+    annulusContourModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    annulusContourModel = self.createAnnulusContourModelColoredByDistance(valveModel, planePosition, planeNormal,
+                                                                          currentModelNode=annulusContourModel)
 
   def addCoaptationMeasurements(self, valveModel):
     for coaptationModel in valveModel.coaptationModels:
@@ -597,8 +716,10 @@ class MeasurementPreset(object):
         self.metricsMessages.append("No coaptation model found. Skipping.")
         continue
 
-      self.addSurfaceAreaMeasurements("{} area (3D)".format(namePrefix),
-                                      surfaceModelNode.GetPolyData(), valveModel)
+      metricName = f'{namePrefix} area (3D)'
+      surfaceModel = self.getOrAddMetricModelNode(valveModel, metricName)
+      self.addSurfaceAreaMeasurements(metricName, surfaceModelNode.GetPolyData(), valveModel,
+                                      currentModelNode=surfaceModel)
 
       self.addMeasurement({KEY_NAME: '{} base line length'.format(namePrefix),
                            KEY_VALUE: "{:.1f}".format(coaptationModel.baseLine.GetCurveLengthWorld()),
@@ -744,7 +865,7 @@ class MeasurementPreset(object):
                                       invertBendingAngleDirection1, invertBendingAngleDirection2, name)
       return
 
-    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     if mode == "2D":
       # Transform annulus points to plane coordinate system
       [annulusPointsProjected, _, _] = \
@@ -757,7 +878,9 @@ class MeasurementPreset(object):
       return
 
     # Full area
-    self.addSurfaceAreaMeasurements(f'{name} area ({mode})', annulusAreaPolyData, valveModel)
+    metricName = f'{name} area ({mode})'
+    surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
+    self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData, valveModel, currentModelNode=surfaceAreaModel)
 
     # Count how many quadrant separator points are defined (must be 4 for a complete definition)
     numberOfFoundLabels = 0
@@ -778,12 +901,18 @@ class MeasurementPreset(object):
           [_, planeNormalPlusX, _, planeNormalPlusY, planePosition, halvesNames, _] = \
             self.getClipPlanesNormalsOrigin(valveModel, planePosition, planeNormal, quadrantPointLabels,
                                             clipBetweenQuadrantPoints=clipBetweenQuadrantPoints)
-          self.addCurveBendingAngleMeasurement(f'{name} bending angle{suffix} ({halvesNames[0]}-{halvesNames[1]})',
+          metricName = f'{name} bending angle{suffix} ({halvesNames[0]}-{halvesNames[1]})'
+          angleModel = self.getOrAddMetricModelNode(valveModel, metricName)
+          self.addCurveBendingAngleMeasurement(metricName,
                                                annulusPoints, planePosition, planeNormalPlusX, valveModel,
-                                               invertDirection=invertBendingAngleDirection1)
-          self.addCurveBendingAngleMeasurement(f'{name} bending angle{suffix} ({halvesNames[2]}-{halvesNames[3]})',
+                                               invertDirection=invertBendingAngleDirection1,
+                                               currentModelNode=angleModel)
+          metricName = f'{name} bending angle{suffix} ({halvesNames[2]}-{halvesNames[3]})'
+          angleModel = self.getOrAddMetricModelNode(valveModel, metricName)
+          self.addCurveBendingAngleMeasurement(metricName,
                                                annulusPoints, planePosition, planeNormalPlusY, valveModel,
-                                               invertDirection=invertBendingAngleDirection2)
+                                               invertDirection=invertBendingAngleDirection2,
+                                               currentModelNode=angleModel)
 
         [[planeMinusX, planePlusX, planeMinusY, planePlusY], halvesNames, quadrantNames] = \
           self.getClipPlanes(valveModel, planePosition, planeNormal, quadrantPointLabels,
@@ -817,28 +946,56 @@ class MeasurementPreset(object):
           valveModel.setAnnulusMarkupLabel('MX', np.mean(np.array([pointMA, pointMP]), axis=0))
 
         # Halves
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[0]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
         self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[0]})', annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX]
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planeMinusX], currentModelNode=surfaceAreaModel
         )
+
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[1]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
         self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[1]})', annulusAreaPolyData, valveModel, clipPlanes=[planePlusX]
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planePlusX], currentModelNode=surfaceAreaModel
         )
+
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[2]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
         self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[2]})', annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY]
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planeMinusY],
+          currentModelNode=surfaceAreaModel
         )
+
+        metricName = f'{name} area{suffix} ({mode}, {halvesNames[3]})'
+        surfaceAreaModel = self.getOrAddMetricModelNode(valveModel, metricName)
         self.addSurfaceAreaMeasurements(
-          f'{name} area{suffix} ({mode}, {halvesNames[3]})', annulusAreaPolyData, valveModel, clipPlanes=[planePlusY]
+          metricName, annulusAreaPolyData, valveModel, clipPlanes=[planePlusY],
+          currentModelNode=surfaceAreaModel
         )
 
         # Quadrants
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[0]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planeMinusX, planeMinusY])
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[1]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planePlusX, planeMinusY])
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[2]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planeMinusX, planePlusY])
-        self.addSurfaceAreaMeasurements(f'{name} area{suffix} ({mode}, {quadrantNames[3]})', annulusAreaPolyData,
-                                        valveModel, clipPlanes=[planePlusX, planePlusY])
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[0]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planeMinusX, planeMinusY],
+                                        currentModelNode=quadrantModel)
+
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[1]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planePlusX, planeMinusY],
+                                        currentModelNode=quadrantModel)
+
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[2]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planeMinusX, planePlusY],
+                                        currentModelNode=quadrantModel)
+
+        metricName = f'{name} area{suffix} ({mode}, {quadrantNames[3]})'
+        quadrantModel = self.getOrAddMetricModelNode(valveModel, metricName)
+        self.addSurfaceAreaMeasurements(metricName, annulusAreaPolyData,
+                                        valveModel, clipPlanes=[planePlusX, planePlusY],
+                                        currentModelNode=quadrantModel)
 
   @staticmethod
   def createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, radiusScalingFactor=1.0):
@@ -865,7 +1022,7 @@ class MeasurementPreset(object):
     targetLandmarkPoints.SetNumberOfPoints(numberOfLandmarkPoints)
     for pointIndex in range(numberOfLandmarkPoints):
       angle = float(pointIndex)/numberOfLandmarkPoints*2.0*math.pi
-      annulusPointIndex = int(round(float(pointIndex)/numberOfLandmarkPoints*numberOfAnnulusPoints))
+      annulusPointIndex = int(np.floor(float(pointIndex)/numberOfLandmarkPoints*numberOfAnnulusPoints))
       sourceLandmarkPoints.SetPoint(pointIndex, math.cos(angle), math.sin(angle), 0)
       targetLandmarkPoints.SetPoint(pointIndex, annulusPoints[:,annulusPointIndex])
 
@@ -897,12 +1054,16 @@ class MeasurementPreset(object):
 
     return annulusAreaPolyData
 
-  def addSurfaceAreaMeasurements(self, name, polyData, valveModel, clipPlanes=None, visibility=False):
+  def addSurfaceAreaMeasurements(self, name, polyData, valveModel, clipPlanes=None, visibility=False, currentModelNode=None):
     modelsLogic = slicer.modules.models.logic()
-    annulusArea3dModel = modelsLogic.AddModel(polyData)
+    if currentModelNode:
+      annulusArea3dModel = currentModelNode
+      annulusArea3dModel.SetAndObservePolyData(polyData)
+    else:
+      annulusArea3dModel = modelsLogic.AddModel(polyData)
     annulusArea3dModel.SetName(name)
     annulusArea3dModel.GetDisplayNode().SetVisibility(visibility)
-    annulusArea3dModel.GetDisplayNode().SetColor(valveModel.getBaseColor())
+    annulusArea3dModel.GetDisplayNode().SetColor([1.0, 0.0, 0.0])
     annulusArea3dModel.GetDisplayNode().SetOpacity(0.6)
     annulusArea3dModel.GetDisplayNode().SetAmbient(0.1)
     annulusArea3dModel.GetDisplayNode().SetDiffuse(0.9)
@@ -935,7 +1096,7 @@ class MeasurementPreset(object):
     annulusArea2d = massProperties.GetSurfaceArea()
     self.addMeasurement({KEY_NAME: name, KEY_VALUE: "{:.1f}".format(annulusArea2d), KEY_UNIT: 'mm*mm'})
 
-    return annulusArea3dModel.GetPolyData()
+    return annulusArea3dModel
 
   def addSurfaceAngleMeasurement(self, name, polyDataA, polyDataB, valveModel, visibility = False):
     """This method computes angle between two surfaces by fitting plane to them.
@@ -975,7 +1136,7 @@ class MeasurementPreset(object):
                                                    valveModel, planePositions[1], planeNormals[1], name))
 
   def addCurveBendingAngleMeasurement(self, name, curvePoints, separatingPlanePosition, separatingPlaneNormal,
-                                      valveModel, invertDirection=False):
+                                      valveModel, invertDirection=False, currentModelNode=None):
     """Separate the point set using separating plane. Fit a plane to each, and report the orientation difference."""
 
     [_, _, pointsOnPositiveSideOfPlane] = \
@@ -1006,10 +1167,13 @@ class MeasurementPreset(object):
          -thickness / 2.0, thickness / 2.0])
 
       if i == 0:
-        planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color=[0.0, 0.0, 0.2]))
+        if currentModelNode:
+          planeModels.append(currentModelNode)
+        else:
+          planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color=[0.0, 0.0, 0.2]))
         self.applyProbeToRASAndMoveToMeasurementFolder(valveModel, planeModels[i])
       elif i != 0 and len(planeModels):
-        planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds,
+        planeModels.append(self.createPlaneModel(name, planePosition, planeNormal, planeBounds, color=[0.0, 0.0, 0.2],
                                                  nodeToBeAddedTo=planeModels[0]))
 
     # Compute angle
@@ -1027,7 +1191,11 @@ class MeasurementPreset(object):
     """
     import math
     from HeartValveLib.util import getPointsOnPlane
-    curveIntersectionPoints = getPointsOnPlane(planePosition, planeNormal, valveModel.annulusContourCurve.GetCurve())
+    curveIntersectionPoints = getPointsOnPlane(planePosition, planeNormal, valveModel.annulusContourCurveNode.GetCurve())
+
+    if curveIntersectionPoints.shape[1] < 2:
+      raise ValueError(f"the annulus contour of {valveModel.heartValveNode.GetName()} intersects the cutting plane in "
+                       f"{curveIntersectionPoints.shape[1]} point(s), 2 are needed")
 
     # TODO: handle cases when number of intersection points != 2
     # TODO: it would be more robust to sort based on sortDirectionVector position and pick first and last points
@@ -1040,7 +1208,7 @@ class MeasurementPreset(object):
     p1p2SameDirectionAsSortDirection = (vtk.vtkMath.AngleBetweenVectors(sortDirectionVector, p2-p1) < math.pi/2)
     return [p1, p2] if p1p2SameDirectionAsSortDirection else [p2, p1]
 
-  def addLeafletSurfaceArea3D(self, valveModel, leafletSegmentId, measurementName):
+  def addLeafletSurfaceArea3D(self, valveModel, leafletSegmentId, measurementName, currentModelNode=None):
 
     # Get leaflet surface
     leafletModel = valveModel.findLeafletModel(leafletSegmentId)
@@ -1063,11 +1231,15 @@ class MeasurementPreset(object):
     color = segmentation.GetSegment(leafletSegmentId).GetColor()
 
     # Create a copy of the leaflet surface
-    modelsLogic = slicer.modules.models.logic()
-    leafletSurfaceModelNode = modelsLogic.AddModel(leafletSurfacePolyData)
+    if currentModelNode:
+      leafletSurfaceModelNode = currentModelNode
+      leafletSurfaceModelNode.SetAndObservePolyData(leafletSurfacePolyData)
+    else:
+      modelsLogic = slicer.modules.models.logic()
+      leafletSurfaceModelNode = modelsLogic.AddModel(leafletSurfacePolyData)
+      leafletSurfaceModelNode.GetDisplayNode().SetVisibility(False)
     leafletSurfaceModelNode.SetName(measurementName)
     leafletSurfaceModelNode.GetDisplayNode().SetColor(color)
-    leafletSurfaceModelNode.GetDisplayNode().SetVisibility(False)
     leafletSurfaceModelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
     leafletSurfaceModelNode.GetDisplayNode().SetOpacity(0.6)
     leafletSurfaceModelNode.GetDisplayNode().SetAmbient(0.1)
@@ -1075,6 +1247,7 @@ class MeasurementPreset(object):
     leafletSurfaceModelNode.GetDisplayNode().SetSpecular(0.1)
     leafletSurfaceModelNode.GetDisplayNode().SetPower(10)
     leafletSurfaceModelNode.GetDisplayNode().BackfaceCullingOff()
+
     # Place model into subject and transform hierarchy
     self.moveNodeToMeasurementFolder(leafletSurfaceModelNode)
     leafletSurfaceModelNode.SetAndObserveTransformNodeID(leafletTransformNodeId)
@@ -1087,7 +1260,7 @@ class MeasurementPreset(object):
     return leafletSurfacePolyData, leafletSurfaceArea3d
 
   @staticmethod
-  def createCurveModel(modelName, curvePoints, radius=0.25, color=None, tubeResolution=8, visibility=False):
+  def createCurveModel(modelName, curvePoints, radius=0.25, color=None, tubeResolution=8, visibility=False, currentModelNode=None):
     """
     Create a line model (line segment with spheres at the endpoints)
     :param modelName: Name of the created model node
@@ -1125,9 +1298,13 @@ class MeasurementPreset(object):
     triangles.Update()
 
     modelsLogic = slicer.modules.models.logic()
-    modelNode = modelsLogic.AddModel(triangles.GetOutput())
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(triangles.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(triangles.GetOutput())
+      modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.SetName(modelName)
-    modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
 
     return modelNode
@@ -1169,14 +1346,15 @@ class MeasurementPreset(object):
       modelsLogic = slicer.modules.models.logic()
       modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutputPort())
       modelNode.SetName(modelName)
-      displayNode = modelNode.GetDisplayNode()
-      displayNode.SetVisibility(visibility)
-      displayNode.SetOpacity(opacity)
-      displayNode.SetColor(color)
-      if displayAsGrid:
-        displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
-        displayNode.BackfaceCullingOff()
-        displayNode.LightingOff()  # don't make the grid darker if it is rotated
+
+    displayNode = modelNode.GetDisplayNode()
+    displayNode.SetVisibility(visibility)
+    displayNode.SetOpacity(opacity)
+    displayNode.SetColor(color)
+    if displayAsGrid:
+      displayNode.SetRepresentation(slicer.vtkMRMLModelDisplayNode.WireframeRepresentation)
+      displayNode.BackfaceCullingOff()
+      displayNode.LightingOff()  # don't make the grid darker if it is rotated
 
     return modelNode
 
@@ -1224,7 +1402,7 @@ class MeasurementPreset(object):
     return triangulator.GetOutput()
 
   @staticmethod
-  def createLineModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False):
+  def createLineModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False, currentModelNode=None):
     """
     Create a line model (line segment with spheres at the endpoints)
     :param modelName: Name of the created model node
@@ -1265,15 +1443,19 @@ class MeasurementPreset(object):
 
     modelsLogic = slicer.modules.models.logic()
     polyDataAppend.Update()
-    modelNode = modelsLogic.AddModel(polyDataAppend.GetOutput())
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(polyDataAppend.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(polyDataAppend.GetOutput())
+      modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.SetName(modelName)
-    modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
     # modelNode.GetDisplayNode().LightingOff() # don't make the line edges darker
     return modelNode
 
   @staticmethod
-  def createArrowModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False):
+  def createArrowModel(modelName, pos1, pos2, radius=0.25, color=None, visibility=False, currentModelNode=None):
     """
     Create an arrow model from pos1 to pos2
     :param modelName: Name of the created model node
@@ -1302,14 +1484,19 @@ class MeasurementPreset(object):
 
     modelsLogic = slicer.modules.models.logic()
     polyTransformToWorld.Update()
-    modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutput())
+
+    if currentModelNode:
+      modelNode = currentModelNode
+      modelNode.SetAndObservePolyData(polyTransformToWorld.GetOutput())
+    else:
+      modelNode = modelsLogic.AddModel(polyTransformToWorld.GetOutput())
+      modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.SetName(modelName)
-    modelNode.GetDisplayNode().SetVisibility(visibility)
     modelNode.GetDisplayNode().SetColor(color)
     # modelNode.GetDisplayNode().LightingOff() # don't make the line edges darker
     return modelNode
 
-  def addSegmentVolumeMeasurement(self, measurementName, color, segmentationNode, segmentID):
+  def addSegmentVolumeMeasurement(self, measurementName, color, segmentationNode, segmentID, currentModelNode=None):
     import vtkSegmentationCorePython as vtkSegmentationCore
 
     segmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, segmentID)
@@ -1350,10 +1537,14 @@ class MeasurementPreset(object):
     modelsLogic = slicer.modules.models.logic()
     modelMesh = vtk.vtkPolyData()
     segmentationNode.GetClosedSurfaceRepresentation(segmentID, modelMesh)
-    volumeModelNode = modelsLogic.AddModel(modelMesh)
+    if currentModelNode:
+      volumeModelNode = currentModelNode
+      volumeModelNode.SetAndObservePolyData(modelMesh)
+    else:
+      volumeModelNode = modelsLogic.AddModel(modelMesh)
+      volumeModelNode.GetDisplayNode().SetVisibility(False)
     volumeModelNode.SetName(measurementName)
     volumeModelNode.GetDisplayNode().SetColor(color)
-    volumeModelNode.GetDisplayNode().SetVisibility(False)
     volumeModelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
     volumeModelNode.GetDisplayNode().SetOpacity(1.0)
     volumeModelNode.GetDisplayNode().SetAmbient(0.1)
@@ -1365,6 +1556,133 @@ class MeasurementPreset(object):
     self.moveNodeToMeasurementFolder(volumeModelNode)
     volumeModelNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
     return volumeMm3
+
+  # Largest reference geometry (in voxels, after oversampling) accepted for rasterizing the volume
+  # between surfaces. Valve-sized reference geometries are a few ten million voxels.
+  MAX_VOLUME_RASTERIZATION_VOXELS = 250000000
+
+  @staticmethod
+  def isValidImageGeometry(imageData):
+    extent = imageData.GetExtent()
+    return all(extent[2 * axis] <= extent[2 * axis + 1] for axis in range(3))
+
+  @staticmethod
+  def imageGeometryWorldBounds(imageData):
+    """Axis-aligned world bounds of an oriented image (its extent corners transformed to world)."""
+    imageToWorldMatrix = vtk.vtkMatrix4x4()
+    imageData.GetImageToWorldMatrix(imageToWorldMatrix)
+    extent = imageData.GetExtent()
+    corners = np.array([[extent[i], extent[2 + j], extent[4 + k], 1.0] for i in (0, 1) for j in (0, 1) for k in (0, 1)])
+    worldCorners = corners @ np.array([[imageToWorldMatrix.GetElement(r, c) for c in range(4)] for r in range(4)]).T
+    return worldCorners[:, :3].min(axis=0), worldCorners[:, :3].max(axis=0)
+
+  @staticmethod
+  def segmentLabelmapsGeometry(segmentationNode):
+    """Union extent of the binary labelmaps of all segments and their image-to-world matrix.
+    :return: (extent list, vtkMatrix4x4), (None, None) if no segment has a labelmap
+    """
+    unionExtent = None
+    imageToWorldMatrix = vtk.vtkMatrix4x4()
+    for segmentId in segmentationNode.GetSegmentation().GetSegmentIDs():
+      labelmap = vtkSegmentationCore.vtkOrientedImageData()
+      if not segmentationNode.GetBinaryLabelmapRepresentation(segmentId, labelmap) or not labelmap.GetPointData().GetScalars():
+        continue
+      if not MeasurementPreset.isValidImageGeometry(labelmap):
+        continue
+      extent = labelmap.GetExtent()
+      if unionExtent is None:
+        unionExtent = list(extent)
+        labelmap.GetImageToWorldMatrix(imageToWorldMatrix)
+      else:
+        for axis in range(3):
+          unionExtent[2 * axis] = min(unionExtent[2 * axis], extent[2 * axis])
+          unionExtent[2 * axis + 1] = max(unionExtent[2 * axis + 1], extent[2 * axis + 1])
+    if unionExtent is None:
+      return None, None
+    return unionExtent, imageToWorldMatrix
+
+  @staticmethod
+  def serializeZeroBasedImageGeometry(imageToWorldMatrix, extent):
+    """Serialized image geometry of the voxel grid (imageToWorldMatrix, extent) with the extent moved to
+    start at 0 (the origin is moved to the first voxel, so the grid does not move in world coordinates).
+
+    Slicer's oversampling of a reference geometry (vtkCalculateOversamplingFactor::ApplyOversamplingOnImageGeometry)
+    clamps the maximum of a negative extent to 0, which turns a geometry with a negative extent into
+    an image of up to billions of voxels: rasterizing the leaflet surfaces with the geometry of the
+    labelmaps of a legacy scene (extent starting around -4000) aborted the application with a
+    negative allocation.
+    """
+    origin = imageToWorldMatrix.MultiplyPoint([extent[0], extent[2], extent[4], 1.0])
+    zeroBasedMatrix = vtk.vtkMatrix4x4()
+    zeroBasedMatrix.DeepCopy(imageToWorldMatrix)
+    for axis in range(3):
+      zeroBasedMatrix.SetElement(axis, 3, origin[axis])
+    geometryImage = vtkSegmentationCore.vtkOrientedImageData()
+    geometryImage.SetExtent(0, extent[1] - extent[0], 0, extent[3] - extent[2], 0, extent[5] - extent[4])
+    geometryImage.SetImageToWorldMatrix(zeroBasedMatrix)
+    return vtkSegmentationCore.vtkSegmentationConverter.SerializeImageGeometry(zeroBasedMatrix, geometryImage)
+
+  @staticmethod
+  def referenceGeometryFromSegments(segmentationNode, paddingVoxels=10):
+    """Serialized image geometry that covers the binary labelmaps of all segments of the segmentation
+    node (in the grid of the labelmaps), padded by paddingVoxels on each side.
+    :return: geometry string, None if no segment has a labelmap
+    """
+    unionExtent, imageToWorldMatrix = MeasurementPreset.segmentLabelmapsGeometry(segmentationNode)
+    if unionExtent is None:
+      return None
+    paddedExtent = [unionExtent[0] - paddingVoxels, unionExtent[1] + paddingVoxels,
+                    unionExtent[2] - paddingVoxels, unionExtent[3] + paddingVoxels,
+                    unionExtent[4] - paddingVoxels, unionExtent[5] + paddingVoxels]
+    return MeasurementPreset.serializeZeroBasedImageGeometry(imageToWorldMatrix, paddedExtent)
+
+  def volumeRasterizationGeometry(self, leafletSegmentationNode, oversamplingFactor):
+    """Reference image geometry for rasterizing surfaces of the leaflet segmentation.
+
+    The segmentation's own reference image geometry is used when it is usable. Legacy scenes contain
+    leaflet segmentations whose reference geometry is unusable: segmentations propagated by the
+    registration workflow carry an empty extent (rasterizing with it allocated an image of negative
+    size and aborted the application), others carry a single-voxel placeholder that does not cover the
+    leaflets, or the whole ultrasound volume at sub-voxel resolution (billions of voxels after
+    oversampling). In those cases the geometry of the leaflet labelmaps is used instead.
+    The returned geometry never has a negative extent (see serializeZeroBasedImageGeometry).
+    :return: (geometry string, reason) where reason is None if the segmentation's own geometry is used,
+      and (None, reason) if no geometry can be determined
+    """
+    parameterName = vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName()
+    referenceGeometryString = leafletSegmentationNode.GetSegmentation().GetConversionParameter(parameterName)
+    reason = None
+    if not referenceGeometryString:
+      reason = "no reference image geometry"
+    else:
+      referenceGeometryImage = vtkSegmentationCore.vtkOrientedImageData()
+      vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(referenceGeometryString, referenceGeometryImage)
+      if not self.isValidImageGeometry(referenceGeometryImage):
+        reason = "reference image geometry with an empty extent"
+      else:
+        dimensions = referenceGeometryImage.GetDimensions()
+        voxels = dimensions[0] * dimensions[1] * dimensions[2] * oversamplingFactor ** 3
+        if voxels > self.MAX_VOLUME_RASTERIZATION_VOXELS:
+          reason = f"reference image geometry of {voxels} voxels after oversampling"
+        else:
+          unionExtent, imageToWorldMatrix = self.segmentLabelmapsGeometry(leafletSegmentationNode)
+          if unionExtent is not None:
+            labelmapsImage = vtkSegmentationCore.vtkOrientedImageData()
+            labelmapsImage.SetExtent(unionExtent)
+            labelmapsImage.SetImageToWorldMatrix(imageToWorldMatrix)
+            referenceMin, referenceMax = self.imageGeometryWorldBounds(referenceGeometryImage)
+            labelmapsMin, labelmapsMax = self.imageGeometryWorldBounds(labelmapsImage)
+            tolerance = max(referenceGeometryImage.GetSpacing())
+            if np.any(labelmapsMin < referenceMin - tolerance) or np.any(labelmapsMax > referenceMax + tolerance):
+              reason = "reference image geometry that does not cover the leaflet labelmaps"
+    if reason is None:
+      extent = referenceGeometryImage.GetExtent()
+      if min(extent[0], extent[2], extent[4]) < 0:
+        imageToWorldMatrix = vtk.vtkMatrix4x4()
+        referenceGeometryImage.GetImageToWorldMatrix(imageToWorldMatrix)
+        referenceGeometryString = self.serializeZeroBasedImageGeometry(imageToWorldMatrix, extent)
+      return referenceGeometryString, None
+    return self.referenceGeometryFromSegments(leafletSegmentationNode), reason
 
   def addVolumeMeasurementBetweenSurfaces(self, measurementName, color, valveModel, allLeafletSurfacePolyData,
                                           annulusAreaPolyData, extrusionDirection, extrusionLength, leafletRois):
@@ -1393,10 +1711,15 @@ class MeasurementPreset(object):
     # Set parent transform
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
     segmentationNode.SetAndObserveTransformNodeID(leafletSegmentationNode.GetTransformNodeID())
-    # Set reference image geometry
-    referenceGeometryString = leafletSegmentationNode.GetSegmentation().GetConversionParameter(vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName())
-    referenceGeometryImage = vtkSegmentationCore.vtkOrientedImageData()
-    vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(referenceGeometryString, referenceGeometryImage)
+    # Set reference image geometry (the leaflet segmentation itself is left unchanged)
+    referenceGeometryString, reason = self.volumeRasterizationGeometry(leafletSegmentationNode, oversamplingFactor)
+    if reason:
+      if not referenceGeometryString:
+        self.metricsMessages.append(f"{measurementName} cannot be computed: the leaflet segmentation has {reason} and no labelmaps.")
+        slicer.mrmlScene.RemoveNode(segmentationNode)
+        return
+      logging.warning(f"{measurementName}: the leaflet segmentation of {valveModel.heartValveNode.GetName()} has {reason},"
+                      " using the geometry of the leaflet labelmaps")
     segmentation.SetConversionParameter(vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName(), referenceGeometryString)
     segmentation.SetConversionParameter(vtkSegmentationCore.vtkClosedSurfaceToBinaryLabelmapConversionRule.GetOversamplingFactorParameterName(), str(oversamplingFactor))
     # Crop models to labelmap (to save memory and make sure that at the far end both segments are cropped to the same size)
@@ -1463,7 +1786,8 @@ class MeasurementPreset(object):
 
     # Smooth the segment to reduce jaggedness of the generated surface. It reduces volume by about 1-2%.
     valveModel.smoothSegment(segmentationNode, leafletClosedSurfaceSegmentId, kernelSizePixel=[3,3,3], method='median')
-    self.addSegmentVolumeMeasurement(measurementName, color, segmentationNode, leafletClosedSurfaceSegmentId)
+    volumeModel = self.getOrAddMetricModelNode(valveModel, measurementName)
+    self.addSegmentVolumeMeasurement(measurementName, color, segmentationNode, leafletClosedSurfaceSegmentId, volumeModel)
 
     for leafletRoiSegmentId in leafletRoiSegmentIds:
       leafletSegmentLabelmap = getBinaryLabelmapRepresentation(segmentationNode, leafletClosedSurfaceSegmentId)
@@ -1532,7 +1856,6 @@ class MeasurementPreset(object):
     modelNode.GetDisplayNode().SetSpecular(0.1)
     modelNode.GetDisplayNode().SetPower(10)
     modelNode.GetDisplayNode().BackfaceCullingOff()
-
     modelNode.GetDisplayNode().SetActiveScalarName('Distance')
 
     useCustomColorNode = True
@@ -1620,7 +1943,7 @@ class MeasurementPreset(object):
 
     # Create soap bubble surface
 
-    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurve).T
+    annulusPoints = slicer.util.arrayFromMarkupsCurvePoints(valveModel.annulusContourCurveNode).T
     annulusAreaPolyData = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 1.2)
 
     # Create fused leaflet surface
@@ -1630,16 +1953,33 @@ class MeasurementPreset(object):
     segmentation = leafletSegmentationNode.GetSegmentation()
     allLeafletThickness = []
     leafletSurfaces = []
+    # Segment ID of each entry of leafletSurfaces: the per-leaflet atrial areas are assigned by position
+    # in this list, which must not be confused with the position among all leaflet models
+    leafletSurfaceSegmentIds = []
     for leafletModel in valveModel.leafletModels:
       segmentId = leafletModel.segmentId
       segment = segmentation.GetSegment(segmentId)
+      # All time points of a valve share the same leaflet segments: a leaflet that is not segmented at
+      # this time point has no metrics here
+      if not segment or not valveModel.segmentHasContent(segmentation, segmentId):
+        continue
 
       leafletVolume = self.addSegmentVolumeMeasurement("Leaflet volume - {0}".format(segment.GetName()),
                                                        segment.GetColor(), leafletSegmentationNode,
                                                        segmentId)
       try:
-        leafletSurfacePolyData, leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId,
-                                                            "Leaflet area - {0} (3D)".format(segment.GetName()))
+        metricName = "Leaflet area - {0}".format(segment.GetName())
+        leafletModel = valveModel.findLeafletModel(segmentId)
+        leafletSurfaceModelNode = None
+        if (leafletModel is not None and leafletModel.surfaceModelNode is not None
+            and leafletModel.surfaceModelNode.GetPolyData() is not None
+            and leafletModel.surfaceModelNode.GetPolyData().GetNumberOfPoints() > 0):
+          # Only create the metric model when there is a surface to store: a leaflet without a
+          # surface left an empty model without transform or folder behind
+          leafletSurfaceModelNode = self.getOrAddMetricModelNode(valveModel, metricName)
+        leafletSurfacePolyData, leafletSurfaceArea = self.addLeafletSurfaceArea3D(valveModel, segmentId, metricName,
+                                                                                  currentModelNode=leafletSurfaceModelNode)
+
         if leafletSurfaceArea is not None:
           # NB: estimating leaflet thickness by dividing volume by surface area
           allLeafletThickness.append(leafletVolume/leafletSurfaceArea)
@@ -1649,6 +1989,7 @@ class MeasurementPreset(object):
         # NB: necessary for calculating partial atrial surface
         if leafletSurfacePolyData is not None:
           leafletSurfaces.append( leafletSurfacePolyData )
+          leafletSurfaceSegmentIds.append(segmentId)
       except TypeError as exc:
         logging.warning("Leaflet ({}) thickness computation failed: {}".format(segment.GetName(), str(exc)))
         import traceback
@@ -1661,33 +2002,47 @@ class MeasurementPreset(object):
 
     valveSurfacePolydata = mergePolydata(*leafletSurfaces)
     try:
-      # Smooth PolyData
-      # NB: using a bigger annulus area, so it can better fit/wrap to the valve surface
-      annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 5.0)
+      if leafletSurfaces:
+        # Smooth PolyData
+        # NB: using a bigger annulus area, so it can better fit/wrap to the valve surface
+        annulusAreaPolyDataBigger = self.createSoapBubblePolyDataFromCircumferencePoints(annulusPoints, 5.0)
 
-      # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
-      maxLeafletDepthMm = 60
+        # Max height of leaflets. Leaflets should not be higher/lower than this value compared to the annulus.
+        maxLeafletDepthMm = 60
 
-      # NB: get largest distance in atrial direction and translate 3d annulus plane there to drop the blanket
-      allLeafletSurfacePolyDataWithDistance = \
-        self.getSignedDistance(valveSurfacePolydata, annulusAreaPolyData, -planeNormal, maxLeafletDepthMm)
+        # NB: get largest distance in atrial direction and translate 3d annulus plane there to drop the blanket
+        allLeafletSurfacePolyDataWithDistance = \
+          self.getSignedDistance(valveSurfacePolydata, annulusAreaPolyData, -planeNormal, maxLeafletDepthMm)
 
-      distances = \
-        vtk.util.numpy_support.vtk_to_numpy(
-          allLeafletSurfacePolyDataWithDistance.GetCellData().GetArray("Distance")
-        )
+        distances = \
+          vtk.util.numpy_support.vtk_to_numpy(
+            allLeafletSurfacePolyDataWithDistance.GetCellData().GetArray("Distance")
+          )
 
-      annulusAreaPolyDataBigger = translatePolyData(annulusAreaPolyDataBigger, -planeNormal, max(distances) * 1.2)
+        annulusAreaPolyDataBigger = translatePolyData(annulusAreaPolyDataBigger, -planeNormal, max(distances) * 1.2)
 
-      allLeafletSurfacePolyData = \
-        extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces, iterations=3,
-                                                    nVertices=5000, subdivide=2, smoothIterations=100,
-                                                    relaxationFactor=0.7)
+        allLeafletSurfacePolyData = \
+          extractValveSurfaceWithSmoothPolyDataFilter(annulusAreaPolyDataBigger, leafletSurfaces, iterations=3,
+                                                      nVertices=5000, subdivide=2, smoothIterations=100,
+                                                      relaxationFactor=0.7)
 
-      if allLeafletSurfacePolyData:
-        self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
-                                              valveModel,
-                                              planeNormal)  # , strategy="(SmoothPolydata)")
+        if allLeafletSurfacePolyData:
+          self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+                                                valveModel, planeNormal,
+                                                leafletSurfaceSegmentIds=leafletSurfaceSegmentIds)  # , strategy="(SmoothPolydata)")
+
+      else:
+        # The leaflet surfaces have not been extracted (LeafletAnalysis): take the valve surface from the
+        # closed union of the leaflet segments instead, so that the atrial area, billow and tenting metrics
+        # are still computed
+        kernelSizeMm = 2.0
+        allLeafletSurfacePolyData = extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition,
+                                                                                 planeNormal, kernelSizeMm,
+                                                                                 maxKernelSizeMm=3.0)
+        if allLeafletSurfacePolyData:
+          self.addBillowTentingAndAtrialSurface(allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
+                                                valveModel, planeNormal,
+                                                leafletSurfaceSegmentIds=leafletSurfaceSegmentIds)
 
       # NB: Morphological_Closing
 
@@ -1711,10 +2066,11 @@ class MeasurementPreset(object):
       #                                         planeNormal, strategy="(Wrap Solidify)")
 
     except AttributeError:
+      logging.exception("Valve surface extraction failed")
       self.addMessage("Valve Surface not extracted")
 
   def addBillowTentingAndAtrialSurface(self, allLeafletSurfacePolyData, annulusAreaPolyData, leafletSurfaces,
-                                       valveModel, planeNormal, strategy=''):
+                                       valveModel, planeNormal, strategy='', leafletSurfaceSegmentIds=None):
     if not allLeafletSurfacePolyData:
       logging.warning(f'Could not extract valve surface from {valveModel.heartValveNode.GetName()} using {strategy}')
       return
@@ -1739,7 +2095,8 @@ class MeasurementPreset(object):
                          KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                          KEY_UNIT: 'mm*mm'})
     if leafletSurfaces:
-      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy)
+      self.addLeafletAtrialSurfaceMeasurements(valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy,
+                                               leafletSurfaceSegmentIds)
     # Get leaflet projections on the valve plane normal so that we can split the volume measurements per leaflet
     leafletRois = []
     for leafletModel in valveModel.leafletModels:
@@ -1774,7 +2131,20 @@ class MeasurementPreset(object):
     for leafletRoi in leafletRois:
       slicer.mrmlScene.RemoveNode(leafletRoi.roiModelNode)
 
-  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy=''):
+  def addLeafletAtrialSurfaceMeasurements(self, valveModel, allLeafletSurfacePolyData, leafletSurfaces, strategy='',
+                                          leafletSurfaceSegmentIds=None):
+    """Split the atrial valve surface between the leaflets (each cell goes to the closest leaflet surface)
+    and report the area per leaflet.
+    :param leafletSurfaceSegmentIds: segment ID of each entry of leafletSurfaces. Leaflets without a
+      surface (e.g. not segmented at this time point) are absent from leafletSurfaces, so the entries
+      cannot be matched to the leaflet models by position: that assigned the areas to the wrong leaflets.
+    """
+    if leafletSurfaceSegmentIds is None:
+      leafletSurfaceSegmentIds = [leafletModel.segmentId for leafletModel in valveModel.leafletModels]
+    if len(leafletSurfaceSegmentIds) != len(leafletSurfaces):
+      logging.warning(f"Leaflet atrial areas of {valveModel.heartValveNode.GetName()} not computed: "
+                      f"{len(leafletSurfaces)} leaflet surfaces for {len(leafletSurfaceSegmentIds)} leaflets")
+      return
     # calculate all cell center distances from atrial valve surface to individual leaflets
     vtkCenters = vtk.vtkCellCenters()
     vtkCenters.SetInputData(allLeafletSurfacePolyData)
@@ -1807,8 +2177,8 @@ class MeasurementPreset(object):
     leafletSegmentationNode = valveModel.getLeafletSegmentationNode()
     segmentation = leafletSegmentationNode.GetSegmentation()
 
-    for idx, leafletModel in enumerate(valveModel.leafletModels):
-      segmentId = leafletModel.segmentId
+    for idx, segmentId in enumerate(leafletSurfaceSegmentIds):
+      leafletModel = valveModel.findLeafletModel(segmentId)
       segment = segmentation.GetSegment(segmentId)
       metricName = f'Leaflet area (atrial) - {segment.GetName()} (3D){strategy}'
 
@@ -1827,9 +2197,7 @@ class MeasurementPreset(object):
       geometryFilter.Update()
       leafletSurface = geometryFilter.GetOutput()
 
-      modelsLogic = slicer.modules.models.logic()
-      modelNode = modelsLogic.AddModel(leafletSurface)
-      modelNode.GetDisplayNode().SetVisibility(False)
+      modelNode = self.getOrAddMetricModelNode(valveModel, metricName)
       modelNode.GetDisplayNode().SetSliceIntersectionThickness(5)
       modelNode.GetDisplayNode().SetColor(leafletModel.getLeafletColor())
       modelNode.GetDisplayNode().SetOpacity(0.6)
@@ -1850,6 +2218,31 @@ class MeasurementPreset(object):
                            KEY_VALUE: "{:.1f}".format(leafletSurfaceArea3d),
                            KEY_UNIT: 'mm*mm'})
 
+  def getOrAddMetricModelNode(self, valveModel, nodeName, createSequence=True):
+    """
+    Get or create a model node for a metric
+    :param valveModel: ValveModel
+    :param nodeName: name of the model node to get or create
+    :param createSequence: if True then a sequence node is created and a time point is added to it
+    :return: model node
+    """
+    modelNode = valveModel.metricsResults.get(nodeName)
+    if modelNode is None:
+      modelsLogic = slicer.modules.models.logic()
+      modelNode = modelsLogic.AddModel(vtk.vtkPolyData())
+      modelNode.SetName(nodeName)
+      valveModel.metricsResults[nodeName] = modelNode
+      modelNode.SetDisplayVisibility(False)
+
+    if not createSequence:
+      return modelNode
+
+    sequenceNode = valveModel.valveBrowser.valveBrowserNode.GetSequenceNode(modelNode)
+    if sequenceNode is None:
+      sequenceNode = valveModel.valveBrowser.makeTimeSequence(modelNode)
+    valveModel.valveBrowser.addCurrentTimePointToSequence(sequenceNode)
+
+    return modelNode
 
 def extractValveSurfaceUsingMorphologicalClosing(valveModel, planePosition, planeNormal, kernelSizeMm, maxKernelSizeMm):
   allLeafletSurfacePolyData = valveModel.createValveSurface(planePosition, planeNormal, kernelSizeMm)
