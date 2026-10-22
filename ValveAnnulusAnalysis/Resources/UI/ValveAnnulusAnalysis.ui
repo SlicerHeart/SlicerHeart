@@ -6,26 +6,26 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>413</width>
-    <height>1017</height>
+    <width>496</width>
+    <height>959</height>
    </rect>
   </property>
   <layout class="QFormLayout" name="formLayout">
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Heart valve:</string>
+      <string>Valve series:</string>
      </property>
     </widget>
    </item>
    <item row="0" column="1">
-    <widget class="qMRMLNodeComboBox" name="heartValveSelector">
+    <widget class="qMRMLNodeComboBox" name="heartValveBrowserSelector">
      <property name="toolTip">
       <string>Select heart valve node where annulus will be added</string>
      </property>
      <property name="nodeTypes">
       <stringlist>
-       <string>vtkMRMLScriptedModuleNode</string>
+       <string>vtkMRMLSequenceBrowserNode</string>
       </stringlist>
      </property>
      <property name="showHidden">
@@ -35,7 +35,7 @@
       <bool>false</bool>
      </property>
      <property name="baseName">
-      <string>HeartValve</string>
+      <string>HeartValveBrowser</string>
      </property>
      <property name="addEnabled">
       <bool>true</bool>
@@ -59,47 +59,64 @@
     <widget class="QComboBox" name="valveTypeSelector"/>
    </item>
    <item row="2" column="0">
-    <widget class="QLabel" name="label_5">
+    <widget class="QLabel" name="label_9">
      <property name="text">
-      <string>Cardiac cycle phase:</string>
+      <string>Valve volume: </string>
      </property>
     </widget>
    </item>
-   <item row="5" column="0" colspan="2">
+   <item row="2" column="1">
+    <widget class="qMRMLNodeComboBox" name="valveVolumeSelector">
+     <property name="toolTip">
+      <string>Select heart valve volume node where the annulus will be defined</string>
+     </property>
+     <property name="nodeTypes">
+      <stringlist>
+       <string>vtkMRMLScalarVolumeNode</string>
+      </stringlist>
+     </property>
+     <property name="showChildNodeTypes">
+      <bool>false</bool>
+     </property>
+     <property name="addEnabled">
+      <bool>false</bool>
+     </property>
+     <property name="renameEnabled">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="label_2">
+     <property name="text">
+      <string>Probe position:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="1">
+    <widget class="QComboBox" name="probePositionSelector">
+     <property name="toolTip">
+      <string>Select valve volume, phase, probe position.
+Set annulus center by pressing Shift key and moving mouse in a slice viewer.
+Fine-tune view orientation using the three sliders to make the red slice (horizontal red line) aligned with the annulus plane.</string>
+     </property>
+    </widget>
+   </item>
+   <item row="9" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="viewCollapsibleButton">
      <property name="text">
       <string>View</string>
      </property>
      <layout class="QFormLayout" name="formLayout_4">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_2">
+      <item row="0" column="1">
+       <widget class="QPushButton" name="displayFourUpViewButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
         <property name="text">
-         <string>Probe position:</string>
+         <string>Reset view</string>
         </property>
        </widget>
-      </item>
-      <item row="0" column="1">
-       <layout class="QHBoxLayout" name="horizontalLayout">
-        <item>
-         <widget class="QComboBox" name="probePositionSelector">
-          <property name="toolTip">
-           <string>Select valve volume, phase, probe position.
-Set annulus center by pressing Shift key and moving mouse in a slice viewer.
-Fine-tune view orientation using the three sliders to make the red slice (horizontal red line) aligned with the annulus plane.</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="displayFourUpViewButton">
-          <property name="enabled">
-           <bool>false</bool>
-          </property>
-          <property name="text">
-           <string>Reset view</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
       </item>
       <item row="1" column="0" colspan="2">
        <widget class="qMRMLTransformSliders" name="axialSliceToRasTransformOrientationSliderWidget">
@@ -120,57 +137,25 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
-   <item row="8" column="0" colspan="2">
+   <item row="12" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="contouringCollapsibleButton">
      <property name="text">
       <string>Contouring</string>
      </property>
      <layout class="QFormLayout" name="formLayout_2">
-      <item row="0" column="0" colspan="2">
-       <widget class="QPushButton" name="placeButton">
-        <property name="text">
-         <string>Mark annulus circumference</string>
-        </property>
-        <property name="checkable">
-         <bool>true</bool>
+      <item row="1" column="0" colspan="2">
+       <widget class="qSlicerMarkupsPlaceWidget" name="placeButton2">
+        <property name="placeMultipleMarkups">
+         <enum>qSlicerMarkupsPlaceWidget::ForcePlaceMultipleMarkups</enum>
         </property>
        </widget>
       </item>
-      <item row="1" column="0" colspan="2">
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-        <item>
-         <widget class="QPushButton" name="deleteLastFiducialButton">
-          <property name="enabled">
-           <bool>false</bool>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>30</height>
-           </size>
-          </property>
-          <property name="text">
-           <string>Delete last</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="deleteAllFiducialsButton">
-          <property name="enabled">
-           <bool>false</bool>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>30</height>
-           </size>
-          </property>
-          <property name="text">
-           <string>Delete all</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_3">
+        <property name="text">
+         <string>Rotation angle: </string>
+        </property>
+       </widget>
       </item>
       <item row="2" column="1">
        <widget class="ctkSliderWidget" name="orthogonalSlicerRotationSliderWidget">
@@ -185,10 +170,10 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_3">
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_7">
         <property name="text">
-         <string>Rotation angle: </string>
+         <string>Angle increment:</string>
         </property>
        </widget>
       </item>
@@ -269,17 +254,28 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
         </item>
        </layout>
       </item>
-      <item row="3" column="0">
-       <widget class="QLabel" name="label_7">
-        <property name="text">
-         <string>Angle increment:</string>
-        </property>
-       </widget>
+      <item row="0" column="0" colspan="2">
+       <layout class="QHBoxLayout" name="horizontalLayout_9">
+        <item>
+         <widget class="QPushButton" name="addAnnulusContourCurveButton">
+          <property name="text">
+           <string>Add annulus contour</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="removeAnnulusContourCurveButton">
+          <property name="text">
+           <string>Remove annulus contour</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>
    </item>
-   <item row="11" column="0" colspan="2">
+   <item row="15" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="contourAdjustmentCollapsibleButton">
      <property name="text">
       <string>Contour adjustment</string>
@@ -392,7 +388,7 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
-   <item row="12" column="0" colspan="2">
+   <item row="16" column="0" colspan="2">
     <widget class="ctkCollapsibleButton" name="displayCollapsibleButton">
      <property name="text">
       <string>Display</string>
@@ -424,68 +420,36 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
      </layout>
     </widget>
    </item>
-   <item row="2" column="1">
-    <widget class="QComboBox" name="cardiacCyclePhaseSelector"/>
-   </item>
-   <item row="3" column="0">
-    <widget class="QLabel" name="label_9">
-     <property name="text">
-      <string>Valve volume: </string>
+   <item row="4" column="1">
+    <widget class="QFrame" name="valveSequenceBrowserFrame">
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
      </property>
-    </widget>
-   </item>
-   <item row="3" column="1">
-    <widget class="qMRMLNodeComboBox" name="valveVolumeSelector">
-     <property name="toolTip">
-      <string>Select heart valve volume node where the annulus will be defined</string>
+     <property name="frameShadow">
+      <enum>QFrame::Raised</enum>
      </property>
-     <property name="nodeTypes">
-      <stringlist>
-       <string>vtkMRMLScalarVolumeNode</string>
-      </stringlist>
-     </property>
-     <property name="showChildNodeTypes">
-      <bool>false</bool>
-     </property>
-     <property name="addEnabled">
-      <bool>false</bool>
-     </property>
-     <property name="renameEnabled">
-      <bool>true</bool>
-     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+     </layout>
     </widget>
    </item>
    <item row="4" column="0">
-    <widget class="QLabel" name="label_6">
+    <widget class="QLabel" name="label_12">
      <property name="text">
-      <string>Valve volume index:</string>
+      <string>Time points:</string>
      </property>
     </widget>
-   </item>
-   <item row="4" column="1">
-    <layout class="QHBoxLayout" name="horizontalLayout_3">
-     <item>
-      <widget class="QLabel" name="valveVolumeSequenceIndexValue">
-       <property name="text">
-        <string>0</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="useCurrentFrameButton">
-       <property name="text">
-        <string>Use current</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="goToAnalyzedFrameButton">
-       <property name="text">
-        <string>Go to</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
    </item>
   </layout>
  </widget>
@@ -522,6 +486,11 @@ Fine-tune view orientation using the three sliders to make the red slice (horizo
    <extends>QWidget</extends>
    <header>qSlicerWidget.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qSlicerMarkupsPlaceWidget</class>
+   <extends>qSlicerWidget</extends>
+   <header>qSlicerMarkupsPlaceWidget.h</header>
   </customwidget>
   <customwidget>
    <class>qSlicerSimpleMarkupsWidget</class>
