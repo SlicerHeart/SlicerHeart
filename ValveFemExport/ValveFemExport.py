@@ -391,8 +391,10 @@ class ValveFemExportWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
     wasModified = self._parameterNode.StartModify()
 
-    self._parameterNode.SetNodeReferenceID("AnnulusCurve", valveModel.getAnnulusContourMarkupNode().GetID())
-    self._parameterNode.SetNodeReferenceID("AnnulusModel", valveModel.getAnnulusContourModelNode().GetID())
+    annulusContourMarkupNode = valveModel.getAnnulusContourMarkupNode()
+    self._parameterNode.SetNodeReferenceID("AnnulusCurve", annulusContourMarkupNode.GetID() if annulusContourMarkupNode else None)
+    # The annulus contour is a closed curve markups node that is displayed as a tube; there is no separate model node
+    self._parameterNode.SetNodeReferenceID("AnnulusModel", None)
 
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
     parameterNodeItemId = shNode.GetItemByDataNode(self._parameterNode)
