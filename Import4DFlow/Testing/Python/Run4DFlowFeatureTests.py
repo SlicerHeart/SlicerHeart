@@ -49,7 +49,44 @@ def slicerVersion(slicerExecutable):
     return os.path.basename(os.path.dirname(slicerExecutable)).replace(" ", "_")
 
 
-def runSuite(slicerExecutable, suiteName, testsDir, reportDir, logFilePath, timeoutSec):
+def stopProcessTree(process):
+    # The Slicer launcher starts the application in a child process, therefore the whole process tree must be stopped
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+    else:
+        process.kill()
+    process.wait()
+
+
+def readNewText(filePath, position):
+    """Text appended to a file since position. Returns (text, new position)."""
+    try:
+        with open(filePath, encoding="utf-8", errors="replace") as file:
+            file.seek(position)
+            text = file.read()
+            return text, file.tell()
+    except OSError:
+        return "", position
+
+
+def mainThreadFrames(tracebackText, numberOfFrames=4):
+    """The innermost frames of the thread that runs the tests in the last stack dump of faulthandler, without the
+    frames of the Python standard library (threading, concurrent.futures, unittest, ...)."""
+    dumps = tracebackText.split("Timeout (")
+    for block in dumps[-1].split("\n\n"):
+        if "runUnitTest" in block:
+            frames = [line.strip() for line in block.splitlines() if line.strip().startswith("File")]
+            frames = [frame for frame in frames if not re.search(r"[\\/]lib[\\/]Python[\\/]Lib[\\/]", frame, re.IGNORECASE)]
+            return frames[:numberOfFrames]
+    return []
+
+
+def runSuite(slicerExecutable, suiteName, testsDir, reportDir, reportFolderName, logFilePath, timeoutSec, hangTimeoutSec,
+             pollSec=10):
+    """Run a test suite in Slicer. While it runs, the progress of the tests (progress.log of the suite) is printed, and
+    the innermost frames of the test whenever the test writes a stack dump because it has been running for a long time.
+    The suite is stopped if it runs longer than timeoutSec or a single test runs longer than hangTimeoutSec.
+    Returns (exit code, or "timeout" or "hang", duration in seconds)."""
     # Python code must be a single line (multi-line command-line arguments are not parsed correctly on Windows)
     pythonCode = (f"import slicer, slicer.testing; slicer.testing.runUnitTest([{testsDir.replace(os.sep, '/')!r}], {suiteName!r});"
                   " slicer.util.exit(0)")
@@ -57,20 +94,50 @@ def runSuite(slicerExecutable, suiteName, testsDir, reportDir, logFilePath, time
                "--additional-module-paths"] + [path.replace(os.sep, "/") for path in MODULE_PATHS]
     environment = dict(os.environ)
     environment["SLICERHEART_TEST_REPORT_DIR"] = reportDir
+    environment["PYTHONUNBUFFERED"] = "1"
+    suiteDir = os.path.join(reportDir, reportFolderName)
+    progressFilePath = os.path.join(suiteDir, "progress.log")
+    crashFilePath = os.path.join(suiteDir, "crash-traceback.txt")
+    # Results of a previous run must not be taken for the progress of this one
+    for filePath in (progressFilePath, crashFilePath):
+        if os.path.exists(filePath):
+            os.remove(filePath)
     startTime = time.time()
+    progressPosition = crashPosition = 0
+    testStartTime, testName = None, None
+    exitCode = None
     with open(logFilePath, "w", encoding="utf-8", errors="replace") as logFile:
         # Run in the report folder, as the application may create files (for example, DICOM database) in the working directory
         process = subprocess.Popen(command, stdout=logFile, stderr=subprocess.STDOUT, env=environment, cwd=reportDir)
-        try:
-            exitCode = process.wait(timeout=timeoutSec)
-        except subprocess.TimeoutExpired:
-            exitCode = "timeout"
-            # The Slicer launcher starts the application in a child process, therefore the whole process tree must be stopped
-            if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
-            else:
-                process.kill()
-            process.wait()
+        while exitCode is None:
+            try:
+                exitCode = process.wait(timeout=pollSec)
+            except subprocess.TimeoutExpired:
+                pass
+            text, progressPosition = readNewText(progressFilePath, progressPosition)
+            for line in text.splitlines():
+                print(f"  {line}", flush=True)
+                if " start " in line:
+                    testStartTime, testName = time.time(), line.split(" start ", 1)[1].strip()
+                elif re.search(r"\] (PASSED|FAILED|SKIPPED) ", line):
+                    testStartTime, testName = None, None
+            text, newCrashPosition = readNewText(crashFilePath, crashPosition)
+            if text.strip():
+                crashPosition = newCrashPosition
+                running = f"{(time.time() - testStartTime) / 60:.0f} min" if testStartTime else "long"
+                print(f"  ! {testName or 'test'} has been running for {running}; stack ({crashFilePath}):", flush=True)
+                for frame in mainThreadFrames(readNewText(crashFilePath, 0)[0]):
+                    print(f"      {frame}", flush=True)
+            if exitCode is not None:
+                break
+            if time.time() - startTime > timeoutSec:
+                print(f"  ! suite timeout ({timeoutSec / 60:.0f} min): stopping", flush=True)
+                exitCode = "timeout"
+            elif testStartTime and time.time() - testStartTime > hangTimeoutSec:
+                print(f"  ! {testName} has been running for more than {hangTimeoutSec / 60:.0f} min: stopping the suite", flush=True)
+                exitCode = "hang"
+            if exitCode is not None:
+                stopProcessTree(process)
     return exitCode, time.time() - startTime
 
 
@@ -188,6 +255,9 @@ def main():
     parser.add_argument("--output", default=os.path.join(REPOSITORY_ROOT, ".test-reports"), help="Output folder for reports")
     parser.add_argument("--suite", action="append", help="Test suite to run (default: all)")
     parser.add_argument("--timeout", type=float, default=3600, help="Timeout for each test suite in seconds")
+    parser.add_argument("--hang-timeout", type=float, default=1800,
+        help="Stop a suite if a single test runs longer than this, in seconds (a test writes its stack to"
+             " crash-traceback.txt every 10 minutes, which is printed while the suite runs)")
     parser.add_argument("--summary-only", action="store_true",
         help="Do not run tests, just regenerate the summary from all results in the output folder")
     args = parser.parse_args()
@@ -208,7 +278,8 @@ def main():
         for suiteName, testsDir, reportFolderName in selectedSuites:
             print(f"Running {suiteName} in Slicer {version}...", flush=True)
             logFilePath = os.path.join(reportDir, f"{suiteName}.log")
-            exitCode, durationSec = runSuite(slicerExecutable, suiteName, testsDir, reportDir, logFilePath, args.timeout)
+            exitCode, durationSec = runSuite(slicerExecutable, suiteName, testsDir, reportDir, reportFolderName, logFilePath,
+                                             args.timeout, args.hang_timeout)
             runInfo["suites"][suiteName] = {"exitCode": exitCode, "durationSec": durationSec}
             saveRunInfo(reportDir, runInfo)
             results = loadResults(reportDir, reportFolderName)
