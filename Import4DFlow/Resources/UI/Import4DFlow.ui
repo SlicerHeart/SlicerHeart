@@ -60,7 +60,17 @@
          </widget>
         </item>
         <item>
-         <widget class="QCheckBox" name="storeInTransformCheckBox">
+         <widget class="QPushButton" name="loadTestCaseButton">
+         <property name="toolTip">
+          <string>Load a 4D flow test case (folder with manifest.json, written by the Test case export format) without DICOM import. Component images, phase wrap segmentations, lumen and measurement planes are loaded, and the flow field is computed.</string>
+         </property>
+         <property name="text">
+          <string>Load test case...</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="storeInTransformCheckBox">
           <property name="toolTip">
            <string>Store the flow field in a sequence of grid transform nodes. This is the legacy flow field format, kept for backward compatibility with existing scenes and with tools that expect a transform. If unchecked, the flow field is stored in a sequence of vector volume nodes (a 3-component image, with the velocity vector in each voxel). This setting is remembered between sessions.</string>
           </property>
@@ -201,7 +211,27 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="0" colspan="2">
+      <item row="2" column="0">
+       <widget class="QLabel" name="lumenLabel">
+        <property name="text">
+         <string>Lumen:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="qMRMLSegmentSelectorWidget" name="lumenSegmentSelectorWidget">
+        <property name="toolTip">
+         <string>Optional segmentation of the vessel lumen (blood pool). Used by slicerheart_4dflow methods: it is excluded from background phase fitting, and it is the region of divergence-free filtering, encoding check, and quality report. It can be created automatically in the Quality section.</string>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Background correction</string>
@@ -211,13 +241,79 @@
         </property>
         <layout class="QFormLayout" name="formLayout">
          <item row="0" column="0">
+          <widget class="QLabel" name="noiseMaskMethodLabel">
+           <property name="text">
+            <string>Noise mask:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="noiseMaskMethodSelector">
+           <property name="toolTip">
+            <string>Voxels in the noise mask are set to zero velocity. Magnitude threshold: magnitude below the noise magnitude threshold. Magnitude and velocity noise (slicerheart_4dflow, Bock 2007): low time-averaged magnitude (Otsu threshold) or random phase (very high temporal velocity variation).</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>noiseMaskMethod</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="backgroundPolynomialOrderLabel">
+           <property name="text">
+            <string>Polynomial order:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="QSpinBox" name="backgroundPolynomialOrderSpinBox">
+           <property name="toolTip">
+            <string>Order of the polynomial fitted to the background phase by slicerheart_4dflow methods (2 is recommended; 3 needs ample static tissue).</string>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>3</number>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>backgroundPolynomialOrder</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="backgroundPerFrameLabel">
+           <property name="text">
+            <string>Fit each frame:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QCheckBox" name="backgroundPerFrameCheckBox">
+           <property name="toolTip">
+            <string>If checked, slicerheart_4dflow methods fit the background to each frame separately, otherwise to the time-averaged velocity (more robust, recommended unless the offset changes over the cardiac cycle).</string>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>backgroundPerFrame</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
           <widget class="QLabel" name="label_4">
            <property name="text">
             <string>Noise magnitude threshold:</string>
            </property>
           </widget>
          </item>
-         <item row="0" column="1">
+         <item row="1" column="1">
           <widget class="ctkSliderWidget" name="noiseMagnitudeThresholdSlider">
            <property name="toolTip">
             <string>Regions where the magnitude image value is below this threshold will be considered noise and velocity will be set to 0.</string>
@@ -233,7 +329,7 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
+         <item row="3" column="0">
           <widget class="QLabel" name="label_6">
            <property name="text">
             <string>Stationary tissue speed threshold:</string>
@@ -243,7 +339,7 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
+         <item row="3" column="1">
           <widget class="ctkSliderWidget" name="stationaryTissueSpeedThresholdSlider">
            <property name="toolTip">
             <string>Regions where the speed is below this threshold (as percentage of venc) will be considered stationary tissue.</string>
@@ -265,14 +361,14 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
+         <item row="2" column="0">
           <widget class="QLabel" name="label_7">
            <property name="text">
             <string>Background subtraction:</string>
            </property>
           </widget>
          </item>
-         <item row="1" column="1">
+         <item row="2" column="1">
           <widget class="ctkComboBox" name="backgroundSubtractionMethodSelector">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
@@ -288,7 +384,7 @@
         </layout>
        </widget>
       </item>
-      <item row="3" column="0" colspan="2">
+      <item row="4" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Velocity anti-aliasing</string>
@@ -340,13 +436,112 @@
         </layout>
        </widget>
       </item>
-      <item row="4" column="0" colspan="2">
+      <item row="5" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="divergenceFilterGroupBox">
+        <property name="title">
+         <string>Divergence-free filtering</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="divergenceFilterFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="divergenceFilterMethodLabel">
+           <property name="text">
+            <string>Method:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="divergenceFilterMethodSelector">
+           <property name="toolTip">
+            <string>Remove the divergent (physically impossible) part of the velocity field inside the lumen, which reduces noise. Requires a lumen segmentation. Finite difference projection is the most accurate; divergence-free wavelet denoising also removes noise from the divergence-free part. Recommended before computing velocity derivatives (wall shear stress, pressure, vorticity).</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>divergenceFilterMethod</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="6" column="0" colspan="2">
        <widget class="QPushButton" name="recomputeFlowFieldButton">
         <property name="toolTip">
          <string>Recompute flow field after adjusting segmentation</string>
         </property>
         <property name="text">
          <string>Recompute flow field</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="qualityCollapsibleButton">
+     <property name="text">
+      <string>Quality</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QVBoxLayout" name="qualityLayout">
+      <item>
+       <layout class="QHBoxLayout" name="qualityButtonsLayout">
+        <item>
+         <widget class="QPushButton" name="createLumenButton">
+          <property name="toolTip">
+           <string>Create a rough lumen (blood pool) segmentation from the PC-MRA (slicerheart_4dflow) and select it as lumen. Review and edit it in Segment Editor before using it for measurements.</string>
+          </property>
+          <property name="text">
+           <string>Create lumen</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="createPcmraButton">
+          <property name="toolTip">
+           <string>Create a velocity-weighted phase-contrast MR angiogram (PC-MRA, Bock 2010) volume from the flow field (slicerheart_4dflow).</string>
+          </property>
+          <property name="text">
+           <string>Create PC-MRA</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="qualityButtonsLayout2">
+        <item>
+         <widget class="QPushButton" name="checkEncodingButton">
+          <property name="toolTip">
+           <string>Check that the velocity component directions and signs are consistent with mass conservation in the lumen (slicerheart_4dflow encoding check). The lumen is estimated from the PC-MRA if not specified.</string>
+          </property>
+          <property name="text">
+           <string>Check encoding directions</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="computeQualityReportButton">
+          <property name="toolTip">
+           <string>Compute quality report of the flow field (slicerheart_4dflow): venc adequacy, velocity noise, residual background offset, divergence. Results are also stored in a table.</string>
+          </property>
+          <property name="text">
+           <string>Compute quality report</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTextBrowser" name="qualityReportTextBrowser">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
         </property>
        </widget>
       </item>
@@ -410,6 +605,11 @@
           <string>5D NRRD file</string>
          </property>
         </item>
+        <item>
+         <property name="text">
+          <string>Test case (slicerheart_4dflow)</string>
+         </property>
+        </item>
        </widget>
       </item>
      </layout>
@@ -441,6 +641,11 @@
    <extends>QWidget</extends>
    <header>qMRMLWidget.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentSelectorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentSelectorWidget.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLSegmentEditorWidget</class>
@@ -506,6 +711,22 @@
     <hint type="destinationlabel">
      <x>164</x>
      <y>405</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>lumenSegmentSelectorWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
     </hint>
    </hints>
   </connection>
