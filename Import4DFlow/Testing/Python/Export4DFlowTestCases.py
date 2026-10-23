@@ -122,7 +122,7 @@ def loadFlowField(patientDirectory, databaseDirectory, unwrapMode=DEFAULT_UNWRAP
             raise RuntimeError(f"Expected one 4D flow image set, found {len(volumeNodeSets)}")
         volumeNodeSet = list(volumeNodeSets.values())[0]
         flowFieldNode = logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
         # DICOM metadata is read while the database is available
         metadata = logic._dicomMetadata(flowFieldNode)
     logic.applyDefaultTestCaseProcessing(flowFieldNode, unwrapMode)

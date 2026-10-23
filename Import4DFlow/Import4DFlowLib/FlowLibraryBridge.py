@@ -7,7 +7,8 @@ numpy arrays. Its conventions:
 
 - arrays are indexed [k, j, i] (time first, vector components last), as slicer.util.arrayFromVolume
 - image geometry is a 4x4 voxel_to_world matrix: here the IJK to RAS matrix, so world is RAS
-- velocity is in mm/s (SlicerHeart flow fields store m/s, or the unit in the voxel value units of a vector volume)
+- velocity is in mm/s (vector volume flow fields store the unit in their voxel value units, mm/s if not specified;
+  flow fields stored in transforms, the legacy format, store m/s)
 
 This module is the only place that knows about these conversions; both the Import 4D Flow and the
 Analyze 4D Flow modules use it.
@@ -24,8 +25,8 @@ import vtk.util.numpy_support
 import slicer
 
 LIBRARY_NAME = "slicerheart_4dflow"
-# Lowest version that has all the functions that the modules use (slicer_io was added after 0.1.0)
-MINIMUM_LIBRARY_VERSION = "0.1.1"
+# Lowest version that has all the functions that the modules use (test case format 4, mask_fraction, estimate_lumen)
+MINIMUM_LIBRARY_VERSION = "0.3.0"
 # Environment variable or application setting with the path of a slicerheart_4dflow source tree
 # to install in editable mode (for development), instead of the released package.
 LIBRARY_SOURCE_ENVIRONMENT_VARIABLE = "SLICERHEART_4DFLOW_SOURCE"
@@ -172,14 +173,14 @@ def flowFieldGeometryNode(flowFieldNode):
 
 def velocityUnitScaleToMmPerSec(node):
     """Factor that converts stored velocity values of a flow field frame (or flow field proxy node) to mm/s.
-    The unit is read from the voxel value units of a vector volume ("m/s", "cm/s" or "mm/s"); flow fields without this
-    information (transforms, volumes without units) are in m/s."""
+    The unit is read from the voxel value units of a vector volume ("m/s", "cm/s" or "mm/s"); vector volumes without
+    units are in mm/s. Flow fields stored in transforms (legacy format) are in m/s."""
     if not node.IsA("vtkMRMLScalarVolumeNode"):
         return M_PER_S_TO_MM_PER_S
     voxelValueUnits = node.GetVoxelValueUnits()
     velocityUnit = voxelValueUnits.GetCodeValue() if voxelValueUnits else None
     if not velocityUnit:
-        return M_PER_S_TO_MM_PER_S
+        return 1.0
     velocityUnit = velocityUnit.strip().lower().replace(" ", "")
     if velocityUnit not in VELOCITY_UNIT_TO_MM_PER_SEC:
         raise ValueError(f"Unsupported voxel value unit '{velocityUnit}' of flow field {node.GetName()}."
@@ -187,11 +188,23 @@ def velocityUnitScaleToMmPerSec(node):
     return VELOCITY_UNIT_TO_MM_PER_SEC[velocityUnit]
 
 
+def _hasVoxelValueUnits(node):
+    return node.IsA("vtkMRMLScalarVolumeNode") and node.GetVoxelValueUnits() is not None and bool(node.GetVoxelValueUnits().GetCodeValue())
+
+
 def _frameScaleToMmPerSec(frameNode, flowFieldNode):
-    """Unit scale of a frame node in a flow field sequence: its own voxel value units, or those of the proxy node."""
-    if frameNode.IsA("vtkMRMLScalarVolumeNode") and frameNode.GetVoxelValueUnits() and frameNode.GetVoxelValueUnits().GetCodeValue():
-        return velocityUnitScaleToMmPerSec(frameNode)
-    return velocityUnitScaleToMmPerSec(flowFieldNode)
+    """Unit scale of a frame node in a flow field sequence: its own voxel value units, those of the proxy node, or the
+    SlicerHeart.velocityUnit attribute of the sequence (voxel value units of volumes are not kept in sequences in all
+    Slicer versions). Without any of these, a vector volume frame is in mm/s (a transform frame in m/s)."""
+    for node in [frameNode, flowFieldNode]:
+        if _hasVoxelValueUnits(node):
+            return velocityUnitScaleToMmPerSec(node)
+    if frameNode.IsA("vtkMRMLScalarVolumeNode"):
+        sequenceNode = sequenceFromProxyNode(flowFieldNode) if flowFieldNode.IsA("vtkMRMLScalarVolumeNode") else None
+        velocityUnit = (sequenceNode.GetAttribute("SlicerHeart.velocityUnit") or "").strip().lower() if sequenceNode else ""
+        if velocityUnit in VELOCITY_UNIT_TO_MM_PER_SEC:
+            return VELOCITY_UNIT_TO_MM_PER_SEC[velocityUnit]
+    return velocityUnitScaleToMmPerSec(frameNode)
 
 
 def velocityArrayFromFlowField(flowFieldNode):
@@ -232,44 +245,110 @@ def magnitudeArray(flowFieldNode):
                      for i in range(sequenceNode.GetNumberOfDataNodes())]).astype(np.float32)
 
 
-def componentEncoding(flowFieldNode):
-    """Velocity encoding of the three component images of a flow field created by Import 4D Flow.
-    Returns (scalesMmPerSecPerValue, vencMmPerSec, invertToRas): stored value * scale = encoded velocity,
-    the encoded component `c` points along RAS axis `c` (inverted if invertToRas[c])."""
-    scales, vencs, inverts = [], [], []
-    for component in range(3):
-        componentSequenceNode = sequenceFromProxyNode(flowFieldNode.GetNthNodeReference("componentVolume", component))
-        vencMmPerSec = float(componentSequenceNode.GetAttribute("SlicerHeart.vencCmPerSec")) * 10.0
-        maxValue = float(componentSequenceNode.GetAttribute("SlicerHeart.maxValue"))
-        scales.append(vencMmPerSec / maxValue)
-        vencs.append(vencMmPerSec)
-        inverts.append(componentSequenceNode.GetAttribute("SlicerHeart.invertToRasDirection") == "true")
-    return np.array(scales), np.array(vencs), np.array(inverts)
+#
+# Input (raw) flow field
+#
+# The input flow field contains the velocity as acquired (aliased, before any correction) in RAS components. It is created
+# from the component images (Import4DFlowLogic.createInputFlowFieldFromComponentVolumes) or loaded from file. Its sequence
+# stores the velocity encoding in attributes (see setRawEncoding). Output flow fields (processing results) reference their
+# input flow field by the "inputFlowField" node reference.
+
+RAW_ROLE_ATTRIBUTE = "SlicerHeart.FlowFieldRole"
+VENC_ENCODED_ATTRIBUTE = "SlicerHeart.vencEncodedMmPerSec"
+ENCODING_TO_WORLD_ATTRIBUTE = "SlicerHeart.encodingToWorld"
+DIRECTION_CODES_ATTRIBUTE = "SlicerHeart.directionCodes"
+COMPONENT_MAX_VALUES_ATTRIBUTE = "SlicerHeart.componentMaxValues"
+
+
+def isRawFlowField(flowFieldNode):
+    """True if the node is an input (raw) flow field: velocity as acquired, with velocity encoding information."""
+    try:
+        sequenceNode = sequenceFromProxyNode(flowFieldNode)
+    except ValueError:
+        return False
+    return sequenceNode.GetAttribute(RAW_ROLE_ATTRIBUTE) == "raw"
+
+
+def rawFlowFieldNode(flowFieldNode):
+    """Input (raw) flow field of a flow field: the flow field itself if it is an input flow field, otherwise the flow field
+    referenced as "inputFlowField" (output flow fields). Raises ValueError if there is none."""
+    if flowFieldNode is None:
+        raise ValueError("No flow field is specified")
+    if isRawFlowField(flowFieldNode):
+        return flowFieldNode
+    inputFlowFieldNode = flowFieldNode.GetNodeReference("inputFlowField")
+    if inputFlowFieldNode is not None:
+        return inputFlowFieldNode
+    raise ValueError(f"Flow field {flowFieldNode.GetName()} has no input flow field (velocity as acquired, with velocity encoding)")
+
+
+def setRawEncoding(flowFieldNode, vencEncodedMmPerSec, encodingToWorldMatrix, directionCodes=None, componentMaxValues=None):
+    """Mark a flow field as input (raw) flow field and store its velocity encoding in attributes of its sequence:
+    vencEncodedMmPerSec: velocity encoding of the 3 encoded components (mm/s); encodingToWorldMatrix: 3x3, columns are the
+    RAS directions of the encoded components; directionCodes: names of the encoded components (for example "through");
+    componentMaxValues: stored value of the component images that corresponds to the velocity encoding (for reference)."""
+    sequenceNode = sequenceFromProxyNode(flowFieldNode)
+    sequenceNode.SetAttribute(RAW_ROLE_ATTRIBUTE, "raw")
+    sequenceNode.SetAttribute(VENC_ENCODED_ATTRIBUTE, ",".join(f"{float(v):g}" for v in vencEncodedMmPerSec))
+    sequenceNode.SetAttribute(ENCODING_TO_WORLD_ATTRIBUTE, ",".join(f"{float(v):g}" for v in np.asarray(encodingToWorldMatrix, float).ravel()))
+    if directionCodes is not None:
+        sequenceNode.SetAttribute(DIRECTION_CODES_ATTRIBUTE, ",".join(directionCodes))
+    if componentMaxValues is not None:
+        sequenceNode.SetAttribute(COMPONENT_MAX_VALUES_ATTRIBUTE, ",".join(f"{float(v):g}" for v in componentMaxValues))
+
+
+def _rawAttributeValues(flowFieldNode, attributeName):
+    value = sequenceFromProxyNode(rawFlowFieldNode(flowFieldNode)).GetAttribute(attributeName)
+    return value.split(",") if value else None
+
+
+def vencEncodedMmPerSec(flowFieldNode):
+    """Velocity encoding of the 3 encoded velocity components of the input flow field (mm/s).
+    If the input flow field has no velocity encoding information (for example, loaded from a file without it), the
+    largest absolute raw velocity of each component is used, as the raw velocity is within [-venc, venc]."""
+    values = _rawAttributeValues(flowFieldNode, VENC_ENCODED_ATTRIBUTE)
+    if values:
+        return np.array([float(v) for v in values])
+    return np.abs(rawEncodedVelocity(flowFieldNode)).reshape(-1, 3).max(axis=0).astype(float)
 
 
 def encodingToWorld(flowFieldNode):
-    """3x3 matrix whose columns are the RAS directions of the encoded velocity components."""
-    _, _, invertToRas = componentEncoding(flowFieldNode)
-    return np.diag(np.where(invertToRas, -1.0, 1.0))
+    """3x3 matrix whose columns are the RAS directions of the encoded velocity components (identity if not specified)."""
+    values = _rawAttributeValues(flowFieldNode, ENCODING_TO_WORLD_ATTRIBUTE)
+    return np.array([float(v) for v in values]).reshape(3, 3) if values else np.eye(3)
 
 
-def rawEncodedVelocity(flowFieldNode):
-    """Velocity of the component images as encoded (before noise masking, unwrapping and background
-    correction): (nt, nk, nj, ni, 3) float32 mm/s, each component aliased in [-venc, venc).
-    Component c is the velocity along encodingToWorld(flowFieldNode)[:, c]."""
-    scales, _, _ = componentEncoding(flowFieldNode)
-    components = []
-    for component in range(3):
-        componentSequenceNode = sequenceFromProxyNode(flowFieldNode.GetNthNodeReference("componentVolume", component))
-        components.append(np.stack([slicer.util.arrayFromVolume(componentSequenceNode.GetNthDataNode(i))
-                                    for i in range(componentSequenceNode.GetNumberOfDataNodes())]).astype(np.float32)
-                          * np.float32(scales[component]))
-    return np.stack(components, axis=-1)
+def directionCodes(flowFieldNode):
+    """Names of the encoded velocity components (for example ["through", "inplane_ap", "inplane_fh"])."""
+    try:
+        values = _rawAttributeValues(flowFieldNode, DIRECTION_CODES_ATTRIBUTE)
+    except ValueError:
+        values = None
+    return values if values else [f"C{component + 1}" for component in range(3)]
+
+
+def componentEncoding(flowFieldNode):
+    """Velocity encoding of the input flow field. Returns (scalesMmPerSecPerValue, vencMmPerSec, invertToRas):
+    stored value of the component images * scale = encoded velocity (scale is 1 if the component images are not known),
+    invertToRas[c] is True if the encoded component `c` points opposite to its RAS axis."""
+    vencs = vencEncodedMmPerSec(flowFieldNode)
+    maxValues = _rawAttributeValues(flowFieldNode, COMPONENT_MAX_VALUES_ATTRIBUTE)
+    scales = vencs / np.array([float(v) for v in maxValues]) if maxValues else np.ones(3)
+    invertToRas = np.diag(encodingToWorld(flowFieldNode)) < 0
+    return scales, vencs, invertToRas
 
 
 def rawWorldVelocity(flowFieldNode):
-    """Raw (uncorrected, possibly aliased) velocity in RAS components, mm/s."""
-    return rawEncodedVelocity(flowFieldNode) * np.diag(encodingToWorld(flowFieldNode)).astype(np.float32)
+    """Raw velocity (as acquired: aliased, before any correction) of the input flow field: (nt, nk, nj, ni, 3) float32
+    mm/s, RAS components."""
+    velocity, _, _ = velocityArrayFromFlowField(rawFlowFieldNode(flowFieldNode))
+    return velocity
+
+
+def rawEncodedVelocity(flowFieldNode):
+    """Raw velocity as encoded components: (nt, nk, nj, ni, 3) float32 mm/s, each component aliased in [-venc, venc).
+    Component c is the velocity along encodingToWorld(flowFieldNode)[:, c] (orthonormal encoding directions)."""
+    return rawWorldVelocity(flowFieldNode) @ encodingToWorld(flowFieldNode).astype(np.float32)
 
 
 #
