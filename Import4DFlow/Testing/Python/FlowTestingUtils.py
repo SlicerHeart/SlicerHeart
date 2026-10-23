@@ -56,7 +56,7 @@ SEQUENCE_NAME_DIRECTION_CODES = {"through": "in", "inplane_ap": "ap", "inplane_f
 #
 
 def repositoryRoot():
-    """Root folder of the SlicerHeartPrivate repository (the folder that contains this module folder)."""
+    """Root folder of the SlicerHeart repository (the folder that contains this module folder)."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 
@@ -97,7 +97,7 @@ def testCases():
 
 
 def gitDescription():
-    """Short description of the current SlicerHeartPrivate source code version."""
+    """Short description of the current SlicerHeart source code version."""
     try:
         commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repositoryRoot(),
             capture_output=True, text=True, timeout=30).stdout.strip()
@@ -170,7 +170,7 @@ class TestReport:
         environment["Slicer version"] = f"{slicer.app.applicationVersion} (revision {slicer.app.revision})"
         environment["Slicer executable"] = slicer.app.applicationFilePath()
         environment["Operating system"] = f"{platform.system()} {platform.release()} ({platform.version()})"
-        environment["SlicerHeartPrivate version"] = gitDescription()
+        environment["SlicerHeart version"] = gitDescription()
         environment["Vector field display node available"] = "yes" if isVectorFieldDisplayAvailable() else "no"
         versions = [f"Python {platform.python_version()}", f"VTK {vtk.vtkVersion.GetVTKVersion()}", f"numpy {np.__version__}"]
         for packageName in ["pydicom", "scipy", "nrrd"]:

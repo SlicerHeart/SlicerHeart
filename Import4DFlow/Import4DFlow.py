@@ -41,9 +41,10 @@ class Import4DFlow(ScriptedLoadableModule):
         self.parent.dependencies = []
         self.parent.contributors = ["Andras Lasso (PerkLab)"]
         self.parent.helpText = """
-Import Siemens CS 4D flow images from DICOM.
+Convert 4D flow MRI phase-contrast images (Siemens CS 4D flow DICOM images) into a flow field and correct it
+(phase unwrapping, noise masking, background phase correction, divergence-free filtering).
 
-See more information in <a href="https://github.com/JolleyLab/SlicerHeartPrivate#import-4d-flow">module documentation</a>.
+See more information in <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/Import4DFlow.md">module documentation</a>.
 """
         self.parent.acknowledgementText = """
 This file was originally developed by Andras Lasso (PerkLab, Queen's University).
