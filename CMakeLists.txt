@@ -107,6 +107,8 @@ add_subdirectory(ImportMimics)
 add_subdirectory(ImportExportSimulationModel)
 add_subdirectory(ViewerLinkCreator)
 add_subdirectory(SimplifiedViewer)
+add_subdirectory(Import4DFlow)
+add_subdirectory(Analyze4DFlow)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
