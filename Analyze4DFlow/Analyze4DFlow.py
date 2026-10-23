@@ -3006,6 +3006,16 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
         """
         slicer.mrmlScene.Clear()
 
+    @staticmethod
+    def _voxelValueUnitsKeptInSequence():
+        """Voxel value units of volumes are kept when they are stored in a sequence and written to NRRD files (not in
+        Slicer versions before 5.13): otherwise the units of flow fields stored in sequences cannot be checked."""
+        volumeNode = slicer.vtkMRMLScalarVolumeNode()
+        volumeNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("mm/s"))
+        storedNode = slicer.vtkMRMLSequenceNode().SetDataNodeAtValue(volumeNode, "0")
+        storedUnits = storedNode.GetVoxelValueUnits() if storedNode else None
+        return bool(storedUnits and storedUnits.GetCodeValue() == "mm/s")
+
     def runTest(self):
         """Run as few or as many tests as needed here.
         """
@@ -3245,7 +3255,8 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
         logic = Analyze4DFlowLogic()
         self.assertAlmostEqual(logic.velocityUnitScaleToMmPerSec(transformFlowFieldNode), 1000.0)
         # The proxy node gets the units of the sequence items
-        self.assertEqual(vectorVolumeFlowFieldNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
+        if self._voxelValueUnitsKeptInSequence():
+            self.assertEqual(vectorVolumeFlowFieldNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
         self.assertAlmostEqual(logic.velocityUnitScaleToMmPerSec(vectorVolumeFlowFieldNode), 1.0)
         self.assertEqual(logic.findFirstFlowFieldNode().GetAttribute("SlicerHeart.Type"), "FlowField")
         self.assertEqual(logic._flowFieldKind(transformFlowFieldNode), "transform")
@@ -3305,8 +3316,10 @@ class Analyze4DFlowTest(ScriptedLoadableModuleTest):
                 maskedVelocityArray = slicer.util.arrayFromGridTransform(outputMaskedFlowField).copy()
             else:
                 maskedVelocityArray = slicer.util.arrayFromVolume(outputMaskedFlowField).copy()
-                self.assertEqual(outputMaskedFlowField.GetVoxelValueUnits().GetCodeValue(), "mm/s")
-            self.assertEqual(outputSpeedVolume.GetVoxelValueUnits().GetCodeValue(), "mm/s")
+                if self._voxelValueUnitsKeptInSequence():
+                    self.assertEqual(outputMaskedFlowField.GetVoxelValueUnits().GetCodeValue(), "mm/s")
+            if self._voxelValueUnitsKeptInSequence():
+                self.assertEqual(outputSpeedVolume.GetVoxelValueUnits().GetCodeValue(), "mm/s")
             results[kind] = (metrics, summary, speedVolumeArray, maskedVelocityArray)
 
         # Sanity check against the known flow (the plane is fully inside the flow column).
