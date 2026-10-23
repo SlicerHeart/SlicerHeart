@@ -355,15 +355,35 @@ def rawEncodedVelocity(flowFieldNode):
 # Segmentations, markups, outputs
 #
 
+def _segmentBinaryLabelmap(segmentationNode, segmentId):
+    """Binary labelmap (0/1, unsigned char) of a segment in its own geometry. Segments may share a labelmap, where each
+    segment has its own label value, therefore the voxels of the segment's label value are selected."""
+    labelmap = slicer.vtkOrientedImageData()
+    slicer.vtkSlicerSegmentationsModuleLogic.GetSegmentBinaryLabelmapRepresentation(segmentationNode, segmentId, labelmap)
+    extent = labelmap.GetExtent()
+    if extent[1] < extent[0] or extent[3] < extent[2] or extent[5] < extent[4] or not labelmap.GetPointData().GetScalars():
+        return None
+    labelValue = segmentationNode.GetSegmentation().GetSegment(segmentId).GetLabelValue()
+    voxels = vtk.util.numpy_support.vtk_to_numpy(labelmap.GetPointData().GetScalars())
+    binary = slicer.vtkOrientedImageData()
+    binary.ShallowCopy(labelmap)
+    binary.CopyDirections(labelmap)
+    binary.SetSpacing(labelmap.GetSpacing())
+    binary.SetOrigin(labelmap.GetOrigin())
+    binaryScalars = vtk.util.numpy_support.numpy_to_vtk((voxels == labelValue).astype(np.uint8), deep=True,
+                                                        array_type=vtk.VTK_UNSIGNED_CHAR)
+    binary.GetPointData().SetScalars(binaryScalars)
+    return binary
+
+
 def segmentLabelmap(segmentationNode, segmentId):
     """Binary labelmap of a segment in its own geometry (the resolution of the segmentation's labelmap, which may be
     finer than the image, cropped to the segment): (mask (nk, nj, ni) bool, voxelToWorld 4x4 IJK to RAS).
     The parent transform of the segmentation is not applied. Returns (None, None) for an empty segment."""
-    labelmap = slicer.vtkOrientedImageData()
-    slicer.vtkSlicerSegmentationsModuleLogic.GetSegmentBinaryLabelmapRepresentation(segmentationNode, segmentId, labelmap)
-    extent = labelmap.GetExtent()
-    if extent[1] < extent[0] or extent[3] < extent[2] or extent[5] < extent[4]:
+    labelmap = _segmentBinaryLabelmap(segmentationNode, segmentId)
+    if labelmap is None:
         return None, None
+    extent = labelmap.GetExtent()
     imageToWorld = vtk.vtkMatrix4x4()
     labelmap.GetImageToWorldMatrix(imageToWorld)
     voxelToWorldMatrix = slicer.util.arrayFromVTKMatrix(imageToWorld)
