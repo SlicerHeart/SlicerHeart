@@ -3164,6 +3164,16 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
         """
         slicer.mrmlScene.Clear()
 
+    @staticmethod
+    def _voxelValueUnitsKeptInSequence():
+        """Voxel value units of volumes are kept when they are stored in a sequence and written to NRRD files (not in
+        Slicer versions before 5.13): otherwise the units of flow fields stored in sequences cannot be checked."""
+        volumeNode = slicer.vtkMRMLScalarVolumeNode()
+        volumeNode.SetVoxelValueUnits(Import4DFlowLogic.createVelocityUnits("mm/s"))
+        storedNode = slicer.vtkMRMLSequenceNode().SetDataNodeAtValue(volumeNode, "0")
+        storedUnits = storedNode.GetVoxelValueUnits() if storedNode else None
+        return bool(storedUnits and storedUnits.GetCodeValue() == "mm/s")
+
     def runTest(self):
         """Run as few or as many tests as needed here.
         """
@@ -3413,7 +3423,8 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
                 np.testing.assert_allclose(slicer.util.arrayFromVolume(frameNode), expectedVelocity[frame], rtol=1e-5)
                 np.testing.assert_allclose(frameNode.GetSpacing(), magnitudeVolumeNode.GetSpacing())
                 np.testing.assert_allclose(frameNode.GetOrigin(), magnitudeVolumeNode.GetOrigin())
-                self.assertEqual(frameNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
+                if self._voxelValueUnitsKeptInSequence():
+                    self.assertEqual(frameNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
 
             self.delayDisplay("Show flow field")
             logic.setFlowFieldVisualizationToDefault(flowFieldNode)
@@ -3433,13 +3444,15 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
                 header = exportedFileHandle.read(1000).decode("ascii", "replace")
             self.assertIn("dimension: 5", header)
             self.assertIn("kinds: vector domain domain domain list", header)
-            self.assertIn('units: "mm/s"', header)  # unit of the velocity values, in the standard NRRD field of the component axis
+            if self._voxelValueUnitsKeptInSequence():
+                self.assertIn('units: "mm/s"', header)  # unit of the velocity values, in the standard NRRD field of the component axis
             loadedSequenceNode = slicer.util.loadNodeFromFile(exportedFile, "SequenceFile")
             self.assertEqual(loadedSequenceNode.GetNumberOfDataNodes(), numberOfFrames)
             for frame in range(numberOfFrames):
                 loadedFrameNode = loadedSequenceNode.GetNthDataNode(frame)
                 self.assertTrue(loadedFrameNode.IsA("vtkMRMLVectorVolumeNode"))
-                self.assertEqual(loadedFrameNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
+                if self._voxelValueUnitsKeptInSequence():
+                    self.assertEqual(loadedFrameNode.GetVoxelValueUnits().GetCodeValue(), "mm/s")
                 np.testing.assert_allclose(slicer.util.arrayFromVolume(loadedFrameNode), expectedVelocity[frame], rtol=1e-5)
                 np.testing.assert_allclose(loadedFrameNode.GetSpacing(), magnitudeVolumeNode.GetSpacing())
                 np.testing.assert_allclose(loadedFrameNode.GetOrigin(), magnitudeVolumeNode.GetOrigin(), atol=1e-6)
