@@ -228,9 +228,6 @@
          <property name="renameEnabled">
           <bool>true</bool>
          </property>
-         <property name="noneDisplay">
-          <string>Create new flow field</string>
-         </property>
          <property name="SlicerParameterName" stdset="0">
           <string notr="true">outputFlowField</string>
          </property>
@@ -386,9 +383,6 @@
           </property>
           <property name="renameEnabled">
            <bool>true</bool>
-          </property>
-          <property name="noneDisplay">
-           <string>Create new volume</string>
           </property>
           <property name="SlicerParameterName" stdset="0">
            <string notr="true">pcmraVolume</string>
