@@ -1,0 +1,290 @@
+"""
+EXPERIMENTAL - NOT YET USED.
+
+This file contains 4D MRI phase unwrapping code that used to be part of Analyze4DFlow.py.
+It is not wired into the Analyze4DFlow module (not listed in CMakeLists.txt, not imported
+anywhere) and is kept only for future reference / potential reuse.
+"""
+
+import logging
+
+import slicer
+import vtk
+
+#
+# 4D MRI phase unwrapping
+#
+# The class is based on MIT-licensed code published at:
+# https://git.web.rug.nl/p305235/Phase_Unwrapping_Comparison/src/branch/main/python_code/unwrapper.py
+# as supplementary material to the paper: https://onlinelibrary.wiley.com/doi/10.1002/mrm.29767
+#
+# 3D+t gradient-based unwrapping ("Probability" method in the implementation) is skipped due to its
+# low performance and long execution time.
+
+# {
+#   "dt": 0.030,
+#   "spacing": [0.25, 0.25, 0.25],
+#   "VENC": 77,
+#   "unwrapping": {
+#     "Temporal": {
+#       "apply": True,
+#       "t_ref": 0,
+#       "path_addon": "temporal/"
+#     },
+#     "lap3d": {
+#       "apply": True,
+#       "path_addon": "lap3d/"
+#     },
+#     "lap4d": {
+#       "apply": True,
+#       "path_addon": "lap4d/"
+#     },
+# }
+
+# # Import modules here
+
+# import math
+# from fenics import *
+# from numpy.core.fromnumeric import shape
+# from numpy.lib.npyio import save
+# import scipy.sparse as sp
+# from scipy.sparse import csc_matrix
+# from scipy.sparse.linalg import spsolve
+# import decimal
+# import time
+
+
+def _saveAndHideTransformVisibility(transformNode, additionalNodes=None):
+    """Hide display nodes of all transform proxy nodes in the same sequence browser as transformNode.
+    Returns a {nodeID: wasVisible} dict for later restoration by _restoreTransformVisibility."""
+    savedState = {}
+    sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(transformNode)
+    if not sequenceBrowserNode:
+        return savedState
+    proxyNodes = vtk.vtkCollection()
+    sequenceBrowserNode.GetAllProxyNodes(proxyNodes)
+    nodesToProcess = [proxyNodes.GetItemAsObject(i) for i in range(proxyNodes.GetNumberOfItems())]
+    if additionalNodes:
+        nodesToProcess.extend(n for n in additionalNodes if n is not None)
+    for node in nodesToProcess:
+        if node and node.IsA("vtkMRMLTransformNode") and node.GetID() not in savedState:
+            dn = node.GetDisplayNode()
+            if dn:
+                savedState[node.GetID()] = dn.GetVisibility()
+                dn.SetVisibility(False)
+    return savedState
+
+
+def _restoreTransformVisibility(savedState):
+    """Restore transform node visibility from state saved by _saveAndHideTransformVisibility."""
+    for nodeID, wasVisible in savedState.items():
+        if not wasVisible:
+            continue
+        node = slicer.mrmlScene.GetNodeByID(nodeID)
+        if node and node.GetDisplayNode():
+            node.GetDisplayNode().SetVisibility(True)
+
+
+def _arrayFromGridTransformToParent(gridTransformNode):
+    """In slicer.util, the method works with transform _from_ parent; we need transform _to_ parent"""
+    transformGrid = gridTransformNode.GetTransformToParent()
+    displacementGrid = transformGrid.GetDisplacementGrid()
+    nshape = tuple(reversed(displacementGrid.GetDimensions()))
+    import vtk.util.numpy_support
+    nshape = nshape + (3,)
+    narray = vtk.util.numpy_support.vtk_to_numpy(displacementGrid.GetPointData().GetScalars()).reshape(nshape)
+    return narray
+
+
+def _arrayFromGridTransformToParentModified(gridTransformNode):
+    """In slicer.util, the method works with transform _from_ parent; we need transform _to_ parent"""
+    transformGrid = gridTransformNode.GetTransformToParent()
+    displacementGrid = transformGrid.GetDisplacementGrid()
+    displacementGrid.GetPointData().GetScalars().Modified()
+    displacementGrid.Modified()
+
+
+def unwrap(gridTransformNode, logCallback=None):
+    """
+    Unwrap the displacement field so that the displacement is continuous across the volume.
+    """
+    import numpy as np
+
+    def log(text):
+        if logCallback:
+            logCallback(text)
+        else:
+            logging.info(text)
+
+    if not gridTransformNode:
+        raise ValueError("Input flow field node is invalid")
+
+    transformSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(gridTransformNode)
+    if not transformSequenceBrowserNode:
+        raise RuntimeError("Input transform is not in a sequence")
+
+    try:
+
+        # Turn off transform visibility to speed up browsing
+        savedTransformVisibility = _saveAndHideTransformVisibility(gridTransformNode)
+
+        originalItemNumber = transformSequenceBrowserNode.GetSelectedItemNumber()
+        numberOfItems = transformSequenceBrowserNode.GetNumberOfItems()
+        velocityField4d = None
+        for itemNumber in range(numberOfItems):
+            log("Unwrapping (prepare)... ({item}/{count})".format(item=itemNumber+1, count=numberOfItems))
+
+            transformSequenceBrowserNode.SetSelectedItemNumber(itemNumber)
+            displacementImageArray = _arrayFromGridTransformToParent(gridTransformNode)
+            if velocityField4d is None:
+                velocityField4d = np.zeros([displacementImageArray.shape[0], displacementImageArray.shape[1], displacementImageArray.shape[2], numberOfItems, 3], dtype=float)
+            velocityField4d[:, :, :, itemNumber] = displacementImageArray
+
+        # Unwrap speed vectors
+
+        # velocityField4d has its vectors in meters, so convert spacing and velocity encoding to meters
+
+        vencCmPerSecStrList = gridTransformNode.GetAttribute("SlicerHeart.vencCmPerSec").split(',')  # list of velocity encoding, in cm/sec
+        vencMeterPerSecList = [float(vencCmPerSecStr) / 100 for vencCmPerSecStr in vencCmPerSecStrList]   # velocity encoding, in m/sec
+
+        gridTransform = gridTransformNode.GetTransformToParent()  # vtkOrientedGridTransform
+        displacementImage = gridTransform.GetDisplacementGrid()
+        spacingMm = displacementImage.GetSpacing()
+        spacingMeter = [spacingMm[0] / 1000, spacingMm[1] / 1000, spacingMm[2] / 1000]
+
+        frameRateFps = 1.0  # TODO: get from DICOM
+        unwwrapper = Unwrapper(velocityField4d, spacingMeter, 1/frameRateFps, vencMeterPerSecList)
+
+        # TODO: use the frame with lowest average speed (or something more sophisticated)
+        temporalReferenceTimeIndex = 0  # time point that has no phase wrapping (e.g., end-diastole)
+        # unwwrapper.unwrap_temporal(temporalReferenceTimeIndex) # TODO: uncomment
+        velocityField4d = unwwrapper.velocity_field
+
+        # Update transform sequence from unwrapped 4D velocity field
+        for itemNumber in range(numberOfItems):
+            log("Unwrapping (update)... ({item}/{count})".format(item=itemNumber+1, count=numberOfItems))
+            transformSequenceBrowserNode.SetSelectedItemNumber(itemNumber)
+            displacementImageArray = _arrayFromGridTransformToParent(gridTransformNode)
+            displacementImageArray[:] = velocityField4d[:, :, :, itemNumber]
+            _arrayFromGridTransformToParentModified(gridTransformNode)
+            gridTransformNode.Modified()
+
+    finally:
+        # Clean up
+        transformSequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
+        _restoreTransformVisibility(savedTransformVisibility)
+
+
+class Unwrapper:
+    def __init__(self, velocity_field, spacing, dt, vencList):
+        """
+        velocity_field: 4d numpy array with dimensions (x, y, z, time, 3)
+        """
+        self.velocity_field = velocity_field
+        self.venc = vencList
+        self.dt = dt  # time step
+        self.spacing = spacing
+
+    def unwrap_laplacian(self, nd = 3):
+        """
+        Args (numpy array): wrapped phase
+        nd: 3, 4, or 0
+        Return (numpy array): unwrapped phase
+        """
+        import numpy as np
+        vx = self.u
+        phiwin = np.asarray(vx * pi / self.venc)
+
+        si = [phiwin.shape[0], phiwin.shape[1], phiwin.shape[2], phiwin.shape[3]]
+        phiw = phiwin
+
+        if nd == 3:
+            [X, Y] = np.mgrid[-si[0]/2:si[0]/2, -si[1]/2:si[1]/2]
+            ss = 4
+            mod = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) - 4
+            modi = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) - 4
+            modi[math.floor(si[0]/2), math.floor(si[1]/2)] = 1
+        else:
+            [X, Y, T] = np.mgrid[-si[0]/2:si[0]/2, -si[1]/2:si[1]/2, -si[3]/2:si[3]/2]
+            ss = 4
+            ts = 2
+            mod = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) + ts*np.cos(pi*T/si[3]) - ss - ts
+            modi = 2*np.cos(pi*X/si[0]) + 2*np.cos(pi*Y/si[1]) + ts*np.cos(pi*T/si[3]) - ss - ts
+            modi[math.floor(si[0]/2), math.floor(si[1]/2), math.floor(si[3]/2)] = 1
+        phiw = phiwin[:, :, 1, :]
+        si = [si[0], si[1], si[3]]
+        def lap(phi):
+            '''computes laplacian with priorly defined stencil'''
+            K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+            K = np.multiply(K, mod)
+            return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+        def ilap(phi):
+            K = np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(phi)))
+            K = K / modi
+            return np.real(np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(K))))
+        lap_phiw = np.zeros(si)
+        lap_phi_vec = np.zeros(si)
+        phi_vec = np.zeros(si)
+        nr = np.zeros(si)
+        if nd == 3:
+            for t in range(self.Lt):
+                #compute Laplacian of the correct phase
+                lap_phi_vec[:,:,t] = np.cos(phiw[:,:,t])*lap(np.sin(phiw[:,:,t])) - np.sin(phiw[:,:,t])*lap(np.cos(phiw[:,:,t]))
+                lap_phiw[:, :, t] = lap(phiw[:, :, t])
+                phi_vec[:, :, t] = ilap(lap_phi_vec[:, :, t] - lap_phiw[:, :, t])
+        if nd == 4:
+            lap_phiw = lap(phiw)
+            lap_phi_vec = np.cos(phiw)*lap(np.sin(phiw)) - np.sin(phiw)*lap(np.cos(phiw))
+            phi_vec = ilap(lap_phi_vec - lap_phiw)
+        nr = np.round(phi_vec/(2*pi))
+        nrout = np.zeros(phiwin.shape)
+        nrout[:, :, 1, :] = nr
+        print(np.count_nonzero(nr))
+        u = self.make_aorta_mesh((phiwin + 2*pi*nrout)*self.venc/pi, False, False)
+        return u
+
+    def unwrap_temporal(self, t_ref = 0):
+        """
+        Unwrap with the temporal method described in Xiang, 1995. Result is stored in self.velocity_field.
+        t_ref: time point index that does not have aliasing
+        """
+        import numpy as np
+
+        method = "numpy"
+
+        if method == "numpy":
+            # TODO: reorder time points so that t_ref is the first
+            for axis in range(3):
+                self.velocity_field[:,:,:,:,axis] = np.unwrap(self.velocity_field[:,:,:,:,axis], axis=3, period=self.venc[axis])
+        else:
+
+            def wrap(u):
+                ''' wraps all values of u into the interval (-pi, pi)'''
+                u_array = u.copy()
+                for axis in range(3):
+                    u_array[u > self.venc[axis]] -= 2 * self.venc[axis]
+                    u_array[u < -self.venc[axis]] += 2 * self.venc[axis]
+                return u_array
+
+            number_of_time_steps = self.velocity_field.shape[3]
+            velocity_field = self.velocity_field.copy()
+            for axis in range(3):
+                for t in range(t_ref, number_of_time_steps-1):
+                    velocity_field_diff = wrap(self.velocity_field[:,:,:,t+1,axis] - self.velocity_field[:,:,:,t,axis])
+                    velocity_field[:,:,:,t+1,axis] = velocity_field[:,:,:,t,axis] + velocity_field_diff
+                for t in reversed(range(0, t_ref)):
+                    velocity_field_diff = wrap(self.velocity_field[:,:,:,t+1,axis] - self.velocity_field[:,:,:,t,axis])
+                    velocity_field[:,:,:,t,axis] = velocity_field[:,:,:,t+1,axis] - velocity_field_diff
+            self.velocity_field[:,:,:,:,:] = velocity_field
+
+        # number_of_time_steps = self.velocity_field.shape[3]  # dimensions: x, y, z, t, 3
+        # for t in range(t_ref, number_of_time_steps-2):
+        #     for axis in range(3):
+        #         diff = self.velocity_field[:, :, :, t+1, axis] - self.velocity_field[:, :, :, t, axis]
+        #         diff = np.unwrap(diff, axis=axis, period=self.venc[axis])
+        #         self.velocity_field[:, :, :, t+1, axis] = self.velocity_field[:, :, :, t, axis] + diff
+        # for t in reversed(range(0, t_ref)):
+        #     for axis in range(3):
+        #         diff = self.velocity_field[:, :, :, t+1, axis] - self.velocity_field[:, :, :, t, axis]
+        #         diff = np.unwrap(diff, axis=axis, period=self.venc[axis])
+        #         self.velocity_field[:, :, :, t, axis] = self.velocity_field[:, :, :, t+1, axis] - diff

@@ -1,0 +1,934 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Import4DFlow</class>
+ <widget class="qMRMLWidget" name="Import4DFlow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>510</width>
+    <height>712</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
+     <property name="text">
+      <string>Create flow field from component images</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_2">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Input flow image:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <item>
+         <widget class="ctkComboBox" name="inputVolumeNodeSetSelector"/>
+        </item>
+        <item>
+         <widget class="QToolButton" name="inspectButton">
+          <property name="text">
+           <string>Refresh</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="inputAdvancedGroupBox">
+        <property name="title">
+         <string>Advanced</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QVBoxLayout" name="inputAdvancedLayout">
+         <item>
+          <widget class="QCheckBox" name="removeInputImageCheckBox">
+           <property name="toolTip">
+            <string>Remove the component images of the input flow image after the input flow field is created from them. They are not needed after this, as the input flow field contains the velocity as acquired and the velocity encoding. The magnitude images are kept.</string>
+           </property>
+           <property name="text">
+            <string>Remove input flow image after conversion</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">removeInputImageAfterConversion</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="convertButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="toolTip">
+         <string>Create the input flow field (velocity as acquired) from the component images, and compute the output flow field with the selected corrections</string>
+        </property>
+        <property name="text">
+         <string>Create flow field</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton_2">
+     <property name="text">
+      <string>Corrections</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_3">
+      <item row="0" column="0">
+       <widget class="QLabel" name="inputFlowFieldLabel">
+        <property name="text">
+         <string>Input flow field:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <layout class="QHBoxLayout" name="inputFlowFieldLayout">
+        <item>
+         <widget class="qMRMLNodeComboBox" name="inputFlowFieldSelector">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string>Input flow field: velocity as acquired (aliased, before any correction), created from the component images (above) or loaded from file. All corrections are computed from it.</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLTransformNode</string>
+            <string>vtkMRMLVectorVolumeNode</string>
+           </stringlist>
+          </property>
+          <property name="showChildNodeTypes">
+           <bool>false</bool>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="renameEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="noneDisplay">
+           <string>Select the input flow field</string>
+          </property>
+          <property name="SlicerParameterName" stdset="0">
+           <string notr="true">inputFlowField</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="deleteInputFlowFieldButton">
+          <property name="toolTip">
+           <string>Delete the input flow field (its sequence and proxy node)</string>
+          </property>
+          <property name="text">
+           <string>Delete</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="magnitudeVolumeLabel">
+        <property name="text">
+         <string>Magnitude image:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="magnitudeVolumeSelector">
+        <property name="toolTip">
+         <string>Magnitude images of the input flow field (a volume sequence with the same number of frames and voxel grid). Needed for noise masking, background correction, PC-MRA and lumen estimation. If its frame times are the same as those of the input flow field then they are browsed with the same sequence browser.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLScalarVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="noneDisplay">
+         <string>None (no magnitude images)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Output flow field:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+        <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="toolTip">
+          <string>Output flow field: velocity after the corrections (noise mask, phase unwrapping, background correction, divergence-free filtering), computed from the input flow field. A new flow field is created if none is selected.</string>
+         </property>
+         <property name="nodeTypes">
+          <stringlist notr="true">
+           <string>vtkMRMLTransformNode</string>
+           <string>vtkMRMLVectorVolumeNode</string>
+          </stringlist>
+         </property>
+         <property name="showChildNodeTypes">
+          <bool>false</bool>
+         </property>
+         <property name="noneEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="addEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="removeEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="renameEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="noneDisplay">
+          <string>Create new flow field</string>
+         </property>
+         <property name="SlicerParameterName" stdset="0">
+          <string notr="true">outputFlowField</string>
+         </property>
+        </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_5">
+        <property name="text">
+         <string>Show:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <item>
+         <widget class="QPushButton" name="showFlowFieldButton">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Flow vectors</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeType">
+           <enum>QSizePolicy::Fixed</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showMagnitudeVolumeButton">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Magnitude</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showComponentVolume1Button">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>C1</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showComponentVolume2Button">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>C2</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="showComponentVolume3Button">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>C3</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="lumenLabel">
+        <property name="text">
+         <string>Lumen:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <layout class="QHBoxLayout" name="lumenLayout">
+        <item>
+          <widget class="qMRMLSegmentSelectorWidget" name="lumenSegmentSelectorWidget">
+           <property name="toolTip">
+            <string>Optional segmentation of the vessel lumen (blood pool). Used by slicerheart_4dflow methods: it is excluded from background phase fitting, and it is the region of divergence-free filtering, encoding check, and quality report. It can be computed automatically (Compute): the selected segment is overwritten, or a new segmentation or segment is created if none is selected.</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+        </item>
+        <item alignment="Qt::AlignTop">
+         <widget class="QPushButton" name="computeLumenButton">
+          <property name="toolTip">
+           <string>Compute a rough lumen (blood pool) segmentation from the flow field (slicerheart_4dflow) into the selected segment (a new segmentation or segment is created if none is selected). Review and edit it in Segment Editor before using it for measurements.</string>
+          </property>
+          <property name="text">
+           <string>Compute</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="pcmraLabel">
+        <property name="text">
+         <string>PC-MRA:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <layout class="QHBoxLayout" name="pcmraLayout">
+        <item>
+         <widget class="qMRMLNodeComboBox" name="pcmraVolumeSelector">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string>Velocity-weighted phase-contrast MR angiogram (PC-MRA, Bock 2010) of the flow field. Compute overwrites the selected volume, or creates a new volume if none is selected.</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLScalarVolumeNode</string>
+           </stringlist>
+          </property>
+          <property name="showChildNodeTypes">
+           <bool>false</bool>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="renameEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="noneDisplay">
+           <string>Create new volume</string>
+          </property>
+          <property name="SlicerParameterName" stdset="0">
+           <string notr="true">pcmraVolume</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="computePcmraButton">
+          <property name="toolTip">
+           <string>Compute the velocity-weighted phase-contrast MR angiogram (PC-MRA, Bock 2010) of the flow field (slicerheart_4dflow) into the selected volume (a new volume is created if none is selected).</string>
+          </property>
+          <property name="text">
+           <string>Compute</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="6" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
+        <property name="title">
+         <string>Background correction</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="formLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="noiseMaskMethodLabel">
+           <property name="text">
+            <string>Noise mask:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="noiseMaskMethodSelector">
+           <property name="toolTip">
+            <string>Voxels in the noise mask are set to zero velocity. Magnitude threshold: magnitude below the noise magnitude threshold. Magnitude and velocity noise (slicerheart_4dflow, Bock 2007): low time-averaged magnitude (Otsu threshold) or random phase (very high temporal velocity variation).</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>noiseMaskMethod</string>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="backgroundPolynomialOrderLabel">
+           <property name="text">
+            <string>Polynomial order:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="QSpinBox" name="backgroundPolynomialOrderSpinBox">
+           <property name="toolTip">
+            <string>Order of the polynomial fitted to the background phase by slicerheart_4dflow methods (2 is recommended; 3 needs ample static tissue).</string>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>3</number>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>backgroundPolynomialOrder</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="backgroundPerFrameLabel">
+           <property name="text">
+            <string>Fit each frame:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QCheckBox" name="backgroundPerFrameCheckBox">
+           <property name="toolTip">
+            <string>If checked, slicerheart_4dflow methods fit the background to each frame separately, otherwise to the time-averaged velocity (more robust, recommended unless the offset changes over the cardiac cycle).</string>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>backgroundPerFrame</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_4">
+           <property name="text">
+            <string>Noise magnitude threshold:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkSliderWidget" name="noiseMagnitudeThresholdSlider">
+           <property name="toolTip">
+            <string>Regions where the magnitude image value is below this threshold will be considered noise and velocity will be set to 0.</string>
+           </property>
+           <property name="decimals">
+            <number>1</number>
+           </property>
+           <property name="suffix">
+            <string>%</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>noiseMagnitudeThresholdPercent</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="label_6">
+           <property name="text">
+            <string>Stationary tissue speed threshold:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="ctkSliderWidget" name="stationaryTissueSpeedThresholdSlider">
+           <property name="toolTip">
+            <string>Regions where the speed is below this threshold (as percentage of venc) will be considered stationary tissue.</string>
+           </property>
+           <property name="decimals">
+            <number>1</number>
+           </property>
+           <property name="singleStep">
+            <double>1.000000000000000</double>
+           </property>
+           <property name="pageStep">
+            <double>5.000000000000000</double>
+           </property>
+           <property name="suffix">
+            <string>%</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>stationaryTissueSpeedThresholdVencPercent</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_7">
+           <property name="text">
+            <string>Background subtraction:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="ctkComboBox" name="backgroundSubtractionMethodSelector">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>backgroundSubtractionMethod</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="7" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
+        <property name="title">
+         <string>Velocity anti-aliasing</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QGridLayout" name="gridLayout">
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="unwrappingMethodSelector">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>unwrapMode</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_3">
+           <property name="text">
+            <string>Automatic:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QToolButton" name="computePhaseUnwrappingButton">
+           <property name="text">
+            <string>Compute</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0" colspan="3">
+          <widget class="qMRMLSegmentEditorWidget" name="segmentEditorWidget">
+           <property name="segmentationNodeSelectorVisible">
+            <bool>false</bool>
+           </property>
+           <property name="sourceVolumeNodeSelectorVisible">
+            <bool>false</bool>
+           </property>
+           <property name="defaultTerminologyEntrySettingsKey">
+            <string notr="true"/>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="8" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="divergenceFilterGroupBox">
+        <property name="title">
+         <string>Divergence-free filtering</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="divergenceFilterFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="divergenceFilterMethodLabel">
+           <property name="text">
+            <string>Method:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ctkComboBox" name="divergenceFilterMethodSelector">
+           <property name="toolTip">
+            <string>Remove the divergent (physically impossible) part of the velocity field inside the lumen, which reduces noise. Requires a lumen segmentation. Finite difference projection is the most accurate; divergence-free wavelet denoising also removes noise from the divergence-free part. Recommended before computing velocity derivatives (wall shear stress, pressure, vorticity).</string>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string>divergenceFilterMethod</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="9" column="0" colspan="2">
+       <widget class="QPushButton" name="recomputeFlowFieldButton">
+        <property name="toolTip">
+         <string>Recompute flow field after adjusting segmentation</string>
+        </property>
+        <property name="text">
+         <string>Recompute flow field</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="qualityCollapsibleButton">
+     <property name="text">
+      <string>Quality</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QVBoxLayout" name="qualityLayout">
+      <item>
+       <layout class="QHBoxLayout" name="qualityButtonsLayout2">
+        <item>
+         <widget class="QPushButton" name="checkEncodingButton">
+          <property name="toolTip">
+           <string>Check that the velocity component directions and signs are consistent with mass conservation in the lumen (slicerheart_4dflow encoding check). The lumen is estimated from the PC-MRA if not specified.</string>
+          </property>
+          <property name="text">
+           <string>Check encoding directions</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="computeQualityReportButton">
+          <property name="toolTip">
+           <string>Compute quality report of the flow field (slicerheart_4dflow): venc adequacy, velocity noise, residual background offset, divergence. Results are also stored in a table.</string>
+          </property>
+          <property name="text">
+           <string>Compute quality report</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTextBrowser" name="qualityReportTextBrowser">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="outputsCollapsibleButton">
+     <property name="text">
+      <string>Export flow field to file</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QFormLayout" name="formLayout_4">
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_8">
+        <property name="text">
+         <string>Output directory:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkPathLineEdit" name="exportPathLineEdit">
+        <property name="filters">
+         <set>ctkPathLineEdit::Dirs</set>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="exportButton">
+        <property name="toolTip">
+         <string>Export flow field to files</string>
+        </property>
+        <property name="text">
+         <string>Export</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>Format:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkComboBox" name="exportFormatComboBox">
+        <item>
+         <property name="text">
+          <string>Anonymized Slicer scene</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Stack of NRRD files</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>5D NRRD file</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Test case (slicerheart_4dflow)</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentSelectorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentSelectorWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSegmentEditorWidget</class>
+   <extends>qMRMLWidget</extends>
+   <header>qMRMLSegmentEditorWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkComboBox</class>
+   <extends>QComboBox</extends>
+   <header>ctkComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputTransformSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>82</x>
+     <y>135</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>445</x>
+     <y>187</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>segmentEditorWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>359</x>
+     <y>566</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>164</x>
+     <y>405</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>lumenSegmentSelectorWidget</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>inputFlowFieldSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>magnitudeVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>pcmraVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>20</x>
+     <y>20</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>
