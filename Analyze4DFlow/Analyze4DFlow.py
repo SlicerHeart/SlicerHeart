@@ -52,9 +52,10 @@ class Analyze4DFlow(ScriptedLoadableModule):
         self.parent.dependencies = []
         self.parent.contributors = ["Andras Lasso (PerkLab)"]
         self.parent.helpText = """
-Analyze 4D flow fields.
+Analyze 4D flow fields: flow metrics in measurement planes, streamlines, pathlines, speed images, and hemodynamic
+quantities.
 
-See more information in <a href="https://github.com/JolleyLab/SlicerHeartPrivate#analyze-4d-flow">module documentation</a>.
+See more information in <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/Analyze4DFlow.md">module documentation</a>.
 """
         self.parent.acknowledgementText = """
 This file was originally developed by Andras Lasso (PerkLab, Queen's University).
