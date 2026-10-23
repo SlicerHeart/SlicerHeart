@@ -63,3 +63,7 @@ target/
 # IDE and OS files
 .idea/
 .DS_Store
+
+# Local test data locations and test reports (see Docs/Import4DFlow.md, Feature tests)
+.env.local
+.test-reports/
