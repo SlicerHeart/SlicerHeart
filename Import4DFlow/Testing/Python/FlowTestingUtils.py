@@ -538,6 +538,57 @@ def selectSequenceItem(proxyNode, itemNumber):
 # Analytic flow phantom
 #
 
+def createLegacyTransformFlowField(flowFieldNode, name=None):
+    """Create a flow field stored in a sequence of grid transforms (the legacy format of flow fields created by earlier
+    versions of Import 4D Flow: velocity in m/s, RAS, stored as displacement, "transform to parent"), browsed with the
+    given flow field, with the same velocity. It is used for testing that flow fields stored in transforms can still be
+    read (Import 4D Flow only writes vector volume flow fields). Returns the proxy transform node."""
+    from Import4DFlowLib import FlowLibraryBridge
+    velocity, _, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+    geometryNode = FlowLibraryBridge.flowFieldGeometryNode(flowFieldNode)
+    sourceSequenceNode = FlowLibraryBridge.sequenceFromProxyNode(flowFieldNode)
+    browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+    name = name or slicer.mrmlScene.GenerateUniqueName(f"{flowFieldNode.GetName()} transform")
+    sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", name)
+    sequenceNode.SetIndexName(sourceSequenceNode.GetIndexName())
+    sequenceNode.SetIndexUnit(sourceSequenceNode.GetIndexUnit())
+    sequenceNode.SetIndexType(sourceSequenceNode.GetIndexType())
+    for attributeName in ["SlicerHeart.vencCmPerSec", "SlicerHeart.processing", "SlicerHeart.phaseUnwrapping"]:
+        if sourceSequenceNode.GetAttribute(attributeName):
+            sequenceNode.SetAttribute(attributeName, sourceSequenceNode.GetAttribute(attributeName))
+    sequenceNode.SetAttribute("SlicerHeart.velocityUnit", "m/s")
+    directionMatrix = vtk.vtkMatrix4x4()
+    geometryNode.GetIJKToRASDirectionMatrix(directionMatrix)
+    for frameIndex in range(sourceSequenceNode.GetNumberOfDataNodes()):
+        frameNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLTransformNode")
+        frameNode.UnRegister(None)
+        dims = geometryNode.GetImageData().GetDimensions()
+        velocityImage = vtk.vtkImageData()
+        velocityImage.SetDimensions(dims)
+        velocityImage.AllocateScalars(vtk.VTK_FLOAT, 3)
+        velocityImage.SetSpacing(geometryNode.GetSpacing())
+        velocityImage.SetOrigin(geometryNode.GetOrigin())
+        gridTransform = slicer.vtkOrientedGridTransform()
+        gridTransform.SetGridDirectionMatrix(directionMatrix)
+        gridTransform.SetDisplacementGridData(velocityImage)
+        frameNode.SetAndObserveTransformFromParent(gridTransform)
+        slicer.util.arrayFromGridTransform(frameNode)[:] = velocity[frameIndex] / 1000.0  # m/s
+        slicer.util.arrayFromGridTransformModified(frameNode)
+        frameNode.SetAttribute("SlicerHeart.Type", "FlowField")
+        # Legacy flow fields store "transform to parent" (displayed faster)
+        frameNode.Inverse()
+        sequenceNode.SetDataNodeAtValue(frameNode, sourceSequenceNode.GetNthIndexValue(frameIndex))
+    browserNode.AddSynchronizedSequenceNodeID(sequenceNode.GetID())
+    slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
+    transformNode = browserNode.GetProxyNode(sequenceNode)
+    transformNode.SetName(name)
+    transformNode.SetAttribute("SlicerHeart.Type", "FlowField")
+    for role in ["magnitudeVolume", "inputFlowField"]:
+        if flowFieldNode.GetNodeReference(role):
+            transformNode.SetNodeReferenceID(role, flowFieldNode.GetNodeReference(role).GetID())
+    return transformNode
+
+
 class FlowPhantom:
     """Analytic pulsatile Poiseuille flow in a straight cylindrical vessel, imaged with an oblique 3D volume.
 
@@ -562,7 +613,9 @@ class FlowPhantom:
                  systoleDurationMs=360.0,
                  backflowDurationMs=180.0,
                  nominalIntervalMs=750.0,
-                 tissueRadiusMm=24.0):
+                 tissueRadiusMm=24.0,
+                 velocityNoiseCmPerSec=0.0,
+                 noiseSeed=0):
         self.dims = tuple(int(d) for d in dims)  # I, J, K
         self.spacingMm = np.array(spacingMm, dtype=float)
         self.centerRas = np.array(centerRas, dtype=float)
@@ -576,6 +629,12 @@ class FlowPhantom:
         self.backflowDurationMs = float(backflowDurationMs)
         self.nominalIntervalMs = float(nominalIntervalMs)
         self.tissueRadiusMm = float(tissueRadiusMm)
+        # Velocity noise of the phase images, as in real images (0: noise-free, for checking the computations exactly).
+        # velocityNoiseCmPerSec is the standard deviation of the velocity noise in the stationary tissue; it is inversely
+        # proportional to the magnitude (signal to noise ratio): half of it in the vessel, and random phase in the air.
+        # Typical value: 2 cm/s (venc 150 cm/s, SNR 50 in tissue).
+        self.velocityNoiseCmPerSec = float(velocityNoiseCmPerSec)
+        self.noiseSeed = int(noiseSeed)
 
         # Volume orientation: rotation around an oblique axis
         rotation = vtk.vtkTransform()
@@ -652,6 +711,7 @@ class FlowPhantom:
         """Raw phase values (k, j, i) of a velocity component image, as stored by Siemens CS 4D flow
         (range [-4096, 4096), velocity encoding vencCmPerSec maps to 4096).
         phaseOffset: optional additive background phase error (raw units), same shape as the image.
+        If the phantom has velocity noise (velocityNoiseCmPerSec), it is added (the same for the same frame and axis).
         """
         velocityCmPerSec = self.velocityVolumeArray(frameIndex)[..., axis] * 100.0
         if invertToRasDirection:
@@ -659,9 +719,27 @@ class FlowPhantom:
         raw = velocityCmPerSec / vencCmPerSec * PHASE_MAX_VALUE
         if phaseOffset is not None:
             raw = raw + phaseOffset
+        if self.velocityNoiseCmPerSec > 0:
+            raw = raw + self.phaseNoise(frameIndex, axis, vencCmPerSec)
         if wrap:
             raw = np.mod(raw + PHASE_MAX_VALUE, 2 * PHASE_MAX_VALUE) - PHASE_MAX_VALUE
         return np.round(raw).astype(np.int16)
+
+    def phaseNoise(self, frameIndex, axis, vencCmPerSec):
+        """Phase noise (raw units, k, j, i) of a component image: Gaussian velocity noise with standard deviation
+        velocityNoiseCmPerSec * (tissue magnitude / magnitude), and uniformly distributed random phase in the air
+        (where the magnitude is at noise level), as in real phase-contrast images."""
+        rng = np.random.default_rng([self.noiseSeed, frameIndex, axis])
+        magnitude = self.magnitudeVolumeArray().astype(float)
+        sigmaRaw = self.velocityNoiseCmPerSec * (100.0 / np.maximum(magnitude, 1.0)) / vencCmPerSec * PHASE_MAX_VALUE
+        noise = rng.normal(0.0, 1.0, magnitude.shape) * sigmaRaw
+        air = self.airMask()
+        noise[air] = rng.uniform(-PHASE_MAX_VALUE, PHASE_MAX_VALUE, int(np.count_nonzero(air)))
+        return noise
+
+    def airMask(self):
+        """Voxels outside the body (magnitude at noise level)."""
+        return self.magnitudeVolumeArray() < 10
 
     def numberOfWrappedVoxels(self, vencCmPerSec):
         """Number of voxels (over all frames and components) where the velocity exceeds the velocity encoding."""
@@ -831,9 +909,10 @@ class FlowPhantom:
         planeNode.SetSize(sizeMm, sizeMm)
         return planeNode
 
-    def createFlowModelMesh(self, frameIndex, velocityArrayName="V", lengthMm=40.0, resolutionMm=1.0):
+    def createFlowModelMesh(self, frameIndex, velocityArrayName="V", lengthMm=40.0, resolutionMm=1.0, velocityUnit="mm/s"):
         """CFD-like flow field: unstructured grid of the vessel lumen (a segment of the cylinder around the center)
-        with a velocity point data array."""
+        with a velocity point data array, in velocityUnit ("mm/s", the unit of velocity arrays without declared unit,
+        or "m/s")."""
         halfSize = max(lengthMm / 2, self.vesselRadiusMm) + 2 * resolutionMm
         imageData = vtk.vtkImageData()
         numberOfPoints = int(2 * halfSize / resolutionMm) + 1
@@ -843,7 +922,7 @@ class FlowPhantom:
         # Point positions in VTK point order (x index changes fastest)
         z, y, x = np.indices((numberOfPoints, numberOfPoints, numberOfPoints)).reshape(3, -1)
         points = np.stack([x, y, z], axis=-1) * resolutionMm + (self.centerRas - halfSize)
-        velocity = self.velocityAt(points, frameIndex).astype(np.float32)
+        velocity = (self.velocityAt(points, frameIndex) * {"m/s": 1.0, "mm/s": 1000.0}[velocityUnit]).astype(np.float32)
         relative = points - self.centerRas
         axial = np.abs(relative @ self.vesselAxis)
         inside = np.logical_and(self.radialDistance(points) <= self.vesselRadiusMm + 0.5 * resolutionMm, axial <= lengthMm / 2)

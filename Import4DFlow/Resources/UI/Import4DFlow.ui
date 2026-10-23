@@ -39,50 +39,51 @@
        </layout>
       </item>
       <item row="1" column="0" colspan="2">
-       <layout class="QHBoxLayout" name="horizontalLayout_3">
-        <item>
-         <widget class="QPushButton" name="convertButton">
-          <property name="enabled">
-           <bool>false</bool>
-          </property>
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
-            <horstretch>1</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="toolTip">
-           <string>Convert component images to 4D flow field</string>
-          </property>
-          <property name="text">
-           <string>Create flow field</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="loadTestCaseButton">
-         <property name="toolTip">
-          <string>Load a 4D flow test case (folder with manifest.json, written by the Test case export format) without DICOM import. Component images, phase wrap segmentations, lumen and measurement planes are loaded, and the flow field is computed.</string>
-         </property>
-         <property name="text">
-          <string>Load test case...</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QCheckBox" name="storeInTransformCheckBox">
-          <property name="toolTip">
-           <string>Store the flow field in a sequence of grid transform nodes. This is the legacy flow field format, kept for backward compatibility with existing scenes and with tools that expect a transform. If unchecked, the flow field is stored in a sequence of vector volume nodes (a 3-component image, with the velocity vector in each voxel). This setting is remembered between sessions.</string>
-          </property>
-          <property name="text">
-           <string>Store in transform</string>
-          </property>
-          <property name="checked">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-       </layout>
+       <widget class="ctkCollapsibleGroupBox" name="inputAdvancedGroupBox">
+        <property name="title">
+         <string>Advanced</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QVBoxLayout" name="inputAdvancedLayout">
+         <item>
+          <widget class="QCheckBox" name="removeInputImageCheckBox">
+           <property name="toolTip">
+            <string>Remove the component images of the input flow image after the input flow field is created from them. They are not needed after this, as the input flow field contains the velocity as acquired and the velocity encoding. The magnitude images are kept.</string>
+           </property>
+           <property name="text">
+            <string>Remove input flow image after conversion</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">removeInputImageAfterConversion</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="convertButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="toolTip">
+         <string>Create the input flow field (velocity as acquired) from the component images, and compute the output flow field with the selected corrections</string>
+        </property>
+        <property name="text">
+         <string>Create flow field</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </widget>
@@ -94,54 +95,155 @@
      </property>
      <layout class="QFormLayout" name="formLayout_3">
       <item row="0" column="0">
-       <widget class="QLabel" name="label_2">
+       <widget class="QLabel" name="inputFlowFieldLabel">
         <property name="text">
-         <string>Flow field:</string>
+         <string>Input flow field:</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
+       <layout class="QHBoxLayout" name="inputFlowFieldLayout">
+        <item>
+         <widget class="qMRMLNodeComboBox" name="inputFlowFieldSelector">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string>Input flow field: velocity as acquired (aliased, before any correction), created from the component images (above) or loaded from file. All corrections are computed from it.</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLTransformNode</string>
+            <string>vtkMRMLVectorVolumeNode</string>
+           </stringlist>
+          </property>
+          <property name="showChildNodeTypes">
+           <bool>false</bool>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="renameEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="noneDisplay">
+           <string>Select the input flow field</string>
+          </property>
+          <property name="SlicerParameterName" stdset="0">
+           <string notr="true">inputFlowField</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="deleteInputFlowFieldButton">
+          <property name="toolTip">
+           <string>Delete the input flow field (its sequence and proxy node)</string>
+          </property>
+          <property name="text">
+           <string>Delete</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="magnitudeVolumeLabel">
+        <property name="text">
+         <string>Magnitude image:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="magnitudeVolumeSelector">
         <property name="toolTip">
-         <string>Pick the output to the algorithm.</string>
+         <string>Magnitude images of the input flow field (a volume sequence with the same number of frames and voxel grid). Needed for noise masking, background correction, PC-MRA and lumen estimation. If its frame times are the same as those of the input flow field then they are browsed with the same sequence browser.</string>
         </property>
         <property name="nodeTypes">
          <stringlist notr="true">
-          <string>vtkMRMLTransformNode</string>
-          <string>vtkMRMLVectorVolumeNode</string>
+          <string>vtkMRMLScalarVolumeNode</string>
          </stringlist>
         </property>
         <property name="showChildNodeTypes">
          <bool>false</bool>
         </property>
         <property name="noneEnabled">
-         <bool>false</bool>
+         <bool>true</bool>
         </property>
         <property name="addEnabled">
          <bool>false</bool>
         </property>
         <property name="removeEnabled">
-         <bool>true</bool>
+         <bool>false</bool>
         </property>
-        <property name="editEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="renameEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">outputFlowField</string>
+        <property name="noneDisplay">
+         <string>None (no magnitude images)</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Output flow field:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+        <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="toolTip">
+          <string>Output flow field: velocity after the corrections (noise mask, phase unwrapping, background correction, divergence-free filtering), computed from the input flow field. A new flow field is created if none is selected.</string>
+         </property>
+         <property name="nodeTypes">
+          <stringlist notr="true">
+           <string>vtkMRMLTransformNode</string>
+           <string>vtkMRMLVectorVolumeNode</string>
+          </stringlist>
+         </property>
+         <property name="showChildNodeTypes">
+          <bool>false</bool>
+         </property>
+         <property name="noneEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="addEnabled">
+          <bool>false</bool>
+         </property>
+         <property name="removeEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="renameEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="noneDisplay">
+          <string>Create new flow field</string>
+         </property>
+         <property name="SlicerParameterName" stdset="0">
+          <string notr="true">outputFlowField</string>
+         </property>
+        </widget>
+      </item>
+      <item row="3" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
          <string>Show:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="3" column="1">
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
          <widget class="QPushButton" name="showFlowFieldButton">
@@ -211,27 +313,101 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="lumenLabel">
         <property name="text">
          <string>Lumen:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
-       <widget class="qMRMLSegmentSelectorWidget" name="lumenSegmentSelectorWidget">
-        <property name="toolTip">
-         <string>Optional segmentation of the vessel lumen (blood pool). Used by slicerheart_4dflow methods: it is excluded from background phase fitting, and it is the region of divergence-free filtering, encoding check, and quality report. It can be created automatically in the Quality section.</string>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="editEnabled">
-         <bool>true</bool>
+      <item row="4" column="1">
+       <layout class="QHBoxLayout" name="lumenLayout">
+        <item>
+          <widget class="qMRMLSegmentSelectorWidget" name="lumenSegmentSelectorWidget">
+           <property name="toolTip">
+            <string>Optional segmentation of the vessel lumen (blood pool). Used by slicerheart_4dflow methods: it is excluded from background phase fitting, and it is the region of divergence-free filtering, encoding check, and quality report. It can be computed automatically (Compute): the selected segment is overwritten, or a new segmentation or segment is created if none is selected.</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+          </widget>
+        </item>
+        <item alignment="Qt::AlignTop">
+         <widget class="QPushButton" name="computeLumenButton">
+          <property name="toolTip">
+           <string>Compute a rough lumen (blood pool) segmentation from the flow field (slicerheart_4dflow) into the selected segment (a new segmentation or segment is created if none is selected). Review and edit it in Segment Editor before using it for measurements.</string>
+          </property>
+          <property name="text">
+           <string>Compute</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="pcmraLabel">
+        <property name="text">
+         <string>PC-MRA:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0" colspan="2">
+      <item row="5" column="1">
+       <layout class="QHBoxLayout" name="pcmraLayout">
+        <item>
+         <widget class="qMRMLNodeComboBox" name="pcmraVolumeSelector">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string>Velocity-weighted phase-contrast MR angiogram (PC-MRA, Bock 2010) of the flow field. Compute overwrites the selected volume, or creates a new volume if none is selected.</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLScalarVolumeNode</string>
+           </stringlist>
+          </property>
+          <property name="showChildNodeTypes">
+           <bool>false</bool>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="renameEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="noneDisplay">
+           <string>Create new volume</string>
+          </property>
+          <property name="SlicerParameterName" stdset="0">
+           <string notr="true">pcmraVolume</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="computePcmraButton">
+          <property name="toolTip">
+           <string>Compute the velocity-weighted phase-contrast MR angiogram (PC-MRA, Bock 2010) of the flow field (slicerheart_4dflow) into the selected volume (a new volume is created if none is selected).</string>
+          </property>
+          <property name="text">
+           <string>Compute</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="6" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Background correction</string>
@@ -384,7 +560,7 @@
         </layout>
        </widget>
       </item>
-      <item row="4" column="0" colspan="2">
+      <item row="7" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Velocity anti-aliasing</string>
@@ -436,7 +612,7 @@
         </layout>
        </widget>
       </item>
-      <item row="5" column="0" colspan="2">
+      <item row="8" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="divergenceFilterGroupBox">
         <property name="title">
          <string>Divergence-free filtering</string>
@@ -465,7 +641,7 @@
         </layout>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
+      <item row="9" column="0" colspan="2">
        <widget class="QPushButton" name="recomputeFlowFieldButton">
         <property name="toolTip">
          <string>Recompute flow field after adjusting segmentation</string>
@@ -487,30 +663,6 @@
       <bool>true</bool>
      </property>
      <layout class="QVBoxLayout" name="qualityLayout">
-      <item>
-       <layout class="QHBoxLayout" name="qualityButtonsLayout">
-        <item>
-         <widget class="QPushButton" name="createLumenButton">
-          <property name="toolTip">
-           <string>Create a rough lumen (blood pool) segmentation from the PC-MRA (slicerheart_4dflow) and select it as lumen. Review and edit it in Segment Editor before using it for measurements.</string>
-          </property>
-          <property name="text">
-           <string>Create lumen</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="createPcmraButton">
-          <property name="toolTip">
-           <string>Create a velocity-weighted phase-contrast MR angiogram (PC-MRA, Bock 2010) volume from the flow field (slicerheart_4dflow).</string>
-          </property>
-          <property name="text">
-           <string>Create PC-MRA</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
       <item>
        <layout class="QHBoxLayout" name="qualityButtonsLayout2">
         <item>
@@ -731,82 +883,50 @@
    </hints>
   </connection>
   <connection>
-   <sender>outputTransformSelector</sender>
-   <signal>currentNodeChanged(bool)</signal>
-   <receiver>showFlowFieldButton</receiver>
-   <slot>setEnabled(bool)</slot>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>inputFlowFieldSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>287</x>
-     <y>187</y>
+     <x>20</x>
+     <y>20</y>
     </hint>
     <hint type="destinationlabel">
-     <x>150</x>
-     <y>218</y>
+     <x>20</x>
+     <y>20</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>outputTransformSelector</sender>
-   <signal>currentNodeChanged(bool)</signal>
-   <receiver>showMagnitudeVolumeButton</receiver>
-   <slot>setEnabled(bool)</slot>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>magnitudeVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>369</x>
-     <y>187</y>
+     <x>20</x>
+     <y>20</y>
     </hint>
     <hint type="destinationlabel">
-     <x>247</x>
-     <y>218</y>
+     <x>20</x>
+     <y>20</y>
     </hint>
    </hints>
   </connection>
   <connection>
-   <sender>outputTransformSelector</sender>
-   <signal>currentNodeChanged(bool)</signal>
-   <receiver>showComponentVolume1Button</receiver>
-   <slot>setEnabled(bool)</slot>
+   <sender>Import4DFlow</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>pcmraVolumeSelector</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>463</x>
-     <y>187</y>
+     <x>20</x>
+     <y>20</y>
     </hint>
     <hint type="destinationlabel">
-     <x>328</x>
-     <y>218</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>outputTransformSelector</sender>
-   <signal>currentNodeChanged(bool)</signal>
-   <receiver>showComponentVolume2Button</receiver>
-   <slot>setEnabled(bool)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>491</x>
-     <y>187</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>409</x>
-     <y>218</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>outputTransformSelector</sender>
-   <signal>currentNodeChanged(bool)</signal>
-   <receiver>showComponentVolume3Button</receiver>
-   <slot>setEnabled(bool)</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>491</x>
-     <y>187</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>490</x>
-     <y>218</y>
+     <x>20</x>
+     <y>20</y>
     </hint>
    </hints>
   </connection>
