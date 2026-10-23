@@ -1,8 +1,11 @@
 """Feature tests of the Analyze4DFlow module.
 
 Flow fields are created from an analytic flow phantom (pulsatile Poiseuille flow in an oblique vessel) in all supported
-storage formats: grid transform sequence and vector volume sequence (created by the Import4DFlow module) and model
-sequence (CFD-like unstructured grid with velocity point data). Computed flow metrics are compared to analytic values.
+storage formats: vector volume sequence (created by the Import4DFlow module, velocity in mm/s), grid transform sequence
+(legacy format, velocity in m/s, created from the vector volume sequence) and model sequence (CFD-like unstructured grid
+with velocity point data, without declared unit, therefore in mm/s). Computed flow metrics are compared to analytic values.
+Analyze 4D Flow computes velocities in mm/s (speed volume, masked flow field, streamline speed), while table values are in
+display units (velocity in cm/s, flow rate in ml/s). FlowPhantom velocities are in m/s.
 If available, an anonymized clinical 4D flow MRI data set is analyzed as well.
 Results are written into a markdown report with screenshots (see FlowTestingUtils.TestReport).
 
@@ -81,23 +84,28 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     # Helpers
 
     def createFlowField(self, phantom, kind, vencCmPerSec=150.0, velocityArrayName="V"):
-        """Create a flow field of the given kind. Returns (flowFieldNode, referenceVolumeNode)."""
+        """Create a flow field of the given kind. Returns (flowFieldNode, referenceVolumeNode).
+        Vector volume flow fields are created by Import 4D Flow (mm/s), grid transform flow fields (legacy format, m/s)
+        are created from them."""
         if kind in ["transform", "volume"]:
             volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
             flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(
                 volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"],
-                volumeNodeSet["magnitudeVolumeNode"], storeInTransform=(kind == "transform"))
+                volumeNodeSet["magnitudeVolumeNode"])
             self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            if kind == "transform":
+                flowFieldNode = FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
             return flowFieldNode, volumeNodeSet["magnitudeVolumeNode"]
         flowFieldNode, _, _ = phantom.createFlowModelSequence(velocityArrayName)
         self.logic.setHeartRateBpm(flowFieldNode, phantom.heartRateBpm(), "test")
         referenceVolumeNode = phantom.createVolumeNode(phantom.magnitudeVolumeArray(), "Reference", addToScene=True)
         return flowFieldNode, referenceVolumeNode
 
-    def analyze(self, flowFieldNode, planeNode, segmentationNode=None, segmentId=None, speedThreshold=0.1,
+    def analyze(self, flowFieldNode, planeNode, segmentationNode=None, segmentId=None, speedThresholdMmPerSec=100.0,
                 streamlines=False, speedVolume=False, projected=False, maskedOutput=None, maximumLengthMm=100,
                 bidirectional=True, computeAllMetrics=False, samplingDistanceMm=1.0, summary=True):
-        """Run analysis. Returns (outputs, metrics, summaryMetrics), where metrics and summaryMetrics are dicts of column values."""
+        """Run analysis. Returns (outputs, metrics, summaryMetrics), where metrics and summaryMetrics are dicts of column values
+        (in display units)."""
         outputs = {"metricsModel": slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Flow metrics")}
         if streamlines:
             outputs["streamlines"] = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Streamlines")
@@ -111,19 +119,20 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             outputFlowMetricsModel=outputs["metricsModel"],
             maskSegmentationNode=segmentationNode, maskSegmentID=segmentId,
             streamlinesMaximumLengthMm=maximumLengthMm, streamlinesBidirectional=bidirectional,
-            streamlinesComputeAllMetrics=computeAllMetrics, streamlinesSpeedThresholdMPerSec=speedThreshold,
+            streamlinesComputeAllMetrics=computeAllMetrics, streamlinesSpeedThresholdMmPerSec=speedThresholdMmPerSec,
             outputSpeedVolume=outputs.get("speedVolume"), speedVolumeProjectedToPlane=projected,
             outputMaskedFlowField=maskedOutput)
         outputs["table"] = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics table")
         outputs["summaryTable"] = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics summary") if summary else None
-        self.logic.computeFlowMetricsTable(outputs["metricsModel"], planeNode, flowFieldNode, speedThreshold,
+        self.logic.computeFlowMetricsTable(outputs["metricsModel"], planeNode, flowFieldNode, speedThresholdMmPerSec,
             outputs["table"], outputs["summaryTable"])
         summaryMetrics = {name: values[0] for name, values in tableToDict(outputs["summaryTable"]).items()}
         return outputs, tableToDict(outputs["table"]), summaryMetrics
 
     def checkMetricsAgainstPhantom(self, label, phantom, metrics, summaryMetrics, speedThreshold=0.0,
                                    flowRtol=0.08, areaRtol=0.15, segmentationMask=True):
-        """Compare per-frame and summary metrics to analytic values. Returns table rows."""
+        """Compare per-frame and summary metrics (in display units) to analytic values. speedThreshold is in m/s.
+        Returns table rows."""
         rows = []
         expectedFlows = [phantom.expectedFlowRateMlPerSec(i, 0.0 if segmentationMask else speedThreshold) for i in range(phantom.numberOfFrames)]
         peakFlow = max(abs(f) for f in expectedFlows)
@@ -196,20 +205,21 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         volumeNodeSets = self.importLogic.findVolumeNodeSets()
         self.assertEqual(len(volumeNodeSets), 1, "Number of detected 4D flow image sets")
         volumeNodeSet = list(volumeNodeSets.values())[0]
+        flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+        self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
+        self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         flowFieldNodes = {}
         for kind in kinds:
-            flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=(kind == "transform"))
-            self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
-            self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
-            flowFieldNodes[kind] = flowFieldNode
+            # Grid transform flow field (legacy format) with the same velocity as the vector volume flow field
+            flowFieldNodes[kind] = flowFieldNode if kind == "volume" else FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
         return volumeNodeSet, flowFieldNodes
 
     def findPeakCoherentFlow(self, vectorVolumeFlowFieldNode, magnitudeVolumeNode):
         """Find location of the highest coherent systolic flow. Noise (random velocity directions, often saturated at the
         velocity encoding) is suppressed by averaging velocity vectors in a 5x5x5 neighborhood and only considering
         bright voxels; the coherent speed is then median filtered.
-        Returns (peakSpeed, peakFrame, peakIndex (k, j, i), peakRas, flowDirection)."""
+        Returns (peakSpeed (in the unit of the flow field, mm/s), peakFrame, peakIndex (k, j, i), peakRas, flowDirection)."""
         import scipy.ndimage
         sequenceNode = self.importLogic._getSequenceFromProxyNode(vectorVolumeFlowFieldNode)
         magnitudeSequenceNode = self.importLogic._getSequenceFromProxyNode(magnitudeVolumeNode)
@@ -351,17 +361,17 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkClose("Grid transform vs. vector volume: max. difference of all metrics", max(differences), 0.0, atol=1e-3)
 
     @reportedTest("Flow quantification accuracy (speed threshold mask)",
-        "Without segmentation, the vessel is defined by the points where speed is above the threshold (0.1 m/s)."
+        "Without segmentation, the vessel is defined by the points where speed is above the threshold (10 cm/s)."
         " Expected flow and area are computed analytically for the thresholded Poiseuille profile.")
     def test_04_FlowMetricsSpeedThresholdMask(self):
         phantom = FlowPhantom()
-        speedThreshold = 0.1
+        speedThreshold = 0.1  # m/s
         for kind in ["volume", "model"]:
             slicer.mrmlScene.Clear()
             label = f"[{KIND_NAMES[kind]}, threshold]"
             flowFieldNode, _ = self.createFlowField(phantom, kind)
             planeNode = phantom.createMeasurementPlane()
-            _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, speedThreshold=speedThreshold)
+            _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, speedThresholdMmPerSec=speedThreshold * 1000.0)
             self.checkMetricsAgainstPhantom(label, phantom, metrics, None, speedThreshold=speedThreshold, segmentationMask=False, areaRtol=0.2)
             zeroFlowFrames = [i for i in range(phantom.numberOfFrames) if abs(phantom.maxVelocity(i)) <= speedThreshold]
             for frameIndex in zeroFlowFrames:
@@ -416,7 +426,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 self.importLogic.setFlowFieldVisualizationToDefault(flowFieldNode)
             planeNode = phantom.createMeasurementPlane()
             segmentationNode, segmentId = phantom.createVesselSegmentation(referenceVolumeNode)
-            outputs, _, _ = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, streamlines=True, speedThreshold=0.02,
+            outputs, _, _ = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, streamlines=True, speedThresholdMmPerSec=20.0,
                 maximumLengthMm=maximumLengthMm, bidirectional=bidirectional, computeAllMetrics=computeAllMetrics, summary=False)
             streamlinesNode = outputs["streamlines"]
             FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
@@ -446,7 +456,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkTrue(f"{label} 'Speed' point data array", speedArray is not None)
             self.report.checkClose(f"{label} Streamlines are parallel to the vessel axis (mean |cos| of segment directions)", meanCosine, 1.0, atol=0.02)
             self.report.checkRange(f"{label} Max. distance of streamline points from vessel axis", float(radial.max()), 0.0, phantom.vesselRadiusMm + 1.0, "mm")
-            self.report.checkClose(f"{label} Max. speed along streamlines", maxSpeed, phantom.peakVelocityMPerSec, rtol=0.05, unit="m/s")
+            self.report.checkClose(f"{label} Max. speed along streamlines", maxSpeed, phantom.peakVelocityMPerSec * 1000.0, rtol=0.05, unit="mm/s")
             axialExtent = (float(axial.min()), float(axial.max()))
             if bidirectional:
                 self.report.checkTrue(f"{label} Streamlines extend upstream and downstream of the plane", axialExtent[0] < -5 and axialExtent[1] > 5,
@@ -473,23 +483,31 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 FlowTestingUtils.reset3DView()
                 self.report.screenshot(f"Streamlines at peak systole {label}")
                 slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
-        self.report.table(["Case", "Lines", "Mean |cos|", "Max. radial distance (mm)", "Axial extent (mm)", "Max. speed (m/s)"], rows)
+        self.report.table(["Case", "Lines", "Mean |cos|", "Max. radial distance (mm)", "Axial extent (mm)", "Max. speed (mm/s)"], rows)
 
     @reportedTest("Speed volume",
-        "The speed volume contains the speed magnitude, or (Doppler-like) the signed velocity component along the plane normal."
-        " Color mapping is set according to the mode.")
+        "The speed volume contains the speed magnitude, or (Doppler-like) the signed velocity component along the plane normal,"
+        " in mm/s. Color mapping is set according to the mode: the speed magnitude uses the color map of the flow field if the"
+        " flow field is in mm/s (not for grid transforms, which are in m/s).")
     def test_07_SpeedVolume(self):
         phantom = FlowPhantom(numberOfFrames=10)
         peakFrame = phantom.peakFrameIndex()
         backflowFrame = phantom.backflowFrameIndex()
         rows = []
-        for kind in ["transform", "model"]:
+        for kind in ["volume", "transform", "model"]:
             slicer.mrmlScene.Clear()
             flowFieldNode, referenceVolumeNode = self.createFlowField(phantom, kind)
-            if kind == "transform":
+            if kind == "volume" and not FlowTestingUtils.isVectorFieldDisplayAvailable():
+                # Vector volume flow field cannot be displayed with glyphs, a default color map is used
+                expectedSpeedColorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
+            elif kind == "volume":
                 self.importLogic.setFlowFieldVisualizationToDefault(flowFieldNode)
-                # Speed magnitude volume uses the same color map as the flow field glyphs
+                # Speed magnitude volume uses the same color map as the flow field glyphs (both in mm/s)
                 expectedSpeedColorNodeID = self.importLogic.getFlowFieldDisplayNode(flowFieldNode).GetColorNodeID()
+            elif kind == "transform":
+                self.importLogic.setFlowFieldVisualizationToDefault(flowFieldNode)
+                # Color map of the flow field glyphs is in m/s, a default color map is used
+                expectedSpeedColorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
             else:
                 # Model has no speed color map, a default color map is used
                 expectedSpeedColorNodeID = "vtkMRMLColorTableNodeFileViridis.txt"
@@ -502,7 +520,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 self.logic.sampleFlowFieldWithPlane(planeNode, flowFieldNode, samplingDistanceMm=1.0,
                     outputFlowMetricsModel=slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Metrics"),
                     maskSegmentationNode=segmentationNode, maskSegmentID=segmentId,
-                    outputSpeedVolume=speedVolumeNode, speedVolumeProjectedToPlane=projected, streamlinesSpeedThresholdMPerSec=0.02)
+                    outputSpeedVolume=speedVolumeNode, speedVolumeProjectedToPlane=projected, streamlinesSpeedThresholdMmPerSec=20.0)
                 durationSec = time.time() - startTime
                 FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
                 peakArray = slicer.util.arrayFromVolume(speedVolumeNode).copy()
@@ -510,17 +528,19 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 backflowArray = slicer.util.arrayFromVolume(speedVolumeNode).copy()
                 colorNode = speedVolumeNode.GetScalarVolumeDisplayNode().GetColorNode()
                 colorMappingType = colorNode.GetAttribute("SlicerHeart.ColorMappingType") if colorNode else None
-                self.report.checkClose(f"{label} Max. value at peak systole", float(peakArray.max()), phantom.peakVelocityMPerSec, rtol=0.05, unit="m/s")
+                units = speedVolumeNode.GetVoxelValueUnits()
+                self.report.checkEqual(f"{label} Speed volume unit", units.GetCodeValue() if units else None, "mm/s")
+                self.report.checkClose(f"{label} Max. value at peak systole", float(peakArray.max()), phantom.peakVelocityMPerSec * 1000.0, rtol=0.05, unit="mm/s")
                 if projected:
-                    expectedMin = phantom.maxVelocity(backflowFrame)
+                    expectedMin = phantom.maxVelocity(backflowFrame) * 1000.0
                     self.report.checkClose(f"{label} Min. value during backflow (negative: flow against plane normal)", float(backflowArray.min()),
-                        expectedMin, rtol=0.1, unit="m/s")
+                        expectedMin, rtol=0.1, unit="mm/s")
                     self.report.checkEqual(f"{label} Color mapping type", colorMappingType, "SpeedComponent")
                 else:
-                    self.report.checkClose(f"{label} Min. value (speed is non-negative)", float(backflowArray.min()), 0.0, atol=1e-6, unit="m/s")
-                    self.report.checkClose(f"{label} Max. value during backflow", float(backflowArray.max()), abs(phantom.maxVelocity(backflowFrame)), rtol=0.1, unit="m/s")
+                    self.report.checkClose(f"{label} Min. value (speed is non-negative)", float(backflowArray.min()), 0.0, atol=1e-3, unit="mm/s")
+                    self.report.checkClose(f"{label} Max. value during backflow", float(backflowArray.max()), abs(phantom.maxVelocity(backflowFrame)) * 1000.0, rtol=0.1, unit="mm/s")
                     self.report.checkEqual(f"{label} Color map", speedVolumeNode.GetScalarVolumeDisplayNode().GetColorNodeID(), expectedSpeedColorNodeID)
-                if kind == "transform":
+                if kind in ["transform", "volume"]:
                     ijkToRas = vtk.vtkMatrix4x4()
                     speedVolumeNode.GetIJKToRASMatrix(ijkToRas)
                     phantomIjkToRas = phantom.ijkToRasMatrix()
@@ -542,7 +562,8 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
     @reportedTest("Masked flow field output",
         "The flow field is masked by a segmentation (half of the vessel radius) or by the speed threshold, and written into"
-        " an output node of the same type. Velocities must be zero outside the mask and unchanged inside."
+        " an output node of the same type (velocity in mm/s, or in m/s for grid transforms). Velocities must be zero outside"
+        " the mask and unchanged inside."
         " An output node of a different type must be rejected.")
     def test_08_MaskedFlowField(self):
         phantom = FlowPhantom(numberOfFrames=8)
@@ -559,17 +580,21 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             outputNode = slicer.mrmlScene.AddNewNodeByClass(flowFieldNode.GetClassName() if kind != "transform" else "vtkMRMLTransformNode", "Masked flow field")
             self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, maskedOutput=outputNode, summary=False)
             FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+            # Velocity in the output: m/s in grid transforms, mm/s otherwise. It is compared in m/s.
             if kind == "model":
                 mesh = outputNode.GetMesh()
                 points = vtk.util.numpy_support.vtk_to_numpy(mesh.GetPoints().GetData())
-                velocity = vtk.util.numpy_support.vtk_to_numpy(mesh.GetPointData().GetArray("V"))
+                velocity = vtk.util.numpy_support.vtk_to_numpy(mesh.GetPointData().GetArray("V")) / 1000.0
                 expected = phantom.velocityAt(points, peakFrame)
                 radial = phantom.radialDistance(points)
+                self.report.checkEqual(f"{label} Velocity unit of the masked model", outputNode.GetAttribute("SimulationModel.PointArray.V.Unit"), "mm/s")
             else:
                 if kind == "transform":
                     velocity = slicer.util.arrayFromGridTransform(outputNode)
                 else:
-                    velocity = slicer.util.arrayFromVolume(outputNode)
+                    velocity = slicer.util.arrayFromVolume(outputNode) / 1000.0
+                    units = outputNode.GetVoxelValueUnits()
+                    self.report.checkEqual(f"{label} Velocity unit of the masked vector volume", units.GetCodeValue() if units else None, "mm/s")
                 expected = phantom.velocityVolumeArray(peakFrame)
                 radial = phantom.radialDistanceMm
             # Exclude points near the mask boundary (voxelization / surface discretization)
@@ -604,10 +629,10 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         flowFieldNode, _ = self.createFlowField(phantom, "volume")
         planeNode = phantom.createMeasurementPlane()
         outputNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode", "Masked flow field")
-        speedThreshold = 0.5
-        self.analyze(flowFieldNode, planeNode, speedThreshold=speedThreshold, maskedOutput=outputNode, summary=False)
+        speedThreshold = 0.5  # m/s
+        self.analyze(flowFieldNode, planeNode, speedThresholdMmPerSec=speedThreshold * 1000.0, maskedOutput=outputNode, summary=False)
         FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
-        velocity = slicer.util.arrayFromVolume(outputNode)
+        velocity = slicer.util.arrayFromVolume(outputNode) / 1000.0  # m/s
         expected = phantom.velocityVolumeArray(peakFrame)
         expectedSpeed = np.linalg.norm(expected, axis=-1)
         speed = np.linalg.norm(velocity, axis=-1)
@@ -641,9 +666,9 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for frameIndex in range(phantom.numberOfFrames):
             browserNode.SetSelectedItemNumber(frameIndex)
             speeds.append(float(slicer.util.arrayFromVolume(outputs["speedVolume"]).max()))
-        expectedSpeeds = [abs(phantom.maxVelocity(i)) for i in range(phantom.numberOfFrames)]
+        expectedSpeeds = [abs(phantom.maxVelocity(i)) * 1000.0 for i in range(phantom.numberOfFrames)]
         self.report.checkClose("Speed volume changes with the selected frame (max. error of per-frame maximum speed)",
-            max(abs(a - b) for a, b in zip(speeds, expectedSpeeds)), 0.0, atol=0.05, unit="m/s")
+            max(abs(a - b) for a, b in zip(speeds, expectedSpeeds)), 0.0, atol=50.0, unit="mm/s")
         self.report.checkEqual("Temporary nodes are removed", len([n for n in slicer.util.getNodes("__tmp__*")]), 0)
 
         # Output node that is already a proxy node of another sequence browser
@@ -692,7 +717,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parentTransform.SetMatrixTransformToParent(transform.GetMatrix())
         for node in [modelNode, planeNode, segmentationNode]:
             node.SetAndObserveTransformNodeID(parentTransform.GetID())
-        outputs, metrics, _ = self.analyze(modelNode, planeNode, segmentationNode, segmentId, streamlines=True, speedThreshold=0.02, summary=False)
+        outputs, metrics, _ = self.analyze(modelNode, planeNode, segmentationNode, segmentId, streamlines=True, speedThresholdMmPerSec=20.0, summary=False)
         self.report.checkClose("[static model, parent transform] Flow rate", metrics["FlowRate"][0], expectedFlow, rtol=0.08, unit="ml/s")
         # Streamlines (in world coordinate system) must follow the transformed vessel axis
         vesselAxisWorld = np.array(transform.TransformVector(phantom.vesselAxis))
@@ -731,8 +756,14 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         _, metrics, _ = self.analyze(modelNode, transformedPlaneNode, segmentationNode, segmentId, summary=False)
         self.report.checkClose("[static model, plane under parent transform] Flow rate", metrics["FlowRate"][0], expectedFlow, rtol=0.08, unit="ml/s")
 
-        # Static vector volume
-        vectorVolumeNode = phantom.createVolumeNode(phantom.velocityVolumeArray(peakFrame), "Static velocity", "vtkMRMLVectorVolumeNode", addToScene=True)
+        # Static model with velocity unit (m/s) specified in the model node attribute
+        modelNode.SetAndObserveMesh(phantom.createFlowModelMesh(peakFrame, "Velocity", velocityUnit="m/s"))
+        modelNode.SetAttribute(Analyze4DFlowLogic.modelVelocityUnitAttributeName("Velocity"), "m/s")
+        _, metrics, _ = self.analyze(modelNode, planeNode, segmentationNode, segmentId, summary=False)
+        self.report.checkClose("[static model, velocity in m/s] Flow rate", metrics["FlowRate"][0], expectedFlow, rtol=0.08, unit="ml/s")
+
+        # Static vector volume (velocity unit is not specified, therefore it is assumed to be mm/s)
+        vectorVolumeNode = phantom.createVolumeNode(phantom.velocityVolumeArray(peakFrame) * 1000.0, "Static velocity", "vtkMRMLVectorVolumeNode", addToScene=True)
         _, metrics, _ = self.analyze(vectorVolumeNode, planeNode, segmentationNode, segmentId, summary=False)
         self.report.checkEqual("[static vector volume] Number of rows in metrics table", len(metrics.get("FlowRate", [])), 1)
         self.report.checkClose("[static vector volume] Flow rate", metrics["FlowRate"][0], expectedFlow, rtol=0.08, unit="ml/s")
@@ -797,7 +828,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         # Summary table only
         summaryOnlyTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Summary only")
         try:
-            self.logic.computeFlowMetricsTable(outputs["metricsModel"], planeNode, flowFieldNode, 0.1, None, summaryOnlyTableNode)
+            self.logic.computeFlowMetricsTable(outputs["metricsModel"], planeNode, flowFieldNode, 100.0, None, summaryOnlyTableNode)
             error = None
         except Exception as e:
             error = f"{type(e).__name__}: {e}"
@@ -809,6 +840,8 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("Plot chart is stored in the parameter node", chartNode is not None)
         self.report.checkEqual("Number of plot series (one per available metric)", len(plotSeriesNodes), len(expectedColumns) - 1)
         self.report.checkTrue("Plot series use time as X axis", all(s.GetXColumnName() == "Time" for s in plotSeriesNodes))
+        self.report.checkEqual("Plot series names contain the display unit", sorted(s.GetName() for s in plotSeriesNodes),
+            sorted(f"{name} [{unit}]" for name, unit in zip(expectedColumns[1:], units[1:])))
         self.logic.createPlotFromTable(tableNode)
         self.report.checkEqual("Repeated plotting does not duplicate plot series", chartNode.GetNumberOfPlotSeriesNodes(), len(expectedColumns) - 1)
         # Only show flow rates
@@ -864,7 +897,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
             volumeNodeSet = list(self.importLogic.findVolumeNodeSets().values())[0]
             dicomFlowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=False)
+                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
             self.report.checkClose("Heart rate from DICOM NominalInterval", self.logic.computeHeartRateBpmFromDicom(dicomFlowFieldNode),
                 60000.0 / 820.0, atol=1e-6, unit="bpm")
 
@@ -920,7 +953,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parameterNode.outputFlowMetricsTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics table")
         parameterNode.outputFlowMetricsSummaryTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics summary")
         parameterNode.samplingDistance = 1.0
-        parameterNode.speedThreshold = 0.05
+        parameterNode.speedThresholdMmPerSec = 50.0
 
         # Heart rate is required for the summary
         self.report.checkClose("Heart rate is 0 in the GUI when not available", widget.ui.heartRateBpmDoubleSpinBox.value, 0.0, atol=1e-6, unit="bpm")
@@ -969,7 +1002,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.text("Sequence Registration extension is not installed: only the error reporting is tested.")
 
     @reportedTest("Anonymized clinical 4D flow MRI data set",
-        "A real Siemens 4D flow acquisition is imported (grid transform and vector volume storage). A measurement plane is"
+        "A real Siemens 4D flow acquisition is imported (vector volume storage, and a grid transform flow field created from it). A measurement plane is"
         " placed automatically at the location of the highest coherent flow velocity (normal = local mean flow direction), with a"
         " spherical mask. Both storage formats must give identical flow metrics, values must be physiologically plausible.")
     def test_15_RealData(self):
@@ -988,14 +1021,16 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 return
             volumeNodeSet = list(volumeNodeSets.values())[0]
             flowFieldNodes = {}
-            for kind in ["transform", "volume"]:
-                startTime = time.time()
-                flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                    volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"], storeInTransform=(kind == "transform"))
-                self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
-                self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
-                timings.append([f"Import flow field ({KIND_NAMES[kind]})", time.time() - startTime])
-                flowFieldNodes[kind] = flowFieldNode
+            startTime = time.time()
+            flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
+                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+            self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
+            self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            timings.append([f"Import flow field ({KIND_NAMES['volume']})", time.time() - startTime])
+            flowFieldNodes["volume"] = flowFieldNode
+            startTime = time.time()
+            flowFieldNodes["transform"] = FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
+            timings.append([f"Create legacy flow field ({KIND_NAMES['transform']})", time.time() - startTime])
             heartRateFromDicom = self.logic.computeHeartRateBpmFromDicom(flowFieldNodes["transform"])
         magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
         heartRate = self.logic.heartRateBpm(flowFieldNodes["transform"])
@@ -1005,7 +1040,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
         peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNodes["volume"], magnitudeVolumeNode)
         self.report.text(f"Measurement plane is placed at frame {peakFrame}, RAS position {np.round(peakRas, 1).tolist()},"
-            f" normal {np.round(flowDirection, 3).tolist()} (coherent speed in 5x5x5 neighborhood: {peakSpeed:.2f} m/s).")
+            f" normal {np.round(flowDirection, 3).tolist()} (coherent speed in 5x5x5 neighborhood: {peakSpeed:.0f} mm/s).")
         planeNode = self.createPlane(peakRas, flowDirection, 30.0, "Measurement plane")
         segmentationNode, segmentId = self.createSphereSegmentation(peakRas, 10.0, magnitudeVolumeNode, "Vessel mask")
 
@@ -1014,7 +1049,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for kind in ["transform", "volume"]:
             startTime = time.time()
             outputs, metrics, summaryMetrics = self.analyze(flowFieldNodes[kind], planeNode, segmentationNode, segmentId,
-                streamlines=(kind == "transform"), speedVolume=(kind == "transform"), speedThreshold=0.1)
+                streamlines=(kind == "transform"), speedVolume=(kind == "transform"), speedThresholdMmPerSec=100.0)
             timings.append([f"Analyze ({KIND_NAMES[kind]})", time.time() - startTime])
             results[kind] = (metrics, summaryMetrics)
             outputsByKind[kind] = outputs
@@ -1070,7 +1105,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNode, magnitudeVolumeNode)
         maskRadiusMm = 10.0
         self.report.text(f"Measurement location: frame {peakFrame}, RAS position {np.round(peakRas, 1).tolist()},"
-            f" flow direction {np.round(flowDirection, 3).tolist()}, coherent speed {peakSpeed:.2f} m/s.")
+            f" flow direction {np.round(flowDirection, 3).tolist()}, coherent speed {peakSpeed:.0f} mm/s.")
 
         # Mass conservation: the same blood volume must flow through parallel planes along the vessel
         rows = []
@@ -1103,8 +1138,8 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
         # Speed threshold mask (no segmentation)
         planeNode = self.createPlane(peakRas, flowDirection, 20.0, "Plane, speed threshold mask")
-        _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, speedThreshold=0.1)
-        rows.append(["speed threshold mask (0.1 m/s), 20 mm plane", summaryMetrics["ForwardVolume"], summaryMetrics["BackwardVolume"],
+        _, metrics, summaryMetrics = self.analyze(flowFieldNode, planeNode, speedThresholdMmPerSec=100.0)
+        rows.append(["speed threshold mask (10 cm/s), 20 mm plane", summaryMetrics["ForwardVolume"], summaryMetrics["BackwardVolume"],
             max(metrics["FlowRate"]), summaryMetrics["PeakVelocity"]])
         self.report.checkTrue("[speed threshold mask] Area at peak flow is positive", metrics["Area"][peakFrame] > 0, metrics["Area"][peakFrame], "> 0")
         self.report.checkRange("[speed threshold mask] Forward volume", summaryMetrics["ForwardVolume"], 0.5, 200, "ml")
@@ -1122,6 +1157,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         outside = distanceFromCenter > maskRadiusMm + 2.0
         planeNode = self.createPlane(peakRas, flowDirection, 30.0, "Plane, speed volume")
         segmentationNode, segmentId = self.createSphereSegmentation(peakRas, maskRadiusMm, magnitudeVolumeNode, "Mask, speed volume")
+        # Velocity of the vector volume flow field (mm/s)
         originalFrame = slicer.util.arrayFromVolume(self.importLogic._getSequenceFromProxyNode(flowFieldNode).GetNthDataNode(peakFrame)).copy()
         speedValues = {}
         for projected in [False, True]:
@@ -1129,16 +1165,16 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.logic.sampleFlowFieldWithPlane(planeNode, flowFieldNode, samplingDistanceMm=1.0,
                 outputFlowMetricsModel=slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Metrics"),
                 maskSegmentationNode=segmentationNode, maskSegmentID=segmentId,
-                outputSpeedVolume=speedVolumeNode, speedVolumeProjectedToPlane=projected, streamlinesSpeedThresholdMPerSec=0.1)
+                outputSpeedVolume=speedVolumeNode, speedVolumeProjectedToPlane=projected, streamlinesSpeedThresholdMmPerSec=100.0)
             FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
             speedValues[projected] = slicer.util.arrayFromVolume(speedVolumeNode).copy()
         expectedMagnitude = np.linalg.norm(originalFrame, axis=-1)
         expectedProjected = originalFrame @ np.array(planeNode.GetNormalWorld())
         self.report.checkClose("[speed volume] Max. error of speed magnitude inside the mask",
-            float(np.abs(speedValues[False] - expectedMagnitude)[inside].max()), 0.0, atol=1e-4, unit="m/s")
+            float(np.abs(speedValues[False] - expectedMagnitude)[inside].max()), 0.0, atol=0.1, unit="mm/s")
         self.report.checkClose("[speed volume] Max. error of projected speed inside the mask",
-            float(np.abs(speedValues[True] - expectedProjected)[inside].max()), 0.0, atol=1e-4, unit="m/s")
-        self.report.checkClose("[speed volume] Max. speed outside the mask", float(np.abs(speedValues[False])[outside].max()), 0.0, atol=1e-6, unit="m/s")
+            float(np.abs(speedValues[True] - expectedProjected)[inside].max()), 0.0, atol=0.1, unit="mm/s")
+        self.report.checkClose("[speed volume] Max. speed outside the mask", float(np.abs(speedValues[False])[outside].max()), 0.0, atol=1e-3, unit="mm/s")
         self.report.checkTrue("[speed volume] Projected speed at the measurement location is positive (flow along the plane normal)",
             speedValues[True][peakIndex] > 0, float(speedValues[True][peakIndex]), "> 0")
         FlowTestingUtils.showVolumeInSliceViews(magnitudeVolumeNode, peakRas, foreground=speedVolumeNode, foregroundOpacity=0.7)
@@ -1148,11 +1184,12 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             outputNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode" if kind == "transform" else "vtkMRMLVectorVolumeNode", f"Masked {kind}")
             self.analyze(flowFieldNodes[kind], planeNode, segmentationNode, segmentId, maskedOutput=outputNode, summary=False)
             FlowTestingUtils.selectSequenceItem(flowFieldNodes[kind], peakFrame)
-            maskedFrame = slicer.util.arrayFromGridTransform(outputNode) if kind == "transform" else slicer.util.arrayFromVolume(outputNode)
+            # Grid transform stores m/s, vector volume mm/s
+            maskedFrame = slicer.util.arrayFromGridTransform(outputNode) * 1000.0 if kind == "transform" else slicer.util.arrayFromVolume(outputNode)
             self.report.checkClose(f"[masked flow field, {KIND_NAMES[kind]}] Max. velocity error inside the mask",
-                float(np.abs(maskedFrame - originalFrame)[inside].max()), 0.0, atol=1e-4, unit="m/s")
+                float(np.abs(maskedFrame - originalFrame)[inside].max()), 0.0, atol=0.1, unit="mm/s")
             self.report.checkClose(f"[masked flow field, {KIND_NAMES[kind]}] Max. speed outside the mask",
-                float(np.linalg.norm(maskedFrame, axis=-1)[outside].max()), 0.0, atol=1e-6, unit="m/s")
+                float(np.linalg.norm(maskedFrame, axis=-1)[outside].max()), 0.0, atol=1e-3, unit="mm/s")
 
     @reportedTest("Clinical data set: module GUI workflow",
         "The analysis of the clinical data set is performed using the module GUI: heart rate from DICOM, analysis with all"
@@ -1189,7 +1226,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             parameterNode.outputFlowMetricsTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics table")
             parameterNode.outputFlowMetricsSummaryTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics summary")
             parameterNode.samplingDistance = 1.0
-            parameterNode.speedThreshold = 0.1
+            parameterNode.speedThresholdMmPerSec = 100.0
 
             widget.onSetHeartRateFromDicomButton()
             self.report.checkClose("[GUI] Heart rate from DICOM", widget.ui.heartRateBpmDoubleSpinBox.value, heartRateAtImport, atol=0.01, unit="bpm")
@@ -1259,7 +1296,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 "Percentile99Velocity", "StdDevVelocity"]))
             self.checkMetricsAgainstPhantom(f"[disc sampling, {KIND_NAMES[kind]}]", phantom, metrics, summaryMetrics, flowRtol=0.03, areaRtol=0.08)
             startTime = time.time()
-            _, probeMetrics, probeSummary = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, speedThreshold=0.0)
+            _, probeMetrics, probeSummary = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, speedThresholdMmPerSec=0.0)
             probeTime = time.time() - startTime
             difference = max(abs(a - b) for a, b in zip(metrics["FlowRate"], probeMetrics["FlowRate"]))
             peakFlow = max(abs(q) for q in probeMetrics["FlowRate"])
@@ -1268,19 +1305,27 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             rows.append([KIND_NAMES[kind], summaryMetrics["ForwardVolume"], probeSummary["ForwardVolume"], discTime, probeTime])
         self.report.table(["Storage", "Forward volume, disc sampling (ml)", "Forward volume, plane probe (ml)", "Disc sampling time (s)", "Plane probe time (s)"], rows)
 
-        # Vector volume flow field stored in mm/s (voxel value units): slicerheart_4dflow methods must use the unit
+        # Vector volume flow field stored in cm/s and m/s (voxel value units): all methods must use the unit
         sequenceNode = self.importLogic._getSequenceFromProxyNode(flowFieldNode)
-        for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
-            frameNode = sequenceNode.GetNthDataNode(frameIndex)
-            slicer.util.arrayFromVolume(frameNode)[:] *= 1000.0
-            slicer.util.arrayFromVolumeModified(frameNode)
-            frameNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("mm/s"))
-        flowFieldNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits("mm/s"))
-        mmPerSecTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Disc sampling metrics (mm/s flow field)")
-        self.logic.computeFlowMetricsTableDiscSampling(planeNode, flowFieldNode, segmentationNode, segmentId, 0.0, mmPerSecTable)
-        difference = max(abs(a - b) for a, b in zip(tableToDict(mmPerSecTable)["FlowRate"], metrics["FlowRate"]))
-        self.report.checkClose("[vector volume in mm/s] Disc sampling flow rates equal the flow rates of the m/s flow field (max. difference)",
-            difference, 0.0, atol=1e-3 * max(abs(q) for q in metrics["FlowRate"]), unit="ml/s")
+        currentUnitToMmPerSec = 1.0
+        for velocityUnit, unitToMmPerSec in [("cm/s", 10.0), ("m/s", 1000.0)]:
+            for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
+                frameNode = sequenceNode.GetNthDataNode(frameIndex)
+                slicer.util.arrayFromVolume(frameNode)[:] *= currentUnitToMmPerSec / unitToMmPerSec
+                slicer.util.arrayFromVolumeModified(frameNode)
+                frameNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits(velocityUnit))
+            flowFieldNode.SetVoxelValueUnits(Analyze4DFlowLogic.createVelocityUnits(velocityUnit))
+            sequenceNode.SetAttribute("SlicerHeart.velocityUnit", velocityUnit)
+            currentUnitToMmPerSec = unitToMmPerSec
+            unitTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", f"Disc sampling metrics ({velocityUnit} flow field)")
+            self.logic.computeFlowMetricsTableDiscSampling(planeNode, flowFieldNode, segmentationNode, segmentId, 0.0, unitTable)
+            difference = max(abs(a - b) for a, b in zip(tableToDict(unitTable)["FlowRate"], metrics["FlowRate"]))
+            self.report.checkClose(f"[vector volume in {velocityUnit}] Disc sampling flow rates equal the flow rates of the mm/s flow field (max. difference)",
+                difference, 0.0, atol=1e-3 * max(abs(q) for q in metrics["FlowRate"]), unit="ml/s")
+            _, unitProbeMetrics, _ = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, speedThresholdMmPerSec=0.0, summary=False)
+            difference = max(abs(a - b) for a, b in zip(unitProbeMetrics["FlowRate"], probeMetrics["FlowRate"]))
+            self.report.checkClose(f"[vector volume in {velocityUnit}] Plane probe flow rates equal the flow rates of the mm/s flow field (max. difference)",
+                difference, 0.0, atol=1e-3 * max(abs(q) for q in probeMetrics["FlowRate"]), unit="ml/s")
 
     @reportedTest("Pathlines (slicerheart_4dflow)",
         "Time-resolved pathlines are emitted from the measurement plane in the vessel at peak systole and traced for 30 ms."
@@ -1441,7 +1486,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         resultTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Mass conservation")
         result = self.logic.computeMassConservation([tables[0]], [tables[1]], resultTable, self.logic.cycleDurationMs(flowFieldNode))
         self.report.checkClose("Inflow - outflow difference", result["percent_error"], 0.0, atol=2.0, unit="%")
-        self.report.checkTrue("Net flow volume is positive", result["in"] > 0, f"{result['in']:.2f} ml")
+        self.report.checkTrue("Net flow volume is positive", result["in"] > 0, f"{result['in'] / 1000.0:.2f} ml")  # result is in mm3
         self.report.checkEqual("Mass conservation table columns", sorted(tableToDict(resultTable).keys()),
             sorted(["Check", "Inflow", "Outflow", "Difference", "PercentError", "Ratio"]))
 
@@ -1461,7 +1506,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parameterNode.inputMaskSegmentation = segmentationNode
         parameterNode.inputMaskSegmentID = segmentId
         parameterNode.samplingDistance = 3.0
-        parameterNode.speedThreshold = 0.0
+        parameterNode.speedThresholdMmPerSec = 0.0
         parameterNode.flowMetricsMethod = FlowMetricsMethodEnum.DiscSampling
         parameterNode.streamlinesMethod = StreamlinesMethodEnum.Pathlines
         parameterNode.outputFlowMetricsTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics")

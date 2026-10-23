@@ -172,13 +172,22 @@
       <item row="4" column="1">
        <widget class="ctkSliderWidget" name="speedThresholdSliderWidget">
         <property name="toolTip">
-         <string>Samples below this threshold will be excluded from the time plot computation.</string>
+         <string>If no mask segment is specified then samples below this speed are excluded from the flow metrics computation. Streamlines and pathlines are terminated where the speed falls below this value.</string>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="singleStep">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>300.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>10.000000000000000</double>
         </property>
         <property name="suffix">
-         <string>m/s</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string notr="true">speedThreshold</string>
+         <string>cm/s</string>
         </property>
        </widget>
       </item>
