@@ -2324,22 +2324,39 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         referenceVolumeNode = self._flowFieldGeometryVolume(outputFlowField)
         dims = referenceVolumeNode.GetImageData().GetDimensions()
         wrapCounts = np.zeros((inputSequenceNode.GetNumberOfDataNodes(), dims[2], dims[1], dims[0], 3), np.int8)
-        for component in range(3):
-            segmentationNode = outputFlowField.GetNthNodeReference("phaseWrapSegmentation", component)
-            if not segmentationNode:
-                continue
-            segmentationSequenceNode = self._getSequenceFromProxyNode(segmentationNode)
-            for frameIndex in range(inputSequenceNode.GetNumberOfDataNodes()):
-                segmentationFrame = segmentationSequenceNode.GetDataNodeAtValue(inputSequenceNode.GetNthIndexValue(frameIndex))
-                if not segmentationFrame:
+        # Segments are exported to a temporary labelmap volume node that has an editable (User type) color table in the
+        # scene. Otherwise the export creates a color table for each segment in the scene of the segmentation, which for
+        # sequence items is the internal scene of the sequence: the labelmap display node cannot find it (warnings for
+        # each segment of each frame) and the color tables are left in the sequence.
+        labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "__temp_phase_wrap__")
+        colorTableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLColorTableNode", "__temp_phase_wrap_colors__")
+        try:
+            colorTableNode.SetTypeToUser()
+            labelmapNode.CreateDefaultDisplayNodes()
+            labelmapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+            for component in range(3):
+                segmentationNode = outputFlowField.GetNthNodeReference("phaseWrapSegmentation", component)
+                if not segmentationNode:
                     continue
-                segmentation = segmentationFrame.GetSegmentation()
-                for wrapIndex in range(1, self.maxWraps + 1):
-                    for segmentId, wrapSign in [(f"Wrap-Neg-{wrapIndex}x", -1), (f"Wrap-Pos-{wrapIndex}x", +1)]:
-                        if not segmentation.GetSegment(segmentId):
-                            continue
-                        wrapMask = slicer.util.arrayFromSegmentBinaryLabelmap(segmentationFrame, segmentId, referenceVolumeNode)
-                        wrapCounts[frameIndex, ..., component][wrapMask > 0] += wrapSign * wrapIndex
+                segmentationSequenceNode = self._getSequenceFromProxyNode(segmentationNode)
+                for frameIndex in range(inputSequenceNode.GetNumberOfDataNodes()):
+                    segmentationFrame = segmentationSequenceNode.GetDataNodeAtValue(inputSequenceNode.GetNthIndexValue(frameIndex))
+                    if not segmentationFrame:
+                        continue
+                    segmentation = segmentationFrame.GetSegmentation()
+                    for wrapIndex in range(1, self.maxWraps + 1):
+                        for segmentId, wrapSign in [(f"Wrap-Neg-{wrapIndex}x", -1), (f"Wrap-Pos-{wrapIndex}x", +1)]:
+                            if not segmentation.GetSegment(segmentId):
+                                continue
+                            if not slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(
+                                    segmentationFrame, [segmentId], labelmapNode, referenceVolumeNode):
+                                raise RuntimeError(f"Failed to export phase wrap segment {segmentId} of frame {frameIndex}")
+                            wrapMask = slicer.util.arrayFromVolume(labelmapNode) > 0
+                            wrapCounts[frameIndex, ..., component][wrapMask] += wrapSign * wrapIndex
+        finally:
+            slicer.mrmlScene.RemoveNode(labelmapNode.GetDisplayNode())
+            slicer.mrmlScene.RemoveNode(labelmapNode)
+            slicer.mrmlScene.RemoveNode(colorTableNode)
         return wrapCounts
 
     def resetUnwrap(self, outputFlowField):
