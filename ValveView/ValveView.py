@@ -87,7 +87,7 @@ class ValveViewWidget(ScriptedLoadableModuleWidget):
     self.orthogonalSlice2Selector.addEnabled = False
     self.orthogonalSlice2Selector.removeEnabled = False
     self.orthogonalSlice2Selector.noneEnabled = True
-    self.orthogonalSlice1Selector.showHidden = False
+    self.orthogonalSlice2Selector.showHidden = False
     self.orthogonalSlice2Selector.showChildNodeTypes = False
     self.orthogonalSlice2Selector.setMRMLScene( slicer.mrmlScene )
     self.orthogonalSlice2Selector.setToolTip( "Pick the slice that will show a plane orthogonal to the two other slices." )
