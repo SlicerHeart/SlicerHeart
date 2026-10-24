@@ -1793,22 +1793,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         colorNode.EndModify(wasModified)
 
-    def _deleteComponentVolumeNodes(self, componentVolumeNodes):
-        # Delete imported component image series from the scene
-        for axis, componentVolumeSequenceProxyNode in enumerate(componentVolumeNodes):
-            if not componentVolumeSequenceProxyNode:
-                raise RuntimeError(f"Volume ({axis}) is invalid")
-            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeSequenceProxyNode)
-            if not componentVolumeSequenceBrowserNode:
-                raise RuntimeError(f"Volume {componentVolumeSequenceProxyNode.GetName()} is expected to be proxy node of a volume sequence")
-            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeSequenceProxyNode)
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNode.GetStorageNode())
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceNode)
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceProxyNode.GetDisplayNode())
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceProxyNode.GetStorageNode())
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceProxyNode)
-            slicer.mrmlScene.RemoveNode(componentVolumeSequenceBrowserNode)
-
     def exportDisplacementFieldToFiles(self,
                                        flowFieldNode: Union[vtkMRMLTransformNode, vtkMRMLVectorVolumeNode],
                                        exportDirectory: str,
@@ -2158,34 +2142,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         displayNode.SetWindowLevelMinMax(-vencs[component], vencs[component])
         self._placeInSameFolder(componentVolumeNode, inputFlowFieldNode)
         return componentVolumeNode
-
-    # def _getBackgroundCorrectionSegmentationNode(self, outputFlowField):
-    #     segmentationNode = outputFlowField.GetNodeReference("backgroundCorrectionSegmentation")
-    #     if segmentationNode:
-    #         return segmentationNode
-
-    #     magnitudeVolumeNode = outputFlowField.GetNthNodeReference("magnitudeVolume")
-
-    #     sequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowField)
-    #     # Create new segmentation node and add it to the sequence
-    #     segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", f"Background subtraction")
-    #     outputFlowField.SetNodeReferenceID("backgroundCorrectionSegmentation", segmentationNode.GetID())
-    #     segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(magnitudeVolumeNode)
-    #     segmentationNode.CreateDefaultDisplayNodes()
-    #     segmentationNode.GetDisplayNode().SetOpacity2DFill(0.8)
-    #     segmentationSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", segmentationNode.GetName())
-    #     sequenceBrowserNode.AddProxyNode(segmentationNode, segmentationSequenceNode, False)
-    #     sequenceBrowserNode.PlaybackActiveOff()
-    #     sequenceBrowserNode.SetRecording(segmentationSequenceNode, False)
-    #     sequenceBrowserNode.SetSaveChanges(segmentationSequenceNode, True)
-    #     sequenceBrowserNode.SetOverwriteProxyName(segmentationSequenceNode, True)  # show index in node name
-
-    #     # Place segmentation in the same subject hierarchy folder as the flow field node
-    #     shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-    #     parentItemId = shNode.GetItemParent(shNode.GetItemByDataNode(outputFlowField))
-    #     shNode.SetItemParent(shNode.GetItemByDataNode(segmentationNode), parentItemId)
-
-    #     return segmentationNode
 
     def _getSegmentIds(self):
         """In phase wrap segmentation, order of segments: no wrap = 0, positive wraps 1x = 1, 2x = 2, 3x = 3, ..., negative wraps 3x = 4, 2x = 5, 1x = 6, ..."""
@@ -3178,57 +3134,9 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
         """Run as few or as many tests as needed here.
         """
         self.setUp()
-        self.test_Import4DFlow1()
-        self.setUp()
         self.test_FindVolumeNodeSetCandidatesInScene()
         self.setUp()
         self.test_CreateVectorVolumeFlowField()
-
-    def test_Import4DFlow1(self):
-        """ Ideally you should have several levels of tests.  At the lowest level
-        tests should exercise the functionality of the logic with different inputs
-        (both valid and invalid).  At higher levels your tests should emulate the
-        way the user would interact with your code and confirm that it still works
-        the way you intended.
-        One of the most important features of the tests is that it should alert other
-        developers when their changes will have an impact on the behavior of your
-        module.  For example, if a developer removes a feature that you depend on,
-        your test should break so they know that the feature is needed.
-        """
-
-        self.delayDisplay("Starting the test")
-
-        # # Get/create input data
-
-        # import SampleData
-        # registerSampleData()
-        # inputVolume = SampleData.downloadSample('Import4DFlow1')
-        # self.delayDisplay('Loaded test data set')
-
-        # inputScalarRange = inputVolume.GetImageData().GetScalarRange()
-        # self.assertEqual(inputScalarRange[0], 0)
-        # self.assertEqual(inputScalarRange[1], 695)
-
-        # outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-        # threshold = 100
-
-        # # Test the module logic
-
-        # logic = Import4DFlowLogic()
-
-        # # Test algorithm with non-inverted threshold
-        # logic.process(inputVolume, outputVolume, threshold, True)
-        # outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-        # self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-        # self.assertEqual(outputScalarRange[1], threshold)
-
-        # # Test algorithm with inverted threshold
-        # logic.process(inputVolume, outputVolume, threshold, False)
-        # outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-        # self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-        # self.assertEqual(outputScalarRange[1], inputScalarRange[1])
-
-        self.delayDisplay('Test passed')
 
     def test_FindVolumeNodeSetCandidatesInScene(self):
         """Volumes loaded from DICOM must be recognized as 4D flow candidates.

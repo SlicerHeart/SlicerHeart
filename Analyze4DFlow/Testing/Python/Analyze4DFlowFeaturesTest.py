@@ -181,13 +181,6 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             f"{label} Flow metrics per frame")
         return rows
 
-    def showResults(self, flowFieldNode, planeNode, phantom, frameIndex, speedVolumeNode=None, streamlinesNode=None):
-        FlowTestingUtils.selectSequenceItem(flowFieldNode, frameIndex)
-        backgroundNode = flowFieldNode.GetNodeReference("magnitudeVolume") or speedVolumeNode
-        if backgroundNode:
-            FlowTestingUtils.showVolumeInSliceViews(backgroundNode, phantom.centerRas, foreground=speedVolumeNode if backgroundNode != speedVolumeNode else None)
-        FlowTestingUtils.reset3DView()
-
     # Clinical data helpers
 
     def realDataDirectoryOrSkip(self):
