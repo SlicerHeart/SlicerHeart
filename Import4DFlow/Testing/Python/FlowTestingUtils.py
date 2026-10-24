@@ -7,7 +7,9 @@
 - DICOM helpers: load 4D flow series from a DICOM folder as volume sequences.
 
 Test data locations (for example, anonymized clinical data sets) are read from environment variables
-or from the .env.local file in the repository root (KEY=VALUE lines).
+or from the .env.local file in the repository root (KEY=VALUE lines). Without a local data set of test cases, the
+clinical test data set of slicerheart_4dflow (TEST_DATA_REVISION) is downloaded by its ClinicalTestingData class into
+~/.SlicerHeart/slicerheart_4dflow_testingdata (shared by all installations), a case when a test first needs it.
 """
 
 import datetime
@@ -35,9 +37,14 @@ REPORT_DIR_ENV_VARIABLE = "SLICERHEART_TEST_REPORT_DIR"
 # Environment variable (or .env.local entry) that specifies the folder of an anonymized 4D flow MRI DICOM data set
 REAL_DATA_ENV_VARIABLE = "MRI_4D_FLOW_TEST_DATA"
 
-# Environment variable (or .env.local entry) that specifies the folder of 4D flow test cases in Slicer-native file format
-# (<folder>/<vendor>/<case>/manifest.json, written by Export4DFlowTestCases.py). Same variable as in slicerheart_4dflow tests.
+# Environment variable (or .env.local entry) that specifies the folder of a local data set of 4D flow test cases in
+# Slicer-native file format (<folder>/manifest.json, inputs/<case>/, outputs/<case>/, written by
+# Export4DFlowTestCases.py). Same variable as in slicerheart_4dflow tests. If it is not set, the clinical test data set
+# of slicerheart_4dflow is used (TEST_DATA_REVISION, downloaded on first use).
 TEST_CASES_ENV_VARIABLE = "SLICERHEART_4DFLOW_CLINICAL_DATA"
+
+# Revision of the clinical test data set of slicerheart_4dflow (slicerheart_4dflow.testing_data, version 0.3.1 or later)
+TEST_DATA_REVISION = "rev001"
 
 # Siemens CS 4D flow component images store phase in the range of [-4096, 4096)
 PHASE_MAX_VALUE = 4096
@@ -78,12 +85,38 @@ def environmentValue(name, default=None):
     return default
 
 
+def clinicalTestingData():
+    """The clinical test data set of slicerheart_4dflow (TEST_DATA_REVISION) as a ClinicalTestingData object (its
+    manifest is downloaded on first use; the cases are downloaded by prepareTestCase), or None if it is not
+    available (slicerheart_4dflow older than 0.3.1, or no network)."""
+    from Import4DFlowLib import FlowLibraryBridge
+    FlowLibraryBridge.ensureLibrary()
+    try:
+        from slicerheart_4dflow import testing_data
+    except ImportError:
+        logging.warning("Downloading the clinical test data set requires slicerheart_4dflow 0.3.1 or later")
+        return None
+    try:
+        manifest = testing_data.clinical_test_data_manifest(TEST_DATA_REVISION)
+    except testing_data.TestingDataUnavailable as exc:
+        logging.warning(f"Clinical test data set is not available: {exc}")
+        return None
+    return testing_data.ClinicalTestingData(manifest)
+
+
 def testCases():
     """The available 4D flow test cases (Slicer-native format): list of (data set folder, case ID), smallest first.
-    The data set folder is set in TEST_CASES_ENV_VARIABLE (environment or .env.local)."""
+    The data set folder is set in TEST_CASES_ENV_VARIABLE (environment or .env.local); otherwise the cases of the
+    clinical test data set of slicerheart_4dflow (clinicalTestingData), which are downloaded by prepareTestCase."""
     root = environmentValue(TEST_CASES_ENV_VARIABLE)
     if not root or not os.path.isfile(os.path.join(root, "manifest.json")):
-        return []
+        data = clinicalTestingData()
+        if data is None:
+            return []
+        # smallest first, by the size of the raw velocity in the manifest (nothing is downloaded yet)
+        def downloadSize(caseId):
+            return data.files.get(f"inputs/{caseId}/acquisition/velocity_raw.seq.nrrd", {}).get("size", 0)
+        return [(str(data.root), caseId) for caseId in sorted(data.cases(), key=downloadSize)]
     from Import4DFlowLib import FlowLibraryBridge
     import Import4DFlow
     slicerIo = FlowLibraryBridge.ensureLibrary().slicer_io
@@ -94,6 +127,15 @@ def testCases():
         return os.path.getsize(velocityRawPath) if os.path.isfile(velocityRawPath) else 0
 
     return [(root, caseId) for caseId in sorted(slicerIo.dataset_cases(root), key=caseSize)]
+
+
+def prepareTestCase(datasetDirectory, caseId):
+    """Make the files of a test case available: a case of the clinical test data set of slicerheart_4dflow is
+    downloaded (if it is not in the cache yet, verified by the sha256 of the manifest); a local data set is used as it
+    is."""
+    data = clinicalTestingData()
+    if data is not None and os.path.normcase(os.path.abspath(str(data.root))) == os.path.normcase(os.path.abspath(str(datasetDirectory))):
+        data.ensure_case(caseId)
 
 
 def gitDescription():
