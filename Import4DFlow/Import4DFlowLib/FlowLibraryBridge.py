@@ -223,21 +223,6 @@ def velocityArrayFromFlowField(flowFieldNode):
     return velocity, voxelToWorldMatrix, sequenceIndexValues(sequenceNode)
 
 
-def setFlowFieldVelocity(flowFieldNode, velocity_t):
-    """Overwrite the velocity of all frames of a flow field (velocity_t: (nt, nk, nj, ni, 3) mm/s, RAS)."""
-    sequenceNode = sequenceFromProxyNode(flowFieldNode)
-    if velocity_t.shape[0] != sequenceNode.GetNumberOfDataNodes():
-        raise ValueError("Number of frames does not match the flow field")
-    for itemIndex in range(sequenceNode.GetNumberOfDataNodes()):
-        frameNode = sequenceNode.GetNthDataNode(itemIndex)
-        _flowFieldFrameArray(frameNode)[:] = velocity_t[itemIndex] / _frameScaleToMmPerSec(frameNode, flowFieldNode)
-        if frameNode.IsA("vtkMRMLVectorVolumeNode"):
-            slicer.util.arrayFromVolumeModified(frameNode)
-        else:
-            frameNode.GetTransformToParentAs("vtkOrientedGridTransform", False).GetDisplacementGrid().Modified()
-            frameNode.TransformModified()
-
-
 def magnitudeArray(flowFieldNode):
     """Magnitude images of all frames (nt, nk, nj, ni) float32."""
     sequenceNode = sequenceFromProxyNode(flowFieldNode.GetNodeReference("magnitudeVolume"))
