@@ -1882,16 +1882,19 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkClose("[GUI] Loaded test case is processed as recorded (mean velocity error in the vessel)", loadedError, 0.0, atol=0.03, unit="m/s")
 
     @reportedTest("Clinical test cases (Slicer-native files, no DICOM import)",
-        "The smallest available clinical test case (see FlowTestingUtils.TEST_CASES_ENV_VARIABLE) is loaded without DICOM import."
+        "The smallest clinical test case (the clinical test data set of slicerheart_4dflow, downloaded on first use, or a local data"
+        " set in FlowTestingUtils.TEST_CASES_ENV_VARIABLE) is loaded without DICOM import."
         " The flow field computed with the recorded processing must match the velocity in the case files. slicerheart_4dflow"
         " Laplacian unwrapping and robust background correction are applied, and the flow through the planes must"
         " agree with the plane flows of the case (outputs/flows.json).")
     def test_28_ClinicalTestCase(self):
         testCases = FlowTestingUtils.testCases()
         if not testCases:
-            self.skipTest(f"No 4D flow test case is available (set {FlowTestingUtils.TEST_CASES_ENV_VARIABLE} in the environment or in .env.local"
+            self.skipTest("No 4D flow test case is available (the clinical test data set requires slicerheart_4dflow 0.3.1 or later"
+                          f" and network access, or set {FlowTestingUtils.TEST_CASES_ENV_VARIABLE} in the environment or in .env.local"
                           " to the folder of a data set of test cases)")
         datasetDirectory, caseId = testCases[0]
+        FlowTestingUtils.prepareTestCase(datasetDirectory, caseId)
         self.report.text(f"Test case: {caseId}")
         library = FlowLibraryBridge.ensureLibrary()
         case = library.load_case(datasetDirectory, caseId, world="RAS")
