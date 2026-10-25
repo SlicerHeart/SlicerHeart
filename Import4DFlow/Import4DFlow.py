@@ -1,3 +1,4 @@
+import contextlib
 import enum
 import json
 import logging
@@ -172,10 +173,13 @@ class Import4DFlowParameterNode:
     inputVolumeNodeSet: str
     exportDirectory: str
     exportFormat: str
-    # Laplacian + temporal unwrapping is the default: temporal unwrapping alone accumulates false wraps in noisy voxels.
+    # Laplacian 4D unwrapping is the default: temporal unwrapping (alone, or as the correction step after Laplacian 3D
+    # unwrapping) accumulates false wraps in voxels with low signal over the cardiac cycle.
     # If slicerheart_4dflow is not available then temporal unwrapping is used (see Import4DFlowWidget.computePhaseUnwrapping).
-    unwrapMode: Annotated[UnwrapModeEnum, Default(UnwrapModeEnum.LaplacianThenTemporalUnwrap)]
-    backgroundSubtractionMethod: BackgroundSubtractionMethodEnum
+    unwrapMode: Annotated[UnwrapModeEnum, Default(UnwrapModeEnum.Laplacian4DUnwrap)]
+    # Background phase offsets are larger than acceptable in most acquisitions, therefore a background fit is used by
+    # default (the quadratic fit, as in the default processing of test cases, does not need slicerheart_4dflow)
+    backgroundSubtractionMethod: Annotated[BackgroundSubtractionMethodEnum, Default(BackgroundSubtractionMethodEnum.QuadraticFit)]
     noiseMagnitudeThresholdPercent: Annotated[float, WithinRange(0.0, 50.0)] = 5.0  # magnitude image threshold to filter out background noise (speed values below this threshold are set to zero in the flow field)
     stationaryTissueSpeedThresholdVencPercent: Annotated[float, WithinRange(0.0, 50.0)] = 10.0  # speed threshold to filter out stationary tissue as percentage of venc (speed values below this threshold are set to zero in the flow field)
     temporalUnwrapReferenceFrame: int = 0  # frame number to use as reference for temporal unwrapping
@@ -371,6 +375,32 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         slicer.util.showStatusMessage(text, 3000)
         slicer.app.processEvents()  # force update
 
+    @contextlib.contextmanager
+    def _progressDialog(self, title):
+        """Show a progress dialog while a long computation runs. The logic reports the progress through its
+        progressCallback; until it reports a fraction (and for steps of unknown length), a busy indicator is shown."""
+        dialog = slicer.util.createProgressDialog(windowTitle=title, labelText=f"{title}...", maximum=0)
+        dialog.setCancelButton(None)
+        dialog.show()
+        slicer.app.processEvents()
+
+        def onProgress(message, fraction):
+            dialog.labelText = message
+            if fraction is None:
+                dialog.maximum = 0  # busy indicator
+            else:
+                dialog.maximum = 100
+                dialog.value = int(round(100 * min(max(fraction, 0.0), 1.0)))
+            slicer.app.processEvents()
+
+        previousCallback = self.logic.progressCallback
+        self.logic.progressCallback = onProgress
+        try:
+            yield
+        finally:
+            self.logic.progressCallback = previousCallback
+            dialog.close()
+
     def onSceneStartClose(self, caller, event) -> None:
         """
         Called just before the scene is closed.
@@ -533,7 +563,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
     def onConvertButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to convert image to flow field.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to convert image to flow field.", waitCursor=True), self._progressDialog("Creating flow field"):
             volumeNodeSet = self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]
             inputFlowFieldNode = self.logic.createInputFlowFieldFromComponentVolumes(
                 volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
@@ -631,7 +661,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             lumenMask=self.lumenMask(flowFieldNode))
 
     def onComputePhaseUnwrappingButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to compute phase unwrapping.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to compute phase unwrapping.", waitCursor=True), self._progressDialog("Computing phase unwrapping"):
             outputFlowFieldNode = self._parameterNode.outputFlowField
             isNewOutput = outputFlowFieldNode is None or outputFlowFieldNode.GetNodeReference("inputFlowField") is not self._parameterNode.inputFlowField
             outputFlowFieldNode = self._requireOutputFlowField()
@@ -680,7 +710,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             segmentation.GetDisplayNode().SetVisibility(visibility)
 
     def onRecomputeFlowFieldButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to recompute flow field.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to recompute flow field.", waitCursor=True), self._progressDialog("Recomputing flow field"):
             self.updateFlowField(self._requireOutputFlowField())
 
     def _requireFlowField(self):
@@ -715,7 +745,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onComputeLumenButton(self) -> None:
         """Compute the lumen segmentation into the selected segment (overwritten); a new segmentation or segment is created
         (and selected) if none is selected."""
-        with slicer.util.tryWithErrorDisplay("Failed to compute lumen segmentation.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to compute lumen segmentation.", waitCursor=True), self._progressDialog("Computing lumen"):
             segmentationNode, segmentId, lumen = self.logic.createLumenSegmentation(self._requireFlowField(), self._parameterNode.lumenSegmentation,
                                                                                     self._parameterNode.lumenSegmentID or None, returnEstimate=True)
             with slicer.util.NodeModify(self._parameterNode):
@@ -729,13 +759,13 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def onComputePcmraButton(self) -> None:
         """Compute the PC-MRA into the selected volume (overwritten); a new volume is created (and selected) if none is selected."""
-        with slicer.util.tryWithErrorDisplay("Failed to compute PC-MRA volume.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to compute PC-MRA volume.", waitCursor=True), self._progressDialog("Computing PC-MRA"):
             pcmraVolumeNode = self.logic.createPcmraVolume(self._requireFlowField(), self._parameterNode.pcmraVolume)
             self._parameterNode.pcmraVolume = pcmraVolumeNode
             slicer.util.setSliceViewerLayers(background=pcmraVolumeNode, fit=True)
 
     def onCheckEncodingButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to check encoding directions.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to check encoding directions.", waitCursor=True), self._progressDialog("Checking encoding directions"):
             flowFieldNode = self._requireFlowField()
             result = self.logic.checkEncodingDirections(flowFieldNode, self.lumenMask(flowFieldNode))
             summary = self.logic.encodingCheckSummary(result)
@@ -744,7 +774,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 slicer.util.warningDisplay(summary, windowTitle="Velocity encoding check")
 
     def onComputeQualityReportButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to compute quality report.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to compute quality report.", waitCursor=True), self._progressDialog("Computing quality report"):
             flowFieldNode = self._requireFlowField()
             report = self.logic.computeQualityReport(flowFieldNode, self.lumenMask(flowFieldNode))
             self.ui.qualityReportTextBrowser.setMarkdown(self.logic.qualityReportToMarkdown(report))
@@ -768,7 +798,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.loadTestCase(datasetDirectory, caseId)
 
     def loadTestCase(self, datasetDirectory, caseId):
-        with slicer.util.tryWithErrorDisplay("Failed to load test case.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to load test case.", waitCursor=True), self._progressDialog("Loading test case"):
             loaded = self.logic.loadTestCase(datasetDirectory, caseId)
             flowFieldNode = loaded["flowFieldNode"]
             self.logic.setFlowFieldVisualizationToDefault(flowFieldNode)
@@ -867,6 +897,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         ScriptedLoadableModuleLogic.__init__(self)
 
         self.logCallback = None
+        # Called with (message, fraction) during long computations; fraction is in [0, 1], or None if unknown
+        self.progressCallback = None
 
         # Converts direction code (in the DICOM header) to axis index (L, P, S)
         # rl: right-left, ap: anterior-posterior, fh: foot-head
@@ -901,6 +933,11 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         logging.info(message)
         if self.logCallback:
             self.logCallback(message)
+
+    def _progress(self, message, fraction=None):
+        """Report the progress of a long computation (see progressCallback)."""
+        if self.progressCallback:
+            self.progressCallback(message, fraction)
 
     @staticmethod
     def dopplerColdToHotColorTableNode():
@@ -1461,42 +1498,49 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         if backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.NoSubtraction:
             return background_3d
 
-        from scipy.optimize import curve_fit
-
         data = componentVoxelArray
 
         # Mask array (True for values to be used in fitting)
         mask = np.logical_and(magnitudeVoxelArray > noiseMagnitudeThreshold, stationaryTissueMask)
 
-        # Get the indices and values of the masked elements
-        indices = np.array(np.nonzero(mask))
-        values = data[mask]
-
-        # Define a linear function for fitting
-        def linear(x, a, b, c, d):
-            return a * x[0] + b * x[1] + c * x[2] + d
-
-        # Define a second-order polynomial function for fitting
-        def quadratic(x, a, b, c, d, e, f, g, h, i, j):
-            return (a * x[0]**2 + b * x[1]**2 + c * x[2]**2 +
-                    d * x[0] * x[1] + e * x[0] * x[2] + f * x[1] * x[2] +
-                    g * x[0] + h * x[1] + i * x[2] + j)
-
         if backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.LinearFit:
-            fitFunction = linear
+            quadratic = False
         elif backgroundSubtractionMethod == BackgroundSubtractionMethodEnum.QuadraticFit:
-            fitFunction = quadratic
+            quadratic = True
         else:
             raise ValueError(f"Unsupported background subtraction method: {backgroundSubtractionMethod}")
 
-        # Fit the second-order polynomial model to the masked values
-        params, _ = curve_fit(fitFunction, indices, values)
-        print(f"Fit parameters: {params}")
-        # Compute the background using the fitted parameters
-        backgroundIndices = np.array(np.nonzero(magnitudeVoxelArray >= noiseMagnitudeThreshold))  # Compute background for non-noise regions
-        background = fitFunction(backgroundIndices, *params)
+        # Coordinates of the voxels along each axis, scaled to [-1, 1] for numerical conditioning (the fitted polynomial
+        # does not depend on the scaling), shaped for broadcasting over the image
+        axisCoordinates = []
+        for axis in range(3):
+            shape = [1, 1, 1]
+            shape[axis] = data.shape[axis]
+            halfSize = max((data.shape[axis] - 1) / 2, 1)
+            axisCoordinates.append(((np.arange(data.shape[axis]) - (data.shape[axis] - 1) / 2) / halfSize).reshape(shape))
 
-        background_3d[magnitudeVoxelArray >= noiseMagnitudeThreshold] = background
+        def polynomialTerms(x):
+            """Constant, linear (and quadratic) terms of the coordinates x (three arrays of the same shape, or broadcastable)."""
+            terms = [np.ones_like(x[0] * x[1] * x[2]), x[0], x[1], x[2]]
+            if quadratic:
+                terms += [x[0] ** 2, x[1] ** 2, x[2] ** 2, x[0] * x[1], x[0] * x[2], x[1] * x[2]]
+            return terms
+
+        # The polynomial is linear in its coefficients: linear least squares fit of the masked values
+        indices = np.nonzero(mask)
+        numberOfTerms = 10 if quadratic else 4
+        if indices[0].size < numberOfTerms:
+            raise ValueError(f"Background fit requires at least {numberOfTerms} stationary tissue voxels, found {indices[0].size}")
+        maskedCoordinates = [axisCoordinates[axis].ravel()[indices[axis]] for axis in range(3)]
+        designMatrix = np.stack(polynomialTerms(maskedCoordinates), axis=1)
+        # Normal equations (a small, well-conditioned system for coordinates in [-1, 1]), much faster than lstsq
+        # with hundreds of thousands of voxels
+        coefficients = np.linalg.solve(designMatrix.T @ designMatrix, designMatrix.T @ data[mask].astype(np.float64))
+        # Compute the background for non-noise regions: evaluate the polynomial on the image grid
+        background = sum(coefficient * term for coefficient, term in zip(coefficients, polynomialTerms(
+            [np.broadcast_to(c, data.shape) for c in axisCoordinates])))
+        backgroundMask = magnitudeVoxelArray >= noiseMagnitudeThreshold
+        background_3d[backgroundMask] = background[backgroundMask]
 
         return background_3d
 
@@ -1550,6 +1594,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             raise ValueError("Background correction and the slicerheart_4dflow noise mask require the magnitude images, but the input flow field"
                              " has no magnitude images. Set background subtraction to none and noise mask to magnitude threshold"
                              " (not applied without magnitude images).")
+        self._progress("Reading phase wrap segmentations...", 0.0)
         wrapCounts = self.getWrapCounts(outputFlowFieldNode)  # (t, k, j, i, 3) or None
 
         # Library methods that need all frames at once
@@ -1560,11 +1605,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             if noiseMaskMethod == NoiseMaskMethodEnum.BockNoiseMask:
                 # Noise is detected from the temporal variation of the velocity, therefore wraps must not be included
                 self._log("Computing noise mask...")
+                self._progress("Computing noise mask...", 0.05)
                 unwrapped = rawEncodedVelocity if wrapCounts is None else rawEncodedVelocity + wrapCounts * (2 * vencs).astype(np.float32)
                 staticNoiseMask = library.noise_mask(magnitude, unwrapped)
                 del unwrapped
             if libraryBackgroundMethod:
                 self._log(f"Computing background phase ({libraryBackgroundMethod})...")
+                self._progress(f"Computing background phase ({libraryBackgroundMethod})...", 0.1)
                 corrected, info = library.correct_background_phase(
                     rawEncodedVelocity, magnitude, method=libraryBackgroundMethod, order=int(backgroundPolynomialOrder),
                     lumen_mask=lumenMask, per_frame=bool(backgroundPerFrame))
@@ -1585,7 +1632,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
         # Frames are added to the sequence after all of them are computed, as divergence-free filtering needs all frames
         frames = []  # (frame node, velocity array view, index value)
-        for frameIndex in range(inputSequenceNode.GetNumberOfDataNodes()):
+        numberOfFrames = inputSequenceNode.GetNumberOfDataNodes()
+        for frameIndex in range(numberOfFrames):
+            self._progress(f"Computing frame {frameIndex + 1} of {numberOfFrames}...", 0.15 + 0.75 * frameIndex / numberOfFrames)
             rawFrame = rawEncodedVelocity[frameIndex]
             if staticNoiseMask is not None:
                 noiseVoxels = staticNoiseMask
@@ -1630,6 +1679,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         if divergenceMethod:
             library = FlowLibraryBridge.ensureLibrary()
             self._log(f"Divergence-free filtering ({divergenceMethod})...")
+            self._progress(f"Divergence-free filtering ({divergenceMethod})...", 0.9)
             velocity = np.stack([velocityArray for _, velocityArray, _ in frames])
             voxelToWorld = FlowLibraryBridge.voxelToWorld(FlowLibraryBridge.flowFieldGeometryNode(inputFlowFieldNode))
             filtered, infos = library.divergence_free_sequence(velocity, lumenMask, voxelToWorld, method=divergenceMethod)
@@ -1639,6 +1689,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 logging.info(f"Divergence-free filtering frame {frameIndex}: divergence RMS {info['div_rms_before']:.4g} -> {info['div_rms_after']:.4g} 1/s")
             del velocity, filtered
 
+        self._progress("Storing the flow field...", 0.97)
         for frameNode, _, indexValue in frames:
             self._addFlowFieldFrameToSequence(outputSequenceNode, frameNode, indexValue)
 
@@ -2179,6 +2230,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             signalMask = ((meanMagnitude >= noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange)
                           & (meanMagnitude > library.otsu_threshold(meanMagnitude)))
         self._log(f"Phase unwrapping ({method})...")
+        self._progress(f"Phase unwrapping ({method})...")
         voxelToWorld = FlowLibraryBridge.voxelToWorld(self._flowFieldGeometryVolume(outputFlowField))
         unwrapped = library.unwrap_velocity(rawEncodedVelocity, vencs, voxelToWorld, method=method, mask=signalMask, max_wraps=self.maxWraps)
         wrapCounts = np.rint((unwrapped - rawEncodedVelocity) / (2 * vencs)).astype(np.int8)
@@ -2211,7 +2263,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             peakSpeed = max(peakSpeed, float(np.percentile(speed[signal[frameIndex]], 99.9)))
         lastFrameWrapped = np.any(wrapCounts[-1] != 0, axis=-1)[signal[-1]]
         lastFrameWrappedFraction = float(lastFrameWrapped.mean()) if lastFrameWrapped.size else 0.0
-        recommendation = (" Laplacian 3D + temporal unwrapping (slicerheart_4dflow) is recommended."
+        recommendation = (" Laplacian 4D unwrapping (slicerheart_4dflow) is recommended."
                           if unwrapMode == UnwrapModeEnum.TemporalUnwrap else " Review the phase wrap segmentations.")
         warnings = []
         if peakSpeed > self.MAXIMUM_PLAUSIBLE_SPEED_MM_PER_SEC:
@@ -2348,6 +2400,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         wrapCounts = np.zeros(rawEncodedVelocity.shape, dtype=np.int8)
         # Compute phase wrap map
         for component in range(3):
+            self._progress(f"Temporal phase unwrapping (component {component + 1} of 3)...", component / 3)
             values = None
             phaseWrapMap = np.zeros(rawEncodedVelocity.shape[1:4], dtype=np.int8)  # first frame is never wrapped around
             for index in range(indexWithoutWrapping, numberOfFrames):
@@ -2653,7 +2706,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     # independently, not written by SlicerHeart); outputs/<case>/ holds the results of the processing and its
     # description. The case ID is the name of the case folder. File names are those of slicerheart_4dflow.slicer_io.
     TEST_CASE_FORMAT_VERSION = 4
-    TEST_CASE_LUMEN_FILE = "lumen.seg.nrrd"
+    # Segmentation of a test case: segment "lumen", and the branch segments of planes placed by hand if they were drawn
+    # (annotations.json names the file of the lumen and of the branch segments; older data sets have lumen.seg.nrrd)
+    TEST_CASE_LUMEN_FILE = "Segmentation.seg.nrrd"
 
     @staticmethod
     def testCasePath(datasetDirectory, caseId, key):
@@ -2813,7 +2868,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         return metadata
 
     # Default processing of test cases (exported from DICOM, or outputs regenerated from the inputs)
-    TEST_CASE_DEFAULT_UNWRAP_MODE = "LaplacianThenTemporalUnwrap"
+    TEST_CASE_DEFAULT_UNWRAP_MODE = "Laplacian4DUnwrap"
     TEST_CASE_NOISE_MAGNITUDE_THRESHOLD_PERCENT = 5.0
     TEST_CASE_STATIONARY_TISSUE_SPEED_THRESHOLD_VENC_PERCENT = 10.0
 
@@ -2948,13 +3003,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
 
     def writeTestCaseLumen(self, datasetDirectory, caseId, flowFieldNode, lumenSegmentationNode=None, lumenSegmentId=None,
                            overwriteLumen=False, pcmra=None, velocity=None, magnitude=None, voxelToWorld=None):
-        """Write the lumen segmentation of a test case (inputs/<case>/annotations/lumen.seg.nrrd) and its description in
-        annotations.json: the specified segment (in its own resolution), otherwise the existing lumen of the case
-        (which may have been edited by the user) unless overwriteLumen is set, otherwise the automatic lumen (estimateLumen,
-        on a grid twice as fine as the image). pcmra, velocity (mm/s), magnitude and voxelToWorld are computed from the flow
-        field if not given. Returns True if the lumen file was written."""
+        """Write the lumen segment of a test case (segment "lumen" of inputs/<case>/annotations/Segmentation.seg.nrrd, or of the
+        file that annotations.json names) and its description in annotations.json: the specified segment (in its own
+        resolution), otherwise the existing lumen of the case (which may have been edited by the user) unless overwriteLumen
+        is set, otherwise the automatic lumen (estimateLumen, on a grid twice as fine as the image). Other segments of the
+        file (branch segments of the planes) are kept. pcmra, velocity (mm/s), magnitude and voxelToWorld are computed from
+        the flow field if not given. Returns True if the lumen was written."""
         annotations = self.readTestCaseJson(datasetDirectory, caseId, "annotations", {})
-        lumenPath = os.path.join(self.testCaseAnnotationsDirectory(datasetDirectory, caseId), self.TEST_CASE_LUMEN_FILE)
+        lumenFile = annotations.get("lumen", {}).get("file", self.TEST_CASE_LUMEN_FILE)
+        lumenPath = os.path.join(self.testCaseAnnotationsDirectory(datasetDirectory, caseId), lumenFile)
         os.makedirs(os.path.dirname(lumenPath), exist_ok=True)
         written = True
         if lumenSegmentationNode and lumenSegmentId:
@@ -2993,18 +3050,25 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 # the files it was computed from (relative to the data set), as they were at this time
                 "inputs": [self.testCaseRelativePath(datasetDirectory, caseId, key) for key in ("pcmra", "velocity", "magnitude")],
                 })
-        annotations["lumen"] = dict({"file": self.TEST_CASE_LUMEN_FILE, "segment": "lumen"}, **annotations["lumen"])
+        annotations["lumen"] = dict(annotations["lumen"], file=lumenFile, segment="lumen")
         self.writeTestCaseJson(datasetDirectory, caseId, "annotations", annotations)
         return written
 
     def _writeLumenSegmentation(self, path, mask, voxelToWorld):
-        """Write a lumen mask on the grid of voxelToWorld (IJK to RAS; may be finer than the image) as a segmentation."""
-        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "lumen")
+        """Write a lumen mask on the grid of voxelToWorld (IJK to RAS; may be finer than the image) as segment "lumen" of a
+        segmentation file. Other segments of an existing file are kept."""
+        if os.path.isfile(path):
+            segmentationNode = slicer.util.loadSegmentation(path)
+        else:
+            segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "lumen")
         try:
             FlowLibraryBridge.setSegmentFromMask(segmentationNode, "lumen", mask, voxelToWorld, name="lumen")
             if not slicer.util.saveNode(segmentationNode, path):
                 raise RuntimeError(f"Failed to write {path}")
         finally:
+            for node in (segmentationNode.GetDisplayNode(), segmentationNode.GetStorageNode()):
+                if node:
+                    slicer.mrmlScene.RemoveNode(node)
             slicer.mrmlScene.RemoveNode(segmentationNode)
 
     def loadTestCase(self, datasetDirectory, caseId, applyProcessing=True, useOutputs=True, unwrapMode=None):
@@ -3016,11 +3080,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         reproduces the outputs (for review). Otherwise only the inputs are used: the flow field is processed with the
         default processing of test cases (applyDefaultTestCaseProcessing, unwrapMode), as for regenerating the outputs.
         Processing is applied only if applyProcessing is set.
-        The lumen segmentation and measurement planes are loaded from their files, so that after editing they can be
-        saved back to the test case (File / Save data).
+        The lumen segmentation, the measurement planes and the branch segmentation of the planes (if any) are loaded from
+        their files, so that after editing they can be saved back to the test case (File / Save data).
 
         Returns a dictionary: flowFieldNode (output flow field), inputFlowFieldNode, magnitudeVolumeNode, lumenSegmentationNode,
-        planeNodes (list), manifest, acquisition, processing, annotations.
+        planeNodes (list), planeSegmentationNode (branch segmentation of the planes, or None), manifest, acquisition,
+        processing, annotations.
         """
         library = FlowLibraryBridge.ensureLibrary()
         case = library.load_case(datasetDirectory, caseId, world="RAS")
@@ -3079,6 +3144,12 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         planeNodes = []
         for filename in annotations.get("planes", {}).get("files", []):
             planeNodes.append(slicer.util.loadMarkups(os.path.join(annotationsDirectory, filename)))
+        planeSegmentationNode = None
+        planeSegmentationFile = annotations.get("planes", {}).get("segmentation", {}).get("file")
+        if planeSegmentationFile == lumenDescription.get("file"):
+            planeSegmentationNode = lumenSegmentationNode  # the branch segments are in the file of the lumen
+        elif planeSegmentationFile and os.path.isfile(os.path.join(annotationsDirectory, planeSegmentationFile)):
+            planeSegmentationNode = slicer.util.loadSegmentation(os.path.join(annotationsDirectory, planeSegmentationFile))
 
         if applyProcessing and not useOutputs:
             self.applyDefaultTestCaseProcessing(flowFieldNode, unwrapMode)
@@ -3100,7 +3171,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 divergenceFilterMethod=divergenceFilterMethod,
                 lumenMask=lumenMask if divergenceFilterMethod.libraryMethod() else None)
         return {"flowFieldNode": flowFieldNode, "inputFlowFieldNode": inputFlowFieldNode, "magnitudeVolumeNode": magnitudeVolumeNode,
-                "lumenSegmentationNode": lumenSegmentationNode, "planeNodes": planeNodes, "manifest": manifest,
+                "lumenSegmentationNode": lumenSegmentationNode, "planeNodes": planeNodes, "planeSegmentationNode": planeSegmentationNode,
+                "manifest": manifest,
                 "acquisition": acquisition, "processing": case["processing"], "annotations": annotations}
 
 

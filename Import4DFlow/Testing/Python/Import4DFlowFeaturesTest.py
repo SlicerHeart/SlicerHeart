@@ -214,6 +214,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         slicer.util.selectModule("Import4DFlow")
         widget = slicer.modules.import4dflow.widgetRepresentation().self()
         self.report.checkTrue("Module widget is created", widget is not None and widget.logic is not None)
+        defaultParameterNode = widget.logic.getParameterNode()
+        self.report.checkEqual("Background subtraction is a quadratic fit by default",
+            defaultParameterNode.backgroundSubtractionMethod, BackgroundSubtractionMethodEnum.QuadraticFit)
 
         colorNode = Import4DFlowLogic.dopplerColdToHotColorTableNode()
         self.report.checkTrue("Doppler color table is available", colorNode is not None)
@@ -923,8 +926,10 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkEqual("Image set name in GUI", widget.ui.inputVolumeNodeSetSelector.currentText, "Phantom, Flow (20240102)")
             self.report.checkTrue("Convert button is enabled", widget.ui.convertButton.enabled)
             parameterNode = widget._parameterNode
-            # This test checks the flow field computed with temporal unwrapping (Laplacian + temporal is the default)
+            # This test checks the flow field computed with temporal unwrapping (Laplacian 4D is the default)
+            # and without background subtraction (the phantom has no background error; a quadratic fit is the default)
             parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
+            parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.NoSubtraction
 
             # Component images are kept, as they are converted again below
             parameterNode.removeInputImageAfterConversion = False
@@ -1385,8 +1390,10 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkEqual("[GUI] Image sets listed in GUI", widget.ui.inputVolumeNodeSetSelector.count, 1)
             self.report.checkTrue("[GUI] Convert button is enabled", widget.ui.convertButton.enabled)
             parameterNode = widget._parameterNode
-            # This test compares unwrapping methods with temporal unwrapping (Laplacian + temporal is the default)
+            # This test compares unwrapping methods with temporal unwrapping (Laplacian 4D is the default),
+            # without background subtraction (a quadratic fit is the default)
             parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
+            parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.NoSubtraction
 
             convertedFlowFieldNodes = []
             for conversion in range(2):
@@ -1785,7 +1792,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("Loaded test case: lumen and planes are loaded", loaded["lumenSegmentationNode"] is not None and len(loaded["planeNodes"]) == 1)
         self.report.checkEqual("Loaded test case: lumen segmentation file can be saved back to the case",
             os.path.normpath(loaded["lumenSegmentationNode"].GetStorageNode().GetFileName()),
-            os.path.normpath(os.path.join(datasetDirectory, "inputs", caseId, "annotations", "lumen.seg.nrrd")))
+            os.path.normpath(os.path.join(datasetDirectory, "inputs", caseId, "annotations", Import4DFlowLogic.TEST_CASE_LUMEN_FILE)))
 
         # Regenerating the outputs: loaded from the inputs only, processed with the default processing of test cases
         slicer.mrmlScene.Clear()
@@ -1928,14 +1935,14 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.screenshot("Clinical test case loaded without DICOM import")
 
     @reportedTest("Default unwrapping method, unwrapping plausibility check, fallback to temporal unwrapping",
-        "Laplacian + temporal unwrapping is the default for new flow fields. Temporal unwrapping counts a wrap where the velocity"
+        "Laplacian 4D unwrapping is the default for new flow fields. Temporal unwrapping counts a wrap where the velocity"
         " changes by more than venc between frames, so random phase in voxels with signal accumulates false wraps: the"
         " plausibility check must warn (implausible speed or wraps remaining in the last frame), and must not warn for"
         " correctly unwrapped data. If slicerheart_4dflow is not available, the GUI must use temporal unwrapping.")
     def test_29_UnwrappingDefaultAndPlausibilityCheck(self):
         parameterNode = self.logic.getParameterNode()
         self.report.checkEqual("Default unwrapping method of a new parameter node", parameterNode.unwrapMode.name,
-            UnwrapModeEnum.LaplacianThenTemporalUnwrap.name)
+            UnwrapModeEnum.Laplacian4DUnwrap.name)
 
         # Correctly unwrapped aliased phantom: no warning
         vencCmPerSec = 70.0
@@ -1966,12 +1973,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("[random phase in tissue] Temporal unwrapping gives a plausibility warning", len(warnings) > 0, len(warnings), "> 0")
         stored = json.loads(self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.phaseUnwrappingWarnings"))
         self.report.checkEqual("Warnings are stored in the flow field", stored, warnings)
-        self.report.checkTrue("Warning recommends Laplacian + temporal unwrapping", all("Laplacian" in w for w in warnings))
+        self.report.checkTrue("Warning recommends Laplacian unwrapping", all("Laplacian" in w for w in warnings))
 
         # Fallback to temporal unwrapping in the GUI if slicerheart_4dflow is not available
         slicer.util.selectModule("Import4DFlow")
         widget = slicer.modules.import4dflow.widgetRepresentation().self()
-        widget._parameterNode.unwrapMode = UnwrapModeEnum.LaplacianThenTemporalUnwrap
+        widget._parameterNode.unwrapMode = UnwrapModeEnum.Laplacian4DUnwrap
         originalEnsureLibrary = FlowLibraryBridge.ensureLibrary
 
         def unavailableLibrary(*args, **kwargs):
