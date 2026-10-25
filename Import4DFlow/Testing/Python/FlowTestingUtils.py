@@ -43,8 +43,8 @@ REAL_DATA_ENV_VARIABLE = "MRI_4D_FLOW_TEST_DATA"
 # of slicerheart_4dflow is used (TEST_DATA_REVISION, downloaded on first use).
 TEST_CASES_ENV_VARIABLE = "SLICERHEART_4DFLOW_CLINICAL_DATA"
 
-# Revision of the clinical test data set of slicerheart_4dflow (slicerheart_4dflow.testing_data, version 0.3.1 or later)
-TEST_DATA_REVISION = "rev001"
+# Revision of the clinical test data set of slicerheart_4dflow (slicerheart_4dflow.testing_data, version 0.4.0 or later)
+TEST_DATA_REVISION = "rev002"
 
 # Siemens CS 4D flow component images store phase in the range of [-4096, 4096)
 PHASE_MAX_VALUE = 4096
@@ -88,13 +88,13 @@ def environmentValue(name, default=None):
 def clinicalTestingData():
     """The clinical test data set of slicerheart_4dflow (TEST_DATA_REVISION) as a ClinicalTestingData object (its
     manifest is downloaded on first use; the cases are downloaded by prepareTestCase), or None if it is not
-    available (slicerheart_4dflow older than 0.3.1, or no network)."""
+    available (slicerheart_4dflow older than 0.4.0, or no network)."""
     from Import4DFlowLib import FlowLibraryBridge
     FlowLibraryBridge.ensureLibrary()
     try:
         from slicerheart_4dflow import testing_data
     except ImportError:
-        logging.warning("Downloading the clinical test data set requires slicerheart_4dflow 0.3.1 or later")
+        logging.warning("Downloading the clinical test data set requires slicerheart_4dflow 0.4.0 or later")
         return None
     try:
         manifest = testing_data.clinical_test_data_manifest(TEST_DATA_REVISION)
