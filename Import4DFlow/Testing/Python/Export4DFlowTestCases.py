@@ -6,7 +6,7 @@ The case ID is the name of the patient folder.
 
 Export: each patient folder of the input folder (anonymized DICOM files, for example Patient0004/<study>/<series>/*.dcm)
 is imported into a temporary DICOM database, the flow field is created with the default processing of test cases
-(Import4DFlowLogic.applyDefaultTestCaseProcessing: Laplacian + temporal phase unwrapping, quadratic background fit; the
+(Import4DFlowLogic.applyDefaultTestCaseProcessing: Laplacian 4D phase unwrapping, quadratic background fit; the
 unwrapping method can be changed with --unwrap), and written by Import4DFlowLogic.exportTestCase and
 Analyze4DFlowLogic.writeTestCaseFlows:
 - inputs/<case>/acquisition/: acquisition description, magnitude and raw velocity
@@ -104,7 +104,7 @@ def findPatients(inputDirectory, patients=None):
     return complete, skipped
 
 
-DEFAULT_UNWRAP_MODE = "LaplacianThenTemporalUnwrap"
+DEFAULT_UNWRAP_MODE = "Laplacian4DUnwrap"
 
 
 def loadFlowField(patientDirectory, databaseDirectory, unwrapMode=DEFAULT_UNWRAP_MODE):
@@ -242,7 +242,7 @@ def main(argv):
     parser.add_argument("--regenerate-lumen", action="store_true", help="With --regenerate-outputs: also replace automatic lumen"
                         " segmentations (that are not reviewed) by the current automatic method")
     parser.add_argument("--unwrap", default=DEFAULT_UNWRAP_MODE, help="Phase unwrapping method (name of Import4DFlow.UnwrapModeEnum,"
-                        " for example TemporalUnwrap or LaplacianThenTemporalUnwrap)")
+                        " for example TemporalUnwrap or Laplacian4DUnwrap)")
     parser.add_argument("--log", help="Write the status of each case into this JSON file (for example in .test-reports;"
                         " not in the data set folder, which holds only test data)")
     args = parser.parse_args(argv)

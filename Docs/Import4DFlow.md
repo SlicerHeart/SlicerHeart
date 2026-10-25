@@ -66,7 +66,9 @@ Corrections are set in the `Corrections` section and applied by `Create flow fie
   - `magnitude threshold`: magnitude below `Noise magnitude threshold`.
   - `magnitude and velocity noise (slicerheart_4dflow)`: low time-averaged magnitude (Otsu threshold) or random phase
     (very high temporal velocity variation), see Bock 2007.
-- `Background subtraction`: a polynomial is fitted to the velocity in stationary tissue and subtracted.
+- `Background subtraction`: a polynomial is fitted to the velocity in stationary tissue and subtracted. The default is
+  `quadratic fit`: without background subtraction the residual offset in static tissue is usually above the acceptable
+  0.6 cm/s, which the quality report checks.
   - `linear fit`, `quadratic fit`: fitted to each frame, in voxels where the speed is below `Stationary tissue speed threshold`.
   - `least squares fit`, `robust fit: MSAC`, `robust fit: weighted least squares` and
     `robust fit: wrap-around rejection + MSAC` *(slicerheart_4dflow)*:
@@ -75,9 +77,13 @@ Corrections are set in the `Corrections` section and applied by `Create flow fie
     - `Polynomial order` is 2 by default.
     - With `Fit each frame` unchecked, the fit uses the time-averaged velocity.
 - `Velocity anti-aliasing`: computes phase wrap segmentations, which can be edited in the segment editor below the selector.
-  - `Laplacian 3D + temporal` *(slicerheart_4dflow)*: the default. Laplacian phase unwrapping (Loecher 2016), then temporal
-    correction. If slicerheart_4dflow cannot be installed, temporal unwrapping is used.
-  - `Laplacian 3D`, `Laplacian 4D` *(slicerheart_4dflow)*: spatial or spatiotemporal Laplacian phase unwrapping.
+  - `Laplacian 4D` *(slicerheart_4dflow)*: the default. Spatiotemporal Laplacian phase unwrapping (Loecher 2016). If
+    slicerheart_4dflow cannot be installed, temporal unwrapping is used.
+  - `Laplacian 3D` *(slicerheart_4dflow)*: spatial Laplacian phase unwrapping of each frame.
+  - `Laplacian 3D + temporal` *(slicerheart_4dflow)*: Laplacian 3D phase unwrapping, then temporal correction. The temporal
+    correction can add false wraps in voxels with low signal (for example at the vessel wall), which are carried over to
+    all later frames: on a clinical case it added ten times more wraps than Laplacian 3D or 4D unwrapping found, at
+    velocities near zero, and doubled the divergence in the lumen.
   - `temporal`: wraps are detected by comparing consecutive frames, assuming no wraps in the first frame. A change larger
     than venc between frames is counted as a wrap and is never removed, so random phase noise in voxels with low signal
     accumulates false wraps. On one of 15 clinical test cases, this gave speeds up to 17 m/s with a venc of 2 m/s.
@@ -254,7 +260,7 @@ section per case. It is the package's own results from a run that was judged cor
 
    For each patient, the script:
    - imports the DICOM files into a temporary DICOM database (in `TEMP`, which needs enough free space)
-   - creates the flow field with the default processing (Laplacian + temporal phase unwrapping, quadratic background fit)
+   - creates the flow field with the default processing (Laplacian 4D phase unwrapping, quadratic background fit)
    - writes the test case, with an automatically generated lumen, measurement planes and plane flows
 
    Patients that are already exported are skipped (`--overwrite` exports them again). Check the printed status (or the
