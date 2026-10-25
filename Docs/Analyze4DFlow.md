@@ -66,6 +66,12 @@ Methods marked *(slicerheart_4dflow)* are implemented in the
       `Output transform sequence`, and in the `Advanced` section set `Fixed frame index` to the frame that was segmented
       and `Transform direction` to `fixed frame to moving frames`.
     - Apply the computed transform sequence to the segmentation.
+  - `Refine boundary` *(slicerheart_4dflow)*: the boundary of the mask segment is moved in or out in each frame to the
+    vessel wall in the magnitude image (the vessel widens and narrows over the cardiac cycle), by at most `max offset`
+    voxels, smoothly along the boundary, so that the shape of the segment is kept and nearby vessels are not added. A
+    segment that is slightly too small (by half a voxel, which may miss 10-20% of the flow of a small vessel) or too
+    large is corrected in each frame. Errors of up to about one voxel are corrected, not larger ones: the segment must
+    follow the vessel wall closely. Requires the magnitude images (flow fields created by Import 4D Flow).
 - Optionally adjust parameters:
   - `Sampling distance`: for very small cross-sections, reduce the sampling distance to get a representative number of
     samples.

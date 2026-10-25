@@ -103,7 +103,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
     def analyze(self, flowFieldNode, planeNode, segmentationNode=None, segmentId=None, speedThresholdMmPerSec=100.0,
                 streamlines=False, speedVolume=False, projected=False, maskedOutput=None, maximumLengthMm=100,
-                bidirectional=True, computeAllMetrics=False, samplingDistanceMm=1.0, summary=True):
+                bidirectional=True, computeAllMetrics=False, samplingDistanceMm=1.0, summary=True, refineVesselBoundary=False):
         """Run analysis. Returns (outputs, metrics, summaryMetrics), where metrics and summaryMetrics are dicts of column values
         (in display units)."""
         outputs = {"metricsModel": slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "Flow metrics")}
@@ -121,7 +121,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             streamlinesMaximumLengthMm=maximumLengthMm, streamlinesBidirectional=bidirectional,
             streamlinesComputeAllMetrics=computeAllMetrics, streamlinesSpeedThresholdMmPerSec=speedThresholdMmPerSec,
             outputSpeedVolume=outputs.get("speedVolume"), speedVolumeProjectedToPlane=projected,
-            outputMaskedFlowField=maskedOutput)
+            outputMaskedFlowField=maskedOutput, refineVesselBoundary=refineVesselBoundary)
         outputs["table"] = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics table")
         outputs["summaryTable"] = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Flow metrics summary") if summary else None
         self.logic.computeFlowMetricsTable(outputs["metricsModel"], planeNode, flowFieldNode, speedThresholdMmPerSec,
@@ -1482,6 +1482,73 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("Net flow volume is positive", result["in"] > 0, f"{result['in'] / 1000.0:.2f} ml")  # result is in mm3
         self.report.checkEqual("Mass conservation table columns", sorted(tableToDict(resultTable).keys()),
             sorted(["Check", "Inflow", "Outflow", "Difference", "PercentError", "Ratio"]))
+
+    @reportedTest("Vessel boundary refined in each frame (slicerheart_4dflow)",
+        "The mask segment is an approximate segmentation of the vessel, 1.5 mm (one voxel) smaller or larger than the vessel"
+        " (radius 10 mm)."
+        " With the boundary refined in each frame (moved to the vessel wall in the magnitude images, by at most 2 voxels), the"
+        " flow rate and the area of the plane probe and of disc sampling must match the analytic phantom, while with the mask"
+        " segment as it is, the smaller segment misses flow. The method corrects errors of about one voxel (partial volume,"
+        " motion of the wall), not larger ones. The option is only enabled in the GUI with a"
+        " mask segment.")
+    def test_25_RefineVesselBoundary(self):
+        from Import4DFlowLib import FlowLibraryBridge
+        if not hasattr(FlowLibraryBridge.ensureLibrary(), "refine_vessel_boundary"):
+            self.skipTest("The installed slicerheart_4dflow does not have refine_vessel_boundary")
+        phantom = FlowPhantom()
+        expectedFlows = [phantom.expectedFlowRateMlPerSec(i) for i in range(phantom.numberOfFrames)]
+        peakFrame = phantom.peakFrameIndex()
+        peakFlow = abs(expectedFlows[peakFrame])
+        expectedArea = phantom.expectedAreaMm2()
+        rows = []
+        for kind in ["transform", "volume"]:
+            slicer.mrmlScene.Clear()
+            flowFieldNode, magnitudeVolumeNode = self.createFlowField(phantom, kind)
+            planeNode = phantom.createMeasurementPlane()
+            for radiusMm in [phantom.vesselRadiusMm - 1.5, phantom.vesselRadiusMm + 1.5]:
+                label = f"[{KIND_NAMES[kind]}, segment radius {radiusMm:g} mm]"
+                segmentationNode, segmentId = phantom.createVesselSegmentation(magnitudeVolumeNode, radiusMm, name=f"Vessel {radiusMm:g} mm")
+                fraction_t, _ = self.logic.refinedLumenFraction(flowFieldNode, segmentationNode, segmentId)
+                self.report.checkEqual(f"{label} Refined vessel has one mask per frame", len(fraction_t), phantom.numberOfFrames)
+                for refine in [False, True]:
+                    method = "refined" if refine else "mask segment"
+                    table = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", "Disc sampling metrics")
+                    disc = self.logic.computeFlowMetricsTableDiscSampling(planeNode, flowFieldNode, segmentationNode, segmentId, 0.0, table,
+                        refineVesselBoundary=refine)
+                    _, probe, _ = self.analyze(flowFieldNode, planeNode, segmentationNode, segmentId, speedThresholdMmPerSec=0.0,
+                        summary=False, refineVesselBoundary=refine)
+                    discFlowError = max(abs(q / 1000.0 - e) for q, e in zip(disc["FlowRate"], expectedFlows)) / peakFlow
+                    probeFlowError = max(abs(q - e) for q, e in zip(probe["FlowRate"], expectedFlows)) / peakFlow
+                    discArea = disc["Area"][peakFrame]
+                    probeArea = probe["Area"][peakFrame]
+                    rows.append([KIND_NAMES[kind], radiusMm, method, 100 * discFlowError, 100 * probeFlowError, discArea, probeArea, expectedArea])
+                    if refine:
+                        self.report.checkClose(f"{label} Refined: disc sampling flow rate error (max., relative to the peak flow)",
+                            discFlowError, 0.0, atol=0.02)
+                        self.report.checkClose(f"{label} Refined: plane probe flow rate error (max., relative to the peak flow)",
+                            probeFlowError, 0.0, atol=0.02)
+                        self.report.checkClose(f"{label} Refined: disc sampling area at peak systole", discArea, expectedArea, rtol=0.08, unit="mm2")
+                        self.report.checkClose(f"{label} Refined: plane probe area at peak systole", probeArea, expectedArea, rtol=0.1, unit="mm2")
+                    elif radiusMm < phantom.vesselRadiusMm:
+                        self.report.checkTrue(f"{label} The smaller mask segment misses flow", discFlowError > 0.05, f"{100 * discFlowError:.1f}%")
+        self.report.table(["Storage", "Segment radius (mm)", "Vessel", "Disc sampling flow error (% of peak)", "Plane probe flow error (% of peak)",
+            "Disc sampling area (mm2)", "Plane probe area (mm2)", "Expected area (mm2)"], rows)
+
+        # GUI: the option is only enabled with a mask segment
+        slicer.util.selectModule("Analyze4DFlow")
+        widget = slicer.modules.analyze4dflow.widgetRepresentation().self()
+        parameterNode = widget._parameterNode
+        parameterNode.inputFlowField = flowFieldNode
+        parameterNode.inputMaskSegmentation = None
+        slicer.app.processEvents()
+        self.report.checkTrue("[GUI] Refine boundary option is disabled without a mask segment", not widget.ui.refineVesselBoundaryCheckBox.enabled)
+        parameterNode.inputMaskSegmentation = segmentationNode
+        parameterNode.inputMaskSegmentID = segmentId
+        parameterNode.refineVesselBoundary = True
+        slicer.app.processEvents()
+        self.report.checkTrue("[GUI] Refine boundary option is enabled with a mask segment", widget.ui.refineVesselBoundaryCheckBox.enabled
+            and widget.ui.refineVesselBoundaryCheckBox.checked and widget.ui.vesselBoundaryMaxOffsetSpinBox.enabled)
+        parameterNode.refineVesselBoundary = False
 
     @reportedTest("slicerheart_4dflow methods in the GUI",
         "Flow metrics method and streamlines method are selected in the GUI, hemodynamic outputs are computed by the"
