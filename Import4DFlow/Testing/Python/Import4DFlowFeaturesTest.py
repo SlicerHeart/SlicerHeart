@@ -1892,12 +1892,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         "The smallest clinical test case (the clinical test data set of slicerheart_4dflow, downloaded on first use, or a local data"
         " set in FlowTestingUtils.TEST_CASES_ENV_VARIABLE) is loaded without DICOM import."
         " The flow field computed with the recorded processing must match the velocity in the case files. slicerheart_4dflow"
-        " Laplacian unwrapping and robust background correction are applied, and the flow through the planes must"
-        " agree with the plane flows of the case (outputs/flows.json).")
+        " Laplacian unwrapping and robust background correction are applied, and the flow through the planes (in the"
+        " measurement region of each plane) must agree with the plane flows of the case (outputs/flows.json).")
     def test_28_ClinicalTestCase(self):
         testCases = FlowTestingUtils.testCases()
         if not testCases:
-            self.skipTest("No 4D flow test case is available (the clinical test data set requires slicerheart_4dflow 0.3.1 or later"
+            self.skipTest("No 4D flow test case is available (the clinical test data set requires slicerheart_4dflow 0.4.0 or later"
                           f" and network access, or set {FlowTestingUtils.TEST_CASES_ENV_VARIABLE} in the environment or in .env.local"
                           " to the folder of a data set of test cases)")
         datasetDirectory, caseId = testCases[0]
@@ -1923,8 +1923,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("Encoding directions are consistent", result["consistent"], self.logic.encodingCheckSummary(result))
         rows = []
         rrMs = case["rr_ms"]
+        from slicerheart_4dflow.slicer_io import plane_lumen
         for name, reference in case["flows"]["planes"].items():
-            flow = library.plane_flow(corrected, voxelToWorld, lumen_mask=lumen, **case["planes"][name])["flow"] / 1000.0
+            # In the measurement region of the plane (the lumen within the branch segment of the plane, if the case has
+            # branch segments), as the plane flows of the case are computed
+            flow = library.plane_flow(corrected, voxelToWorld, lumen_mask=plane_lumen(case, name, "fraction"),
+                                      **case["planes"][name])["flow"] / 1000.0
             net = float(np.mean(flow) * rrMs / 1000.0)
             rows.append([name, reference["net_volume_mL"], net])
             self.report.checkClose(f"[{name}] Net flow volume with slicerheart_4dflow corrections", net, reference["net_volume_mL"],
