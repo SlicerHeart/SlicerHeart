@@ -294,7 +294,7 @@
         </item>
        </layout>
       </item>
-      <item row="7" column="0" colspan="2">
+      <item row="8" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_3">
         <property name="title">
          <string>Flow metrics</string>
@@ -538,7 +538,7 @@
         </layout>
        </widget>
       </item>
-      <item row="9" column="0" colspan="2">
+      <item row="10" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox">
         <property name="title">
          <string>Streamlines</string>
@@ -676,7 +676,7 @@
         </layout>
        </widget>
       </item>
-      <item row="10" column="0" colspan="2">
+      <item row="11" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_2">
         <property name="title">
          <string>Speed image</string>
@@ -745,7 +745,7 @@
         </layout>
        </widget>
       </item>
-      <item row="11" column="0" colspan="2">
+      <item row="12" column="0" colspan="2">
        <widget class="QPushButton" name="analyzeButton">
         <property name="enabled">
          <bool>true</bool>
@@ -761,7 +761,7 @@
         </property>
        </widget>
       </item>
-      <item row="13" column="0" colspan="2">
+      <item row="14" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="massConservationGroupBox">
         <property name="title">
          <string>Mass conservation</string>
@@ -861,64 +861,7 @@
         </layout>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
-       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_4">
-        <property name="title">
-         <string>Flow field processing</string>
-        </property>
-        <property name="collapsed">
-         <bool>true</bool>
-        </property>
-        <layout class="QFormLayout" name="formLayout_8">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_17">
-           <property name="text">
-            <string>Output masked flow field:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="qMRMLNodeComboBox" name="outputMaskedFlowFieldSelector">
-           <property name="toolTip">
-            <string>Flow field with flow set to zero outside the selected mask</string>
-           </property>
-           <property name="nodeTypes">
-            <stringlist notr="true">
-             <string>vtkMRMLModelNode</string>
-             <string>vtkMRMLTransformNode</string>
-             <string>vtkMRMLVectorVolumeNode</string>
-            </stringlist>
-           </property>
-           <property name="showChildNodeTypes">
-            <bool>false</bool>
-           </property>
-           <property name="baseName">
-            <string>Masked 4D flow</string>
-           </property>
-           <property name="noneEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="addEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="removeEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="editEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="renameEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">outputMaskedFlowField</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="12" column="0" colspan="2">
+      <item row="13" column="0" colspan="2">
        <widget class="ctkCollapsibleGroupBox" name="hemodynamicsGroupBox">
         <property name="title">
          <string>Hemodynamics</string>
@@ -1358,6 +1301,63 @@
            </property>
            <property name="text">
             <string>Compute hemodynamics</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="7" column="0" colspan="2">
+       <widget class="ctkCollapsibleGroupBox" name="CollapsibleGroupBox_4">
+        <property name="title">
+         <string>Flow field processing</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="formLayout_8">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_17">
+           <property name="text">
+            <string>Output masked flow field:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="qMRMLNodeComboBox" name="outputMaskedFlowFieldSelector">
+           <property name="toolTip">
+            <string>Flow field with flow set to zero outside the selected mask</string>
+           </property>
+           <property name="nodeTypes">
+            <stringlist notr="true">
+             <string>vtkMRMLModelNode</string>
+             <string>vtkMRMLTransformNode</string>
+             <string>vtkMRMLVectorVolumeNode</string>
+            </stringlist>
+           </property>
+           <property name="showChildNodeTypes">
+            <bool>false</bool>
+           </property>
+           <property name="baseName">
+            <string>Masked 4D flow</string>
+           </property>
+           <property name="noneEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="addEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="removeEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="editEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="renameEnabled">
+            <bool>true</bool>
+           </property>
+           <property name="SlicerParameterName" stdset="0">
+            <string notr="true">outputMaskedFlowField</string>
            </property>
           </widget>
          </item>
