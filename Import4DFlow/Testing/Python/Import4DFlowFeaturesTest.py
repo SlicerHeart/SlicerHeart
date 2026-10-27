@@ -271,7 +271,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 loadablesByPluginName = {type(plugin).__name__: (plugin, loadables) for plugin, loadables in loadablesByPlugin.items()}
                 flowPlugin, flowLoadables = loadablesByPluginName["Import4DFlowDicomPluginClass"]
                 multiVolumeLoadables = loadablesByPluginName["MultiVolumeImporterPluginClass"][1]
-                self.report.checkEqual(f"[{caseName}] Number of 4D flow plugin loadables (one per series of the acquisition)", len(flowLoadables), 4)
+                # One loadable per series of the acquisition: GE has a 5th (complex difference) series
+                self.report.checkEqual(f"[{caseName}] Number of 4D flow plugin loadables (one per series of the acquisition)", len(flowLoadables), 5 if variant == "ge" else 4)
                 self.report.checkTrue(f"[{caseName}] 4D flow plugin loadables are selected by default", all(l.selected for l in flowLoadables))
                 flowFiles = set(fileName for loadable in flowLoadables for fileName in loadable.files)
                 competingLoadables = [loadable for loadable in multiVolumeLoadables if set(loadable.files) & flowFiles]
@@ -287,6 +288,11 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             inputFlowFieldNodes = [node for node in slicer.util.getNodesByClass("vtkMRMLVectorVolumeNode") if FlowLibraryBridge.isRawFlowField(node)]
             loadedOnce = self.report.checkEqual(f"[{caseName}] Acquisition is loaded once (sequence browsers, input flow fields)",
                 (len(browserNodes), len(inputFlowFieldNodes)), (1, 1))
+            if variant == "ge" and browserNodes:
+                synchronizedSequences = vtk.vtkCollection()
+                browserNodes[0].GetSynchronizedSequenceNodes(synchronizedSequences, True)
+                self.report.checkEqual(f"[{caseName}] Sequences in the browser (magnitude, complex difference, input flow field)",
+                    synchronizedSequences.GetNumberOfItems(), 3)
             if not loadedOnce:
                 rows.append([caseName, "not loaded", "", "", "", ""])
                 continue
@@ -297,6 +303,18 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             seriesItem = shNode.GetItemByDataNode(magnitudeVolumeNode)
             self.report.checkEqual(f"[{caseName}] Magnitude image is in the study in subject hierarchy",
                 shNode.GetItemLevel(shNode.GetItemParent(seriesItem)) if seriesItem else "", slicer.vtkMRMLSubjectHierarchyConstants.GetDICOMLevelStudy())
+            # Display after loading: magnitude in the slice views, velocity as glyphs, the loaded sequence browser in the toolbar
+            compositeNode = slicer.app.layoutManager().sliceWidget("Red").mrmlSliceCompositeNode()
+            self.report.checkEqual(f"[{caseName}] Magnitude image is shown in the slice views",
+                (compositeNode.GetBackgroundVolumeID(), compositeNode.GetForegroundVolumeID()), (magnitudeVolumeNode.GetID(), None))
+            glyphDisplayNode = self.logic.getFlowFieldDisplayNode(inputFlowFieldNode)
+            if FlowTestingUtils.isVectorFieldDisplayAvailable():
+                self.report.checkTrue(f"[{caseName}] Input flow field is shown as glyphs in the slice views",
+                    glyphDisplayNode is not None and bool(glyphDisplayNode.GetVisibility()) and bool(glyphDisplayNode.GetVisibility2D()))
+            self.report.checkTrue(f"[{caseName}] Sequence browser of the acquisition is active in the toolbar",
+                slicer.modules.sequences.toolBar().activeBrowserNode() == browserNodes[0])
+            self.report.checkEqual(f"[{caseName}] Save changes is enabled for the loaded sequences (fast replay)",
+                [bool(browserNodes[0].GetSaveChanges(self.logic._getSequenceFromProxyNode(node))) for node in (magnitudeVolumeNode, inputFlowFieldNode)], [True, True])
             self.report.checkEqual(f"[{caseName}] Vendor", self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.vendor"), expectedVendor[variant])
             directionCodes = (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.directionCodes") or "").split(",")
             self.report.checkEqual(f"[{caseName}] Direction codes of components (R, A, S)", directionCodes, [c[0] for c in configuration])
@@ -691,6 +709,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             else:
                 self.report.checkEqual(f"[{storage}] Scalar range uses color node range", displayNode.GetScalarRangeFlag(),
                     slicer.vtkMRMLDisplayNode.UseColorNodeScalarRange)
+                samplingSpacing = displayNode.GetSamplingSpacing() if hasattr(displayNode, "GetSamplingSpacing") else displayNode.GetEffectiveSamplingSpacingMm()
+                self.report.checkClose(f"[{storage}] Glyph sampling spacing (sparse for fast replay)", samplingSpacing, 5.0, atol=1e-6, unit="mm")
             self.showFlowFieldAtFrame(flowFieldNode, peakFrame, phantom)
             self.report.screenshot(f"Default flow field visualization ({storage}) at peak systole")
 
@@ -962,6 +982,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkTrue("[GUI] Output flow field references the input flow field and the magnitude images", flowFieldNode is not None
                 and flowFieldNode.GetNodeReference("inputFlowField") is parameterNode.inputFlowField
                 and flowFieldNode.GetNodeReference("magnitudeVolume") is not None)
+            inputDisplayNode = self.logic.getFlowFieldDisplayNode(parameterNode.inputFlowField)
+            self.report.checkTrue("[GUI] Glyphs of the input flow field are hidden when the output flow field is created",
+                inputDisplayNode is None or not inputDisplayNode.GetVisibility())
             self.checkVelocityFrames("[GUI] Velocity (temporal unwrapping is applied automatically)",
                 self.velocityFrames(flowFieldNode), expectedFrames, velocityQuantizationMPerSec(vencCmPerSec))
             buttonTexts = [getattr(widget.ui, f"showComponentVolume{c + 1}Button").text for c in range(3)]
@@ -2068,7 +2091,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             loadablesByPlugin, _ = DICOMUtils.getLoadablesFromFileLists(fileLists, ["Import4DFlowDicomPlugin"])
             timings.append([f"4D flow plugin: examine ({len(fileLists)} series, {sum(len(f) for f in fileLists)} files)", time.time() - startTime])
             plugin, loadables = next(iter(loadablesByPlugin.items()))
-            found = self.report.checkEqual(f"[{vendor}] Number of 4D flow plugin loadables (one per series of the acquisition)", len(loadables), 4)
+            roles = [loadable.flowImage["role"] for loadable in loadables]
+            found = self.report.checkEqual(f"[{vendor}] 4D flow plugin loadables (magnitude, velocity components, auxiliary images)",
+                (roles.count("magnitude"), roles.count("velocity"), roles.count("auxiliary")), (1, 3, 1 if expectedVendor == "ge" else 0))
             if not found:
                 return None
             startTime = time.time()

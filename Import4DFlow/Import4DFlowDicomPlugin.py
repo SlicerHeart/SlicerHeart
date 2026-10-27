@@ -164,6 +164,7 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         images of one study/group, or None."""
         magnitudes = [image for image in images if image["role"] == "magnitude"]
         velocities = [image for image in images if image["role"] == "velocity"]
+        auxiliaries = [image for image in images if image["role"] == "auxiliary"]
         if len(magnitudes) != 1 or len(velocities) < 3:
             return None
         magnitude = magnitudes[0]
@@ -174,18 +175,21 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
             return None
         components = [next(image for image in velocities if image["directionCode"] == directionCode) for directionCode, _ in configuration]
         invertToRasDirection = [invert for _, invert in configuration]
-        # Same voxel grid and frames
-        for image in components:
-            for key in ("shape", "frameTimes"):
-                if image[key] != magnitude[key]:
-                    logging.debug(f"Import4DFlowDicomPlugin: {image['seriesName']} and {magnitude['seriesName']} differ in {key}")
-                    return None
+        # Same voxel grid and frames (auxiliary images that differ are left to the other plugins)
+        def sameGrid(image):
+            if any(image[key] != magnitude[key] for key in ("shape", "frameTimes")):
+                logging.debug(f"Import4DFlowDicomPlugin: {image['seriesName']} and {magnitude['seriesName']} differ in frames or image size")
+                return False
             if len(image["slicePositions"]) != len(magnitude["slicePositions"]) or \
                     np.abs(image["slicePositions"] - magnitude["slicePositions"]).max() > 0.01 or \
                     np.abs(image["orientation"] - magnitude["orientation"]).max() > 1e-4:
                 logging.debug(f"Import4DFlowDicomPlugin: {image['seriesName']} and {magnitude['seriesName']} differ in geometry")
-                return None
-        return {"magnitude": magnitude, "components": components, "invertToRasDirection": invertToRasDirection,
+                return False
+            return True
+        if not all(sameGrid(image) for image in components):
+            return None
+        auxiliaries = [image for image in auxiliaries if sameGrid(image)]
+        return {"magnitude": magnitude, "components": components, "invertToRasDirection": invertToRasDirection, "auxiliaries": auxiliaries,
                 "name": f"{magnitude['patientName']} ({magnitude['studyDate']})"
                         + (f" / {magnitude['acquisitionNumber']}" if magnitude["acquisitionNumber"] > 1 else "")}
 
@@ -195,14 +199,21 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         vendorLabel = {"siemens": "Siemens", "ge": "GE", "philips": "Philips"}.get(acquisition["magnitude"]["vendor"], "")
         componentLabels = {"patient_rl": "R/L", "patient_ap": "A/P", "patient_fh": "F/H", "through": "through-plane",
                            "inplane_rl": "in-plane R/L", "inplane_ap": "in-plane A/P", "inplane_fh": "in-plane F/H"}
+        auxiliaryLabels = {FlowDicom.COMPLEX_DIFFERENCE_DIRECTION_CODE: "complex difference image"}
         loadables = []
-        for image in [acquisition["magnitude"]] + acquisition["components"]:
+        for image in [acquisition["magnitude"]] + acquisition["components"] + acquisition["auxiliaries"]:
             loadable = DICOMLoadable()
             loadable.files = image["files"]
-            role = "magnitude" if image["role"] == "magnitude" else f"velocity {componentLabels.get(image['directionCode'], image['directionCode'])}"
+            if image["role"] == "magnitude":
+                role = "magnitude"
+            elif image["role"] == "velocity":
+                role = f"velocity {componentLabels.get(image['directionCode'], image['directionCode'])}"
+            else:
+                role = auxiliaryLabels.get(image["directionCode"], image["directionCode"])
             loadable.name = f"{image['seriesName']} - 4D flow {role}"
             loadable.tooltip = (f"4D flow MRI ({vendorLabel}, {len(image['frameTimes'])} frames) loaded as input flow field with the magnitude"
-                                " image sequence. Loading any of the magnitude and velocity component series loads the whole acquisition.")
+                                " image sequence (and the other images of the acquisition in the same sequence browser). Loading any of"
+                                " the series loads the whole acquisition.")
             loadable.selected = True
             loadable.confidence = self.CONFIDENCE
             loadable.flowAcquisition = acquisition
@@ -229,44 +240,56 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         voxelToWorld = self._voxelToWorld(magnitude)
         logging.info(f"Loading 4D flow acquisition {acquisition['name']}: {numberOfFrames} frames, {len(magnitude['slicePositions'])} slices")
 
-        # Magnitude volume sequence (browsed by frame time, as volume sequences imported from DICOM)
-        frameTimes = magnitude["frameTimes"]
-        sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", magnitude["seriesName"])
-        sequenceNode.SetIndexName("time")
-        sequenceNode.SetIndexUnit("ms")
-        sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
-        magnitudeRange = 0.0
-        for frameIndex in range(numberOfFrames):
-            frame = self._readFrame(magnitude, frameIndex)
-            magnitudeRange = max(magnitudeRange, float(frame.max()))
-            sequenceNode.SetDataNodeAtValue(logic._volumeNodeFromArray(frame, voxelToWorld), f"{frameTimes[frameIndex]:g}")
-        sequenceNode.SetAttribute("MultiVolume.FrameIdentifyingDICOMTagName", "TriggerTime")
-        sequenceNode.SetAttribute("MultiVolume.FrameIdentifyingDICOMTagUnits", "ms")
-        sequenceNode.SetAttribute("MultiVolume.FrameLabels", ",".join(f"{t:g}" for t in frameTimes))
-        sequenceNode.SetAttribute("MultiVolume.NumberOfFrames", str(numberOfFrames))
-        sequenceNode.SetAttribute("SlicerHeart.vendor", magnitude["vendor"])
-        sequenceNode.SetAttribute("SlicerHeart.directionCode", FlowDicom.MAGNITUDE_DIRECTION_CODE)
-        # Siemens magnitude images use a fixed range (see Import4DFlowLogic.magnitudeRange); others are scaled arbitrarily
-        if magnitude["vendor"] == "siemens":
-            magnitudeRange = logic.magnitudeVolumeRange
-        sequenceNode.SetAttribute("SlicerHeart.magnitudeRange", f"{magnitudeRange:g}")
-        heartRateBpm = magnitude["heartRateBpm"]
-        if not heartRateBpm:
-            heartRateBpm = FlowDicom.heartRateBpmFromFrameTimes(frameTimes)
-            if heartRateBpm:
-                logging.info(f"{magnitude['seriesName']}: heart rate is not in the DICOM header, estimated from the trigger times: {heartRateBpm:.1f} bpm")
-        if heartRateBpm:
-            sequenceNode.SetAttribute("SlicerHeart.heartRateBpm", str(heartRateBpm))
-        browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", magnitude["seriesName"] + " browser")
-        browserNode.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
-        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
-        magnitudeVolumeNode = browserNode.GetProxyNode(sequenceNode)
-        magnitudeVolumeNode.CreateDefaultDisplayNodes()
+        # Magnitude volume sequence (browsed by frame time, as volume sequences imported from DICOM) with its sequence
+        # browser, and the auxiliary images of the acquisition (for example, the GE complex difference image) as
+        # further sequences of the same browser
         from DICOMLib import DICOMUtils
-        instanceUIDs = DICOMUtils.fileValues(magnitude["files"], self.tags["instanceUID"])
-        magnitudeVolumeNode.SetAttribute("DICOM.instanceUIDs", " ".join(uid for uid in instanceUIDs if uid))
-        magnitudeLoadable = next((l for l in acquisition.get("loadables", []) if l.flowImage is magnitude), loadable)
-        self.addSeriesInSubjectHierarchy(magnitudeLoadable, magnitudeVolumeNode)
+        frameTimes = magnitude["frameTimes"]
+        browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", magnitude["seriesName"] + " browser")
+        sequenceNodes = {}
+        for image in [magnitude] + acquisition["auxiliaries"]:
+            sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", image["seriesName"])
+            sequenceNode.SetIndexName("time")
+            sequenceNode.SetIndexUnit("ms")
+            sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
+            valueRange = 0.0
+            for frameIndex in range(numberOfFrames):
+                frame = self._readFrame(image, frameIndex)
+                valueRange = max(valueRange, float(frame.max()))
+                sequenceNode.SetDataNodeAtValue(logic._volumeNodeFromArray(frame, voxelToWorld), f"{frameTimes[frameIndex]:g}")
+            sequenceNode.SetAttribute("MultiVolume.FrameIdentifyingDICOMTagName", "TriggerTime")
+            sequenceNode.SetAttribute("MultiVolume.FrameIdentifyingDICOMTagUnits", "ms")
+            sequenceNode.SetAttribute("MultiVolume.FrameLabels", ",".join(f"{t:g}" for t in frameTimes))
+            sequenceNode.SetAttribute("MultiVolume.NumberOfFrames", str(numberOfFrames))
+            sequenceNode.SetAttribute("SlicerHeart.vendor", image["vendor"])
+            sequenceNode.SetAttribute("SlicerHeart.directionCode", image["directionCode"])
+            if image is magnitude:
+                # Siemens magnitude images use a fixed range (see Import4DFlowLogic.magnitudeRange); others are scaled arbitrarily
+                magnitudeRange = logic.magnitudeVolumeRange if image["vendor"] == "siemens" else valueRange
+                sequenceNode.SetAttribute("SlicerHeart.magnitudeRange", f"{magnitudeRange:g}")
+                heartRateBpm = image["heartRateBpm"]
+                if not heartRateBpm:
+                    heartRateBpm = FlowDicom.heartRateBpmFromFrameTimes(frameTimes)
+                    if heartRateBpm:
+                        logging.info(f"{image['seriesName']}: heart rate is not in the DICOM header, estimated from the trigger times: {heartRateBpm:.1f} bpm")
+                if heartRateBpm:
+                    sequenceNode.SetAttribute("SlicerHeart.heartRateBpm", str(heartRateBpm))
+                browserNode.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
+            else:
+                browserNode.AddSynchronizedSequenceNodeID(sequenceNode.GetID())
+            # With save changes allowed, the proxy node is updated by shallow copy, which is much faster for large images
+            # (as in the volume sequence import of the DICOM module)
+            browserNode.SetSaveChanges(sequenceNode, True)
+            sequenceNodes[id(image)] = sequenceNode
+        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
+        for image in [magnitude] + acquisition["auxiliaries"]:
+            proxyNode = browserNode.GetProxyNode(sequenceNodes[id(image)])
+            proxyNode.CreateDefaultDisplayNodes()
+            instanceUIDs = DICOMUtils.fileValues(image["files"], self.tags["instanceUID"])
+            proxyNode.SetAttribute("DICOM.instanceUIDs", " ".join(uid for uid in instanceUIDs if uid))
+            imageLoadable = next((l for l in acquisition.get("loadables", []) if l.flowImage is image), loadable)
+            self.addSeriesInSubjectHierarchy(imageLoadable, proxyNode)
+        magnitudeVolumeNode = browserNode.GetProxyNode(sequenceNodes[id(magnitude)])
 
         # Input flow field: raw velocity frames (RAS components, mm/s) are read on demand, straight into the flow field
         signs = np.array([-1.0 if invert else 1.0 for invert in acquisition["invertToRasDirection"]])
@@ -287,11 +310,25 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
 
         inputFlowFieldNode = logic.createInputFlowFieldFromArrays(
             RawVelocityFrames(), magnitudeVolumeNode, vencsMmPerSec, np.diag(signs),
-            directionCodes=[image["directionCode"] for image in components], componentMaxValues=maxValues)
+            directionCodes=[image["directionCode"] for image in components], componentMaxValues=maxValues, saveChanges=True)
         logic._getSequenceFromProxyNode(inputFlowFieldNode).SetAttribute(logic.ACQUISITION_METADATA_ATTRIBUTE, json.dumps(magnitude["metadata"]))
         for axis, image in enumerate(components):
             inputFlowFieldNode.SetAttribute(f"DICOM.componentInstanceUIDs{axis}",
                                             " ".join(uid for uid in DICOMUtils.fileValues(image["files"], self.tags["instanceUID"]) if uid))
+        # Show the acquisition as the volume sequence import of the DICOM module does: the magnitude images in the slice
+        # views (the input flow field is not shown as a volume), the velocity as acquired as glyphs (if the vector field
+        # display node is available in this Slicer version), and the sequence browser of the acquisition in the toolbar
+        if hasattr(slicer, "vtkMRMLVectorFieldDisplayNode"):
+            logic.setFlowFieldVisualizationToDefault(inputFlowFieldNode)
+        appLogic = slicer.app.applicationLogic()
+        selectionNode = appLogic.GetSelectionNode()
+        selectionNode.SetReferenceActiveVolumeID(magnitudeVolumeNode.GetID())
+        appLogic.PropagateVolumeSelection()
+        sequencesModule = slicer.modules.sequences
+        if sequencesModule.autoShowToolBar:
+            sequencesModule.setToolBarActiveBrowserNode(browserNode)
+            sequencesModule.setToolBarVisible(True)
+
         acquisition["magnitudeVolumeNodeID"] = magnitudeVolumeNode.GetID()
         acquisition["inputFlowFieldNodeID"] = inputFlowFieldNode.GetID()
         return magnitudeVolumeNode
@@ -468,7 +505,8 @@ class Import4DFlowDicomPluginTest(ScriptedLoadableModuleTest):
             image = FlowDicom.classifyDataset(ge(flag))
             self.assertEqual((image["role"], image["directionCode"], image["vencCmPerSec"]), ("velocity", directionCode, 250.0))
             self.assertAlmostEqual(image["maxValue"], 795.775 * math.pi, places=3)
-        self.assertIsNone(FlowDicom.classifyDataset(ge(7)))  # complex difference
+        image = FlowDicom.classifyDataset(ge(7))  # complex difference: auxiliary image of the acquisition
+        self.assertEqual((image["role"], image["directionCode"], image["vencCmPerSec"]), ("auxiliary", FlowDicom.COMPLEX_DIFFERENCE_DIRECTION_CODE, None))
         self.assertEqual(FlowDicom.classifyDataset(ge(3, scale=None))["maxValue"], 2500.0)  # pixel values in mm/s
         self.assertIsNone(FlowDicom.classifyDataset(ge(3, venc=None)))
 

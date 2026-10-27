@@ -31,7 +31,8 @@ Flow fields stored in grid transforms (velocity in m/s), created by earlier vers
   - Siemens: "112: CS4Dflow_R7.7_retro_post 1.6 x 1.6_P", "113: CS4Dflow_R7.7_retro_post 1.6 x 1.6_P",
     "114: CS4Dflow_R7.7_retro_post 1.6 x 1.6_P", and "115: CS4Dflow_R7.7_retro_post 1.6 x 1.6"
   - GE: 5 series with the same description, for example "70: AX 4D FLOWQ v250" ... "74: AX 4D FLOWQ v250" (magnitude,
-    3 velocity components, and a complex difference image that is ignored)
+    3 velocity components, and a complex difference image, which is loaded as an additional image sequence of the
+    acquisition)
   - Philips: "3703: anatomy", "3704: RL", "3705: AP", "3706: FH"
   All series of the acquisition must be selected together: if some are missing, the series can only be loaded as volume
   sequences. The pixel data is read directly from the files (uncompressed files; other files are read with pydicom), which
@@ -203,7 +204,7 @@ corresponds to venc.
 
 | | Siemens (CS 4D flow) | GE (mm4dflow, 4DFLOW) | Philips (classic DICOM) |
 |---|---|---|---|
-| Image identification | velocity: venc and direction code in private tag (0051,1014) (Avanto) or (0021,1129) (Avanto Fit), for example `v150_through`, or at the end of `SequenceName` (`fl3d1_v150in`); magnitude: `SequenceName` contains `fl3d1r2` or `fl3d1r3` | (0043,1030) Vas collapse flag: 2 magnitude, 3/4/5 L/R, A/P, S/I velocity (8-11: the same, "oblique", unverified); other values (7, complex difference) are ignored | `ImageType` contains `VELOCITY MAP` (or (2005,1011) is `P`): velocity; (2005,1011) is `M` with (2001,1016) Number of PC directions 3: magnitude; (2001,101A) PC Velocity must be present |
+| Image identification | velocity: venc and direction code in private tag (0051,1014) (Avanto) or (0021,1129) (Avanto Fit), for example `v150_through`, or at the end of `SequenceName` (`fl3d1_v150in`); magnitude: `SequenceName` contains `fl3d1r2` or `fl3d1r3` | (0043,1030) Vas collapse flag: 2 magnitude, 3/4/5 L/R, A/P, S/I velocity (8-11: the same, "oblique", unverified), 7 complex difference (auxiliary image, loaded into the same sequence browser) | `ImageType` contains `VELOCITY MAP` (or (2005,1011) is `P`): velocity; (2005,1011) is `M` with (2001,1016) Number of PC directions 3: magnitude; (2001,101A) PC Velocity must be present |
 | venc | in the direction code (cm/s) | (0019,10CC) Velocity encoding (mm/s) | (2001,101A) PC Velocity (cm/s), the nonzero element |
 | Loaded value scaling | phase in [-4096, 4096), `maxValue` 4096 | no rescale tags; (0019,10E2) Velocity Encode Scale = venc/π scales phase (rad) to pixel value, so `maxValue` = (0019,10E2)·π and the pixel values are mm/s | RescaleSlope/RescaleIntercept (RescaleType `cm/s`) give cm/s, `maxValue` = venc (cm/s) |
 | Encoding direction | relative to the image: through-plane, in-plane R/L, A/P, F/H; mapped to RAS by the acquisition orientation (`FlowDicom.SIEMENS_AXIS_CONFIGURATIONS`) | patient axes from the flag: `patient_rl`, `patient_ap`, `patient_fh`, independent of the image orientation | (0018,9090) Velocity Encoding Direction in the (2005,140F) sequence (patient coordinate system); fallback: nonzero element of (2001,101A), or the series description `RL`, `AP`, `FH` |

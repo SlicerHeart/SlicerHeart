@@ -1041,7 +1041,7 @@ class FlowPhantom:
         - "ge": GE 4D flow (mm4dflow): the role of the series in private tag (0043,1030) Vas collapse flag (2: magnitude,
           3/4/5: L/R, A/P, S/I velocity), venc (mm/s) in (0019,10CC), Velocity Encode Scale (venc/pi) in (0019,10E2),
           int16 pixel values in mm/s, no rescale tags, all series with the same description. A 5th series with
-          flag 7 (complex difference) is written too (it is ignored by the import).
+          flag 7 (complex difference) is written too (loaded as an auxiliary image sequence of the acquisition).
         - "philips": Philips 4D flow classic DICOM: ImageType 'VELOCITY MAP' / 'M_FFE', (2005,1011) 'P' / 'M', venc (cm/s)
           in (2001,101A) PC Velocity (one nonzero element for velocity images), (0018,9090) Velocity Encoding
           Direction in the (2005,140F) sequence, stored values rescaled to cm/s (RescaleType 'cm/s')
