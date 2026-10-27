@@ -235,7 +235,7 @@ def magnitudeArray(flowFieldNode):
 # Input (raw) flow field
 #
 # The input flow field contains the velocity as acquired (aliased, before any correction) in RAS components. It is created
-# from the component images (Import4DFlowLogic.createInputFlowFieldFromComponentVolumes) or loaded from file. Its sequence
+# by the 4D flow DICOM plugin (Import4DFlowLogic.createInputFlowFieldFromArrays) or loaded from file. Its sequence
 # stores the velocity encoding in attributes (see setRawEncoding). Output flow fields (processing results) reference their
 # input flow field by the "inputFlowField" node reference.
 

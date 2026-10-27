@@ -42,8 +42,9 @@ class Import4DFlow(ScriptedLoadableModule):
         self.parent.dependencies = []
         self.parent.contributors = ["Andras Lasso (PerkLab)"]
         self.parent.helpText = """
-Convert 4D flow MRI phase-contrast images (Siemens CS 4D flow DICOM images) into a flow field and correct it
-(phase unwrapping, noise masking, background phase correction, divergence-free filtering).
+Correct the velocity field of 4D flow MRI phase-contrast images (loaded from Siemens, GE, or Philips DICOM images by
+the 4D flow DICOM plugin, or from file): phase unwrapping, noise masking, background phase correction, divergence-free
+filtering.
 
 See more information in <a href="https://github.com/SlicerHeart/SlicerHeart/blob/master/Docs/Import4DFlow.md">module documentation</a>.
 """
@@ -160,17 +161,14 @@ class Import4DFlowParameterNode:
     """
     The parameters needed by module.
     """
-    # Input flow field: velocity as acquired (created from the component images or loaded from file), vector volume sequence.
+    # Input flow field: velocity as acquired (loaded from DICOM by the 4D flow DICOM plugin, or from file), vector volume sequence.
     # All corrections are computed from it into the output flow field.
     inputFlowField: Union[vtkMRMLTransformNode, vtkMRMLVectorVolumeNode, None]
     # Output flow field (corrected velocity) is stored either in a sequence of grid transform nodes (legacy format)
     # or in a sequence of vector volume nodes (3-component image, velocity vector in each voxel)
     outputFlowField: Union[vtkMRMLTransformNode, vtkMRMLVectorVolumeNode, None]
-    # Remove the component images after the input flow field is created from them (they are not needed after that)
-    removeInputImageAfterConversion: bool = True
     # Velocity-weighted phase-contrast MR angiogram of the flow field
     pcmraVolume: Optional[vtkMRMLScalarVolumeNode]
-    inputVolumeNodeSet: str
     exportDirectory: str
     exportFormat: str
     # Laplacian 4D unwrapping is the default: temporal unwrapping (alone, or as the correction step after Laplacian 3D
@@ -212,13 +210,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNodeGuiTag = None
         self._updatingGUIFromParameterNode = False
         self._progressBar = None  # progress bar in the status bar of the main window, see _progressStatus
-        # Dict that maps from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet.
-        # volumeNodeSet contains:
-        #   - 'name': displayable name of the node set
-        #   - 'componentVolumeNodes': list of 3 volume nodes (R, A, S component)
-        #   - 'componentVolumeNodesInvertToRasDirection': list of 3 Booleans, which tell is the component has to be inverted to get velocity RAS direction
-        #   - 'magnitudeVolumeNode' magnitude volume node
-        self._volumeNodesSets = {}
         self.segmentEditorSingletonTag = "Import3DFlow.SegmentEditor"
 
     def setup(self) -> None:
@@ -295,11 +286,8 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
 
         # Buttons
-        self.ui.inputVolumeNodeSetSelector.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
         self.ui.exportPathLineEdit.connect('currentPathChanged(QString)', self.updateParameterNodeFromGUI)
         self.ui.exportFormatComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
-        self.ui.inspectButton.connect('clicked(bool)', self.onInspectButton)
-        self.ui.convertButton.connect('clicked(bool)', self.onConvertButton)
         self.ui.computePhaseUnwrappingButton.connect('clicked(bool)', self.onComputePhaseUnwrappingButton)
         self.ui.exportButton.connect('clicked(bool)', self.onExportButton)
 
@@ -328,8 +316,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
-
-        self.onInspectButton()
 
         if slicer.app.majorVersion * 100 + slicer.app.minorVersion < 5.40:
             slicer.util.warningDisplay("This module requires Slicer-5.4 or later version for proper loading of 4D flow files from DICOM.")
@@ -362,8 +348,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                         self._parameterNode.inputFlowField = inputFlowFieldNode
                 if not self._parameterNode.outputFlowField and self._parameterNode.inputFlowField:
                     self._parameterNode.outputFlowField = self.logic.findOutputFlowFieldNode(self._parameterNode.inputFlowField)
-
-        self.onInspectButton()
 
     def exit(self) -> None:
         """
@@ -498,18 +482,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure GUI changes do not call updateParameterNodeFromGUI (it could cause infinite loop)
         self._updatingGUIFromParameterNode = True
 
-        # Update node selectors and sliders
-        self.ui.inputVolumeNodeSetSelector.setCurrentIndex(
-            self.ui.inputVolumeNodeSetSelector.findData(self._parameterNode.inputVolumeNodeSet))
-
-        # Update buttons state and tooltip
-        if self._parameterNode and self._parameterNode.inputVolumeNodeSet:
-            self.ui.convertButton.toolTip = "Convert input flow image to flow field"
-            self.ui.convertButton.enabled = True
-        else:
-            self.ui.convertButton.toolTip = "Select a valid input flow image"
-            self.ui.convertButton.enabled = False
-
         self.ui.lumenSegmentSelectorWidget.setCurrentNode(self._parameterNode.lumenSegmentation)
         self.ui.lumenSegmentSelectorWidget.setCurrentSegmentID(self._parameterNode.lumenSegmentID)
 
@@ -571,45 +543,11 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Modify all properties in a single batch
         with slicer.util.NodeModify(self._parameterNode):
-            volumeNodeSet = self.ui.inputVolumeNodeSetSelector.currentData
-            self._parameterNode.inputVolumeNodeSet = volumeNodeSet if volumeNodeSet else ""
             self._parameterNode.exportDirectory = self.ui.exportPathLineEdit.currentPath
             self._parameterNode.exportFormat = self.ui.exportFormatComboBox.currentData
             self._parameterNode.lumenSegmentation = self.ui.lumenSegmentSelectorWidget.currentNode()
             self._parameterNode.lumenSegmentID = self.ui.lumenSegmentSelectorWidget.currentSegmentID() or ""
 
-
-    def onInspectButton(self) -> None:
-        self._volumeNodesSets = self.logic.findVolumeNodeSets()
-        self.ui.inputVolumeNodeSetSelector.clear()
-        if self._volumeNodesSets:
-            for volumeNodeSet in self._volumeNodesSets:
-                self.ui.inputVolumeNodeSetSelector.addItem(self._volumeNodesSets[volumeNodeSet]["name"], volumeNodeSet)
-            self.ui.inputVolumeNodeSetSelector.enabled = True
-        else:
-            self.ui.inputVolumeNodeSetSelector.addItem("(Not found in the scene)")
-            self.ui.inputVolumeNodeSetSelector.setToolTip("No Siemens CS 4D flow found in the scene that could be converted to flow field.")
-            self.ui.inputVolumeNodeSetSelector.enabled = False
-
-
-    def onConvertButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to convert image to flow field.", waitCursor=True), self._progressStatus("Creating flow field"):
-            volumeNodeSet = self._volumeNodesSets[self._parameterNode.inputVolumeNodeSet]
-            inputFlowFieldNode = self.logic.createInputFlowFieldFromComponentVolumes(
-                volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
-            if self._parameterNode.removeInputImageAfterConversion:
-                self.logic.removeComponentVolumes(volumeNodeSet["componentVolumeNodes"])
-            with slicer.util.NodeModify(self._parameterNode):
-                self._parameterNode.inputFlowField = inputFlowFieldNode
-                self._parameterNode.outputFlowField = None
-            # Compute the output flow field with the selected corrections (phase unwrapping is computed for the new flow field)
-            outputFlowFieldNode = self._requireOutputFlowField()
-            self.updateFlowField(outputFlowFieldNode)
-            self.logic.setFlowFieldVisualizationToDefault(outputFlowFieldNode)
-            browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowFieldNode)
-            slicer.modules.sequences.toolBar().setActiveBrowserNode(browserNode)
-            self.onInspectButton()
-            self.updateGUIFromParameterNode()
 
     def _flowField(self):
         """Flow field to show and check: the output flow field, or the input flow field if there is no output flow field."""
@@ -620,16 +558,8 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if not inputFlowFieldNode:
             raise RuntimeError("Select an input flow field")
         if not FlowLibraryBridge.isRawFlowField(inputFlowFieldNode):
-            # Flow field created by an earlier version of this module (references the component images)
-            # or a velocity field loaded from file
-            rawFlowFieldNode = self.logic.ensureInputFlowField(inputFlowFieldNode)
-            if rawFlowFieldNode is None:
-                rawFlowFieldNode = self.logic.markAsInputFlowField(inputFlowFieldNode)
-            if rawFlowFieldNode is not inputFlowFieldNode:
-                with slicer.util.NodeModify(self._parameterNode):
-                    self._parameterNode.outputFlowField = inputFlowFieldNode
-                    self._parameterNode.inputFlowField = rawFlowFieldNode
-            inputFlowFieldNode = rawFlowFieldNode
+            # A velocity field loaded from file
+            self.logic.markAsInputFlowField(inputFlowFieldNode)
         return inputFlowFieldNode
 
     def _requireOutputFlowField(self):
@@ -741,7 +671,15 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def onRecomputeFlowFieldButton(self) -> None:
         with slicer.util.tryWithErrorDisplay("Failed to recompute flow field.", waitCursor=True), self._progressStatus("Recomputing flow field"):
-            self.updateFlowField(self._requireOutputFlowField())
+            previousOutputFlowFieldNode = self._parameterNode.outputFlowField
+            outputFlowFieldNode = self._requireOutputFlowField()
+            self.updateFlowField(outputFlowFieldNode)
+            if outputFlowFieldNode is not previousOutputFlowFieldNode:
+                # A new output flow field was created: show it and browse it in the toolbar
+                self.logic.setFlowFieldVisualizationToDefault(outputFlowFieldNode)
+                browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowFieldNode)
+                slicer.modules.sequences.toolBar().setActiveBrowserNode(browserNode)
+                self.updateGUIFromParameterNode()
 
     def _requireFlowField(self):
         flowFieldNode = self._flowField()
@@ -920,6 +858,8 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     # Value of the "SlicerHeart.Type" attribute of input flow fields (velocity as acquired). Output flow fields (processing
     # results) are "FlowField", so that Analyze 4D Flow selects them, not the input flow field.
     RAW_FLOW_FIELD_TYPE = "RawFlowField"
+    # Acquisition metadata (JSON) stored in the sequence of the input flow field by the 4D flow DICOM plugin
+    ACQUISITION_METADATA_ATTRIBUTE = "SlicerHeart.acquisitionMetadata"
     # All export formats, in the order they are listed in the module GUI
     EXPORT_FORMATS = [EXPORT_FORMAT_ANONYMIZED_SCENE, EXPORT_FORMAT_NRRD_STACK, EXPORT_FORMAT_NRRD_5D, EXPORT_FORMAT_TEST_CASE]
     DOPPLER_COLD_TO_HOT_SINGLETON_TAG = "SlicerHeart.DopplerColdToHot"
@@ -936,25 +876,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         self.progressCallback = None
         self._progressRanges = []  # (start, end) fractions of the nested sub-computations in progress, see _progressRange
 
-        # Converts direction code (in the DICOM header) to axis index (L, P, S)
-        # rl: right-left, ap: anterior-posterior, fh: foot-head
-        # For each configuration: list of (directionCode, invertToRasDirection) triplets (one for each axis).
-        # invertToRasDirection is True if the direction should be inverted to convert to RAS coordinate system.
-        self.axisForDirectionCodes = [
-            [("through", True), ("inplane_ap", True), ('inplane_fh', False)],
-            [("inplane_rl", False), ("through", True), ('inplane_fh', False)],
-            # We have not encountered the following configuration yet, but based on the first two cases (observed in real data sets) it seems possible.
-            # Need to verify the invertToRasDirection flags.
-            [("inplane_rl", True), ("inplane_ap", True), ('through', False)],
-        ]
-
-        # Converts direction code in the SequenceName DICOM field (for example, "in" in "fl3d1_v150in")
-        # to direction code used in the private DICOM tag (for example, "through" in "v150_through").
-        self.sequenceNameDirectionCodes = {"in": "through", "rl": "inplane_rl", "ap": "inplane_ap", "fh": "inplane_fh"}
-
-        # for current Siemens CS4D flow images this can be hardcoded
+        # Range of the magnitude images of Siemens CS 4D flow acquisitions. It is also the default magnitude range
+        # (for the noise magnitude threshold, which is specified in percent of the range) of flow fields that do not
+        # store the range of their magnitude images (SlicerHeart.magnitudeRange attribute, see magnitudeRange).
         self.magnitudeVolumeRange = 255
-        self.componentVolumeMaxValueSiemensCS4DFlow = 4096
 
         self.maxWraps = 3
 
@@ -1051,207 +976,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         sequenceNode = browserNode.GetSequenceNode(proxyNode)
         return sequenceNode
 
-    def _findVolumeNodeSetCandidatesInScene(self):
-        import pydicom
-        import re
-        import traceback
-
-        # Velocity encoding and direction code at the end of SequenceName, for example "150" and "in" in "fl3d1_v150in"
-        sequenceNameComponentPattern = r"_v(\d+(?:\.\d+)?)(in|rl|ap|fh)$"
-
-        volumeNodesSets = {}
-        unsortedVolumeNodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
-        for volumeNode in unsortedVolumeNodes:
-            try:
-                instUidsStr = volumeNode.GetAttribute("DICOM.instanceUIDs")
-                if not instUidsStr:
-                    # not loaded from DICOM
-                    logging.debug(f"{volumeNode.GetName()} has no DICOM.instanceUIDs - skip")
-                    continue
-                instUids = instUidsStr.split()
-                filename = slicer.dicomDatabase.fileForInstance(instUids[0])
-                if not filename:
-                    # DICOM files are not in the Slicer DICOM database
-                    logging.debug(f"{volumeNode.GetName()} is not found in the DICOM database - skip")
-                    continue
-                ds = pydicom.dcmread(filename)
-
-                # Find DICOM tag that stores speedAndDirectionCode.
-                # On Siemens Avanto, it is (0x0051,0x1014), on newer Siemens Avanto Fit, it is (0x0021,0x1129).
-                speedAndDirectionCodeTag = None
-                for tag in [(0x0051,0x1014), (0x0021,0x1129)]:
-                    if tag in ds:
-                        speedAndDirectionCodeTag = tag
-                        break
-
-                # Get heart rate information if available
-                try:
-                    heartRateBpm = 60000.0 / float(ds["NominalInterval"].value)
-                except Exception:
-                    heartRateBpm = None
-
-                if speedAndDirectionCodeTag:
-                    # flow vector component image
-                    try:
-                        speedAndDirectionCode = ds[speedAndDirectionCodeTag].value.decode().strip()
-                    except AttributeError:
-                        speedAndDirectionCode = ds[speedAndDirectionCodeTag].value.strip()
-                    vencCmPerSecInput, directionCodeInput = speedAndDirectionCode.split('_', 1)
-                    vencCmPerSec = float(vencCmPerSecInput[1:])
-                    directionCode = directionCodeInput.strip()
-                    logging.debug(f"Found a flow vector component image candidate [{directionCode}]: {volumeNode.GetName()}")
-                    # The tag contains speed and direction, for example:
-                    # 'v150_through', 'v150_inplane_ap', 'v150_inplane_fh'
-                    volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
-                    volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
-                    volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
-                elif ("SequenceName" in ds) and re.search(sequenceNameComponentPattern, ds["SequenceName"].value.strip()):
-                    # component image (contain speed specification)
-                    # Examples: 'fl3d1_v150in', 'fl3d1_v150ap', 'fl3d1_v150fh', 'WIP_f_v150fh'
-                    # In freerunning flow sequence, all the directions may be under the same series
-                    logging.debug(f"Found a flow vector component image candidate: {volumeNode.GetName()}")
-                    match = re.search(sequenceNameComponentPattern, ds["SequenceName"].value.strip())
-                    vencCmPerSec = float(match.group(1))
-                    # Convert to the same direction codes as used in the private tag (and axisForDirectionCodes)
-                    directionCode = self.sequenceNameDirectionCodes[match.group(2)]
-                    volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
-                    volumeSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))  # velocity encoding, in cm/sec
-                    volumeSequenceNode.SetAttribute("SlicerHeart.maxValue", str(self.componentVolumeMaxValueSiemensCS4DFlow))
-                elif ("SequenceName" in ds) and (('fl3d1r2' in ds["SequenceName"].value) or ('fl3d1r3' in ds["SequenceName"].value)):
-                    # magnitude image
-                    # Examples: '*fl3d1r2' or 'fl3d1r2' or 'WIP_fl3d1r2' or 'WIP_fl3d1r3'
-                    logging.debug(f"Found an magnitude image candidate: {volumeNode.GetName()}")
-                    directionCode = 'magnitude'
-                else:
-                    # something else
-                    logging.debug(f"Unknown image: {volumeNode.GetName()} - skip")
-                    continue
-            except Exception as e:
-                # error accessing DICOM fields
-                logging.debug(f"Error while processing image: {volumeNode.GetName()} - skip")
-                print(traceback.format_exc())
-                continue
-
-            studyInstanceUID = ds["StudyInstanceUID"].value.strip()
-            acquisitionNumber = ds["AcquisitionNumber"].value
-
-            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-            studyShItemId = shNode.GetItemParent(shNode.GetItemByDataNode(volumeNode))
-            # use studyShItemId to ensure unique acquisitionID even if the same study is loaded multiple times
-            acquisitionID = f"{studyShItemId}-{studyInstanceUID}/{acquisitionNumber}"
-
-            if acquisitionID not in volumeNodesSets:
-                acquisitionNumberSuffix =  f" / {acquisitionNumber}" if acquisitionNumber > 1 else ""
-                volumeNodeSet = {
-                    'name': f"{ds.PatientName.family_comma_given()} ({ds.StudyDate}){acquisitionNumberSuffix}",
-                    'candidateVolumeNodes': [],  # list of potential component or magnitude volume nodes - there may be several candidates in the study
-                    }
-                volumeNodesSets[acquisitionID] = volumeNodeSet
-
-            volumeSequenceNode = self._getSequenceFromProxyNode(volumeNode)
-            volumeSequenceNode.SetAttribute("SlicerHeart.directionCode", directionCode)
-            if heartRateBpm:
-                volumeSequenceNode.SetAttribute("SlicerHeart.heartRateBpm", str(heartRateBpm))
-            volumeNodesSets[acquisitionID]['candidateVolumeNodes'].append(volumeNode)
-
-        return volumeNodesSets
-
     def _getSequenceAttribute(self, proxyNode, attributeName):
         sequenceNode = self._getSequenceFromProxyNode(proxyNode)
         return sequenceNode.GetAttribute(attributeName)
-
-    def _findComponentVolumeNodes(self, volumeNodesSet):
-        """
-        Returns a list of 3 volume nodes (x, y, z) and for each if the component values need to be reversed (ix, iy, iz).
-        If not found, then returns (None, None).
-        """
-        # Find if there is a axisForDirectionCode mapping which has a corresponding volume
-        # for each component
-        for axisForDirectionCode in self.axisForDirectionCodes:
-            componentVolumeNodes = [None, None, None]
-            invertToRasDirections = [False, False, False]
-            # axisForDirectionCode example: [("through", True), ("inplane_ap", True), ('inplane_fh', False)]
-            for axis, (directionCode, invertToRasDirection) in enumerate(axisForDirectionCode):
-                for volumeNode in volumeNodesSet['candidateVolumeNodes']:
-                    if self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") == directionCode:
-                        # Found a volume for this direction
-                        componentVolumeNodes[axis] = volumeNode
-                        invertToRasDirections[axis] = invertToRasDirection
-                        break
-            if not all(componentVolumeNodes):
-                continue
-
-            # Check if number of frames is consistent across component volumes
-            numberOfFrames = None
-            valid = True
-            for axis in range(len(componentVolumeNodes)):
-                if numberOfFrames is None:
-                    numberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[axis])
-                else:
-                    currentNumberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[axis])
-                    if currentNumberOfFrames != numberOfFrames:
-                        logging.warning(f"Volumes {[volumeNode.GetName() for volumeNode in componentVolumeNodes]} in node set {volumeNodesSet['name']} are discarded: inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
-                        valid = False
-                        break
-            if not valid:
-                continue
-
-            # Component volumes are found and have consistent number of frames
-            return componentVolumeNodes, invertToRasDirections
-
-        return None, None
-
-    def _findMagnitudeVolumeNode(self, volumeNodesSet, componentVolumeNodes):
-        numberOfFrames = self._getNumberOfDataNodesInSequence(componentVolumeNodes[0])
-        candidateMagnitudeVolumes = [volumeNode for volumeNode in volumeNodesSet['candidateVolumeNodes'] if self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") == "magnitude"]
-        for volumeNode in candidateMagnitudeVolumes:
-
-            # Check number of frames
-            currentNumberOfFrames = self._getNumberOfDataNodesInSequence(volumeNode)
-            if currentNumberOfFrames != numberOfFrames:
-                logging.debug(f"Volume node set {volumeNodesSet['name']}: candidate magnitude volume {volumeNode.GetName()} discarded due to inconsistent number of frames ({currentNumberOfFrames} vs {numberOfFrames})")
-                continue
-
-            # Found a suitable magnitude volume
-            return volumeNode
-
-        return None
-
-    def findVolumeNodeSets(self):
-        # Map from {StudyInstanceUID}/{AcquisitionNumber} to volumesNodeSet:
-        # {
-        #   'name': 'Patient Name (study date) / 1',
-        #   'candidateVolumeNodes': result of _findVolumeNodeSetCandidatesInScene, contain volume nodes
-        #       with SlicerHeart.directionCode and SlicerHeart.vencCmPerSec (velocity encoding, in cm/sec) attributes
-        #   'componentVolumeNodes': [volumeNodeX, volumeNodeY, volumeNodeZ]
-        #   'componentVolumeNodesInvertToRasDirection': [ix, iy, iz] if scalar value needs to be reversed to get directions in RAS
-        #   'magnitudeVolumeNode': volumeNodeMagnitude
-        # }
-        candidateVolumeNodesSets = self._findVolumeNodeSetCandidatesInScene()
-        volumeNodesSets = {}
-        for acquisitionID in candidateVolumeNodesSets:
-            volumeNodeSet = candidateVolumeNodesSets[acquisitionID]
-
-            componentVolumeNodes, componentVolumeNodesInvertToRasDirection = self._findComponentVolumeNodes(volumeNodeSet)
-            if componentVolumeNodes is None or componentVolumeNodesInvertToRasDirection is None:
-                directionCodes = [self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
-                logging.debug(f"Volume node set {volumeNodeSet['name']} is discarded: cannot find volume for all directions (found direction: {directionCodes})")
-                continue
-
-            magnitudeVolumeNode = self._findMagnitudeVolumeNode(volumeNodeSet, componentVolumeNodes)
-            if not magnitudeVolumeNode:
-                directionCodes = [self._getSequenceAttribute(volumeNode, "SlicerHeart.directionCode") for volumeNode in volumeNodeSet['candidateVolumeNodes']]
-                logging.debug(f"Volume node set {volumeNodeSet['name']} is discarded: missing magnitude volume")
-                continue
-
-            volumeNodesSets[acquisitionID] = {
-                "name": volumeNodeSet['name'],
-                "componentVolumeNodes": componentVolumeNodes,
-                "componentVolumeNodesInvertToRasDirection": componentVolumeNodesInvertToRasDirection,
-                "magnitudeVolumeNode": magnitudeVolumeNode,
-            }
-
-        return volumeNodesSets
 
     # Unit of the velocity values of the flow fields created by this module (vector volumes, declared in their voxel value
     # units). Flow fields in other units (m/s, cm/s) can be read, see FlowLibraryBridge.velocityUnitScaleToMmPerSec.
@@ -1280,116 +1007,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 return displayNode
         return None
 
-    def _prepareComponentVolumes(self, componentVolumeNodes, componentVolumeNodesInvertToRasDirection, magnitudeVolumeNode):
-        """Move the component image sequences into the sequence browser of the magnitude images and use the frame times
-        (trigger times) as index values. Returns the sequence browser node."""
-
-        magnitudeVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
-        if not magnitudeVolumeSequenceBrowserNode:
-            raise RuntimeError(f"Magnitude volume {magnitudeVolumeNode.GetName()} is expected to be proxy node of a volume sequence")
-        magnitudeVolumeSequenceNode = magnitudeVolumeSequenceBrowserNode.GetSequenceNode(magnitudeVolumeNode)
-
-        # Set input nodes of the flow field based on current selection
-        for component in range(3):
-            componentVolumeNode = componentVolumeNodes[component]
-
-            # Turn off interpolation to see wrapped voxels better
-            componentVolumeNode.GetScalarVolumeDisplayNode().InterpolateOff()
-
-            componentVolumeSequenceBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeNode)
-            if not componentVolumeSequenceBrowserNode:
-                raise RuntimeError(f"Volume {componentVolumeNode.GetName()} is expected to be proxy node of a volume sequence")
-            componentVolumeSequenceNode = componentVolumeSequenceBrowserNode.GetSequenceNode(componentVolumeNode)
-
-            # Add direction code to the name to make it easier to identify the component images
-            directionCode = self._getSequenceAttribute(componentVolumeNode, 'SlicerHeart.directionCode')
-            sequenceName = componentVolumeSequenceNode.GetName()
-            componentVolumeSequenceNode.SetName(f"{sequenceName} - C{component+1} {directionCode}")
-
-            invertToRasDirection = componentVolumeNodesInvertToRasDirection[component]
-            # It could make sense to store this information as node reference attribute, but the feature is not yet available in Slicer Stable Release
-            componentVolumeSequenceNode.SetAttribute("SlicerHeart.invertToRasDirection", "true" if invertToRasDirection else "false")
-
-            # Move component images to the same sequence browser node
-            if componentVolumeSequenceBrowserNode != magnitudeVolumeSequenceBrowserNode:
-                # Remove old sequence browser node
-                slicer.mrmlScene.RemoveNode(componentVolumeSequenceBrowserNode)
-                # Add to common sequence browser node
-                magnitudeVolumeSequenceBrowserNode.AddProxyNode(componentVolumeNode, componentVolumeSequenceNode, False)
-                magnitudeVolumeSequenceBrowserNode.SetSaveChanges(componentVolumeSequenceNode, True)  # faster browsing
-                magnitudeVolumeSequenceBrowserNode.SetRecording(componentVolumeSequenceNode, False)  # no need for live recording
-                magnitudeVolumeSequenceBrowserNode.SetOverwriteProxyName(componentVolumeSequenceNode, True)  # show index in node name
-
-
-        # Replace frame indices by frame times
-
-        try:
-            frameIdentifyingDICOMTagName = self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.FrameIdentifyingDICOMTagName")
-            frameIdentifyingDICOMTagUnits = self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.FrameIdentifyingDICOMTagUnits")
-            frameLabelsStrList = self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.FrameLabels").split(',')
-            frameLabels = [float(frameLabel) for frameLabel in frameLabelsStrList]
-            numberOfFrames = int(self._getSequenceAttribute(magnitudeVolumeNode, "MultiVolume.NumberOfFrames"))
-            if frameIdentifyingDICOMTagName != "TriggerTime":
-                raise RuntimeWarning(f"frameIdentifyingDICOMTagName={frameIdentifyingDICOMTagName}, expected 'TriggerTime'")
-            if frameIdentifyingDICOMTagUnits != "ms":
-                raise RuntimeWarning(f"frameIdentifyingDICOMTagUnits={frameIdentifyingDICOMTagUnits}, expected 'ms'")
-            if len(frameLabels) != numberOfFrames:
-                raise RuntimeWarning(f"len(frameLabels)={len(frameLabels)}, expected {numberOfFrames}")
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            logging.warning(f"Failed to get frame times from sequence node: {e}")
-            frameLabels = None
-
-        if frameLabels:
-            # Replace frame indices by frame times
-            proxyNodes = [magnitudeVolumeNode] + componentVolumeNodes
-            sequenceNodes = [self._getSequenceFromProxyNode(proxyNode) for proxyNode in proxyNodes]
-            # Skip sequences that already use frame times as index (for example, if a flow field has been already created
-            # from these images)
-            sequenceNodes = [sequenceNode for sequenceNode in sequenceNodes
-                if [sequenceNode.GetNthIndexValue(i) for i in range(sequenceNode.GetNumberOfDataNodes())] != frameLabelsStrList]
-
-            # Temporarily disable saving of proxy node changes into all synchronized sequences (for example, flow fields
-            # that were created earlier from the same images), because proxy nodes would be saved into
-            # the sequences at the temporary index values.
-            synchronizedSequenceNodes = vtk.vtkCollection()
-            magnitudeVolumeSequenceBrowserNode.GetSynchronizedSequenceNodes(synchronizedSequenceNodes, True)
-            savedSaveChanges = {}
-            for synchronizedSequenceNode in [synchronizedSequenceNodes.GetItemAsObject(i) for i in range(synchronizedSequenceNodes.GetNumberOfItems())]:
-                savedSaveChanges[synchronizedSequenceNode.GetID()] = magnitudeVolumeSequenceBrowserNode.GetSaveChanges(synchronizedSequenceNode)
-                magnitudeVolumeSequenceBrowserNode.SetSaveChanges(synchronizedSequenceNode, False)
-
-            # Temporary disable playback to avoid updating the index values
-            for sequenceNode in sequenceNodes:
-                magnitudeVolumeSequenceBrowserNode.SetPlayback(sequenceNode, False)
-
-            for sequenceNode in sequenceNodes:
-                sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.TextIndex)
-                sequenceNode.SetIndexName("time")
-                sequenceNode.SetIndexUnit("ms")
-                # We cannot rename from the old value to the new value because in theory some of the new values
-                # could be the same as some of the new values
-                for frameIndex in range(numberOfFrames):
-                    oldIndexValue = sequenceNode.GetNthIndexValue(frameIndex)
-                    temporaryIndexValue = f"___frame{frameIndex}"
-                    sequenceNode.UpdateIndexValue(oldIndexValue, temporaryIndexValue)
-                for frameIndex in range(numberOfFrames):
-                    temporaryIndexValue = f"___frame{frameIndex}"
-                    newIndexValue = frameLabelsStrList[frameIndex]
-                    sequenceNode.UpdateIndexValue(temporaryIndexValue, newIndexValue)
-                sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
-
-            # Restore playback state
-            for sequenceNode in sequenceNodes:
-                magnitudeVolumeSequenceBrowserNode.SetPlayback(sequenceNode, True)
-
-            # Restore saving of proxy node changes
-            for synchronizedSequenceNodeID, saveChanges in savedSaveChanges.items():
-                magnitudeVolumeSequenceBrowserNode.SetSaveChanges(slicer.mrmlScene.GetNodeByID(synchronizedSequenceNodeID), saveChanges)
-
-        return magnitudeVolumeSequenceBrowserNode
-
     def _addFlowFieldSequence(self, flowFieldNode, name, browserNode, referenceSequenceNode, saveChanges=True):
         """Create the sequence that stores the frames of a flow field and add it to the sequence browser."""
         flowFieldSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", name)
@@ -1406,31 +1023,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         """Place a node in the same subject hierarchy folder as the reference node."""
         shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
         shNode.SetItemParent(shNode.GetItemByDataNode(node), shNode.GetItemParent(shNode.GetItemByDataNode(referenceNode)))
-
-    def createInputFlowFieldFromComponentVolumes(self, componentVolumeNodes, componentVolumeNodesInvertToRasDirection, magnitudeVolumeNode,
-                                                 name="Input flow field"):
-        """Create the input flow field from the component images: the velocity as acquired (aliased, before any correction),
-        in RAS components, in a vector volume sequence that is browsed with the magnitude images. The velocity encoding is
-        stored in the flow field (see FlowLibraryBridge.setRawEncoding), so the component images are not needed after this.
-        Returns the input flow field (proxy node)."""
-        browserNode = self._prepareComponentVolumes(componentVolumeNodes, componentVolumeNodesInvertToRasDirection, magnitudeVolumeNode)
-        vencsMmPerSec, maxValues, directionCodes, componentSequenceNodes = [], [], [], []
-        for componentVolumeNode in componentVolumeNodes:
-            vencsMmPerSec.append(float(self._getSequenceAttribute(componentVolumeNode, "SlicerHeart.vencCmPerSec")) * 10.0)
-            maxValues.append(float(self._getSequenceAttribute(componentVolumeNode, "SlicerHeart.maxValue")))
-            directionCodes.append(self._getSequenceAttribute(componentVolumeNode, "SlicerHeart.directionCode") or "")
-            componentSequenceNodes.append(self._getSequenceFromProxyNode(componentVolumeNode))
-        signs = np.where(np.asarray(componentVolumeNodesInvertToRasDirection, bool), -1.0, 1.0)
-
-        def rawWorldFrame(frameIndex):
-            # Encoded component c is along RAS axis c (inverted if invertToRasDirection)
-            return np.stack([slicer.util.arrayFromVolume(componentSequenceNodes[component].GetNthDataNode(frameIndex)).astype(np.float32)
-                             * np.float32(vencsMmPerSec[component] / maxValues[component] * signs[component])
-                             for component in range(3)], axis=-1)
-
-        inputFlowFieldNode = self._createInputFlowField(rawWorldFrame, magnitudeVolumeNode, browserNode, name)
-        FlowLibraryBridge.setRawEncoding(inputFlowFieldNode, vencsMmPerSec, np.diag(signs), directionCodes, maxValues)
-        return inputFlowFieldNode
 
     def createInputFlowFieldFromArrays(self, rawWorldVelocityMmPerSec, magnitudeVolumeNode, vencEncodedMmPerSec, encodingToWorld,
                                        directionCodes=None, componentMaxValues=None, name="Input flow field"):
@@ -1480,32 +1072,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         self._placeInSameFolder(outputFlowFieldNode, inputFlowFieldNode)
         return outputFlowFieldNode
 
-    def createFlowFieldFromComponentVolumes(self, componentVolumeNodes, componentVolumeNodesInvertToRasDirection, magnitudeVolumeNode):
-        """Create the input flow field from the component images (createInputFlowFieldFromComponentVolumes) and an output flow
-        field for it (createOutputFlowField). The output flow field frames are computed by computeOutputFlowField
-        (or updateFlowFieldFromComponentVolumes). Returns the output flow field."""
-        inputFlowFieldNode = self.createInputFlowFieldFromComponentVolumes(componentVolumeNodes, componentVolumeNodesInvertToRasDirection, magnitudeVolumeNode)
-        return self.createOutputFlowField(inputFlowFieldNode)
-
-    def ensureInputFlowField(self, flowFieldNode):
-        """Return the input flow field of a flow field. Flow fields created by earlier versions of this module reference
-        the component images instead of an input flow field: for these, the input flow field is created from the component
-        images. Returns None if the flow field has no input flow field and no component images."""
-        try:
-            return FlowLibraryBridge.rawFlowFieldNode(flowFieldNode)
-        except ValueError:
-            pass
-        componentVolumeNodes = [flowFieldNode.GetNthNodeReference("componentVolume", component) for component in range(3)]
-        magnitudeVolumeNode = flowFieldNode.GetNodeReference("magnitudeVolume")
-        if not all(componentVolumeNodes) or not magnitudeVolumeNode:
-            return None
-        invertToRas = [self._getSequenceAttribute(node, "SlicerHeart.invertToRasDirection") == "true" for node in componentVolumeNodes]
-        inputFlowFieldNode = self.createInputFlowFieldFromComponentVolumes(componentVolumeNodes, invertToRas, magnitudeVolumeNode)
-        flowFieldNode.SetNodeReferenceID("inputFlowField", inputFlowFieldNode.GetID())
-        for component in range(3):
-            flowFieldNode.RemoveNthNodeReferenceID("componentVolume", 0)
-        return inputFlowFieldNode
-
     @staticmethod
     def _removeSequenceAndProxy(proxyNode):
         """Remove a proxy node and its sequence (from its sequence browser too). The sequence browser is removed if it does
@@ -1528,11 +1094,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             browserNode.GetSynchronizedSequenceNodes(synchronizedSequenceNodes, True)
             if synchronizedSequenceNodes.GetNumberOfItems() == 0:
                 slicer.mrmlScene.RemoveNode(browserNode)
-
-    def removeComponentVolumes(self, componentVolumeNodes):
-        """Remove the component images (sequences and proxy nodes). They are not needed after the input flow field is created."""
-        for componentVolumeNode in componentVolumeNodes:
-            self._removeSequenceAndProxy(componentVolumeNode)
 
     def deleteFlowField(self, flowFieldNode):
         """Remove a flow field: its sequence and proxy node, and the component volumes that were created from it for display."""
@@ -1597,16 +1158,6 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         background_3d[backgroundMask] = background[backgroundMask]
 
         return background_3d
-
-    def updateFlowFieldFromComponentVolumes(self, flowFieldNode, noiseMagnitudeThresholdPercent, backgroundSubtractionMethod, stationaryTissueSpeedThresholdVencPercent,
-                                            noiseMaskMethod=NoiseMaskMethodEnum.MagnitudeThreshold, backgroundPolynomialOrder=2, backgroundPerFrame=False,
-                                            divergenceFilterMethod=DivergenceFilterMethodEnum.NoFilter, lumenMask=None):
-        """Compute the output flow field flowFieldNode from its input flow field (see computeOutputFlowField).
-        Flow fields of earlier versions of this module that reference the component images get an input flow field first."""
-        if self.ensureInputFlowField(flowFieldNode) is None:
-            raise ValueError(f"Flow field {flowFieldNode.GetName()} has no input flow field")
-        self.computeOutputFlowField(flowFieldNode, noiseMagnitudeThresholdPercent, backgroundSubtractionMethod, stationaryTissueSpeedThresholdVencPercent,
-                                    noiseMaskMethod, backgroundPolynomialOrder, backgroundPerFrame, divergenceFilterMethod, lumenMask)
 
     def computeOutputFlowField(self, outputFlowFieldNode, noiseMagnitudeThresholdPercent, backgroundSubtractionMethod, stationaryTissueSpeedThresholdVencPercent,
                                noiseMaskMethod=NoiseMaskMethodEnum.MagnitudeThreshold, backgroundPolynomialOrder=2, backgroundPerFrame=False,
@@ -1677,7 +1228,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                     logging.info(f"Background phase fit: {line}")
                 del corrected
 
-        noiseMagnitudeThreshold = noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange
+        noiseMagnitudeThreshold = noiseMagnitudeThresholdPercent / 100 * self.magnitudeRange(outputFlowFieldNode)
         stationaryTissueSpeedThresholdMmPerSec = stationaryTissueSpeedThresholdVencPercent / 100 * float(np.max(vencs))
         if self.isFlowFieldStoredInTransform(outputFlowFieldNode):
             raise ValueError(f"Flow field {outputFlowFieldNode.GetName()} is stored in transforms (legacy format), which can be read"
@@ -2294,7 +1845,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             # magnitude threshold (a few percent of the range) keeps most of the air and low-signal tissue. Therefore only
             # voxels above the Otsu threshold of the time-averaged magnitude (body, separated from air) are unwrapped.
             meanMagnitude = magnitude.mean(axis=0)
-            signalMask = ((meanMagnitude >= noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange)
+            signalMask = ((meanMagnitude >= noiseMagnitudeThresholdPercent / 100 * self.magnitudeRange(outputFlowField))
                           & (meanMagnitude > library.otsu_threshold(meanMagnitude)))
         self._log(f"Phase unwrapping ({method})...")
         self._progress(f"Phase unwrapping ({method})...")
@@ -2321,7 +1872,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         rawEncodedVelocity = FlowLibraryBridge.rawEncodedVelocity(outputFlowField)
         _, vencs, _ = FlowLibraryBridge.componentEncoding(outputFlowField)
         if outputFlowField.GetNodeReference("magnitudeVolume"):
-            signal = FlowLibraryBridge.magnitudeArray(outputFlowField) >= noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange
+            signal = FlowLibraryBridge.magnitudeArray(outputFlowField) >= noiseMagnitudeThresholdPercent / 100 * self.magnitudeRange(outputFlowField)
         else:
             signal = np.ones(rawEncodedVelocity.shape[:4], bool)  # without magnitude images all voxels are checked
         peakSpeed = 0.0
@@ -2482,7 +2033,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 previousValues = values
                 values = rawEncodedVelocity[index, ..., component].copy()
                 if magnitude is not None:
-                    values[magnitude[index] < noiseMagnitudeThresholdPercent / 100 * self.magnitudeVolumeRange] = 0
+                    values[magnitude[index] < noiseMagnitudeThresholdPercent / 100 * self.magnitudeRange(outputFlowField)] = 0
                 if previousValues is not None:
                     phaseWrapMap = np.copy(phaseWrapMap)
                     # Unwrap by comparing with the previous frame
@@ -2518,6 +2069,18 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         except (TypeError, ValueError, RuntimeError, AttributeError):
             return None
         return heartRateBpm if heartRateBpm > 0 else None
+
+    def magnitudeRange(self, node):
+        """Range of the magnitude images of a flow field (or of a magnitude volume node): the noise magnitude threshold
+        is specified in percent of it. It is stored in the SlicerHeart.magnitudeRange attribute of the magnitude volume
+        sequence by the 4D flow DICOM plugin; magnitudeVolumeRange (the
+        range of Siemens CS 4D flow magnitude images) is used if the attribute is not available."""
+        try:
+            magnitudeVolumeNode = node.GetNodeReference("magnitudeVolume") or node
+            magnitudeRange = float(self._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.magnitudeRange"))
+        except (TypeError, ValueError, RuntimeError, AttributeError):
+            return self.magnitudeVolumeRange
+        return magnitudeRange if magnitudeRange > 0 else self.magnitudeVolumeRange
 
     @staticmethod
     def findFirstFlowFieldNode():
@@ -2933,27 +2496,17 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             slicer.mrmlScene.RemoveNode(storageNode)
             slicer.mrmlScene.RemoveNode(sequenceNode)
 
-    def _dicomMetadata(self, flowFieldNode):
-        """Non-identifying acquisition metadata (vendor, scanner model, software version, field strength) from the DICOM
-        header of the magnitude image, if it is available in the DICOM database."""
-        metadata = {}
+    def acquisitionMetadata(self, flowFieldNode):
+        """Non-identifying acquisition metadata (vendor, scanner model, software version, field strength) that the 4D flow
+        DICOM plugin stores in the input flow field (ACQUISITION_METADATA_ATTRIBUTE of its sequence, JSON), or an empty
+        dictionary."""
         try:
-            magnitudeVolumeNode = flowFieldNode.GetNodeReference("magnitudeVolume")
-            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-            instanceUIDs = shNode.GetItemUID(shNode.GetItemByDataNode(magnitudeVolumeNode), "DICOMInstanceUID")
-            filename = slicer.dicomDatabase.fileForInstance(instanceUIDs.split()[0]) if instanceUIDs and slicer.dicomDatabase else None
-            if filename:
-                import pydicom
-                ds = pydicom.dcmread(filename, stop_before_pixels=True)
-                metadata = {
-                    "vendor": str(ds.get("Manufacturer", "")).strip().split()[0].lower() if ds.get("Manufacturer") else "unknown",
-                    "scanner": " ".join(str(ds.get(tag, "")).strip() for tag in ("Manufacturer", "ManufacturerModelName")).strip(),
-                    "software_version": str(ds.get("SoftwareVersions", "")).strip(),
-                    "field_strength_t": float(ds.MagneticFieldStrength) if "MagneticFieldStrength" in ds else None,
-                }
+            inputFlowFieldNode = FlowLibraryBridge.rawFlowFieldNode(flowFieldNode)
+            metadata = self._getSequenceAttribute(inputFlowFieldNode, self.ACQUISITION_METADATA_ATTRIBUTE)
+            return json.loads(metadata) if metadata else {}
         except Exception as e:
-            logging.debug(f"DICOM metadata is not available: {e}")
-        return metadata
+            logging.debug(f"Acquisition metadata is not available: {e}")
+            return {}
 
     # Default processing of test cases (exported from DICOM, or outputs regenerated from the inputs)
     TEST_CASE_DEFAULT_UNWRAP_MODE = "Laplacian4DUnwrap"
@@ -2971,7 +2524,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             else:
                 self.laplacianUnwrap(flowFieldNode, mode, threshold)
         with self._progressRange(0.5, 1.0):
-            self.updateFlowFieldFromComponentVolumes(flowFieldNode, threshold, BackgroundSubtractionMethodEnum.QuadraticFit,
+            self.computeOutputFlowField(flowFieldNode, threshold, BackgroundSubtractionMethodEnum.QuadraticFit,
                                                      self.TEST_CASE_STATIONARY_TISSUE_SPEED_THRESHOLD_VENC_PERCENT)
 
     def exportTestCase(self, flowFieldNode, datasetDirectory, caseId, lumenSegmentationNode=None, lumenSegmentId=None, metadata=None,
@@ -2997,7 +2550,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         description of the acquisition), and the manifest of the data set if it does not have one yet.
         Only image data and geometry are written (no DICOM header fields, names, dates, or UIDs), the case is identified
         by caseId. Velocities are in mm/s; vector components are LPS in the files (as any Slicer volume file).
-        metadata: additional fields of the acquisition description, for example from _dicomMetadata.
+        metadata: additional fields of the acquisition description, for example from acquisitionMetadata.
         Returns dict: magnitude (t, k, j, i) float32, voxelToWorld (RAS)."""
         path = lambda key: self.testCasePath(datasetDirectory, caseId, key)
         os.makedirs(os.path.dirname(path("acquisition")), exist_ok=True)
@@ -3029,13 +2582,15 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             "scanner": "",
             "software_version": "",
             "rr_ms": 60000.0 / heartRateBpm if heartRateBpm else None,
+            # Range of the magnitude images (the noise magnitude threshold is specified in percent of it)
+            "magnitude_range": self.magnitudeRange(flowFieldNode),
             # Velocity encoding of the encoded components (columns of encoding_to_world), in mm/s
             "venc_encoded_mm_s": [float(v) for v in vencs],
             # Columns: LPS directions of the encoded (acquired) velocity components
             "encoding_to_world": (lpsFromRas @ encodingToWorld).tolist(),
             "component_encoding": componentEncodings,
             }
-        acquisition.update(self._dicomMetadata(flowFieldNode))
+        acquisition.update(self.acquisitionMetadata(flowFieldNode))
         if metadata:
             acquisition.update(metadata)
         self.writeTestCaseJson(datasetDirectory, caseId, "acquisition", acquisition)
@@ -3217,6 +2772,10 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         magnitudeAttributes = {"SlicerHeart.directionCode": "magnitude"}
         if case["rr_ms"]:
             magnitudeAttributes["SlicerHeart.heartRateBpm"] = str(60000.0 / case["rr_ms"])
+        if acquisition.get("magnitude_range"):
+            magnitudeAttributes["SlicerHeart.magnitudeRange"] = f"{float(acquisition['magnitude_range']):g}"
+        if acquisition.get("vendor") and acquisition["vendor"] != "unknown":
+            magnitudeAttributes["SlicerHeart.vendor"] = str(acquisition["vendor"])
         self._progress("Creating the magnitude image sequence...", 0.05)
         magnitudeVolumeNode = createSequence(f"{caseId} magnitude", case["magnitude_t"], magnitudeAttributes)
 
@@ -3263,7 +2822,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                             or lumenSegmentationNode.GetSegmentation().GetNthSegmentID(0)
                         lumenMask = self.getLumenMask(flowFieldNode, lumenSegmentationNode, lumenSegmentId)
                     divergenceFilterMethod = DivergenceFilterMethodEnum[processing.get("divergenceFilter", "NoFilter")]
-                    self.updateFlowFieldFromComponentVolumes(
+                    self.computeOutputFlowField(
                         flowFieldNode,
                         processing.get("noiseMagnitudeThresholdPercent", 5.0),
                         BackgroundSubtractionMethodEnum[processing.get("backgroundSubtraction", "NoSubtraction")],
@@ -3309,150 +2868,7 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
         """Run as few or as many tests as needed here.
         """
         self.setUp()
-        self.test_FindVolumeNodeSetCandidatesInScene()
-        self.setUp()
         self.test_CreateVectorVolumeFlowField()
-
-    def test_FindVolumeNodeSetCandidatesInScene(self):
-        """Volumes loaded from DICOM must be recognized as 4D flow candidates.
-
-        Regression test for reading DICOM headers with pydicom: the candidate scan
-        swallows per-volume errors, so a broken pydicom call (such as the
-        pydicom.read_file function that was removed in pydicom 3) does not raise
-        but silently returns no candidates.
-        """
-        import shutil
-        import tempfile
-        from pydicom.dataset import Dataset, FileMetaDataset
-        from pydicom.uid import ExplicitVRLittleEndian, MRImageStorage, generate_uid
-        from DICOMLib import DICOMUtils
-
-        self.delayDisplay("Create a magnitude image of a Siemens 4D flow acquisition")
-        sopInstanceUID = generate_uid()
-        ds = Dataset()
-        ds.PatientName = "Test^Patient"
-        ds.PatientID = "Import4DFlowTest"
-        ds.StudyInstanceUID = generate_uid()
-        ds.SeriesInstanceUID = generate_uid()
-        ds.SOPInstanceUID = sopInstanceUID
-        ds.SOPClassUID = MRImageStorage
-        ds.Modality = "MR"
-        ds.StudyDate = "20240102"
-        ds.SeriesNumber = 1
-        ds.InstanceNumber = 1
-        ds.AcquisitionNumber = 1
-        ds.SequenceName = "fl3d1r2"
-        ds.NominalInterval = 1000  # msec, 60 bpm
-        ds.Rows = 2
-        ds.Columns = 2
-        ds.SamplesPerPixel = 1
-        ds.PhotometricInterpretation = "MONOCHROME2"
-        ds.BitsAllocated = 16
-        ds.BitsStored = 16
-        ds.HighBit = 15
-        ds.PixelRepresentation = 0
-        ds.PixelData = bytes(ds.Rows * ds.Columns * 2)
-        ds.file_meta = FileMetaDataset()
-        ds.file_meta.MediaStorageSOPClassUID = MRImageStorage
-        ds.file_meta.MediaStorageSOPInstanceUID = sopInstanceUID
-        ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-
-        tempDir = tempfile.mkdtemp(prefix="Import4DFlowTest_", dir=slicer.app.temporaryPath)
-        try:
-            dicomDir = os.path.join(tempDir, "dicom")
-            os.makedirs(dicomDir)
-            dicomFilePath = os.path.join(dicomDir, "magnitude.dcm")
-            try:
-                ds.save_as(dicomFilePath, enforce_file_format=True)  # pydicom >= 3.0
-            except TypeError:
-                ds.is_little_endian = True
-                ds.is_implicit_VR = False
-                ds.save_as(dicomFilePath, write_like_original=False)  # pydicom 2.x
-
-            with DICOMUtils.TemporaryDICOMDatabase(os.path.join(tempDir, "DICOMDatabase")) as db:
-                self.assertTrue(DICOMUtils.importDicom(dicomDir, db))
-                self.assertTrue(db.fileForInstance(sopInstanceUID))
-
-                # The candidate scan only accepts proxy nodes of volume sequences
-                volumeNode = slicer.vtkMRMLScalarVolumeNode()
-                volumeNode.SetName("Magnitude")
-                sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "MagnitudeSequence")
-                sequenceNode.SetDataNodeAtValue(volumeNode, "0")
-                browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", "MagnitudeBrowser")
-                browserNode.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
-                slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
-                proxyVolumeNode = browserNode.GetProxyNode(sequenceNode)
-                self.assertIsNotNone(proxyVolumeNode)
-                proxyVolumeNode.SetAttribute("DICOM.instanceUIDs", sopInstanceUID)
-
-                self.delayDisplay("Find 4D flow candidate volumes")
-                logic = Import4DFlowLogic()
-                volumeNodesSets = logic._findVolumeNodeSetCandidatesInScene()
-        finally:
-            shutil.rmtree(tempDir, ignore_errors=True)
-
-        self.assertEqual(len(volumeNodesSets), 1)
-        volumeNodesSet = next(iter(volumeNodesSets.values()))
-        self.assertEqual(volumeNodesSet["name"], "Test, Patient (20240102)")
-        self.assertEqual(volumeNodesSet["candidateVolumeNodes"], [proxyVolumeNode])
-        self.assertEqual(sequenceNode.GetAttribute("SlicerHeart.directionCode"), "magnitude")
-        self.assertAlmostEqual(float(sequenceNode.GetAttribute("SlicerHeart.heartRateBpm")), 60.0)
-
-        self.delayDisplay("Test passed")
-
-    def _createSyntheticFlowImages(self, dims, numberOfFrames, vencsCmPerSec, directionCodes):
-        """Create magnitude and component volume sequences, similar to what the DICOM importer produces for a
-        Siemens 4D flow acquisition. All volumes are proxy nodes of the same sequence browser.
-        Returns (magnitudeVolumeNode, componentVolumeNodes, componentArrays), where componentArrays[frame][component]
-        holds the raw voxel values of a component image.
-        """
-        import numpy as np
-
-        browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", "FlowBrowser")
-        componentArrays = [[None] * 3 for frame in range(numberOfFrames)]
-
-        def createSequence(name, component):
-            sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", name)
-            sequenceNode.SetIndexName("frame")
-            for frame in range(numberOfFrames):
-                volumeNode = slicer.vtkMRMLScalarVolumeNode()
-                volumeNode.SetName(name)
-                image = vtk.vtkImageData()
-                image.SetDimensions(dims)
-                image.AllocateScalars(vtk.VTK_SHORT, 1)
-                volumeNode.SetAndObserveImageData(image)
-                volumeNode.SetSpacing(1.5, 2.0, 2.5)
-                volumeNode.SetOrigin(-10.0, 20.0, 30.0)
-                voxels = slicer.util.arrayFromVolume(volumeNode)
-                if component is None:
-                    voxels[:] = 200  # magnitude well above the noise threshold everywhere
-                else:
-                    # Phase values that vary by voxel, frame and component (well below the wraparound limit)
-                    k, j, i = np.indices(voxels.shape)
-                    voxels[:] = (component + 1) * 300 + frame * 100 + 10 * i - 20 * j + 30 * k
-                    componentArrays[frame][component] = voxels.copy()
-                slicer.util.arrayFromVolumeModified(volumeNode)
-                sequenceNode.SetDataNodeAtValue(volumeNode, str(frame))
-            return sequenceNode
-
-        magnitudeSequenceNode = createSequence("Magnitude", None)
-        browserNode.SetAndObserveMasterSequenceNodeID(magnitudeSequenceNode.GetID())
-        componentSequenceNodes = []
-        for component in range(3):
-            componentSequenceNode = createSequence(f"Component {component + 1}", component)
-            componentSequenceNode.SetAttribute("SlicerHeart.directionCode", directionCodes[component])
-            componentSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencsCmPerSec[component]))
-            componentSequenceNode.SetAttribute("SlicerHeart.maxValue", str(Import4DFlowLogic().componentVolumeMaxValueSiemensCS4DFlow))
-            browserNode.AddSynchronizedSequenceNodeID(componentSequenceNode.GetID())
-            componentSequenceNodes.append(componentSequenceNode)
-        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
-
-        magnitudeVolumeNode = browserNode.GetProxyNode(magnitudeSequenceNode)
-        componentVolumeNodes = [browserNode.GetProxyNode(sequenceNode) for sequenceNode in componentSequenceNodes]
-        for volumeNode in [magnitudeVolumeNode] + componentVolumeNodes:
-            self.assertIsNotNone(volumeNode)
-            volumeNode.CreateDefaultDisplayNodes()
-        return magnitudeVolumeNode, componentVolumeNodes, componentArrays
 
     def test_CreateVectorVolumeFlowField(self):
         """The flow field is stored in a sequence of vector volumes (mm/s, declared in the voxel value units), which must
@@ -3464,31 +2880,40 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
 
         dims = (4, 3, 2)
         numberOfFrames = 2
-        vencsCmPerSec = [150.0, 150.0, 200.0]
+        vencsMmPerSec = [1500.0, 1500.0, 2000.0]
         directionCodes = ["through", "inplane_ap", "inplane_fh"]
         invertToRasDirection = [True, True, False]
-
-        self.delayDisplay("Create synthetic 4D flow component images")
-        magnitudeVolumeNode, componentVolumeNodes, componentArrays = self._createSyntheticFlowImages(
-            dims, numberOfFrames, vencsCmPerSec, directionCodes)
-
         logic = Import4DFlowLogic()
 
-        # Expected velocity (mm/s, RAS) from the raw component values, with no background subtraction
-        expectedVelocity = []
+        self.delayDisplay("Create magnitude images and the input flow field (velocity as acquired), as the 4D flow DICOM plugin does")
+        voxelToWorld = np.array([[1.5, 0.0, 0.0, -10.0], [0.0, 2.0, 0.0, 20.0], [0.0, 0.0, 2.5, 30.0], [0.0, 0.0, 0.0, 1.0]])
+        magnitudeSequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", "Magnitude")
+        magnitudeSequenceNode.SetIndexName("time")
+        magnitudeSequenceNode.SetIndexUnit("ms")
+        magnitudeSequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
         for frame in range(numberOfFrames):
-            velocity = np.zeros(tuple(reversed(dims)) + (3,), dtype=np.float32)
-            for component in range(3):
-                scaleToMmPerSec = vencsCmPerSec[component] * 10.0 / logic.componentVolumeMaxValueSiemensCS4DFlow
-                if invertToRasDirection[component]:
-                    scaleToMmPerSec = -scaleToMmPerSec
-                velocity[..., component] = componentArrays[frame][component] * scaleToMmPerSec
-            expectedVelocity.append(velocity)
+            magnitude = np.full(tuple(reversed(dims)), 200, dtype=np.int16)  # well above the noise threshold everywhere
+            magnitudeSequenceNode.SetDataNodeAtValue(logic._volumeNodeFromArray(magnitude, voxelToWorld), str(frame * 100))
+        browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", "FlowBrowser")
+        browserNode.SetAndObserveMasterSequenceNodeID(magnitudeSequenceNode.GetID())
+        slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
+        magnitudeVolumeNode = browserNode.GetProxyNode(magnitudeSequenceNode)
+        magnitudeVolumeNode.CreateDefaultDisplayNodes()
+        # Raw velocity (mm/s, RAS) that varies by voxel, frame and component
+        k, j, i = np.indices(tuple(reversed(dims)))
+        rawVelocity = np.stack([np.stack([(component + 1) * 300 + frame * 100 + 10 * i - 20 * j + 30 * k for component in range(3)], axis=-1)
+                                for frame in range(numberOfFrames)]).astype(np.float32)
+        signs = np.where(np.asarray(invertToRasDirection), -1.0, 1.0)
+        inputFlowFieldNode = logic.createInputFlowFieldFromArrays(rawVelocity, magnitudeVolumeNode, vencsMmPerSec, np.diag(signs),
+                                                                  directionCodes=directionCodes, componentMaxValues=[4096.0] * 3)
+        self.assertTrue(FlowLibraryBridge.isRawFlowField(inputFlowFieldNode))
+        self.assertEqual(inputFlowFieldNode.GetNodeReference("magnitudeVolume"), magnitudeVolumeNode)
+        expectedVelocity = [rawVelocity[frame] for frame in range(numberOfFrames)]  # no background subtraction, no masking
 
         tempDir = tempfile.mkdtemp(prefix="Import4DFlowTest_", dir=slicer.app.temporaryPath)
         try:
             self.delayDisplay("Create flow field")
-            flowFieldNode = logic.createFlowFieldFromComponentVolumes(componentVolumeNodes, invertToRasDirection, magnitudeVolumeNode)
+            flowFieldNode = logic.createOutputFlowField(inputFlowFieldNode)
             self.assertTrue(flowFieldNode.IsA("vtkMRMLVectorVolumeNode"))
             self.assertFalse(logic.isFlowFieldStoredInTransform(flowFieldNode))
             self.assertEqual(flowFieldNode.GetAttribute("SlicerHeart.Type"), "FlowField")
@@ -3496,7 +2921,7 @@ class Import4DFlowTest(ScriptedLoadableModuleTest):
             flowFieldSequenceNode = logic._getSequenceFromProxyNode(flowFieldNode)
             self.assertIsNotNone(flowFieldSequenceNode)
 
-            logic.updateFlowFieldFromComponentVolumes(
+            logic.computeOutputFlowField(
                 flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
             self.assertEqual(flowFieldSequenceNode.GetNumberOfDataNodes(), numberOfFrames)
             self.assertEqual(flowFieldSequenceNode.GetAttribute("SlicerHeart.velocityUnit"), "mm/s")
