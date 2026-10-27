@@ -12,83 +12,6 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
-     <property name="text">
-      <string>Create flow field from component images</string>
-     </property>
-     <layout class="QFormLayout" name="formLayout_2">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label">
-        <property name="text">
-         <string>Input flow image:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-        <item>
-         <widget class="ctkComboBox" name="inputVolumeNodeSetSelector"/>
-        </item>
-        <item>
-         <widget class="QToolButton" name="inspectButton">
-          <property name="text">
-           <string>Refresh</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item row="1" column="0" colspan="2">
-       <widget class="ctkCollapsibleGroupBox" name="inputAdvancedGroupBox">
-        <property name="title">
-         <string>Advanced</string>
-        </property>
-        <property name="collapsed">
-         <bool>true</bool>
-        </property>
-        <layout class="QVBoxLayout" name="inputAdvancedLayout">
-         <item>
-          <widget class="QCheckBox" name="removeInputImageCheckBox">
-           <property name="toolTip">
-            <string>Remove the component images of the input flow image after the input flow field is created from them. They are not needed after this, as the input flow field contains the velocity as acquired and the velocity encoding. The magnitude images are kept.</string>
-           </property>
-           <property name="text">
-            <string>Remove input flow image after conversion</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-           <property name="SlicerParameterName" stdset="0">
-            <string notr="true">removeInputImageAfterConversion</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="2" column="0" colspan="2">
-       <widget class="QPushButton" name="convertButton">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="toolTip">
-         <string>Create the input flow field (velocity as acquired) from the component images, and compute the output flow field with the selected corrections</string>
-        </property>
-        <property name="text">
-         <string>Create flow field</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton_2">
      <property name="text">
       <string>Corrections</string>
@@ -112,7 +35,7 @@
            </sizepolicy>
           </property>
           <property name="toolTip">
-           <string>Input flow field: velocity as acquired (aliased, before any correction), created from the component images (above) or loaded from file. All corrections are computed from it.</string>
+           <string>Input flow field: velocity as acquired (aliased, before any correction), loaded from DICOM (4D flow DICOM plugin) or from file. All corrections are computed from it.</string>
           </property>
           <property name="nodeTypes">
            <stringlist notr="true">

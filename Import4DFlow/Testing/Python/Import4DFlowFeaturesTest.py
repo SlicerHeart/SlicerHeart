@@ -44,8 +44,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     REPORT_SUITE_NAME = "Import4DFlow"
     REPORT_TITLE = "Import 4D Flow - feature test report"
     REPORT_DESCRIPTION = (
-        "Automated tests of all features of the *Import 4D Flow* module: detection of Siemens CS 4D flow images"
-        " loaded from DICOM, conversion to flow field (stored in grid transform or vector volume sequence), noise masking,"
+        "Automated tests of all features of the *Import 4D Flow* module: detection of 4D flow images (Siemens, GE, Philips)"
+        " loaded with the 4D flow DICOM plugin, flow field creation (stored in grid transform or vector volume sequence), noise masking,"
         " background phase correction, phase unwrapping (temporal and manual), visualization, export (NRRD stack, 5D NRRD,"
         " anonymized scene), scene persistence, and the module GUI.\n\n"
         "Most tests use an analytic flow phantom: pulsatile Poiseuille flow in an oblique cylindrical vessel"
@@ -68,18 +68,16 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
     # Helpers
 
-    def createFlowField(self, volumeNodeSet, storeInTransform, noiseMagnitudeThresholdPercent=5.0,
+    def createFlowField(self, inputFlowFieldNode, storeInTransform, noiseMagnitudeThresholdPercent=5.0,
                         backgroundSubtractionMethod=BackgroundSubtractionMethodEnum.NoSubtraction,
                         stationaryTissueSpeedThresholdVencPercent=10.0, unwrap=False):
-        """Create and compute a flow field (vector volume sequence, mm/s). If storeInTransform is set then a flow field
-        stored in grid transforms (legacy format, m/s; it can be read but not written by Import 4D Flow) is created from it
-        and returned."""
-        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(
-            volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"],
-            volumeNodeSet["magnitudeVolumeNode"])
+        """Create and compute the output flow field (vector volume sequence, mm/s) of an input flow field. If storeInTransform
+        is set then a flow field stored in grid transforms (legacy format, m/s; it can be read but not written by
+        Import 4D Flow) is created from it and returned."""
+        flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
         if unwrap:
             self.logic.temporalUnwrap(flowFieldNode, 0, noiseMagnitudeThresholdPercent)
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, noiseMagnitudeThresholdPercent,
+        self.logic.computeOutputFlowField(flowFieldNode, noiseMagnitudeThresholdPercent,
             backgroundSubtractionMethod, stationaryTissueSpeedThresholdVencPercent)
         if storeInTransform:
             return FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
@@ -133,14 +131,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.skipTest(f"Anonymized 4D flow data set is not available (set {FlowTestingUtils.REAL_DATA_ENV_VARIABLE} in the environment or in .env.local)")
         return dataDir
 
-    def loadRealDataVolumeNodeSet(self, dataDir):
-        """Load the clinical data set from DICOM (the DICOM database must be open) and return the detected image set."""
+    def loadRealDataInputFlowField(self, dataDir):
+        """Load the clinical data set from DICOM with the 4D flow DICOM plugin (the DICOM database must be open) and return
+        the input flow field."""
         from DICOMLib import DICOMUtils
         DICOMUtils.importDicom(dataDir, slicer.dicomDatabase)
-        FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-        volumeNodeSets = self.logic.findVolumeNodeSets()
-        self.assertEqual(len(volumeNodeSets), 1, "Number of detected 4D flow image sets")
-        return list(volumeNodeSets.values())[0]
+        return FlowTestingUtils.loadDicomStudyWithFlowPlugin()
 
     def isSpatialVectorNrrdReadingSupported(self):
         """Returns True if this Slicer version loads spatial vector volumes from NRRD files as spatial vectors
@@ -228,75 +224,116 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         comboBox = widget.ui.exportFormatComboBox
         formats = [comboBox.itemData(i) for i in range(comboBox.count)]
         self.report.checkEqual("Export formats in GUI", formats, Import4DFlowLogic.EXPORT_FORMATS)
-        self.report.checkTrue("'Remove input flow image after conversion' is checked by default", widget.ui.removeInputImageCheckBox.checked)
         self.report.checkTrue("There is no option to store the flow field in transforms (legacy format, read only)",
             not hasattr(widget.ui, "storeInTransformCheckBox"))
-        self.report.checkTrue("Convert button is disabled without input", not widget.ui.convertButton.enabled)
+        self.report.checkTrue("There is no section for converting component images (4D flow DICOM images are loaded as flow field by the DICOM plugin)",
+            not hasattr(widget.ui, "convertButton") and not hasattr(widget.ui, "inputVolumeNodeSetSelector"))
         self.report.screenshot("Import 4D Flow module GUI", kind="window")
 
-    @reportedTest("Detection of 4D flow images loaded from DICOM",
-        "Siemens CS 4D flow phantom images are written as DICOM files (magnitude and 3 phase series, multiple trigger times),"
-        " imported into a temporary DICOM database, loaded as volume sequences, then detected by"
-        " `findVolumeNodeSets`. Variants: speed/direction code in private tag (0051,1014) (Siemens Avanto),"
-        " in private tag (0021,1129) stored as raw bytes (Siemens Avanto Fit), only in SequenceName (free-running sequences),"
-        " and a coronal acquisition (different direction configuration). For each detected set, the flow field is computed"
-        " and compared to the analytic phantom velocity (end-to-end test of DICOM geometry, rescaling, and direction mapping).")
-    def test_02_DicomDetection(self):
+    @reportedTest("Direct loading of 4D flow DICOM images with the 4D flow DICOM plugin",
+        "The 4D flow DICOM plugin (`Import4DFlowDicomPlugin`) recognizes the magnitude and velocity component series of an"
+        " acquisition from the DICOM headers (Siemens, GE, Philips phantom variants, axial, coronal and rotated volumes)"
+        " and loads them directly as magnitude volume sequence and input flow field, without the volume sequence import"
+        " and the conversion of component images. Its loadables must be selected by default instead of the"
+        " MultiVolumeImporterPlugin loadables of the same series, loading them must load the acquisition once, and the"
+        " image geometry, metadata and velocity vectors must match the analytic phantom as with the conversion of"
+        " component images. No loadable is offered for an incomplete selection of series.")
+    def test_02_DicomPluginImport(self):
         from DICOMLib import DICOMUtils
-        vencCmPerSec = 150.0
-        phantom = FlowPhantom(dims=(24, 24, 12), spacingMm=(1.5, 1.5, 2.5), numberOfFrames=6, tissueRadiusMm=16.0)
-        expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
+        phantomParameters = dict(dims=(24, 24, 12), spacingMm=(1.5, 1.5, 2.5), numberOfFrames=6, tissueRadiusMm=16.0)
+        phantom = FlowPhantom(**phantomParameters)  # default orientation: rotated by 20 degrees around an oblique axis
+        rotatedPhantom = FlowPhantom(volumeRotationDeg=90.0, volumeRotationAxis=(0.0, 0.0, 1.0), **phantomParameters)
+        AXIAL, CORONAL = FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL, FlowTestingUtils.DIRECTION_CONFIGURATION_CORONAL
+        PATIENT_GE, PATIENT_PHILIPS = FlowTestingUtils.DIRECTION_CONFIGURATION_PATIENT_GE, FlowTestingUtils.DIRECTION_CONFIGURATION_PATIENT_PHILIPS
+        # (case name, DICOM variant, direction configuration, phantom, venc (cm/s), heart rate source)
         cases = [
-            ("avanto", FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL),
-            ("avantofit", FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL),
-            ("sequencename", FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL),
-            ("avanto", FlowTestingUtils.DIRECTION_CONFIGURATION_CORONAL),
+            ("avanto, axial", "avanto", AXIAL, phantom, 150.0, "nominalInterval"),
+            ("avanto, coronal", "avanto", CORONAL, phantom, 150.0, "nominalInterval"),
+            ("ge, rotated", "ge", PATIENT_GE, rotatedPhantom, 250.0, "none"),
+            ("philips", "philips", PATIENT_PHILIPS, phantom, 200.0, "heartRate"),
         ]
+        expectedVendor = {"avanto": "siemens", "ge": "ge", "philips": "philips"}
+        pluginClassNames = ["Import4DFlowDicomPlugin", "MultiVolumeImporterPlugin"]
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
         rows = []
-        for variant, configuration in cases:
-            caseName = f"{variant}, {'axial' if configuration is FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL else 'coronal'}"
+        for caseName, variant, configuration, casePhantom, vencCmPerSec, heartRateSource in cases:
+            expectedFrames = [casePhantom.velocityVolumeArray(i) for i in range(casePhantom.numberOfFrames)]
             slicer.mrmlScene.Clear()
-            dicomDir = self.temporaryDirectory("Import4DFlowDicom_")
-            phantom.writeDicomSeries(os.path.join(dicomDir, "dicom"), vencCmPerSec, configuration, variant)
+            dicomDir = self.temporaryDirectory("Import4DFlowDicomPlugin_")
+            seriesUIDs = casePhantom.writeDicomSeries(os.path.join(dicomDir, "dicom"), vencCmPerSec, configuration, variant, heartRateSource=heartRateSource)
             with DICOMUtils.TemporaryDICOMDatabase(os.path.join(dicomDir, "db")) as db:
                 DICOMUtils.importDicom(os.path.join(dicomDir, "dicom"), db)
-                loadedVolumes = FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-                self.report.checkEqual(f"[{caseName}] Number of loaded volume sequences", len(loadedVolumes), 4)
-                volumeNodeSets = self.logic.findVolumeNodeSets()
-            found = self.report.checkEqual(f"[{caseName}] Number of detected 4D flow image sets", len(volumeNodeSets), 1)
-            if not found:
-                rows.append([caseName, "not detected", "", "", "", ""])
+                fileLists = [slicer.dicomDatabase.filesForSeries(seriesUID) for seriesUID in seriesUIDs]
+                startTime = time.time()
+                loadablesByPlugin, _ = DICOMUtils.getLoadablesFromFileLists(fileLists, pluginClassNames)
+                examineTime = time.time() - startTime
+                DICOMUtils.selectHighestConfidenceLoadables(loadablesByPlugin)
+                loadablesByPluginName = {type(plugin).__name__: (plugin, loadables) for plugin, loadables in loadablesByPlugin.items()}
+                flowPlugin, flowLoadables = loadablesByPluginName["Import4DFlowDicomPluginClass"]
+                multiVolumeLoadables = loadablesByPluginName["MultiVolumeImporterPluginClass"][1]
+                self.report.checkEqual(f"[{caseName}] Number of 4D flow plugin loadables (one per series of the acquisition)", len(flowLoadables), 4)
+                self.report.checkTrue(f"[{caseName}] 4D flow plugin loadables are selected by default", all(l.selected for l in flowLoadables))
+                flowFiles = set(fileName for loadable in flowLoadables for fileName in loadable.files)
+                competingLoadables = [loadable for loadable in multiVolumeLoadables if set(loadable.files) & flowFiles]
+                self.report.checkTrue(f"[{caseName}] MultiVolumeImporter loadables of the 4D flow series are not selected",
+                    competingLoadables and not any(loadable.selected for loadable in competingLoadables),
+                    f"{sum(loadable.selected for loadable in competingLoadables)} of {len(competingLoadables)} selected", "0 selected")
+                self.report.checkEqual(f"[{caseName}] Loadables for an incomplete selection of series (magnitude and 2 components)",
+                    len(flowPlugin.examineForImport(fileLists[:3])), 0)
+                startTime = time.time()
+                DICOMUtils.loadLoadables({flowPlugin: flowLoadables})
+                loadTime = time.time() - startTime
+            browserNodes = slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode")
+            inputFlowFieldNodes = [node for node in slicer.util.getNodesByClass("vtkMRMLVectorVolumeNode") if FlowLibraryBridge.isRawFlowField(node)]
+            loadedOnce = self.report.checkEqual(f"[{caseName}] Acquisition is loaded once (sequence browsers, input flow fields)",
+                (len(browserNodes), len(inputFlowFieldNodes)), (1, 1))
+            if not loadedOnce:
+                rows.append([caseName, "not loaded", "", "", "", ""])
                 continue
-            volumeNodeSet = list(volumeNodeSets.values())[0]
-            self.report.checkEqual(f"[{caseName}] Image set name", volumeNodeSet["name"], "Phantom, Flow (20240102)")
-            directionCodes = [self.logic._getSequenceAttribute(n, "SlicerHeart.directionCode") for n in volumeNodeSet["componentVolumeNodes"]]
+            inputFlowFieldNode = inputFlowFieldNodes[0]
+            magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
+            self.report.checkTrue(f"[{caseName}] Input flow field references the magnitude image sequence",
+                magnitudeVolumeNode is not None and self.logic._getSequenceFromProxyNode(magnitudeVolumeNode) is not None)
+            seriesItem = shNode.GetItemByDataNode(magnitudeVolumeNode)
+            self.report.checkEqual(f"[{caseName}] Magnitude image is in the study in subject hierarchy",
+                shNode.GetItemLevel(shNode.GetItemParent(seriesItem)) if seriesItem else "", slicer.vtkMRMLSubjectHierarchyConstants.GetDICOMLevelStudy())
+            self.report.checkEqual(f"[{caseName}] Vendor", self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.vendor"), expectedVendor[variant])
+            directionCodes = (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.directionCodes") or "").split(",")
             self.report.checkEqual(f"[{caseName}] Direction codes of components (R, A, S)", directionCodes, [c[0] for c in configuration])
-            self.report.checkEqual(f"[{caseName}] Invert to RAS direction flags", volumeNodeSet["componentVolumeNodesInvertToRasDirection"],
+            encodingToWorld = np.array([float(v) for v in (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.encodingToWorld") or "").split(",")]).reshape(3, 3)
+            self.report.checkEqual(f"[{caseName}] Encoding to world (signs of the components)", [bool(encodingToWorld[i, i] < 0) for i in range(3)],
                 [c[1] for c in configuration])
-            vencs = [self.logic._getSequenceAttribute(n, "SlicerHeart.vencCmPerSec") for n in volumeNodeSet["componentVolumeNodes"]]
+            vencs = [float(v) / 10.0 for v in (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.vencEncodedMmPerSec") or "").split(",")]
             self.report.checkTrue(f"[{caseName}] Velocity encoding is read from DICOM",
-                all(v is not None and abs(float(v) - vencCmPerSec) < 1e-6 for v in vencs), vencs, f"{vencCmPerSec:g}")
-            heartRate = self.logic._getSequenceAttribute(volumeNodeSet["magnitudeVolumeNode"], "SlicerHeart.heartRateBpm")
-            self.report.checkClose(f"[{caseName}] Heart rate from NominalInterval", float(heartRate or "nan"), phantom.heartRateBpm(), atol=1e-6, unit="bpm")
-
-            # End-to-end check of velocity vectors
+                len(vencs) == 3 and all(abs(v - vencCmPerSec) < 1e-6 for v in vencs), vencs, f"{vencCmPerSec:g}")
+            heartRate = self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.heartRateBpm")
+            if heartRateSource == "none":
+                expectedHeartRate = 60000.0 / ((casePhantom.frameTimesMs[-1] - casePhantom.frameTimesMs[0]) * casePhantom.numberOfFrames / (casePhantom.numberOfFrames - 1))
+            else:
+                expectedHeartRate = casePhantom.heartRateBpm()
+            self.report.checkClose(f"[{caseName}] Heart rate", float(heartRate or "nan"), expectedHeartRate, atol=1e-6, unit="bpm")
+            magnitudeScale = FlowTestingUtils.DICOM_MAGNITUDE_SCALE[variant] * (1.7 if variant == "philips" else 1.0)  # Philips: rescale slope
+            expectedMagnitudeRange = self.logic.magnitudeVolumeRange if variant == "avanto" else float(casePhantom.magnitudeVolumeArray().max()) * magnitudeScale
+            self.report.checkClose(f"[{caseName}] Magnitude range", self.logic.magnitudeRange(magnitudeVolumeNode), expectedMagnitudeRange, atol=0.5)
             ijkToRas = vtk.vtkMatrix4x4()
-            volumeNodeSet["magnitudeVolumeNode"].GetIJKToRASMatrix(ijkToRas)
-            phantomIjkToRas = phantom.ijkToRasMatrix()
+            magnitudeVolumeNode.GetIJKToRASMatrix(ijkToRas)
+            phantomIjkToRas = casePhantom.ijkToRasMatrix()
             geometryError = max(abs(ijkToRas.GetElement(r, c) - phantomIjkToRas.GetElement(r, c)) for r in range(3) for c in range(4))
             self.report.checkClose(f"[{caseName}] Loaded image geometry (IJK to RAS matrix) error", geometryError, 0.0, atol=1e-3)
-            flowFieldNode = self.createFlowField(volumeNodeSet, storeInTransform=False)
+            flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
+            self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
             frames = self.velocityFrames(flowFieldNode)
             maxErrors = self.checkVelocityFrames(f"[{caseName}] Velocity", frames, expectedFrames, velocityQuantizationMPerSec(vencCmPerSec))
-            rows.append([caseName, "detected", directionCodes, volumeNodeSet["componentVolumeNodesInvertToRasDirection"], heartRate, max(maxErrors)])
-            if variant == "avanto" and configuration is FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL:
-                self.showFlowFieldAtFrame(flowFieldNode, phantom.peakFrameIndex(), phantom)
-                self.report.screenshot("Flow field computed from DICOM phantom (Siemens Avanto variant) at peak systole")
-        self.report.table(["DICOM variant", "Result", "Direction codes", "Invert flags", "Heart rate (bpm)", "Max. velocity error (m/s)"], rows,
-            "Detection results")
+            rows.append([caseName, "loaded", directionCodes, f"{examineTime:.2f}", f"{loadTime:.2f}", max(maxErrors)])
+            if caseName == "ge, rotated":
+                self.showFlowFieldAtFrame(flowFieldNode, casePhantom.peakFrameIndex(), casePhantom)
+                self.report.screenshot("Flow field loaded with the 4D flow DICOM plugin (GE variant, rotated volume) at peak systole")
+        self.report.table(["DICOM variant", "Result", "Direction codes", "Examine time (s)", "Load time (s)", "Max. velocity error (m/s)"], rows,
+            "4D flow DICOM plugin results")
 
     @reportedTest("Incomplete image sets are rejected",
-        "4D flow image sets are only offered for conversion if all 3 velocity components and the magnitude image are available.")
+        "The 4D flow DICOM plugin offers loadables only if the magnitude series and all 3 velocity component series of the"
+        " acquisition are examined together.")
     def test_03_IncompleteImageSetsRejected(self):
         from DICOMLib import DICOMUtils
         phantom = FlowPhantom(dims=(16, 16, 8), spacingMm=(2.0, 2.0, 3.0), numberOfFrames=3, tissueRadiusMm=12.0, vesselRadiusMm=6.0)
@@ -304,71 +341,51 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         seriesUIDs = phantom.writeDicomSeries(os.path.join(dicomDir, "dicom"), 150.0)
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(dicomDir, "db")) as db:
             DICOMUtils.importDicom(os.path.join(dicomDir, "dicom"), db)
-            # Without magnitude image
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences(seriesUIDs[1:])
-            self.report.checkEqual("Image sets found without magnitude image", len(self.logic.findVolumeNodeSets()), 0)
-            slicer.mrmlScene.Clear()
-            # Without one of the components
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences(seriesUIDs[:3])
-            self.report.checkEqual("Image sets found with a missing velocity component", len(self.logic.findVolumeNodeSets()), 0)
-            # Complete set
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences(seriesUIDs[3:])
-            self.report.checkEqual("Image sets found with all images", len(self.logic.findVolumeNodeSets()), 1)
-        # Non-DICOM volumes are ignored
-        slicer.mrmlScene.Clear()
-        phantom.createComponentImagesInScene()
-        self.report.checkEqual("Image sets found for volumes that are not loaded from DICOM", len(self.logic.findVolumeNodeSets()), 0)
+            fileLists = [slicer.dicomDatabase.filesForSeries(seriesUID) for seriesUID in seriesUIDs]
+            plugin = slicer.modules.dicomPlugins["Import4DFlowDicomPlugin"]()
+            self.report.checkEqual("Loadables without the magnitude series", len(plugin.examineForImport(fileLists[1:])), 0)
+            self.report.checkEqual("Loadables with a missing velocity component", len(plugin.examineForImport(fileLists[:3])), 0)
+            self.report.checkEqual("Loadables for a single velocity component series", len(plugin.examineForImport(fileLists[1:2])), 0)
+            self.report.checkEqual("Loadables with all series (one per series)", len(plugin.examineForImport(fileLists)), 4)
 
     @reportedTest("Flow field creation",
-        "`createFlowFieldFromComponentVolumes` merges all image sequences into one sequence browser, replaces frame indices"
-        " by trigger times, and creates the flow field node (vector volume, mm/s) with all references.")
+        "`createOutputFlowField` creates the output flow field (vector volume, mm/s) of an input flow field (velocity as"
+        " acquired, created from the phantom as the 4D flow DICOM plugin does): it is browsed with the magnitude images"
+        " by trigger time, and it references the input flow field and the magnitude images.")
     def test_04_CreateFlowField(self):
         phantom = FlowPhantom()
-        for storeInTransform in [False]:  # flow fields are not written in transforms (legacy format)
-            slicer.mrmlScene.Clear()
-            storage = self.storageName(storeInTransform)
-            volumeNodeSet = phantom.createComponentImagesInScene()
-            flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(
-                volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"],
-                volumeNodeSet["magnitudeVolumeNode"])
-            expectedClass = "vtkMRMLVectorVolumeNode"
-            self.report.checkTrue(f"[{storage}] Flow field node type is {expectedClass}", flowFieldNode.IsA(expectedClass), flowFieldNode.GetClassName(), expectedClass)
-            self.report.checkEqual(f"[{storage}] SlicerHeart.Type attribute", flowFieldNode.GetAttribute("SlicerHeart.Type"), "FlowField")
-            self.report.checkTrue(f"[{storage}] Magnitude volume reference", flowFieldNode.GetNodeReference("magnitudeVolume") == volumeNodeSet["magnitudeVolumeNode"])
-            inputFlowFieldNode = flowFieldNode.GetNodeReference("inputFlowField")
-            self.report.checkTrue(f"[{storage}] Output flow field references the input flow field (velocity as acquired)",
-                inputFlowFieldNode is not None and FlowLibraryBridge.isRawFlowField(inputFlowFieldNode))
-            if inputFlowFieldNode is not None:
-                self.report.checkEqual(f"[{storage}] Input flow field stores the direction codes", FlowLibraryBridge.directionCodes(inputFlowFieldNode),
-                    [code for code, _ in FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL])
-                self.report.checkEqual(f"[{storage}] Input flow field stores the velocity encoding (mm/s)",
-                    FlowLibraryBridge.vencEncodedMmPerSec(inputFlowFieldNode).tolist(), [1500.0] * 3)  # default venc of the phantom: 150 cm/s
-                self.report.checkTrue(f"[{storage}] Input flow field is a vector volume", inputFlowFieldNode.IsA("vtkMRMLVectorVolumeNode"))
-            browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
-            magnitudeBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(volumeNodeSet["magnitudeVolumeNode"])
-            self.report.checkTrue(f"[{storage}] Flow field is in the magnitude volume's sequence browser", browserNode is not None and browserNode == magnitudeBrowserNode)
-            for component, componentVolumeNode in enumerate(volumeNodeSet["componentVolumeNodes"]):
-                componentBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(componentVolumeNode)
-                self.report.checkTrue(f"[{storage}] Component {component} is moved into the common sequence browser", componentBrowserNode == browserNode)
-                sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
-                directionCode, invert = FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL[component]
-                self.report.checkTrue(f"[{storage}] Component {component} sequence name contains direction code",
-                    f"C{component + 1} {directionCode}" in sequenceNode.GetName(), sequenceNode.GetName())
-                self.report.checkEqual(f"[{storage}] Component {component} invertToRasDirection attribute",
-                    sequenceNode.GetAttribute("SlicerHeart.invertToRasDirection"), "true" if invert else "false")
-            self.report.checkEqual(f"[{storage}] Number of browser items", browserNode.GetNumberOfItems(), phantom.numberOfFrames)
-            magnitudeSequenceNode = self.logic._getSequenceFromProxyNode(volumeNodeSet["magnitudeVolumeNode"])
-            indexValues = [float(magnitudeSequenceNode.GetNthIndexValue(i)) for i in range(magnitudeSequenceNode.GetNumberOfDataNodes())]
-            self.report.checkEqual(f"[{storage}] Frame index values are trigger times", indexValues, phantom.frameTimesMs)
-            self.report.checkEqual(f"[{storage}] Index name and unit", (magnitudeSequenceNode.GetIndexName(), magnitudeSequenceNode.GetIndexUnit()), ("time", "ms"))
-            self.report.checkEqual(f"[{storage}] Index type is numeric", magnitudeSequenceNode.GetIndexType(), slicer.vtkMRMLSequenceNode.NumericIndex)
-            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-            self.report.checkEqual(f"[{storage}] Flow field is in the same subject hierarchy folder as the magnitude volume",
-                shNode.GetItemParent(shNode.GetItemByDataNode(flowFieldNode)),
-                shNode.GetItemParent(shNode.GetItemByDataNode(volumeNodeSet["magnitudeVolumeNode"])))
+        slicer.mrmlScene.Clear()
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene()
+        magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
+        flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
+        expectedClass = "vtkMRMLVectorVolumeNode"
+        self.report.checkTrue(f"Flow field node type is {expectedClass}", flowFieldNode.IsA(expectedClass), flowFieldNode.GetClassName(), expectedClass)
+        self.report.checkEqual("SlicerHeart.Type attribute", flowFieldNode.GetAttribute("SlicerHeart.Type"), "FlowField")
+        self.report.checkTrue("Magnitude volume reference", flowFieldNode.GetNodeReference("magnitudeVolume") == magnitudeVolumeNode)
+        self.report.checkTrue("Output flow field references the input flow field (velocity as acquired)",
+            flowFieldNode.GetNodeReference("inputFlowField") is inputFlowFieldNode and FlowLibraryBridge.isRawFlowField(inputFlowFieldNode))
+        self.report.checkEqual("Input flow field stores the direction codes", FlowLibraryBridge.directionCodes(inputFlowFieldNode),
+            [code for code, _ in FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL])
+        self.report.checkEqual("Input flow field stores the velocity encoding (mm/s)",
+            FlowLibraryBridge.vencEncodedMmPerSec(inputFlowFieldNode).tolist(), [1500.0] * 3)  # default venc of the phantom: 150 cm/s
+        self.report.checkTrue("Input flow field is a vector volume", inputFlowFieldNode.IsA("vtkMRMLVectorVolumeNode"))
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        magnitudeBrowserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
+        self.report.checkTrue("Flow field is in the magnitude volume's sequence browser", browserNode is not None and browserNode == magnitudeBrowserNode)
+        self.report.checkEqual("Number of browser items", browserNode.GetNumberOfItems(), phantom.numberOfFrames)
+        for name, node in [("magnitude images", magnitudeVolumeNode), ("input flow field", inputFlowFieldNode)]:
+            sequenceNode = self.logic._getSequenceFromProxyNode(node)
+            indexValues = [float(sequenceNode.GetNthIndexValue(i)) for i in range(sequenceNode.GetNumberOfDataNodes())]
+            self.report.checkEqual(f"Frame index values of the {name} are trigger times", indexValues, phantom.frameTimesMs)
+        magnitudeSequenceNode = self.logic._getSequenceFromProxyNode(magnitudeVolumeNode)
+        self.report.checkEqual("Index name and unit", (magnitudeSequenceNode.GetIndexName(), magnitudeSequenceNode.GetIndexUnit()), ("time", "ms"))
+        self.report.checkEqual("Index type is numeric", magnitudeSequenceNode.GetIndexType(), slicer.vtkMRMLSequenceNode.NumericIndex)
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        self.report.checkEqual("Flow field is in the same subject hierarchy folder as the magnitude volume",
+            shNode.GetItemParent(shNode.GetItemByDataNode(flowFieldNode)), shNode.GetItemParent(shNode.GetItemByDataNode(magnitudeVolumeNode)))
 
     @reportedTest("Velocity computation accuracy",
-        "Velocity vectors computed by `updateFlowFieldFromComponentVolumes` are compared to the analytic phantom"
+        "Velocity vectors computed by `computeOutputFlowField` are compared to the analytic phantom"
         " in every voxel and frame. The phantom volume is oblique (rotated by 20 degrees). The flow field is stored in vector"
         " volumes (mm/s); a flow field stored in grid transforms (legacy format, m/s) is created from it to check that it is"
         " read the same way: the grid transform must displace each point by the velocity vector (in the 'to parent'"
@@ -382,9 +399,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for storeInTransform in [True, False]:
             slicer.mrmlScene.Clear()
             storage = self.storageName(storeInTransform)
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
             startTime = time.time()
-            flowFieldNode = self.createFlowField(volumeNodeSet, storeInTransform)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, storeInTransform)
             durationSec = time.time() - startTime
             frames = self.velocityFrames(flowFieldNode)
             computedFrames[storeInTransform] = frames
@@ -444,8 +461,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         rows = []
         for thresholdPercent in [5.0, 45.0]:
             slicer.mrmlScene.Clear()
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec, phaseOffset=phaseOffset)
-            flowFieldNode = self.createFlowField(volumeNodeSet, False, noiseMagnitudeThresholdPercent=thresholdPercent)
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec, phaseOffset=phaseOffset)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, False, noiseMagnitudeThresholdPercent=thresholdPercent)
             frame = self.velocityFrames(flowFieldNode)[0]  # first frame: no flow, only the phase offset
             speed = np.linalg.norm(frame, axis=-1)
             threshold = thresholdPercent / 100.0 * self.logic.magnitudeVolumeRange
@@ -486,8 +503,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             ]
             for offsetName, phaseOffset, method, mustCorrect in cases:
                 slicer.mrmlScene.Clear()
-                volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec, phaseOffset=phaseOffset)
-                flowFieldNode = self.createFlowField(volumeNodeSet, False, backgroundSubtractionMethod=method)
+                inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec, phaseOffset=phaseOffset)
+                flowFieldNode = self.createFlowField(inputFlowFieldNode, False, backgroundSubtractionMethod=method)
                 frame = self.velocityFrames(flowFieldNode)[peakFrame]
                 tissueError = float(np.abs(frame[stationaryTissue]).mean())
                 vesselError = float(np.abs(frame - expectedPeak)[phantom.insideVessel].mean())
@@ -512,8 +529,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         expectedWrappedVoxels = phantom.numberOfWrappedVoxels(vencCmPerSec)
         self.report.text(f"Number of voxels (over all frames and components) with velocity above the velocity encoding: {expectedWrappedVoxels}")
         self.report.checkTrue("Phantom contains phase wraps", expectedWrappedVoxels > 0, expectedWrappedVoxels, "> 0")
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        flowFieldNode = self.createFlowField(volumeNodeSet, False, unwrap=False)
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=False)
         wrappedFrames = self.velocityFrames(flowFieldNode)
         wrappedError = max(float(np.abs(f - e).max()) for f, e in zip(wrappedFrames, expectedFrames))
         self.report.checkTrue("Without unwrapping, velocity error is large", wrappedError > 0.5, f"{wrappedError:.3f} m/s", "> 0.5 m/s")
@@ -541,7 +558,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 count = 0
                 for segmentIndex in range(frameSegmentation.GetSegmentation().GetNumberOfSegments()):
                     segmentId = frameSegmentation.GetSegmentation().GetNthSegmentID(segmentIndex)
-                    segmentArray = slicer.util.arrayFromSegmentBinaryLabelmap(frameSegmentation, segmentId, volumeNodeSet["magnitudeVolumeNode"])
+                    segmentArray = slicer.util.arrayFromSegmentBinaryLabelmap(frameSegmentation, segmentId, inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
                     count += int(np.count_nonzero(segmentArray))
                 markedVoxels += count
                 if count:
@@ -549,7 +566,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.table(["Component", "Frame", "Voxels marked as wrapped"], rows, "Phase wrap segmentation content")
         self.report.checkEqual("Number of voxels marked as phase wrapped", markedVoxels, expectedWrappedVoxels)
 
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         self.checkVelocityFrames("After temporal unwrapping", self.velocityFrames(flowFieldNode), expectedFrames,
             velocityQuantizationMPerSec(vencCmPerSec))
         self.report.text(f"Temporal unwrapping computation time: {unwrapDurationSec:.2f} s")
@@ -569,12 +586,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("Resetting unwrapping removes phase wrap segmentations", not any(remaining), remaining, "[None, None, None]")
         self.report.checkEqual("Resetting unwrapping removes phase wrap segmentations from the scene",
             len(slicer.util.getNodesByClass("vtkMRMLSegmentationNode")), 0)
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         resetError = max(float(np.abs(f - e).max()) for f, e in zip(self.velocityFrames(flowFieldNode), expectedFrames))
         self.report.checkTrue("After reset, the flow field is computed without unwrapping", resetError > 0.5, f"{resetError:.3f} m/s", "> 0.5 m/s")
 
         self.logic.laplacianUnwrap(flowFieldNode)
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         self.checkVelocityFrames("Laplacian unwrapping (slicerheart_4dflow) after reset", self.velocityFrames(flowFieldNode), expectedFrames,
             velocityQuantizationMPerSec(vencCmPerSec))
         with self.assertRaises(RuntimeError):
@@ -587,8 +604,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     def test_09_ManualPhaseWrapCorrection(self):
         vencCmPerSec = 150.0
         phantom = FlowPhantom()
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        flowFieldNode = self.createFlowField(volumeNodeSet, False, unwrap=True)  # no wraps in the phantom
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=True)  # no wraps in the phantom
         frameIndex = phantom.peakFrameIndex()
         component = 2
         FlowTestingUtils.selectSequenceItem(flowFieldNode, frameIndex)
@@ -598,7 +615,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.text(f"Phase wrap segment IDs: {', '.join(segmentIds)}")
 
         # Mark a block in the tissue (stationary) region as positive wrap and another one as negative wrap
-        componentVolumeNode = volumeNodeSet["componentVolumeNodes"][component]
+        componentVolumeNode = self.logic.getRawComponentVolume(flowFieldNode, component)
         positiveMask = np.zeros(phantom.radialDistanceMm.shape, dtype=np.uint8)
         negativeMask = np.zeros(phantom.radialDistanceMm.shape, dtype=np.uint8)
         tissue = phantom.stationaryTissueMask()
@@ -612,7 +629,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         FlowTestingUtils.showVolumeInSliceViews(componentVolumeNode, phantom.centerRas)
         self.report.screenshot("Manually marked phase wrap regions (positive and negative 1x wrap) on the inplane_fh component image")
 
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         frame = self.velocityFrames(flowFieldNode)[frameIndex]
         expected = phantom.velocityVolumeArray(frameIndex)[..., component]
         shiftMPerSec = 2 * vencCmPerSec / 100.0
@@ -637,8 +654,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for storeInTransform in [True, False]:
             slicer.mrmlScene.Clear()
             storage = self.storageName(storeInTransform)
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-            flowFieldNode = self.createFlowField(volumeNodeSet, storeInTransform)
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, storeInTransform)
             error = self.trySetDefaultVisualization(flowFieldNode)
             self.report.checkTrue(f"[{storage}] Default visualization can be set up", error is None, error or "no error", "no error")
             if error:
@@ -660,7 +677,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             self.report.checkTrue(f"[{storage}] Visible in slice views", displayNode.GetVisibility() and displayNode.GetVisibility2D())
             # Transform display node and earlier vector field display node: "region", current vector field display node: "samplingRegion"
             regionNode = displayNode.GetSamplingRegionNode() if hasattr(displayNode, "GetSamplingRegionNode") else displayNode.GetRegionNode()
-            self.report.checkTrue(f"[{storage}] Region is the magnitude volume", regionNode == volumeNodeSet["magnitudeVolumeNode"])
+            self.report.checkTrue(f"[{storage}] Region is the magnitude volume", regionNode == inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
             colorNode = displayNode.GetColorNode()
             self.report.checkEqual(f"[{storage}] Color node category", colorNode.GetAttribute("Category") if colorNode else None, "Flow")
             colorRange = colorNode.GetColorTransferFunction().GetRange() if colorNode else (0, 0)
@@ -691,8 +708,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for storeInTransform in [True, False]:
             slicer.mrmlScene.Clear()
             storage = self.storageName(storeInTransform)
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-            flowFieldNode = self.createFlowField(volumeNodeSet, storeInTransform)
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, storeInTransform)
             exportDir = self.temporaryDirectory("Import4DFlowNrrdStack_")
             self.logic.exportDisplacementFieldToFiles(flowFieldNode, exportDir, Import4DFlowLogic.EXPORT_FORMAT_NRRD_STACK)
             prefix = "transform" if storeInTransform else "velocity"
@@ -751,8 +768,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for storeInTransform in [True, False]:
             slicer.mrmlScene.Clear()
             storage = self.storageName(storeInTransform)
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-            flowFieldNode = self.createFlowField(volumeNodeSet, storeInTransform)
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, storeInTransform)
             exportDir = self.temporaryDirectory("Import4DFlowNrrd5D_")
             startTime = time.time()
             self.logic.exportDisplacementFieldToFiles(flowFieldNode, exportDir, Import4DFlowLogic.EXPORT_FORMAT_NRRD_5D)
@@ -810,9 +827,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         os.makedirs(exportDir)
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(dicomDir, "db")) as db:
             DICOMUtils.importDicom(os.path.join(dicomDir, "dicom"), db)
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-            volumeNodeSet = list(self.logic.findVolumeNodeSets().values())[0]
-            self.createFlowField(volumeNodeSet, False)
+            inputFlowFieldNode = FlowTestingUtils.loadDicomStudyWithFlowPlugin()
+            self.createFlowField(inputFlowFieldNode, False)
         shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
 
         countIdentifiers = self.countDicomIdentifiers
@@ -857,8 +873,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         vencCmPerSec = 150.0
         phantom = FlowPhantom(numberOfFrames=4)
         expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        volumeFlowField = self.createFlowField(volumeNodeSet, False, unwrap=True)
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        volumeFlowField = self.createFlowField(inputFlowFieldNode, False, unwrap=True)
         transformFlowField = FlowTestingUtils.createLegacyTransformFlowField(volumeFlowField)
         self.logic.setFlowFieldVisualizationToDefault(transformFlowField)
         error = self.trySetDefaultVisualization(volumeFlowField)
@@ -890,7 +906,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                     self.report.checkTrue(f"[{storage}] Speed color map is restored", colorNode is not None and colorNode.GetAttribute("Category") == "Flow")
                 # Flow fields stored in transforms (legacy format) are read only
                 try:
-                    self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+                    self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
                     error = None
                 except ValueError as e:
                     error = str(e)
@@ -900,7 +916,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
                 self.report.checkTrue(f"[{storage}] Phase wrap segmentations are restored",
                     all(flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", c) is not None for c in range(3)))
                 # Flow field can be updated after reload
-                self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+                self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
                 self.checkVelocityFrames(f"[{storage}] Velocity recomputed after reload", self.velocityFrames(flowFieldNode), expectedFrames,
                     velocityQuantizationMPerSec(vencCmPerSec))
 
@@ -914,52 +930,40 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         phantom = FlowPhantom(dims=(28, 28, 16), spacingMm=(1.5, 1.5, 2.0), numberOfFrames=8, tissueRadiusMm=20.0)
         expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
         dicomDir = self.temporaryDirectory("Import4DFlowGui_")
-        phantom.writeDicomSeries(os.path.join(dicomDir, "dicom"), vencCmPerSec)
+        seriesUIDs = phantom.writeDicomSeries(os.path.join(dicomDir, "dicom"), vencCmPerSec)
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(dicomDir, "db")) as db:
             DICOMUtils.importDicom(os.path.join(dicomDir, "dicom"), db)
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
+            # Load as a user would in the DICOM module: the 4D flow DICOM plugin loads the input flow field
+            fileLists = [slicer.dicomDatabase.filesForSeries(seriesUID) for seriesUID in seriesUIDs]
+            loadablesByPlugin, _ = DICOMUtils.getLoadablesFromFileLists(fileLists, ["Import4DFlowDicomPlugin"])
+            DICOMUtils.loadLoadables(loadablesByPlugin)
 
             slicer.util.selectModule("Import4DFlow")
             widget = slicer.modules.import4dflow.widgetRepresentation().self()
-            widget.onInspectButton()
-            self.report.checkEqual("Image sets listed in GUI", widget.ui.inputVolumeNodeSetSelector.count, 1)
-            self.report.checkEqual("Image set name in GUI", widget.ui.inputVolumeNodeSetSelector.currentText, "Phantom, Flow (20240102)")
-            self.report.checkTrue("Convert button is enabled", widget.ui.convertButton.enabled)
+            widget.enter()
             parameterNode = widget._parameterNode
+            inputFlowFieldNodes = [node for node in slicer.util.getNodesByClass("vtkMRMLVectorVolumeNode") if FlowLibraryBridge.isRawFlowField(node)]
+            self.report.checkEqual("[GUI] Input flow field is loaded by the 4D flow DICOM plugin", len(inputFlowFieldNodes), 1)
+            self.report.checkTrue("[GUI] Input flow field is selected when the module is entered",
+                inputFlowFieldNodes and parameterNode.inputFlowField is inputFlowFieldNodes[0])
             # This test checks the flow field computed with temporal unwrapping (Laplacian 4D is the default)
             # and without background subtraction (the phantom has no background error; a quadratic fit is the default)
             parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
             parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.NoSubtraction
 
-            # Component images are kept, as they are converted again below
-            parameterNode.removeInputImageAfterConversion = False
             try:
-                widget.onConvertButton()
+                widget.onRecomputeFlowFieldButton()
                 error = None
             except Exception as e:
                 error = f"{type(e).__name__}: {e}"
-            self.report.checkTrue("[GUI] 'Create flow field' with vector volume storage completes without error", error is None, error or "no error", "no error")
-            volumeFlowField = parameterNode.outputFlowField
-            self.report.checkTrue("[GUI] Flow field is created as vector volume", volumeFlowField is not None and volumeFlowField.IsA("vtkMRMLVectorVolumeNode"))
-            if volumeFlowField and volumeFlowField.IsA("vtkMRMLVectorVolumeNode"):
-                self.checkVelocityFrames("[GUI, vector volume] Velocity (temporal unwrapping is applied automatically)",
-                    self.velocityFrames(volumeFlowField), expectedFrames, velocityQuantizationMPerSec(vencCmPerSec))
-
-            # Component images are removed after conversion (default)
-            parameterNode.removeInputImageAfterConversion = True
-            volumeNodeSet = widget._volumeNodesSets[parameterNode.inputVolumeNodeSet]
-            componentVolumeIds = [node.GetID() for node in volumeNodeSet["componentVolumeNodes"]]
-            widget.onConvertButton()
+            self.report.checkTrue("[GUI] 'Recompute flow field' creates the output flow field without error", error is None, error or "no error", "no error")
             flowFieldNode = parameterNode.outputFlowField
-            self.report.checkTrue("[GUI] Component images are removed after conversion",
-                all(slicer.mrmlScene.GetNodeByID(nodeId) is None for nodeId in componentVolumeIds))
-            self.report.checkTrue("[GUI] Magnitude images are kept after conversion", slicer.mrmlScene.IsNodePresent(volumeNodeSet["magnitudeVolumeNode"]) > 0)
-            self.report.checkTrue("[GUI] Input flow field is selected", parameterNode.inputFlowField is not None
-                and flowFieldNode is not None and flowFieldNode.GetNodeReference("inputFlowField") is parameterNode.inputFlowField)
-            self.report.checkTrue("[GUI] A new flow field is created as vector volume", flowFieldNode is not None
-                and flowFieldNode.IsA("vtkMRMLVectorVolumeNode") and flowFieldNode is not volumeFlowField)
-            self.checkVelocityFrames("[GUI, second conversion] Velocity", self.velocityFrames(flowFieldNode), expectedFrames,
-                velocityQuantizationMPerSec(vencCmPerSec))
+            self.report.checkTrue("[GUI] Output flow field is created as vector volume", flowFieldNode is not None and flowFieldNode.IsA("vtkMRMLVectorVolumeNode"))
+            self.report.checkTrue("[GUI] Output flow field references the input flow field and the magnitude images", flowFieldNode is not None
+                and flowFieldNode.GetNodeReference("inputFlowField") is parameterNode.inputFlowField
+                and flowFieldNode.GetNodeReference("magnitudeVolume") is not None)
+            self.checkVelocityFrames("[GUI] Velocity (temporal unwrapping is applied automatically)",
+                self.velocityFrames(flowFieldNode), expectedFrames, velocityQuantizationMPerSec(vencCmPerSec))
             buttonTexts = [getattr(widget.ui, f"showComponentVolume{c + 1}Button").text for c in range(3)]
             self.report.checkEqual("Component buttons show direction codes", buttonTexts, ["through", "inplane_ap", "inplane_fh"])
             activeBrowser = slicer.modules.sequences.toolBar().activeBrowserNode()
@@ -1050,30 +1054,24 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             DICOMUtils.importDicom(dataDir, db)
             timings.append(["Import DICOM files into database", time.time() - startTime])
             startTime = time.time()
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-            timings.append(["Load series as volume sequences", time.time() - startTime])
-            startTime = time.time()
-            volumeNodeSets = self.logic.findVolumeNodeSets()
-            timings.append(["Find 4D flow image sets", time.time() - startTime])
-        self.report.checkEqual("Number of detected 4D flow image sets", len(volumeNodeSets), 1)
-        if not volumeNodeSets:
-            return
-        volumeNodeSet = list(volumeNodeSets.values())[0]
-        directionCodes = [self.logic._getSequenceAttribute(n, "SlicerHeart.directionCode") for n in volumeNodeSet["componentVolumeNodes"]]
-        vencs = [float(self.logic._getSequenceAttribute(n, "SlicerHeart.vencCmPerSec")) for n in volumeNodeSet["componentVolumeNodes"]]
-        heartRate = float(self.logic._getSequenceAttribute(volumeNodeSet["magnitudeVolumeNode"], "SlicerHeart.heartRateBpm") or "nan")
-        magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+            inputFlowFieldNode = FlowTestingUtils.loadDicomStudyWithFlowPlugin()
+            timings.append(["Load with the 4D flow DICOM plugin (magnitude sequence and input flow field)", time.time() - startTime])
+        directionCodes = FlowLibraryBridge.directionCodes(inputFlowFieldNode)
+        encodingToWorld = FlowLibraryBridge.encodingToWorld(inputFlowFieldNode)
+        vencs = (np.asarray(FlowLibraryBridge.vencEncodedMmPerSec(inputFlowFieldNode)) / 10.0).tolist()
+        magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
+        heartRate = float(self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.heartRateBpm") or "nan")
         numberOfFrames = self.logic._getNumberOfDataNodesInSequence(magnitudeVolumeNode)
         self.report.table(["Property", "Value"], [
             ["Direction codes (R, A, S)", directionCodes],
-            ["Invert to RAS direction", volumeNodeSet["componentVolumeNodesInvertToRasDirection"]],
+            ["Invert to RAS direction", [bool(encodingToWorld[i, i] < 0) for i in range(3)]],
             ["Velocity encoding (cm/s)", vencs],
             ["Heart rate from DICOM (bpm)", heartRate],
             ["Number of frames", numberOfFrames],
             ["Image size (voxels)", magnitudeVolumeNode.GetImageData().GetDimensions()],
             ["Voxel spacing (mm)", magnitudeVolumeNode.GetSpacing()],
-        ], "Detected 4D flow image set")
-        self.report.checkTrue("All 3 velocity components are found", len(volumeNodeSet["componentVolumeNodes"]) == 3)
+        ], "Loaded 4D flow acquisition")
+        self.report.checkTrue("All 3 velocity components are found", len(directionCodes) == 3 and len(vencs) == 3)
         self.report.checkRange("Heart rate", heartRate, 30, 220, "bpm")
         self.report.checkTrue("Number of frames", numberOfFrames > 1, numberOfFrames, "> 1")
 
@@ -1082,15 +1080,13 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for storeInTransform in [True, False]:
             storage = self.storageName(storeInTransform)
             startTime = time.time()
-            flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(
-                volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"],
-                magnitudeVolumeNode)
+            flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
             timings.append([f"Create flow field ({storage})", time.time() - startTime])
             startTime = time.time()
             self.logic.temporalUnwrap(flowFieldNode, 0, 5.0)
             timings.append([f"Temporal unwrapping ({storage})", time.time() - startTime])
             startTime = time.time()
-            self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
             timings.append([f"Compute flow field ({storage})", time.time() - startTime])
             if storeInTransform:
                 # Flow field in the legacy format (read only), created from the computed flow field
@@ -1175,19 +1171,19 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         dataDir = self.realDataDirectoryOrSkip()
         workDir = self.temporaryDirectory("Import4DFlowRealDataOptions_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
-            volumeNodeSet = self.loadRealDataVolumeNodeSet(dataDir)
-        magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+            inputFlowFieldNode = self.loadRealDataInputFlowField(dataDir)
+        magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
         magnitudeSequenceNode = self.logic._getSequenceFromProxyNode(magnitudeVolumeNode)
         numberOfFrames = magnitudeSequenceNode.GetNumberOfDataNodes()
         magnitudeFrames = [slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(i)) for i in range(numberOfFrames)]
-        vencs = [float(self.logic._getSequenceAttribute(n, "SlicerHeart.vencCmPerSec")) for n in volumeNodeSet["componentVolumeNodes"]]
+        vencs = (np.asarray(FlowLibraryBridge.vencEncodedMmPerSec(inputFlowFieldNode)) / 10.0).tolist()
 
         # Noise masking
         rows = []
         framesByThreshold = {}
         nonzeroVoxels = {}
         for thresholdPercent in [2.0, 5.0, 15.0]:
-            flowFieldNode = self.createFlowField(volumeNodeSet, False, noiseMagnitudeThresholdPercent=thresholdPercent)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, False, noiseMagnitudeThresholdPercent=thresholdPercent)
             frames = self.velocityFrames(flowFieldNode)
             self.removeFlowField(flowFieldNode)
             framesByThreshold[thresholdPercent] = frames
@@ -1222,7 +1218,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         biasBefore = stationaryBias(baseFrames)
         rows = [["no subtraction", biasBefore, 0.0]]
         for method in [BackgroundSubtractionMethodEnum.LinearFit, BackgroundSubtractionMethodEnum.QuadraticFit]:
-            flowFieldNode = self.createFlowField(volumeNodeSet, False, backgroundSubtractionMethod=method)
+            flowFieldNode = self.createFlowField(inputFlowFieldNode, False, backgroundSubtractionMethod=method)
             frames = self.velocityFrames(flowFieldNode)
             self.removeFlowField(flowFieldNode)
             biasAfter = stationaryBias(frames)
@@ -1235,7 +1231,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.table(["Background subtraction", "Mean velocity bias in stationary tissue (m/s)", "Median velocity change in moving blood (m/s)"], rows)
 
         # Manual phase wrap correction
-        flowFieldNode = self.createFlowField(volumeNodeSet, False, unwrap=True)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=True)
         before = self.velocityFrames(flowFieldNode)
         frameIndex = numberOfFrames // 4
         component = 0
@@ -1256,9 +1252,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             segmentationNode, "Wrap-Pos-1x", magnitudeVolumeNode)
         browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
         slicer.modules.sequences.logic().UpdateSequencesFromProxyNodes(browserNode, segmentationNode)
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         after = self.velocityFrames(flowFieldNode)
-        invert = volumeNodeSet["componentVolumeNodesInvertToRasDirection"][component]
+        invert = bool(FlowLibraryBridge.encodingToWorld(inputFlowFieldNode)[component, component] < 0)
         expectedShift = 2 * vencs[component] / 100.0 * (-1.0 if invert else 1.0)
         shift = (after[frameIndex][..., component] - before[frameIndex][..., component])[marked > 0]
         self.report.text(f"{int(np.count_nonzero(marked))} voxels of component {component} in frame {frameIndex} are marked as positive 1x wrap.")
@@ -1282,9 +1278,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         dataDir = self.realDataDirectoryOrSkip()
         workDir = self.temporaryDirectory("Import4DFlowRealDataExport_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
-            volumeNodeSet = self.loadRealDataVolumeNodeSet(dataDir)
-        flowFieldNodes = {"grid transform": self.createFlowField(volumeNodeSet, True, unwrap=True),
-                          "vector volume": self.createFlowField(volumeNodeSet, False, unwrap=True)}
+            inputFlowFieldNode = self.loadRealDataInputFlowField(dataDir)
+        flowFieldNodes = {"grid transform": self.createFlowField(inputFlowFieldNode, True, unwrap=True),
+                          "vector volume": self.createFlowField(inputFlowFieldNode, False, unwrap=True)}
         frames = {storage: self.velocityFrames(node) for storage, node in flowFieldNodes.items()}
         numberOfFrames = len(frames["grid transform"])
         timings = []
@@ -1383,13 +1379,20 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         workDir = self.temporaryDirectory("Import4DFlowRealDataGui_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
             DICOMUtils.importDicom(dataDir, slicer.dicomDatabase)
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
+            fileLists = []
+            for patient in slicer.dicomDatabase.patients():
+                for study in slicer.dicomDatabase.studiesForPatient(patient):
+                    fileLists += [slicer.dicomDatabase.filesForSeries(seriesUID) for seriesUID in slicer.dicomDatabase.seriesForStudy(study)]
+            loadablesByPlugin, _ = DICOMUtils.getLoadablesFromFileLists(fileLists, ["Import4DFlowDicomPlugin"])
+            self.report.checkEqual("[GUI] 4D flow DICOM plugin loadables (one per series of the acquisition)",
+                len(next(iter(loadablesByPlugin.values()))), 4)
+            DICOMUtils.loadLoadables(loadablesByPlugin)
             slicer.util.selectModule("Import4DFlow")
             widget = slicer.modules.import4dflow.widgetRepresentation().self()
-            widget.onInspectButton()
-            self.report.checkEqual("[GUI] Image sets listed in GUI", widget.ui.inputVolumeNodeSetSelector.count, 1)
-            self.report.checkTrue("[GUI] Convert button is enabled", widget.ui.convertButton.enabled)
+            widget.enter()
             parameterNode = widget._parameterNode
+            self.report.checkTrue("[GUI] Input flow field loaded by the 4D flow DICOM plugin is selected",
+                parameterNode.inputFlowField is not None and FlowLibraryBridge.isRawFlowField(parameterNode.inputFlowField))
             # This test compares unwrapping methods with temporal unwrapping (Laplacian 4D is the default),
             # without background subtraction (a quadratic fit is the default)
             parameterNode.unwrapMode = UnwrapModeEnum.TemporalUnwrap
@@ -1397,14 +1400,14 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
             convertedFlowFieldNodes = []
             for conversion in range(2):
-                # The same images are converted twice: they are removed after the last conversion
-                parameterNode.removeInputImageAfterConversion = conversion == 1
+                # The output flow field is computed twice from the same input flow field (into a new flow field)
+                parameterNode.outputFlowField = None
                 try:
-                    widget.onConvertButton()
+                    widget.onRecomputeFlowFieldButton()
                     error = None
                 except Exception as e:
                     error = f"{type(e).__name__}: {e}"
-                self.report.checkTrue(f"[GUI, conversion {conversion + 1}] 'Create flow field' completes without error", error is None,
+                self.report.checkTrue(f"[GUI, conversion {conversion + 1}] 'Recompute flow field' completes without error", error is None,
                     error or "no error", "no error")
                 flowFieldNode = parameterNode.outputFlowField
                 self.report.checkTrue(f"[GUI, conversion {conversion + 1}] Flow field is created as vector volume",
@@ -1479,19 +1482,17 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
     # slicerheart_4dflow methods
 
-    def addRandomPhaseInAir(self, volumeNodeSet, phantom, seed=0):
-        """Replace the phase in the air (background) by random values in each frame, as in real images,
-        where the phase of noise voxels is random."""
+    def randomPhaseInAir(self, phantom, seed=0):
+        """Phase modifier for FlowPhantom.createInputFlowFieldInScene: the phase in the air (background) is replaced by random
+        values in each frame, as in real images, where the phase of noise voxels is random."""
         rng = np.random.default_rng(seed)
-        air = phantom.magnitudeVolumeArray() < 10
-        for componentVolumeNode in volumeNodeSet["componentVolumeNodes"]:
-            sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
-            for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
-                frameNode = sequenceNode.GetNthDataNode(frameIndex)
-                array = slicer.util.arrayFromVolume(frameNode)
-                array[air] = rng.integers(-FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE, np.count_nonzero(air))
-                slicer.util.arrayFromVolumeModified(frameNode)
-        return air
+        air = phantom.airMask()
+
+        def modify(frameIndex, axis, phase):
+            phase = phase.copy()
+            phase[air] = rng.integers(-FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE, np.count_nonzero(air))
+            return phase
+        return modify
 
     @reportedTest("Background phase correction by slicerheart_4dflow methods",
         "A linear or quadratic background phase error is added to the component images of a phantom with realistic proportions"
@@ -1513,11 +1514,10 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             for method in methods:
                 for perFrame in ([False, True] if method == BackgroundSubtractionMethodEnum.WarMsacFit else [False]):
                     slicer.mrmlScene.Clear()
-                    volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec, phaseOffset=phaseOffset)
-                    flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                        volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+                    inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec, phaseOffset=phaseOffset)
+                    flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
                     startTime = time.time()
-                    self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, method, 10.0,
+                    self.logic.computeOutputFlowField(flowFieldNode, 5.0, method, 10.0,
                         backgroundPolynomialOrder=max(order, 2), backgroundPerFrame=perFrame)
                     duration = time.time() - startTime
                     residual = np.mean([frame - expected for frame, expected in zip(self.velocityFrames(flowFieldNode), expectedFrames)], axis=0)
@@ -1549,15 +1549,15 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         vencCmPerSec = 70.0
         phantom = FlowPhantom()
         expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        flowFieldNode = self.createFlowField(volumeNodeSet, False, unwrap=True)
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=True)
         temporalWraps = self.logic.getWrapCounts(flowFieldNode)
         rows = []
         for mode in [UnwrapModeEnum.LaplacianUnwrap, UnwrapModeEnum.Laplacian4DUnwrap, UnwrapModeEnum.LaplacianThenTemporalUnwrap]:
             startTime = time.time()
             self.logic.laplacianUnwrap(flowFieldNode, mode, 5.0)
             duration = time.time() - startTime
-            self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
             wraps = self.logic.getWrapCounts(flowFieldNode)
             self.report.checkTrue(f"[{mode.label()}] Phase wrap segmentations are created",
                 all(flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", c) for c in range(3)))
@@ -1576,7 +1576,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         segmentId = "Wrap-Pos-1x" if segmentationNode.GetSegmentation().GetSegment("Wrap-Pos-1x") else "Wrap-Neg-1x"
         slicer.util.updateSegmentBinaryLabelmapFromArray(np.zeros(phantom.radialDistanceMm.shape, np.uint8), segmentationNode, segmentId,
             flowFieldNode.GetNodeReference("magnitudeVolume"))
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         editedError = float(np.abs(self.velocityFrames(flowFieldNode)[peakFrame] - expectedFrames[peakFrame]).max())
         self.report.checkTrue("Editing the phase wrap segmentation changes the flow field", editedError > 0.5, f"{editedError:.2f} m/s", "> 0.5 m/s")
 
@@ -1586,11 +1586,10 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     def test_23_LibraryNoiseMask(self):
         vencCmPerSec = 150.0
         phantom = FlowPhantom()
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        air = self.addRandomPhaseInAir(volumeNodeSet, phantom)
-        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 0.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec, phaseModifier=self.randomPhaseInAir(phantom))
+        air = phantom.airMask()
+        flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
+        self.logic.computeOutputFlowField(flowFieldNode, 0.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
             noiseMaskMethod=NoiseMaskMethodEnum.BockNoiseMask)
         frames = self.velocityFrames(flowFieldNode)
         maxAirSpeed = max(float(np.linalg.norm(frame[air], axis=-1).max()) for frame in frames)
@@ -1616,24 +1615,18 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         for method in [DivergenceFilterMethodEnum.NoFilter, DivergenceFilterMethodEnum.FdmProjection, DivergenceFilterMethodEnum.RelaxedProjection,
                        DivergenceFilterMethodEnum.LerayProjection, DivergenceFilterMethodEnum.DivergenceFreeWavelet]:
             slicer.mrmlScene.Clear()
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-            for component, componentVolumeNode in enumerate(volumeNodeSet["componentVolumeNodes"]):
-                sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
-                for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
-                    array = slicer.util.arrayFromVolume(sequenceNode.GetNthDataNode(frameIndex))
-                    array[:] = np.clip(array + noise[component], -FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE - 1)
-                    slicer.util.arrayFromVolumeModified(sequenceNode.GetNthDataNode(frameIndex))
-            flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
-            segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec, phaseModifier=lambda frameIndex, axis, phase:
+                np.clip(phase + noise[axis], -FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE - 1))
+            flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
+            segmentationNode, segmentId = phantom.createVesselSegmentation(inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
             lumenMask = self.logic.getLumenMask(flowFieldNode, segmentationNode, segmentId)
             if method == DivergenceFilterMethodEnum.FdmProjection:
                 with self.assertRaises(ValueError):
-                    self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
+                    self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
                         divergenceFilterMethod=method)
                 self.report.checkTrue("Divergence-free filtering without lumen segmentation is rejected", True)
             startTime = time.time()
-            self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
+            self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0,
                 divergenceFilterMethod=method, lumenMask=lumenMask)
             duration = time.time() - startTime
             velocity, voxelToWorld, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
@@ -1652,22 +1645,18 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         " inadequate when the velocity is aliased.")
     def test_25_QualityChecks(self):
         phantom = FlowPhantom(velocityNoiseCmPerSec=2.0)
-        volumeNodeSet = phantom.createComponentImagesInScene(150.0)
-        flowFieldNode = self.createFlowField(volumeNodeSet, False)
-        segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(150.0)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False)
+        segmentationNode, segmentId = phantom.createVesselSegmentation(inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
         lumenMask = self.logic.getLumenMask(flowFieldNode, segmentationNode, segmentId)
         result = self.logic.checkEncodingDirections(flowFieldNode, lumenMask)
         self.report.text("Correct mapping: " + self.logic.encodingCheckSummary(result))
         self.report.checkTrue("Correct component mapping is consistent", result["consistent"])
 
         # Invert one component (wrong sign flag)
-        wrongConfiguration = list(FlowTestingUtils.DIRECTION_CONFIGURATION_AXIAL)
-        wrongConfiguration[2] = (wrongConfiguration[2][0], not wrongConfiguration[2][1])
-        wrongVolumeNodeSet = phantom.createComponentImagesInScene(150.0)
-        wrongFlowFieldNode = self.logic.createFlowFieldFromComponentVolumes(wrongVolumeNodeSet["componentVolumeNodes"],
-            [not invert if axis == 2 else invert for axis, invert in enumerate(wrongVolumeNodeSet["componentVolumeNodesInvertToRasDirection"])],
-            wrongVolumeNodeSet["magnitudeVolumeNode"])
-        self.logic.updateFlowFieldFromComponentVolumes(wrongFlowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        wrongInputFlowFieldNode = phantom.createInputFlowFieldInScene(150.0, phaseModifier=lambda frameIndex, axis, phase: -phase if axis == 2 else phase)
+        wrongFlowFieldNode = self.logic.createOutputFlowField(wrongInputFlowFieldNode)
+        self.logic.computeOutputFlowField(wrongFlowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         wrongResult = self.logic.checkEncodingDirections(wrongFlowFieldNode, lumenMask)
         self.report.text("Mapping with inverted S component: " + self.logic.encodingCheckSummary(wrongResult))
         self.report.checkTrue("Mapping with an inverted component is inconsistent", not wrongResult["consistent"])
@@ -1702,8 +1691,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.checkTrue("Quality report markdown is created", len(markdown) > 100)
 
         slicer.mrmlScene.Clear()
-        aliasedVolumeNodeSet = phantom.createComponentImagesInScene(70.0)
-        aliasedFlowFieldNode = self.createFlowField(aliasedVolumeNodeSet, False, unwrap=True)
+        aliasedInputFlowFieldNode = phantom.createInputFlowFieldInScene(70.0)
+        aliasedFlowFieldNode = self.createFlowField(aliasedInputFlowFieldNode, False, unwrap=True)
         aliasedReport = self.logic.computeQualityReport(aliasedFlowFieldNode, phantom.insideVessel)
         self.report.checkTrue("[venc 70 cm/s] Quality report: venc is not adequate", not aliasedReport["venc"]["venc_adequate"])
 
@@ -1716,9 +1705,9 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     def test_26_TestCaseExportAndLoad(self):
         vencCmPerSec = 70.0
         phantom = FlowPhantom()
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        flowFieldNode = self.createFlowField(volumeNodeSet, False, unwrap=True)
-        segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=True)
+        segmentationNode, segmentId = phantom.createVesselSegmentation(inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
         planeNode = phantom.createMeasurementPlane(name="vessel")
         datasetDirectory, caseId = self.temporaryDirectory("TestCase"), "Phantom0001"
         startTime = time.time()
@@ -1813,14 +1802,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
     def test_27_LibraryGuiWorkflow(self):
         vencCmPerSec = 70.0
         phantom = FlowPhantom(vesselRadiusMm=6.0, tissueRadiusMm=30.0, numberOfFrames=6, velocityNoiseCmPerSec=2.0)
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec, phaseOffset=phantom.quadraticPhaseOffset())
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec, phaseOffset=phantom.quadraticPhaseOffset())
         slicer.util.selectModule("Import4DFlow")
         widget = slicer.modules.import4dflow.widgetRepresentation().self()
-        widget._volumeNodesSets = {"phantom": volumeNodeSet}
-        widget.ui.inputVolumeNodeSetSelector.clear()
-        widget.ui.inputVolumeNodeSetSelector.addItem("Phantom", "phantom")
         parameterNode = widget._parameterNode
-        parameterNode.inputVolumeNodeSet = "phantom"
+        parameterNode.inputFlowField = inputFlowFieldNode
+        parameterNode.outputFlowField = None
         parameterNode.unwrapMode = UnwrapModeEnum.LaplacianThenTemporalUnwrap
         parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.WarMsacFit
         parameterNode.backgroundPolynomialOrder = 2
@@ -1833,7 +1820,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parameterNode.backgroundSubtractionMethod = BackgroundSubtractionMethodEnum.WarMsacFit
         self.report.checkEqual("[GUI] Unwrapping method combobox shows the selected method",
             widget.ui.unwrappingMethodSelector.currentText, UnwrapModeEnum.LaplacianThenTemporalUnwrap.label())
-        widget.onConvertButton()
+        widget.onRecomputeFlowFieldButton()
         flowFieldNode = parameterNode.outputFlowField
         self.report.checkTrue("[GUI] Flow field is created", flowFieldNode is not None)
         expectedFrames = [phantom.velocityVolumeArray(i) for i in range(phantom.numberOfFrames)]
@@ -1845,7 +1832,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parameterNode.lumenSegmentID = ""
         widget.onComputeLumenButton()
         self.report.checkTrue("[GUI] Lumen segmentation is created and selected", parameterNode.lumenSegmentation is not None and parameterNode.lumenSegmentID)
-        segmentationNode, segmentId = phantom.createVesselSegmentation(volumeNodeSet["magnitudeVolumeNode"])
+        segmentationNode, segmentId = phantom.createVesselSegmentation(inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
         parameterNode.lumenSegmentation = segmentationNode
         parameterNode.lumenSegmentID = segmentId
         parameterNode.divergenceFilterMethod = DivergenceFilterMethodEnum.FdmProjection
@@ -1916,7 +1903,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         lumenSegmentation = loaded["lumenSegmentationNode"]
         lumenSegmentId = lumenSegmentation.GetSegmentation().GetNthSegmentID(0)
         self.logic.laplacianUnwrap(flowFieldNode, UnwrapModeEnum.LaplacianThenTemporalUnwrap, 5.0)
-        self.logic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.WarMsacFit, 10.0,
+        self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.WarMsacFit, 10.0,
             lumenMask=self.logic.getLumenMask(flowFieldNode, lumenSegmentation, lumenSegmentId))
         corrected, _, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
         result = self.logic.checkEncodingDirections(flowFieldNode, lumen)
@@ -1951,9 +1938,8 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         # Correctly unwrapped aliased phantom: no warning
         vencCmPerSec = 70.0
         phantom = FlowPhantom()
-        volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
         warnings = self.logic.temporalUnwrap(flowFieldNode, 0, 5.0)
         self.report.checkEqual("[aliased phantom] Temporal unwrapping warnings", warnings, [])
         warnings = self.logic.laplacianUnwrap(flowFieldNode, UnwrapModeEnum.LaplacianThenTemporalUnwrap, 5.0)
@@ -1961,17 +1947,15 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
         # Random phase in a part of the tissue (signal above the noise threshold): temporal unwrapping accumulates false wraps
         slicer.mrmlScene.Clear()
-        volumeNodeSet = phantom.createComponentImagesInScene(150.0)
         rng = np.random.default_rng(3)
         noisyTissue = phantom.stationaryTissueMask() & (rng.random(phantom.radialDistanceMm.shape) < 0.3)
-        for componentVolumeNode in volumeNodeSet["componentVolumeNodes"]:
-            sequenceNode = self.logic._getSequenceFromProxyNode(componentVolumeNode)
-            for frameIndex in range(sequenceNode.GetNumberOfDataNodes()):
-                array = slicer.util.arrayFromVolume(sequenceNode.GetNthDataNode(frameIndex))
-                array[noisyTissue] = rng.integers(-FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE, np.count_nonzero(noisyTissue))
-                slicer.util.arrayFromVolumeModified(sequenceNode.GetNthDataNode(frameIndex))
-        flowFieldNode = self.logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+
+        def randomPhaseInNoisyTissue(frameIndex, axis, phase):
+            phase = phase.copy()
+            phase[noisyTissue] = rng.integers(-FlowTestingUtils.PHASE_MAX_VALUE, FlowTestingUtils.PHASE_MAX_VALUE, np.count_nonzero(noisyTissue))
+            return phase
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(150.0, phaseModifier=randomPhaseInNoisyTissue)
+        flowFieldNode = self.logic.createOutputFlowField(inputFlowFieldNode)
         warnings = self.logic.temporalUnwrap(flowFieldNode, 0, 5.0)
         self.report.text("Warnings of temporal unwrapping with random phase in 30% of the tissue voxels: " + " / ".join(warnings))
         self.report.checkTrue("[random phase in tissue] Temporal unwrapping gives a plausibility warning", len(warnings) > 0, len(warnings), "> 0")
@@ -1995,3 +1979,282 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             FlowLibraryBridge.ensureLibrary = originalEnsureLibrary
         self.report.checkEqual("[slicerheart_4dflow not available] Temporal unwrapping is used",
             self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.phaseUnwrapping"), UnwrapModeEnum.TemporalUnwrap.name)
+
+    VENDOR_DATA_TEST_DESCRIPTION = (
+        "An anonymized {vendor} 4D flow DICOM data set (folder in the `{variable}` environment variable or `.env.local`"
+        " entry; the test is skipped if it is not available) is imported into a temporary DICOM database and loaded with the"
+        " 4D flow DICOM plugin: the velocity components must be encoded along the patient axes"
+        " (R, A, S) with the vendor sign convention, with the venc, heart rate, and frames of the acquisition, and the"
+        " vendor of the acquisition metadata must be recognized. The input flow field is created, and the encoding direction"
+        " check (divergence of the time-averaged raw velocity of a subset of the frames in the pulsatile blood,"
+        " `slicerheart_4dflow.encoding_check`) must find the imported mapping consistent: this verifies the vendor direction"
+        " and sign conventions up to a global sign (which was checked by the flow direction in the descending aorta, caudal"
+        " in systole). No unwrapping or background correction is computed, because the data sets can be large"
+        " (30 x 180 x 230 x 360 voxels).")
+
+    @reportedTest("Detection and encoding check of a GE 4D flow DICOM data set",
+        VENDOR_DATA_TEST_DESCRIPTION.format(vendor="GE", variable=FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES["ge"]))
+    def test_30_RealDataGE(self):
+        self._realDataVendorTest("ge")
+
+    @reportedTest("Detection and encoding check of a Philips 4D flow DICOM data set",
+        VENDOR_DATA_TEST_DESCRIPTION.format(vendor="Philips", variable=FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES["philips"]))
+    def test_31_RealDataPhilips(self):
+        self._realDataVendorTest("philips")
+
+    REAL_DATA_PLUGIN_TEST_DESCRIPTION = (
+        "The {vendor} 4D flow DICOM data set (folder in the {variable} environment variable; skipped if not set) is"
+        " imported and loaded with the 4D flow DICOM plugin (`Import4DFlowDicomPlugin`) directly as magnitude volume"
+        " sequence and input flow field. The result must match the volume sequences loaded with MultiVolumeImporterPlugin"
+        " (image geometry, magnitude values, and the scaled velocity of the S component in a few frames), and the examine"
+        " and load times are reported next to the volume sequence loading time of one series.")
+
+    @reportedTest("Direct loading of a GE 4D flow DICOM data set with the 4D flow DICOM plugin",
+        REAL_DATA_PLUGIN_TEST_DESCRIPTION.format(vendor="GE", variable=FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES["ge"]))
+    def test_33_RealDataDicomPluginGE(self):
+        self._realDataPluginTest("ge")
+
+    @reportedTest("Direct loading of a Philips 4D flow DICOM data set with the 4D flow DICOM plugin",
+        REAL_DATA_PLUGIN_TEST_DESCRIPTION.format(vendor="Philips", variable=FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES["philips"]))
+    def test_34_RealDataDicomPluginPhilips(self):
+        self._realDataPluginTest("philips")
+
+    @reportedTest("Direct loading of a folder of Siemens 4D flow DICOM patients with the 4D flow DICOM plugin",
+        "Each patient folder of the Siemens 4D flow DICOM data set (folder in the MRI_4D_FLOW_TEST_DATA_SIEMENS_CASES environment"
+        " variable or `.env.local` entry; skipped if not set) is imported and loaded with the 4D flow DICOM plugin, and the"
+        " result is compared with the volume sequences loaded with MultiVolumeImporterPlugin (image geometry, magnitude"
+        " values, and the scaled velocity of the S component in a few frames), as for the GE and Philips data sets. The"
+        " velocity components must be recognized by their Siemens direction codes with a known direction configuration.")
+    def test_35_RealDataDicomPluginSiemensCases(self):
+        variable = FlowTestingUtils.REAL_DATA_SIEMENS_CASES_ENV_VARIABLE
+        casesDir = FlowTestingUtils.environmentValue(variable)
+        if not casesDir or not os.path.isdir(casesDir):
+            self.skipTest(f"Siemens 4D flow patient folders are not available (set {variable} in the environment or in .env.local)")
+        patients = sorted(name for name in os.listdir(casesDir) if os.path.isdir(os.path.join(casesDir, name)))
+        self.report.checkTrue("Patient folders are found", len(patients) > 0, len(patients), "> 0")
+        rows = []
+        for patient in patients:
+            timings = self._dicomPluginComparison(f"siemens {patient}", os.path.join(casesDir, patient), "siemens", screenshot=False)
+            rows.append([patient] + [f"{seconds:.1f}" for _, seconds in (timings or [])])
+        self.report.table(["Patient", "Indexing (s)", "Plugin examine (s)", "Plugin load (s)", "MultiVolumeImporter magnitude (s)", "MultiVolumeImporter S component (s)"],
+            rows, "Timings per patient")
+
+    def _realDataPluginTest(self, vendor):
+        variable = FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES[vendor]
+        dataDir = FlowTestingUtils.environmentValue(variable)
+        if not dataDir or not os.path.isdir(dataDir):
+            self.skipTest(f"Anonymized {vendor} 4D flow data set is not available (set {variable} in the environment or in .env.local)")
+        self._dicomPluginComparison(vendor, dataDir, vendor)
+
+    def _dicomPluginComparison(self, label, dataDir, expectedVendor, screenshot=True):
+        """Load the DICOM folder with the 4D flow DICOM plugin and compare the result with MultiVolumeImporterPlugin.
+        Returns the timings (list of [step, seconds]), or None if the acquisition was not loaded."""
+        from DICOMLib import DICOMUtils
+        vendor = label
+        expectedConfiguration = {"ge": FlowTestingUtils.DIRECTION_CONFIGURATION_PATIENT_GE,
+                                 "philips": FlowTestingUtils.DIRECTION_CONFIGURATION_PATIENT_PHILIPS}.get(expectedVendor)
+        slicer.mrmlScene.Clear()
+        workDir = self.temporaryDirectory(f"Import4DFlowRealDataPlugin_{expectedVendor}_")
+        timings = []
+        with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")) as db:
+            startTime = time.time()
+            DICOMUtils.importDicom(dataDir, db)
+            timings.append(["DICOM import (indexing)", time.time() - startTime])
+            fileLists = []
+            for patient in slicer.dicomDatabase.patients():
+                for study in slicer.dicomDatabase.studiesForPatient(patient):
+                    fileLists += [slicer.dicomDatabase.filesForSeries(seriesUID) for seriesUID in slicer.dicomDatabase.seriesForStudy(study)]
+            startTime = time.time()
+            loadablesByPlugin, _ = DICOMUtils.getLoadablesFromFileLists(fileLists, ["Import4DFlowDicomPlugin"])
+            timings.append([f"4D flow plugin: examine ({len(fileLists)} series, {sum(len(f) for f in fileLists)} files)", time.time() - startTime])
+            plugin, loadables = next(iter(loadablesByPlugin.items()))
+            found = self.report.checkEqual(f"[{vendor}] Number of 4D flow plugin loadables (one per series of the acquisition)", len(loadables), 4)
+            if not found:
+                return None
+            startTime = time.time()
+            DICOMUtils.loadLoadables(loadablesByPlugin)
+            timings.append(["4D flow plugin: load (magnitude sequence and input flow field)", time.time() - startTime])
+            inputFlowFieldNodes = [node for node in slicer.util.getNodesByClass("vtkMRMLVectorVolumeNode") if FlowLibraryBridge.isRawFlowField(node)]
+            loaded = self.report.checkEqual(f"[{vendor}] Number of input flow fields", len(inputFlowFieldNodes), 1)
+            if not loaded:
+                return None
+            inputFlowFieldNode = inputFlowFieldNodes[0]
+            magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
+            numberOfFrames = self.logic._getNumberOfDataNodesInSequence(magnitudeVolumeNode)
+            self.report.checkEqual(f"[{vendor}] Vendor", self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.vendor"), expectedVendor)
+            self.report.checkTrue(f"[{vendor}] Number of frames", numberOfFrames > 1, numberOfFrames, "> 1")
+            self.report.checkRange(f"[{vendor}] Heart rate", float(self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.heartRateBpm") or "nan"), 30, 220, "bpm")
+            directionCodes = (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.directionCodes") or "").split(",")
+            encodingToWorld = np.array([float(v) for v in (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.encodingToWorld") or "").split(",")]).reshape(3, 3)
+            if expectedConfiguration is None:
+                # Siemens: image-relative direction codes, one of the known direction configurations
+                from Import4DFlowLib import FlowDicom
+                expectedConfiguration = FlowDicom.componentConfiguration(expectedVendor, directionCodes)
+                self.report.checkTrue(f"[{vendor}] Direction codes of components (R, A, S) form a known configuration",
+                    expectedConfiguration is not None and directionCodes == [c[0] for c in expectedConfiguration], directionCodes)
+            else:
+                self.report.checkEqual(f"[{vendor}] Direction codes of components (R, A, S)", directionCodes, [c[0] for c in expectedConfiguration])
+            if expectedConfiguration is not None:
+                self.report.checkEqual(f"[{vendor}] Encoding to world (signs of the components)", [bool(encodingToWorld[i, i] < 0) for i in range(3)], [c[1] for c in expectedConfiguration])
+            vencsMmPerSec = [float(v) for v in (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.vencEncodedMmPerSec") or "").split(",")]
+            maxValues = [float(v) for v in (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.componentMaxValues") or "").split(",")]
+
+            # Compare with the volume sequences loaded by MultiVolumeImporterPlugin (magnitude and the S component)
+            inputSequenceNode = self.logic._getSequenceFromProxyNode(inputFlowFieldNode)
+            magnitudeSequenceNode = self.logic._getSequenceFromProxyNode(magnitudeVolumeNode)
+            frameIndices = sorted(set([0, numberOfFrames // 2, numberOfFrames - 1]))
+            for loadable in loadables:
+                image = loadable.flowImage
+                if image["role"] != "magnitude" and image is not loadables[0].flowAcquisition["components"][2]:
+                    continue
+                label = "magnitude" if image["role"] == "magnitude" else "S velocity component"
+                seriesUID = slicer.dicomDatabase.fileValue(loadable.files[0], "0020,000E")
+                startTime = time.time()
+                referenceVolumeNode = FlowTestingUtils.loadDicomSeriesAsVolumeSequences([seriesUID])[0]
+                timings.append([f"MultiVolumeImporter: examine and load the {label} series as volume sequence", time.time() - startTime])
+                referenceSequenceNode = self.logic._getSequenceFromProxyNode(referenceVolumeNode)
+                self.report.checkEqual(f"[{vendor}] Number of frames of the {label} (4D flow plugin, MultiVolumeImporter)",
+                    (numberOfFrames, referenceSequenceNode.GetNumberOfDataNodes()), (numberOfFrames, numberOfFrames))
+                referenceIjkToRas, ijkToRas = vtk.vtkMatrix4x4(), vtk.vtkMatrix4x4()
+                referenceVolumeNode.GetIJKToRASMatrix(referenceIjkToRas)
+                magnitudeVolumeNode.GetIJKToRASMatrix(ijkToRas)
+                geometryError = max(abs(ijkToRas.GetElement(r, c) - referenceIjkToRas.GetElement(r, c)) for r in range(3) for c in range(4))
+                self.report.checkClose(f"[{vendor}] Image geometry (IJK to RAS matrix) difference of the {label}", geometryError, 0.0, atol=1e-3)
+                maxDifference, maxAbsValue = 0.0, 0.0
+                for frameIndex in frameIndices:
+                    reference = slicer.util.arrayFromVolume(referenceSequenceNode.GetNthDataNode(frameIndex)).astype(np.float32)
+                    if image["role"] == "magnitude":
+                        loadedFrame = slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(frameIndex)).astype(np.float32)
+                    else:
+                        # Scaled as the 4D flow DICOM plugin does (venc / max value, sign)
+                        loadedFrame = slicer.util.arrayFromVolume(inputSequenceNode.GetNthDataNode(frameIndex))[..., 2]
+                        reference = reference * np.float32(vencsMmPerSec[2] / maxValues[2] * encodingToWorld[2, 2])
+                    if reference.shape != loadedFrame.shape:
+                        maxDifference = float("inf")
+                        break
+                    maxDifference = max(maxDifference, float(np.abs(reference - loadedFrame).max()))
+                    maxAbsValue = max(maxAbsValue, float(np.abs(reference).max()))
+                self.report.checkClose(f"[{vendor}] Maximum difference of the {label} values in frames {frameIndices} (4D flow plugin vs MultiVolumeImporter)",
+                    maxDifference, 0.0, atol=1e-4 * max(maxAbsValue, 1.0))
+                self.logic._removeSequenceAndProxy(referenceVolumeNode)
+        if screenshot:
+            slicer.util.setSliceViewerLayers(background=magnitudeVolumeNode, fit=True)
+            self.report.screenshot(f"{vendor}: magnitude image loaded with the 4D flow DICOM plugin")
+            self.report.table(["Step", "Time (s)"], [[step, f"{seconds:.1f}"] for step, seconds in timings], f"[{vendor}] Timings")
+        return timings
+
+    def _realDataVendorTest(self, vendor):
+        from DICOMLib import DICOMUtils
+        variable = FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES[vendor]
+        dataDir = FlowTestingUtils.environmentValue(variable)
+        if not dataDir or not os.path.isdir(dataDir):
+            self.skipTest(f"Anonymized {vendor} 4D flow data set is not available (set {variable} in the environment or in .env.local)")
+        rows = []
+        for vendor, dataDir in [(vendor, dataDir)]:
+            slicer.mrmlScene.Clear()
+            workDir = self.temporaryDirectory(f"Import4DFlowRealData_{vendor}_")
+            startTime = time.time()
+            with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")) as db:
+                DICOMUtils.importDicom(dataDir, db)
+                try:
+                    inputFlowFieldNode = FlowTestingUtils.loadDicomStudyWithFlowPlugin()
+                except RuntimeError as e:
+                    inputFlowFieldNode = None
+                    self.report.checkTrue(f"[{vendor}] 4D flow acquisition is loaded by the 4D flow DICOM plugin", False, str(e))
+                if inputFlowFieldNode is None:
+                    rows.append([vendor, "not detected", "", "", "", "", "", ""])
+                    continue
+                metadata = self.logic.acquisitionMetadata(inputFlowFieldNode)
+            loadTime = time.time() - startTime
+            magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
+            directionCodes = FlowLibraryBridge.directionCodes(inputFlowFieldNode)
+            encodingToWorld = FlowLibraryBridge.encodingToWorld(inputFlowFieldNode)
+            invertFlags = [bool(encodingToWorld[i, i] < 0) for i in range(3)]
+            vencs = (np.asarray(FlowLibraryBridge.vencEncodedMmPerSec(inputFlowFieldNode)) / 10.0).tolist()
+            maxValues = [float(v) for v in (self.logic._getSequenceAttribute(inputFlowFieldNode, "SlicerHeart.componentMaxValues") or "").split(",")]
+            heartRate = float(self.logic._getSequenceAttribute(magnitudeVolumeNode, "SlicerHeart.heartRateBpm") or "nan")
+            numberOfFrames = self.logic._getNumberOfDataNodesInSequence(magnitudeVolumeNode)
+            magnitudeRange = self.logic.magnitudeRange(magnitudeVolumeNode)
+            expectedConfiguration = FlowTestingUtils.DIRECTION_CONFIGURATION_PATIENT_GE if vendor == "ge" else FlowTestingUtils.DIRECTION_CONFIGURATION_PATIENT_PHILIPS
+            self.report.checkEqual(f"[{vendor}] Vendor of the acquisition metadata", metadata.get("vendor"), vendor)
+            self.report.checkEqual(f"[{vendor}] Direction codes of components (R, A, S)", directionCodes, [c[0] for c in expectedConfiguration])
+            self.report.checkEqual(f"[{vendor}] Invert to RAS direction flags", invertFlags, [c[1] for c in expectedConfiguration])
+            self.report.checkTrue(f"[{vendor}] Velocity encoding is the same for all components and plausible",
+                len(set(vencs)) == 1 and 50.0 <= vencs[0] <= 500.0, vencs, "one value in [50, 500] cm/s")
+            expectedMaxValue = vencs[0] * 10.0 if vendor == "ge" else vencs[0]
+            self.report.checkTrue(f"[{vendor}] Loaded voxel value that corresponds to the velocity encoding",
+                all(abs(v - expectedMaxValue) < 0.01 * expectedMaxValue for v in maxValues), maxValues, f"{expectedMaxValue:g}")
+            self.report.checkRange(f"[{vendor}] Heart rate", heartRate, 30, 220, "bpm")
+            self.report.checkTrue(f"[{vendor}] Number of frames", numberOfFrames > 1, numberOfFrames, "> 1")
+            self.report.checkTrue(f"[{vendor}] Magnitude range is taken from the images", magnitudeRange > 0 and magnitudeRange != self.logic.magnitudeVolumeRange, magnitudeRange)
+            # Raw velocity: within the velocity encoding (a small fraction may exceed it, for example after corrections on the scanner)
+            rawVelocity = FlowLibraryBridge.rawEncodedVelocity(inputFlowFieldNode)
+            vencsMmPerSec = np.array(vencs) * 10.0
+            exceedingFraction = float(np.count_nonzero(np.abs(rawVelocity) > vencsMmPerSec * 1.001) / rawVelocity.size)
+            self.report.checkTrue(f"[{vendor}] Fraction of raw velocity values beyond the velocity encoding", exceedingFraction < 0.02,
+                f"{exceedingFraction:.4%}", "< 2%")
+            self.report.checkTrue(f"[{vendor}] Raw velocity values are within 1.2 x venc", float(np.abs(rawVelocity).max()) <= 1.2 * vencsMmPerSec.max(),
+                f"{float(np.abs(rawVelocity).max()):.0f} mm/s")
+
+            # Encoding direction check on the raw velocity (no unwrapping or background correction: the data sets can be
+            # large, for example 30 x 180 x 230 x 360 voxels, so a subset of the frames is used, read frame by frame)
+            del rawVelocity
+            startTime = time.time()
+            library = FlowLibraryBridge.ensureLibrary()
+            inputSequenceNode = self.logic._getSequenceFromProxyNode(inputFlowFieldNode)
+            magnitudeSequenceNode = self.logic._getSequenceFromProxyNode(magnitudeVolumeNode)
+            frameIndices = sorted(set(int(round(i)) for i in np.linspace(0, numberOfFrames - 1, min(numberOfFrames, 8))))
+            velocitySubset = np.stack([slicer.util.arrayFromVolume(inputSequenceNode.GetNthDataNode(i)).astype(np.float32) for i in frameIndices])
+            magnitudeSubset = np.stack([slicer.util.arrayFromVolume(magnitudeSequenceNode.GetNthDataNode(i)).astype(np.float32) for i in frameIndices])
+            voxelToWorld = FlowLibraryBridge.voxelToWorld(magnitudeVolumeNode)
+            # Lumen: pulsatile blood (temporal standard deviation of the velocity above 150 mm/s) in bright voxels of the body
+            # (the random phase of the air and the noisy low-signal tissue are excluded by the magnitude, very bright static
+            # objects by the upper limit), in connected components of at least 1 ml. The PC-MRA is not used, because a bright
+            # static object with a constant velocity offset can dominate it (observed in the GE data set).
+            import scipy.ndimage as ndi
+            meanMagnitude = magnitudeSubset.mean(axis=0)
+            body = meanMagnitude > library.otsu_threshold(meanMagnitude)
+            # Only the central part of the body (the heart and the great vessels; the magnitude statistics of the whole
+            # field of view are skewed by the limbs, the neck and bright static objects)
+            _, bodyJ, bodyI = np.nonzero(body)
+            j0, j1 = np.percentile(bodyJ, [20, 80]).astype(int)
+            i0, i1 = np.percentile(bodyI, [20, 80]).astype(int)
+            central = np.zeros_like(body)
+            central[:, j0:j1, i0:i1] = True
+            body &= central
+            blood = body & (meanMagnitude > np.percentile(meanMagnitude[body], 50)) & (meanMagnitude < 4 * np.median(meanMagnitude[body]))
+            temporalStd = np.sqrt(((velocitySubset - velocitySubset.mean(axis=0)[None]) ** 2).sum(axis=-1).mean(axis=0))
+            candidates = blood & (temporalStd > 150.0)
+            del temporalStd
+            labels, count = ndi.label(candidates)
+            voxelVolumeMl = abs(np.linalg.det(np.asarray(voxelToWorld)[:3, :3])) / 1000.0
+            sizes = ndi.sum(candidates, labels, range(1, count + 1))
+            lumenMask = np.isin(labels, [i + 1 for i in range(count) if sizes[i] * voxelVolumeMl >= 1.0])
+            del candidates, labels
+            result = library.encoding_check(velocitySubset, lumenMask, voxelToWorld)
+            del velocitySubset
+            checkTime = time.time() - startTime
+            self.report.text(f"[{vendor}] " + self.logic.encodingCheckSummary(result).replace("\n", " ")
+                             + f" Frames {frameIndices}, lumen {int(np.count_nonzero(lumenMask))} voxels.")
+            permutation, signs = result["best"]
+            identityMapping = list(permutation) == [0, 1, 2] and all(s > 0 for s in signs)
+            self.report.checkTrue(f"[{vendor}] Encoding directions are consistent (divergence of the imported mapping close to the lowest)",
+                result["consistent"], f"ratio {result['ratio']:.2f}")
+            if result.get("conclusive", True):
+                self.report.checkTrue(f"[{vendor}] Lowest divergence mapping is the imported mapping", identityMapping, result["best"], "((0, 1, 2), (1, 1, 1))")
+            else:
+                # The data set does not constrain the mapping strongly (for example, low velocities relative to the velocity
+                # encoding): the ranking of the mappings close to the minimum is not reliable, only the consistency is checked
+                self.report.text(f"[{vendor}] The encoding check is inconclusive (discrimination {result.get('discrimination', float('nan')):.2f}):"
+                                 f" the lowest divergence mapping {result['best']} is not checked, only the consistency of the imported mapping.")
+            rows.append([vendor, "detected", directionCodes, invertFlags, f"{vencs[0]:g}", f"{heartRate:.1f}", numberOfFrames,
+                         f"{result['ratio']:.2f} ({'consistent' if result['consistent'] else 'inconsistent'})"])
+            self.report.table(["Step", "Time (s)"], [["Import, load and detect", f"{loadTime:.1f}"], ["Encoding check", f"{checkTime:.1f}"]],
+                f"[{vendor}] Timings")
+            # Frame with the highest mean speed in the lumen (peak systole)
+            peakFrameIndex = int(np.argmax([float(np.linalg.norm(slicer.util.arrayFromVolume(inputSequenceNode.GetNthDataNode(i)), axis=-1)[lumenMask].mean())
+                                            for i in range(numberOfFrames)]))
+            self.showFlowFieldAtFrame(inputFlowFieldNode, peakFrameIndex)
+            self.report.screenshot(f"[{vendor}] Raw flow field at the frame with the highest lumen speed (frame {peakFrameIndex})")
+        self.report.table(["Vendor", "Result", "Direction codes", "Invert flags", "venc (cm/s)", "Heart rate (bpm)", "Frames", "Divergence ratio"], rows,
+            "Detection results of the vendor data sets")

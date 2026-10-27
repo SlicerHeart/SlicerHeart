@@ -88,14 +88,12 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         Vector volume flow fields are created by Import 4D Flow (mm/s), grid transform flow fields (legacy format, m/s)
         are created from them."""
         if kind in ["transform", "volume"]:
-            volumeNodeSet = phantom.createComponentImagesInScene(vencCmPerSec)
-            flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(
-                volumeNodeSet["componentVolumeNodes"], volumeNodeSet["componentVolumeNodesInvertToRasDirection"],
-                volumeNodeSet["magnitudeVolumeNode"])
-            self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+            flowFieldNode = self.importLogic.createOutputFlowField(inputFlowFieldNode)
+            self.importLogic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
             if kind == "transform":
                 flowFieldNode = FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
-            return flowFieldNode, volumeNodeSet["magnitudeVolumeNode"]
+            return flowFieldNode, inputFlowFieldNode.GetNodeReference("magnitudeVolume")
         flowFieldNode, _, _ = phantom.createFlowModelSequence(velocityArrayName)
         self.logic.setHeartRateBpm(flowFieldNode, phantom.heartRateBpm(), "test")
         referenceVolumeNode = phantom.createVolumeNode(phantom.magnitudeVolumeArray(), "Reference", addToScene=True)
@@ -191,22 +189,18 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
 
     def loadRealDataFlowFields(self, dataDir, kinds=("transform", "volume")):
         """Load the clinical data set from DICOM (the DICOM database must be open) and create flow fields
-        (with temporal unwrapping). Returns (volumeNodeSet, {kind: flowFieldNode})."""
+        (with temporal unwrapping). Returns (inputFlowFieldNode, {kind: flowFieldNode})."""
         from DICOMLib import DICOMUtils
         DICOMUtils.importDicom(dataDir, slicer.dicomDatabase)
-        FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-        volumeNodeSets = self.importLogic.findVolumeNodeSets()
-        self.assertEqual(len(volumeNodeSets), 1, "Number of detected 4D flow image sets")
-        volumeNodeSet = list(volumeNodeSets.values())[0]
-        flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+        inputFlowFieldNode = FlowTestingUtils.loadDicomStudyWithFlowPlugin()
+        flowFieldNode = self.importLogic.createOutputFlowField(inputFlowFieldNode)
         self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
-        self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.importLogic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
         flowFieldNodes = {}
         for kind in kinds:
             # Grid transform flow field (legacy format) with the same velocity as the vector volume flow field
             flowFieldNodes[kind] = flowFieldNode if kind == "volume" else FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
-        return volumeNodeSet, flowFieldNodes
+        return inputFlowFieldNode, flowFieldNodes
 
     def findPeakCoherentFlow(self, vectorVolumeFlowFieldNode, magnitudeVolumeNode):
         """Find location of the highest coherent systolic flow. Noise (random velocity directions, often saturated at the
@@ -887,10 +881,7 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         slicer.mrmlScene.Clear()
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")) as db:
             DICOMUtils.importDicom(os.path.join(workDir, "dicom"), db)
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-            volumeNodeSet = list(self.importLogic.findVolumeNodeSets().values())[0]
-            dicomFlowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+            dicomFlowFieldNode = self.importLogic.createOutputFlowField(FlowTestingUtils.loadDicomStudyWithFlowPlugin())
             self.report.checkClose("Heart rate from DICOM NominalInterval", self.logic.computeHeartRateBpmFromDicom(dicomFlowFieldNode),
                 60000.0 / 820.0, atol=1e-6, unit="bpm")
 
@@ -1006,26 +997,20 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")) as db:
             startTime = time.time()
             DICOMUtils.importDicom(dataDir, db)
-            FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-            volumeNodeSets = self.importLogic.findVolumeNodeSets()
+            inputFlowFieldNode = FlowTestingUtils.loadDicomStudyWithFlowPlugin()
             timings.append(["Load DICOM", time.time() - startTime])
-            self.report.checkEqual("Number of detected 4D flow image sets", len(volumeNodeSets), 1)
-            if not volumeNodeSets:
-                return
-            volumeNodeSet = list(volumeNodeSets.values())[0]
             flowFieldNodes = {}
             startTime = time.time()
-            flowFieldNode = self.importLogic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-                volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
+            flowFieldNode = self.importLogic.createOutputFlowField(inputFlowFieldNode)
             self.importLogic.temporalUnwrap(flowFieldNode, 0, 5.0)
-            self.importLogic.updateFlowFieldFromComponentVolumes(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+            self.importLogic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
             timings.append([f"Import flow field ({KIND_NAMES['volume']})", time.time() - startTime])
             flowFieldNodes["volume"] = flowFieldNode
             startTime = time.time()
             flowFieldNodes["transform"] = FlowTestingUtils.createLegacyTransformFlowField(flowFieldNode)
             timings.append([f"Create legacy flow field ({KIND_NAMES['transform']})", time.time() - startTime])
             heartRateFromDicom = self.logic.computeHeartRateBpmFromDicom(flowFieldNodes["transform"])
-        magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+        magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
         heartRate = self.logic.heartRateBpm(flowFieldNodes["transform"])
         self.report.checkClose("Heart rate from DICOM equals heart rate stored at import", heartRateFromDicom, heartRate, atol=1e-6, unit="bpm")
         self.report.checkRange("Heart rate", heartRate, 30, 220, "bpm")
@@ -1092,8 +1077,8 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         dataDir = self.realDataDirectoryOrSkip()
         workDir = self.temporaryDirectory("Analyze4DFlowRealDataOptions_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
-            volumeNodeSet, flowFieldNodes = self.loadRealDataFlowFields(dataDir)
-        magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+            inputFlowFieldNode, flowFieldNodes = self.loadRealDataFlowFields(dataDir)
+        magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
         flowFieldNode = flowFieldNodes["volume"]
         peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNode, magnitudeVolumeNode)
         maskRadiusMm = 10.0
@@ -1192,8 +1177,8 @@ class Analyze4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         dataDir = self.realDataDirectoryOrSkip()
         workDir = self.temporaryDirectory("Analyze4DFlowRealDataGui_")
         with DICOMUtils.TemporaryDICOMDatabase(os.path.join(workDir, "db")):
-            volumeNodeSet, flowFieldNodes = self.loadRealDataFlowFields(dataDir)
-            magnitudeVolumeNode = volumeNodeSet["magnitudeVolumeNode"]
+            inputFlowFieldNode, flowFieldNodes = self.loadRealDataFlowFields(dataDir)
+            magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
             flowFieldNode = flowFieldNodes["transform"]
             self.importLogic.setFlowFieldVisualizationToDefault(flowFieldNode)
             peakSpeed, peakFrame, peakIndex, peakRas, flowDirection = self.findPeakCoherentFlow(flowFieldNodes["volume"], magnitudeVolumeNode)

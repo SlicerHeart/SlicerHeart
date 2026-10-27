@@ -61,7 +61,7 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if THIS_DIR not in sys.path:
     sys.path.insert(0, THIS_DIR)
 
-NUMBER_OF_SERIES = 4  # magnitude and three velocity components
+NUMBER_OF_SERIES = 4  # at least: magnitude and three velocity components (GE studies have a 5th, complex difference series)
 
 
 def seriesFolders(patientDirectory):
@@ -116,15 +116,9 @@ def loadFlowField(patientDirectory, databaseDirectory, unwrapMode=DEFAULT_UNWRAP
     logic = Import4DFlow.Import4DFlowLogic()
     with DICOMUtils.TemporaryDICOMDatabase(databaseDirectory) as db:
         DICOMUtils.importDicom(patientDirectory, db)
-        FlowTestingUtils.loadDicomSeriesAsVolumeSequences()
-        volumeNodeSets = logic.findVolumeNodeSets()
-        if len(volumeNodeSets) != 1:
-            raise RuntimeError(f"Expected one 4D flow image set, found {len(volumeNodeSets)}")
-        volumeNodeSet = list(volumeNodeSets.values())[0]
-        flowFieldNode = logic.createFlowFieldFromComponentVolumes(volumeNodeSet["componentVolumeNodes"],
-            volumeNodeSet["componentVolumeNodesInvertToRasDirection"], volumeNodeSet["magnitudeVolumeNode"])
-        # DICOM metadata is read while the database is available
-        metadata = logic._dicomMetadata(flowFieldNode)
+        inputFlowFieldNode = FlowTestingUtils.loadDicomStudyWithFlowPlugin()
+        flowFieldNode = logic.createOutputFlowField(inputFlowFieldNode)
+        metadata = logic.acquisitionMetadata(flowFieldNode)
     logic.applyDefaultTestCaseProcessing(flowFieldNode, unwrapMode)
     return flowFieldNode, metadata
 

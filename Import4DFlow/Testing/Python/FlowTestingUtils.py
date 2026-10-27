@@ -57,6 +57,21 @@ DIRECTION_CONFIGURATION_CORONAL = [("inplane_rl", False), ("through", True), ("i
 # Short direction codes used in the SequenceName DICOM field (for example, 'fl3d1_v150in')
 SEQUENCE_NAME_DIRECTION_CODES = {"through": "in", "inplane_ap": "ap", "inplane_fh": "fh", "inplane_rl": "rl"}
 
+# Patient-axis direction codes (GE, Philips) for the R, A, S axes, and the vendor sign conventions
+# (same as FlowDicom.PATIENT_AXIS_CONFIGURATIONS): (directionCode, invertToRasDirection) for each RAS axis
+PATIENT_DIRECTION_CODES = ["patient_rl", "patient_ap", "patient_fh"]
+DIRECTION_CONFIGURATION_PATIENT_GE = [("patient_rl", True), ("patient_ap", True), ("patient_fh", False)]
+DIRECTION_CONFIGURATION_PATIENT_PHILIPS = [("patient_rl", True), ("patient_ap", True), ("patient_fh", False)]
+
+# Environment variables (or .env.local entries) that specify folders of anonymized 4D flow DICOM data sets of other vendors
+REAL_DATA_VENDOR_ENV_VARIABLES = {"ge": "MRI_4D_FLOW_TEST_DATA_GE", "philips": "MRI_4D_FLOW_TEST_DATA_PHILIPS"}
+# Folder of anonymized Siemens 4D flow DICOM patient folders (each loaded with the 4D flow DICOM plugin)
+REAL_DATA_SIEMENS_CASES_ENV_VARIABLE = "MRI_4D_FLOW_TEST_DATA_SIEMENS_CASES"
+
+# Magnitude scaling of the DICOM phantom variants: the phantom magnitude (3..200) is multiplied by this factor
+# (Siemens magnitude images have a fixed 0..255 range; GE and Philips images are scaled arbitrarily)
+DICOM_MAGNITUDE_SCALE = {"avanto": 1, "avantofit": 1, "sequencename": 1, "ge": 8, "philips": 20}
+
 
 #
 # Environment
@@ -872,13 +887,18 @@ class FlowPhantom:
         slicer.util.updateVolumeFromArray(volumeNode, voxelArray)
         return volumeNode
 
-    def createVolumeSequence(self, name, frameArrays, multiVolumeAttributes=True):
-        """Create a volume sequence with its own sequence browser (as the DICOM importer does).
+    def createVolumeSequence(self, name, frameArrays, multiVolumeAttributes=True, indexByFrameTime=False):
+        """Create a volume sequence with its own sequence browser (as the DICOM importer does). The index values are the
+        frame indices (MultiVolumeImporter) or the frame times (indexByFrameTime, as the 4D flow DICOM plugin).
         Returns (proxyVolumeNode, sequenceNode, browserNode)."""
         sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", name)
+        if indexByFrameTime:
+            sequenceNode.SetIndexName("time")
+            sequenceNode.SetIndexUnit("ms")
+            sequenceNode.SetIndexType(slicer.vtkMRMLSequenceNode.NumericIndex)
         for frameIndex, frameArray in enumerate(frameArrays):
             volumeNode = self.createVolumeNode(frameArray, name)
-            sequenceNode.SetDataNodeAtValue(volumeNode, str(frameIndex))
+            sequenceNode.SetDataNodeAtValue(volumeNode, f"{self.frameTimesMs[frameIndex]:g}" if indexByFrameTime else str(frameIndex))
         if multiVolumeAttributes:
             # Same attributes as set by MultiVolumeImporter when loading 4D DICOM by trigger time
             sequenceNode.SetAttribute("MultiVolume.FrameIdentifyingDICOMTagName", "TriggerTime")
@@ -892,35 +912,32 @@ class FlowPhantom:
         proxyNode.CreateDefaultDisplayNodes()
         return proxyNode, sequenceNode, browserNode
 
-    def createComponentImagesInScene(self, vencCmPerSec=150.0, directionConfiguration=DIRECTION_CONFIGURATION_AXIAL,
-                                     phaseOffset=None, wrap=True, withHeartRate=True):
-        """Create magnitude and component volume sequences in the scene, with the same attributes that
-        Import4DFlowLogic sets when it finds the images in the DICOM database.
-        Returns a volume node set dictionary (same format as Import4DFlowLogic.findVolumeNodeSets values).
+    def createInputFlowFieldInScene(self, vencCmPerSec=150.0, directionConfiguration=DIRECTION_CONFIGURATION_AXIAL,
+                                    phaseOffset=None, wrap=True, withHeartRate=True, phaseModifier=None):
+        """Create the magnitude volume sequence and the input flow field (velocity as acquired) in the scene, as the 4D flow
+        DICOM plugin does: the velocity components are generated as Siemens-like phase images (componentVolumeArray, with
+        the optional phase offset, wrapping and noise), optionally modified by phaseModifier(frameIndex, axis, phase), and
+        scaled to RAS velocity (mm/s) with the direction configuration. Returns the input flow field (proxy node).
         """
+        import Import4DFlow
+        logic = Import4DFlow.Import4DFlowLogic()
         magnitudeArray = self.magnitudeVolumeArray()
         magnitudeVolumeNode, magnitudeSequenceNode, _ = self.createVolumeSequence(
-            "Magnitude", [magnitudeArray] * self.numberOfFrames)
+            "Magnitude", [magnitudeArray] * self.numberOfFrames, indexByFrameTime=True)
         magnitudeSequenceNode.SetAttribute("SlicerHeart.directionCode", "magnitude")
         if withHeartRate:
             magnitudeSequenceNode.SetAttribute("SlicerHeart.heartRateBpm", str(self.heartRateBpm()))
-        componentVolumeNodes = []
-        invertToRasDirections = []
-        for axis, (directionCode, invertToRasDirection) in enumerate(directionConfiguration):
-            frames = [self.componentVolumeArray(frameIndex, axis, vencCmPerSec, invertToRasDirection, phaseOffset, wrap)
-                      for frameIndex in range(self.numberOfFrames)]
-            componentVolumeNode, componentSequenceNode, _ = self.createVolumeSequence(f"Phase {directionCode}", frames)
-            componentSequenceNode.SetAttribute("SlicerHeart.directionCode", directionCode)
-            componentSequenceNode.SetAttribute("SlicerHeart.vencCmPerSec", str(vencCmPerSec))
-            componentSequenceNode.SetAttribute("SlicerHeart.maxValue", str(PHASE_MAX_VALUE))
-            componentVolumeNodes.append(componentVolumeNode)
-            invertToRasDirections.append(invertToRasDirection)
-        return {
-            "name": "Phantom",
-            "componentVolumeNodes": componentVolumeNodes,
-            "componentVolumeNodesInvertToRasDirection": invertToRasDirections,
-            "magnitudeVolumeNode": magnitudeVolumeNode,
-        }
+        signs = np.array([-1.0 if invertToRasDirection else 1.0 for _, invertToRasDirection in directionConfiguration])
+        rawVelocity = np.empty((self.numberOfFrames,) + self.radialDistanceMm.shape + (3,), np.float32)
+        for frameIndex in range(self.numberOfFrames):
+            for axis, (directionCode, invertToRasDirection) in enumerate(directionConfiguration):
+                phase = self.componentVolumeArray(frameIndex, axis, vencCmPerSec, invertToRasDirection, phaseOffset, wrap)
+                if phaseModifier is not None:
+                    phase = phaseModifier(frameIndex, axis, phase)
+                rawVelocity[frameIndex, ..., axis] = phase.astype(np.float32) * np.float32(vencCmPerSec * 10.0 / PHASE_MAX_VALUE * signs[axis])
+        return logic.createInputFlowFieldFromArrays(rawVelocity, magnitudeVolumeNode, [vencCmPerSec * 10.0] * 3, np.diag(signs),
+                                                    directionCodes=[directionCode for directionCode, _ in directionConfiguration],
+                                                    componentMaxValues=[float(PHASE_MAX_VALUE)] * 3, name="Phantom input flow field")
 
     def createVesselSegmentation(self, referenceVolumeNode, radiusMm=None, name="Vessel"):
         """Segmentation with a single segment that contains the vessel lumen. Returns (segmentationNode, segmentId)."""
@@ -1012,19 +1029,42 @@ class FlowPhantom:
     # DICOM
 
     def writeDicomSeries(self, outputDir, vencCmPerSec=150.0, directionConfiguration=DIRECTION_CONFIGURATION_AXIAL,
-                         variant="avanto", patientName="Phantom^Flow", studyDate="20240102", wrap=True):
-        """Write magnitude and phase component series as Siemens CS 4D flow-like DICOM files (one file per slice and frame).
+                         variant="avanto", patientName="Phantom^Flow", studyDate="20240102", wrap=True,
+                         heartRateSource="nominalInterval"):
+        """Write magnitude and velocity component series as vendor-like 4D flow DICOM files (one file per slice and frame).
 
-        variant:
+        variant (Siemens CS 4D flow: phase component images with rescale slope 2 and intercept -4096, range [-4096, 4096)):
         - "avanto": speed and direction code in private tag (0051,1014) with explicit VR (LO), for example 'v150_through'
         - "avantofit": speed and direction code in private tag (0021,1129) as raw bytes (VR UN), as in Siemens Avanto Fit
         - "sequencename": no private tags, speed and direction is only in SequenceName, for example 'fl3d1_v150in'
+        variant (patient-axis velocity encoding, directionConfiguration must use PATIENT_DIRECTION_CODES):
+        - "ge": GE 4D flow (mm4dflow): the role of the series in private tag (0043,1030) Vas collapse flag (2: magnitude,
+          3/4/5: L/R, A/P, S/I velocity), venc (mm/s) in (0019,10CC), Velocity Encode Scale (venc/pi) in (0019,10E2),
+          int16 pixel values in mm/s, no rescale tags, all series with the same description. A 5th series with
+          flag 7 (complex difference) is written too (it is ignored by the import).
+        - "philips": Philips 4D flow classic DICOM: ImageType 'VELOCITY MAP' / 'M_FFE', (2005,1011) 'P' / 'M', venc (cm/s)
+          in (2001,101A) PC Velocity (one nonzero element for velocity images), (0018,9090) Velocity Encoding
+          Direction in the (2005,140F) sequence, stored values rescaled to cm/s (RescaleType 'cm/s')
+        The magnitude values are multiplied by DICOM_MAGNITUDE_SCALE[variant].
+        heartRateSource: "nominalInterval" (NominalInterval tag, as Siemens), "heartRate" (HeartRate tag, as GE and
+        Philips), or "none" (neither: the heart rate is estimated from the trigger times).
 
-        Returns list of series instance UIDs: [magnitude, component 0, component 1, component 2].
+        Returns list of series instance UIDs: [magnitude, component 0, component 1, component 2] (for "ge", followed by
+        the complex difference series).
         """
         import pydicom
         from pydicom.dataset import Dataset, FileMetaDataset
+        from pydicom.sequence import Sequence
         from pydicom.uid import ExplicitVRLittleEndian, MRImageStorage, generate_uid
+
+        if variant not in DICOM_MAGNITUDE_SCALE:
+            raise ValueError(f"Unknown DICOM variant: {variant}")
+        patientAxisVariant = variant in ("ge", "philips")
+        for directionCode, _ in directionConfiguration:
+            if patientAxisVariant != (directionCode in PATIENT_DIRECTION_CODES):
+                raise ValueError(f"Direction code {directionCode} cannot be used with DICOM variant {variant}")
+        if heartRateSource not in ("nominalInterval", "heartRate", "none"):
+            raise ValueError(f"Unknown heart rate source: {heartRateSource}")
 
         os.makedirs(outputDir, exist_ok=True)
         studyInstanceUID = generate_uid()
@@ -1039,23 +1079,35 @@ class FlowPhantom:
         seriesDefinitions = [("magnitude", None, False)]
         for axis, (directionCode, invertToRasDirection) in enumerate(directionConfiguration):
             seriesDefinitions.append((directionCode, axis, invertToRasDirection))
+        if variant == "ge":
+            seriesDefinitions.append(("cd", None, False))  # complex difference (not a magnitude or velocity image)
 
         seriesUIDs = []
-        magnitudeArray = self.magnitudeVolumeArray()
+        magnitudeArray = self.magnitudeVolumeArray().astype(np.int32) * DICOM_MAGNITUDE_SCALE[variant]
+        vencMmPerSec = vencCmPerSec * 10.0
+        philipsSlope = 2.0 * vencCmPerSec / 4095.0  # stored [0, 4095] -> [-venc, venc] cm/s
         for seriesIndex, (directionCode, axis, invertToRasDirection) in enumerate(seriesDefinitions):
             seriesInstanceUID = generate_uid()
             seriesUIDs.append(seriesInstanceUID)
             seriesDir = os.path.join(outputDir, f"series{seriesIndex}")
             os.makedirs(seriesDir, exist_ok=True)
             vencText = f"{vencCmPerSec:g}"
+            signedPixels = (variant == "ge")
             for frameIndex in range(self.numberOfFrames):
                 if axis is None:
-                    voxels = magnitudeArray.astype(np.int32)
-                    storedValues = voxels
+                    storedValues = magnitudeArray
                 else:
+                    # Phase in [-4096, 4096) (Siemens raw units), venc at 4096
                     voxels = self.componentVolumeArray(frameIndex, axis, vencCmPerSec, invertToRasDirection, wrap=wrap).astype(np.int32)
-                    # Stored values are in [0, 4095], rescaled to [-4096, 4094] with slope 2 and intercept -4096
-                    storedValues = np.clip(np.round((voxels + PHASE_MAX_VALUE) / 2.0), 0, 4095).astype(np.int32)
+                    if variant == "ge":
+                        # Pixel values are velocity in mm/s
+                        storedValues = np.round(voxels / PHASE_MAX_VALUE * vencMmPerSec).astype(np.int32)
+                    elif variant == "philips":
+                        velocityCmPerSec = voxels / PHASE_MAX_VALUE * vencCmPerSec
+                        storedValues = np.clip(np.round((velocityCmPerSec + vencCmPerSec) / philipsSlope), 0, 4095).astype(np.int32)
+                    else:
+                        # Stored values are in [0, 4095], rescaled to [-4096, 4094] with slope 2 and intercept -4096
+                        storedValues = np.clip(np.round((voxels + PHASE_MAX_VALUE) / 2.0), 0, 4095).astype(np.int32)
                 for sliceIndex in range(self.dims[2]):
                     sopInstanceUID = generate_uid()
                     ds = Dataset()
@@ -1070,40 +1122,101 @@ class FlowPhantom:
                     ds.AccessionNumber = "PHANTOM1"
                     ds.SeriesInstanceUID = seriesInstanceUID
                     ds.SeriesNumber = 50 + seriesIndex
-                    ds.SeriesDescription = f"4D flow phantom {directionCode}"
+                    ds.SeriesTime = "120313"
                     ds.FrameOfReferenceUID = frameOfReferenceUID
                     ds.SOPInstanceUID = sopInstanceUID
                     ds.SOPClassUID = MRImageStorage
                     ds.Modality = "MR"
-                    ds.Manufacturer = "SIEMENS"
-                    ds.ManufacturerModelName = "Avanto_fit" if variant == "avantofit" else "Avanto"
                     ds.InstanceNumber = frameIndex * self.dims[2] + sliceIndex + 1
                     ds.AcquisitionNumber = 1
                     ds.TriggerTime = f"{self.frameTimesMs[frameIndex]:.6f}"
-                    ds.NominalInterval = f"{self.nominalIntervalMs:g}"
+                    if heartRateSource == "nominalInterval":
+                        ds.NominalInterval = f"{self.nominalIntervalMs:g}"
+                    elif heartRateSource == "heartRate":
+                        ds.HeartRate = f"{round(60000.0 / self.nominalIntervalMs)}"
+                    ds.CardiacNumberOfImages = str(self.numberOfFrames)
                     ds.RepetitionTime = "40"
                     ds.EchoTime = "2.3"
                     ds.FlipAngle = "15"
                     ds.MagneticFieldStrength = "1.5"
-                    if axis is None:
-                        ds.SequenceName = "fl3d1r2"
-                        ds.ImageType = ["ORIGINAL", "PRIMARY", "M", "RETRO", "NORM", "DIS2D"]
+                    if variant == "ge":
+                        ds.Manufacturer = "GE MEDICAL SYSTEMS"
+                        ds.ManufacturerModelName = "DISCOVERY MR750"
+                        ds.SoftwareVersions = ["27", "LX", "MR Software release:"]
+                        ds.SeriesDescription = f"AX 4D FLOWQ v{vencText}"
+                        ds.ImageType = ["ORIGINAL", "PRIMARY", "OTHER"]
+                        ds.add_new((0x0019, 0x0010), "LO", "GEMS_ACQU_01")
+                        ds.add_new((0x0019, 0x109C), "LO", "mm4dflow/ORv1506")
+                        ds.add_new((0x0019, 0x10CB), "SS", 7)  # phase contrast flow axis: all
+                        ds.add_new((0x0019, 0x10CC), "SS", int(round(vencMmPerSec)))
+                        ds.add_new((0x0019, 0x10D7), "SS", frameIndex + 1)  # cardiac phase number
+                        ds.add_new((0x0019, 0x10E2), "DS", f"{vencMmPerSec / np.pi:.6f}")
+                        ds.add_new((0x0043, 0x0010), "LO", "GEMS_PARM_01")
+                        if directionCode == "cd":
+                            vasCollapseFlag = 7
+                        elif axis is None:
+                            vasCollapseFlag = 2
+                        else:
+                            vasCollapseFlag = 3 + axis
+                        ds.add_new((0x0043, 0x1030), "SS", vasCollapseFlag)
+                    elif variant == "philips":
+                        ds.Manufacturer = "Philips"
+                        ds.ManufacturerModelName = "Ingenia Ambition X"
+                        ds.SoftwareVersions = "12.3.0.1"
+                        ds.SeriesDescription = "anatomy" if axis is None else ["RL", "AP", "FH"][axis]
+                        ds.add_new((0x2001, 0x0010), "LO", "Philips Imaging DD 001")
+                        ds.add_new((0x2001, 0x1008), "IS", str(frameIndex + 1))  # phase number
+                        ds.add_new((0x2001, 0x100A), "IS", str(sliceIndex + 1))  # slice number
+                        ds.add_new((0x2001, 0x1017), "SL", self.numberOfFrames)  # number of phases
+                        ds.add_new((0x2001, 0x1018), "SL", self.dims[2])  # number of slices
+                        ds.add_new((0x2005, 0x0010), "LO", "Philips MR Imaging DD 001")
+                        velocityEncodingItem = Dataset()
+                        velocityEncodingItem.PhaseContrast = "YES"
+                        velocityEncodingItem.AcquisitionContrast = "FLOW_ENCODED"
+                        if axis is None:
+                            ds.ImageType = ["ORIGINAL", "PRIMARY", "M_FFE", "M", "FFE"]
+                            ds.add_new((0x2001, 0x1016), "SS", 3)  # number of PC directions
+                            ds.add_new((0x2001, 0x101A), "FL", [vencCmPerSec] * 3)
+                            ds.add_new((0x2005, 0x1011), "CS", "M")
+                            velocityEncodingItem.VelocityEncodingDirection = [1.0 / np.sqrt(3.0)] * 3
+                            ds.RescaleSlope = "1.7"
+                            ds.RescaleIntercept = "0"
+                            ds.RescaleType = "normalized"
+                        else:
+                            ds.ImageType = ["ORIGINAL", "PRIMARY", "VELOCITY MAP", "P", "PCA"]
+                            ds.add_new((0x2001, 0x1016), "SS", 1)
+                            pcVelocity = [0.0, 0.0, 0.0]
+                            pcVelocity[axis] = vencCmPerSec
+                            ds.add_new((0x2001, 0x101A), "FL", pcVelocity)
+                            ds.add_new((0x2005, 0x1011), "CS", "P")
+                            direction = [0.0, 0.0, 0.0]
+                            direction[axis] = 1.0
+                            velocityEncodingItem.VelocityEncodingDirection = direction
+                            ds.RescaleSlope = f"{philipsSlope:.14g}"
+                            ds.RescaleIntercept = f"{-vencCmPerSec:g}"
+                            ds.RescaleType = "cm/s"
+                        ds.add_new((0x2005, 0x140F), "SQ", Sequence([velocityEncodingItem]))
                     else:
-                        ds.SequenceName = f"fl3d1_v{vencText}{SEQUENCE_NAME_DIRECTION_CODES[directionCode]}"
-                        ds.ImageType = ["DERIVED", "PRIMARY", "P", "RETRO", "DIS2D"]
-                        ds.RescaleSlope = "2"
-                        ds.RescaleIntercept = "-4096"
-                        ds.RescaleType = "US"
-                        speedAndDirectionCode = f"v{vencText}_{directionCode}"
-                        if variant == "avanto":
-                            ds.add_new((0x0051, 0x0010), "LO", "SIEMENS MR HEADER")
-                            ds.add_new((0x0051, 0x1014), "LO", speedAndDirectionCode)
-                        elif variant == "avantofit":
-                            ds.add_new((0x0021, 0x0010), "LO", "SIEMENS MR SDS 01")
-                            value = (speedAndDirectionCode + " ").encode()  # Siemens pads to even length with a space
-                            ds.add_new((0x0021, 0x1129), "UN", value)
-                        elif variant != "sequencename":
-                            raise ValueError(f"Unknown DICOM variant: {variant}")
+                        ds.Manufacturer = "SIEMENS"
+                        ds.ManufacturerModelName = "Avanto_fit" if variant == "avantofit" else "Avanto"
+                        ds.SeriesDescription = f"4D flow phantom {directionCode}"
+                        if axis is None:
+                            ds.SequenceName = "fl3d1r2"
+                            ds.ImageType = ["ORIGINAL", "PRIMARY", "M", "RETRO", "NORM", "DIS2D"]
+                        else:
+                            ds.SequenceName = f"fl3d1_v{vencText}{SEQUENCE_NAME_DIRECTION_CODES[directionCode]}"
+                            ds.ImageType = ["DERIVED", "PRIMARY", "P", "RETRO", "DIS2D"]
+                            ds.RescaleSlope = "2"
+                            ds.RescaleIntercept = "-4096"
+                            ds.RescaleType = "US"
+                            speedAndDirectionCode = f"v{vencText}_{directionCode}"
+                            if variant == "avanto":
+                                ds.add_new((0x0051, 0x0010), "LO", "SIEMENS MR HEADER")
+                                ds.add_new((0x0051, 0x1014), "LO", speedAndDirectionCode)
+                            elif variant == "avantofit":
+                                ds.add_new((0x0021, 0x0010), "LO", "SIEMENS MR SDS 01")
+                                value = (speedAndDirectionCode + " ").encode()  # Siemens pads to even length with a space
+                                ds.add_new((0x0021, 0x1129), "UN", value)
                     position = originLps + sliceDirection * self.spacingMm[2] * sliceIndex
                     ds.ImagePositionPatient = [f"{v:.6f}" for v in position]
                     ds.ImageOrientationPatient = [f"{v:.8f}" for v in list(rowDirection) + list(columnDirection)]
@@ -1116,10 +1229,10 @@ class FlowPhantom:
                     ds.SamplesPerPixel = 1
                     ds.PhotometricInterpretation = "MONOCHROME2"
                     ds.BitsAllocated = 16
-                    ds.BitsStored = 12
-                    ds.HighBit = 11
-                    ds.PixelRepresentation = 0
-                    ds.PixelData = storedValues[sliceIndex].astype(np.uint16).tobytes()
+                    ds.BitsStored = 16 if signedPixels else 12
+                    ds.HighBit = 15 if signedPixels else 11
+                    ds.PixelRepresentation = 1 if signedPixels else 0
+                    ds.PixelData = storedValues[sliceIndex].astype(np.int16 if signedPixels else np.uint16).tobytes()
                     ds.file_meta = FileMetaDataset()
                     ds.file_meta.MediaStorageSOPClassUID = MRImageStorage
                     ds.file_meta.MediaStorageSOPInstanceUID = sopInstanceUID
@@ -1137,6 +1250,28 @@ class FlowPhantom:
 #
 # DICOM loading
 #
+
+def loadDicomStudyWithFlowPlugin():
+    """Load the 4D flow acquisition of the current DICOM database with the 4D flow DICOM plugin (all series of all studies
+    are examined together), as a user would load it in the DICOM module. Returns the input flow field (proxy node).
+    Raises RuntimeError if the plugin does not find exactly one acquisition."""
+    from DICOMLib import DICOMUtils
+    fileLists = []
+    for patient in slicer.dicomDatabase.patients():
+        for study in slicer.dicomDatabase.studiesForPatient(patient):
+            fileLists += [slicer.dicomDatabase.filesForSeries(seriesUID) for seriesUID in slicer.dicomDatabase.seriesForStudy(study)]
+    loadablesByPlugin, _ = DICOMUtils.getLoadablesFromFileLists(fileLists, ["Import4DFlowDicomPlugin"])
+    loadables = next(iter(loadablesByPlugin.values()), [])
+    acquisitions = {id(loadable.flowAcquisition) for loadable in loadables}
+    if len(acquisitions) != 1:
+        raise RuntimeError(f"Expected one 4D flow acquisition, the 4D flow DICOM plugin found {len(acquisitions)} ({len(loadables)} loadables)")
+    DICOMUtils.loadLoadables(loadablesByPlugin)
+    inputFlowFieldNodeID = loadables[0].flowAcquisition.get("inputFlowFieldNodeID")
+    inputFlowFieldNode = slicer.mrmlScene.GetNodeByID(inputFlowFieldNodeID) if inputFlowFieldNodeID else None
+    if inputFlowFieldNode is None:
+        raise RuntimeError("The 4D flow DICOM plugin did not load the acquisition")
+    return inputFlowFieldNode
+
 
 def loadDicomSeriesAsVolumeSequences(seriesUIDs=None):
     """Load 4D DICOM series from the current DICOM database as volume sequences (frames identified by trigger time),
