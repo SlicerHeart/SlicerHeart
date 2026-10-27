@@ -650,6 +650,20 @@ def main(argv):
   parser.add_argument(AnnulusContourModelExportRule.CMD_FLAG_MODEL, "--valve_annulus_contour_model", action='store_true')
 
   parser.add_argument("-d", "--debug", action='store_true', help="run python debugger upon Slicer start")
+
+  # NB: export rules registered by other modules (see ValveBatchExportWidget.registerExportPlugin). This file runs as a
+  # script (__main__), the rules are registered with the class of the imported module.
+  import ValveBatchExport as module
+  builtInRuleClasses = [plugin.getRuleClass() for plugin in ValveBatchExportWidget.registeredExportPlugins]
+  registeredRuleClasses = {}
+  for plugin in module.ValveBatchExportWidget.registeredExportPlugins:
+    ruleClass = plugin.getRuleClass()
+    if ruleClass in builtInRuleClasses or not ruleClass.CMD_FLAG:
+      continue
+    dest = f"registered_rule_{len(registeredRuleClasses)}"
+    parser.add_argument(ruleClass.CMD_FLAG, dest=dest, action='store_true', help=ruleClass.BRIEF_USE)
+    registeredRuleClasses[dest] = ruleClass
+
   args = parser.parse_args(argv)
 
   import slicer
@@ -694,6 +708,9 @@ def main(argv):
     ValveLandmarkLabelsExportRule.EXPORT_COMMISSURAL_LANDMARKS = args.valve_landmark_label_commissures
     ValveLandmarkLabelsExportRule.ONE_FILE_PER_LANDMARK = args.valve_landmark_label_individual_files
     logic.addRule(ValveLandmarkLabelsExportRule)
+  for dest, ruleClass in registeredRuleClasses.items():
+    if getattr(args, dest):
+      logic.addRule(ruleClass)
 
   assert Path(args.input_mrb).exists
 
