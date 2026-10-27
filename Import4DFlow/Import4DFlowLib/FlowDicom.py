@@ -27,6 +27,9 @@ import re
 SIEMENS_DIRECTION_CODES = ("through", "inplane_rl", "inplane_ap", "inplane_fh")
 PATIENT_DIRECTION_CODES = ("patient_rl", "patient_ap", "patient_fh")  # RAS axes R, A, S
 MAGNITUDE_DIRECTION_CODE = "magnitude"
+# Auxiliary images of an acquisition (neither magnitude nor velocity component), loaded as additional image sequences
+COMPLEX_DIFFERENCE_DIRECTION_CODE = "complex_difference"  # GE: angiogram-like complex difference image
+AUXILIARY_DIRECTION_CODES = (COMPLEX_DIFFERENCE_DIRECTION_CODE,)
 
 # Siemens CS 4D flow component images store the phase in the range of [-4096, 4096)
 SIEMENS_PHASE_MAX_VALUE = 4096
@@ -82,7 +85,7 @@ _GE_VAS_COLLAPSE_FLAGS = {
     3: "patient_rl",  # left/right (4D flow) or slice (2D PC) velocity
     4: "patient_ap",  # anterior/posterior velocity
     5: "patient_fh",  # inferior/superior velocity
-    # 7: observed in a 5th series with nonnegative values (complex difference), not used
+    7: COMPLEX_DIFFERENCE_DIRECTION_CODE,  # 5th series with nonnegative values (complex difference), auxiliary image
     # 8-11: same as 2-5, "oblique orientation" (not encountered yet, the convention is unverified)
     8: MAGNITUDE_DIRECTION_CODE,
     9: "patient_rl",
@@ -161,10 +164,12 @@ def classifyDataset(ds):
 
     Returns None if the image is not a 4D flow image of a supported vendor, otherwise a dictionary:
     - vendor: "siemens", "ge", or "philips"
-    - role: "magnitude" or "velocity"
-    - directionCode: "magnitude", or the direction code of the encoded velocity component (see the module docstring)
-    - vencCmPerSec: velocity encoding (cm/s) of the component (None for magnitude images)
-    - maxValue: loaded voxel value that corresponds to the velocity encoding (None for magnitude images)
+    - role: "magnitude", "velocity", or "auxiliary" (other image of the acquisition, for example the GE complex
+      difference image, see AUXILIARY_DIRECTION_CODES)
+    - directionCode: "magnitude", the direction code of the encoded velocity component (see the module docstring), or
+      the auxiliary image code
+    - vencCmPerSec: velocity encoding (cm/s) of the component (None for other images)
+    - maxValue: loaded voxel value that corresponds to the velocity encoding (None for other images)
     - groupKey: identifies the acquisition within the study (images of one 4D flow acquisition have the same key)
     """
     vendorName = vendor(ds)
@@ -180,9 +185,15 @@ def classifyDataset(ds):
 
 
 def _result(vendorName, directionCode, vencCmPerSec=None, maxValue=None, groupKey=None):
+    if directionCode == MAGNITUDE_DIRECTION_CODE:
+        role = "magnitude"
+    elif directionCode in AUXILIARY_DIRECTION_CODES:
+        role = "auxiliary"
+    else:
+        role = "velocity"
     return {
         "vendor": vendorName,
-        "role": "magnitude" if directionCode == MAGNITUDE_DIRECTION_CODE else "velocity",
+        "role": role,
         "directionCode": directionCode,
         "vencCmPerSec": vencCmPerSec,
         "maxValue": maxValue,
@@ -225,7 +236,8 @@ def _classifySiemens(ds):
 
 def _classifyGE(ds):
     """GE 4D flow (mm4dflow / 4DFLOW sequences): the role of each series is in the private tag (0043,1030)
-    Vas collapse flag (2: magnitude, 3/4/5: L/R, A/P, S/I velocity), the velocity encoding (mm/s) in (0019,10CC),
+    Vas collapse flag (2: magnitude, 3/4/5: L/R, A/P, S/I velocity, 7: complex difference image), the velocity encoding
+    (mm/s) in (0019,10CC),
     and the stored value scaling in (0019,10E2) Velocity Encode Scale (venc/pi): pixel = phase * scale, so the pixel
     values are velocity in mm/s. The series of one acquisition share the SeriesTime."""
     flag = _floatValue(ds, (0x0043, 0x1030))
@@ -241,7 +253,7 @@ def _classifyGE(ds):
                         " has not been verified on such images")
     seriesTime = _stringValue(ds.get("SeriesTime", "")) or _stringValue(ds.get("AcquisitionTime", ""))
     groupKey = f"{seriesTime}/{_acquisitionNumberKey(ds)}"
-    if directionCode == MAGNITUDE_DIRECTION_CODE:
+    if directionCode == MAGNITUDE_DIRECTION_CODE or directionCode in AUXILIARY_DIRECTION_CODES:
         return _result("ge", directionCode, groupKey=groupKey)
     vencMmPerSec = _floatValue(ds, (0x0019, 0x10CC))
     if not vencMmPerSec or vencMmPerSec <= 0:

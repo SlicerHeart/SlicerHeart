@@ -675,7 +675,10 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             outputFlowFieldNode = self._requireOutputFlowField()
             self.updateFlowField(outputFlowFieldNode)
             if outputFlowFieldNode is not previousOutputFlowFieldNode:
-                # A new output flow field was created: show it and browse it in the toolbar
+                # A new output flow field was created: show it instead of the input flow field, and browse it in the toolbar
+                inputDisplayNode = self.logic.getFlowFieldDisplayNode(self._parameterNode.inputFlowField)
+                if inputDisplayNode:
+                    inputDisplayNode.SetVisibility(False)
                 self.logic.setFlowFieldVisualizationToDefault(outputFlowFieldNode)
                 browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(outputFlowFieldNode)
                 slicer.modules.sequences.toolBar().setActiveBrowserNode(browserNode)
@@ -1025,25 +1028,28 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         shNode.SetItemParent(shNode.GetItemByDataNode(node), shNode.GetItemParent(shNode.GetItemByDataNode(referenceNode)))
 
     def createInputFlowFieldFromArrays(self, rawWorldVelocityMmPerSec, magnitudeVolumeNode, vencEncodedMmPerSec, encodingToWorld,
-                                       directionCodes=None, componentMaxValues=None, name="Input flow field"):
+                                       directionCodes=None, componentMaxValues=None, name="Input flow field", saveChanges=False):
         """Create the input flow field from raw velocity (t, k, j, i, 3) mm/s RAS (as acquired), on the voxel grid of the
         magnitude volume sequence, browsed with the magnitude images. encodingToWorld: 3x3, columns are the RAS directions
-        of the encoded components. Returns the input flow field (proxy node)."""
+        of the encoded components. If saveChanges is set, the sequence browser updates the proxy node by shallow copy
+        (faster replay of large images) and writes changes of the proxy node back into the sequence.
+        Returns the input flow field (proxy node)."""
         browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(magnitudeVolumeNode)
         if not browserNode:
             raise RuntimeError(f"Magnitude volume {magnitudeVolumeNode.GetName()} is expected to be proxy node of a volume sequence")
-        inputFlowFieldNode = self._createInputFlowField(lambda frameIndex: rawWorldVelocityMmPerSec[frameIndex], magnitudeVolumeNode, browserNode, name)
+        inputFlowFieldNode = self._createInputFlowField(lambda frameIndex: rawWorldVelocityMmPerSec[frameIndex], magnitudeVolumeNode, browserNode, name,
+                                                        saveChanges=saveChanges)
         FlowLibraryBridge.setRawEncoding(inputFlowFieldNode, vencEncodedMmPerSec, encodingToWorld, directionCodes, componentMaxValues)
         return inputFlowFieldNode
 
-    def _createInputFlowField(self, rawWorldFrameMmPerSec, magnitudeVolumeNode, browserNode, name):
+    def _createInputFlowField(self, rawWorldFrameMmPerSec, magnitudeVolumeNode, browserNode, name, saveChanges=False):
         """Create an input flow field (vector volume sequence, mm/s) with frames rawWorldFrameMmPerSec(frameIndex) on the voxel
         grid of the magnitude images."""
         magnitudeSequenceNode = self._getSequenceFromProxyNode(magnitudeVolumeNode)
         inputFlowFieldNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLVectorVolumeNode", name)
         inputFlowFieldNode.SetAttribute("SlicerHeart.Type", self.RAW_FLOW_FIELD_TYPE)
         inputFlowFieldNode.SetNodeReferenceID("magnitudeVolume", magnitudeVolumeNode.GetID())
-        sequenceNode = self._addFlowFieldSequence(inputFlowFieldNode, name, browserNode, magnitudeSequenceNode, saveChanges=False)
+        sequenceNode = self._addFlowFieldSequence(inputFlowFieldNode, name, browserNode, magnitudeSequenceNode, saveChanges=saveChanges)
         numberOfFrames = magnitudeSequenceNode.GetNumberOfDataNodes()
         for frameIndex in range(numberOfFrames):
             self._progress(f"Creating the input flow field (frame {frameIndex + 1} of {numberOfFrames})...", frameIndex / numberOfFrames)
@@ -1385,14 +1391,14 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             if hasattr(displayNode, "SetSamplingSpacing"):
                 # Current vector field display node API
                 displayNode.SetSamplingPattern(slicer.vtkMRMLVectorFieldDisplayNode.SamplingPatternRegular)
-                displayNode.SetSamplingSpacing(2.0)
+                displayNode.SetSamplingSpacing(5.0)  # sparse glyphs: fast update when replaying the sequence
                 displayNode.SetGlyphDiameter(0.8)
                 displayNode.SetGlyphScaleFactor(5.0 * unitToMmPerSec / 1000.0)  # 5 mm long glyph for 1 m/s
                 displayNode.SetAndObserveSamplingRegionNode(magnitudeVolumeNode)
             else:
                 # Earlier vector field display node API
                 displayNode.SetMaskingMode(slicer.vtkMRMLVectorFieldDisplayNode.MaskingModeFixedSpacing)
-                displayNode.SetEffectiveSamplingSpacingMm(2.0)
+                displayNode.SetEffectiveSamplingSpacingMm(5.0)
                 displayNode.SetGlyphDiameterMm(0.8)
                 displayNode.SetScaleFactor(5.0 * unitToMmPerSec / 1000.0)
                 displayNode.SetAndObserveRegionNode(magnitudeVolumeNode)
