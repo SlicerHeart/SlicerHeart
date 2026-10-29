@@ -25,6 +25,15 @@ from slicer.ScriptedLoadableModule import ScriptedLoadableModuleTest
 from Import4DFlowLib import FlowDicom
 
 
+def fileValues(filePaths, tag):
+    """Values of a DICOM tag of multiple files from the DICOM database (empty string if not found).
+    Uses the batch query of DICOMUtils.fileValues (Slicer 5.13 and later), or one query per file."""
+    from DICOMLib import DICOMUtils
+    if hasattr(DICOMUtils, "fileValues"):
+        return DICOMUtils.fileValues(filePaths, tag)
+    return [slicer.dicomDatabase.fileValue(filePath, tag) for filePath in filePaths]
+
+
 class Import4DFlowDicomPluginClass(DICOMPlugin):
     """4D flow MRI interpretation: magnitude + 3 velocity component series -> magnitude sequence + input flow field."""
 
@@ -80,7 +89,6 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         same in all files of a series) and group its files into frames (trigger times) and slices (positions along the
         slice normal) with bulk tag queries. Returns None if the series is not a 4D flow magnitude or velocity series."""
         import pydicom
-        from DICOMLib import DICOMUtils
 
         ds = pydicom.dcmread(files[0], stop_before_pixels=True)
         image = FlowDicom.classifyDataset(ds)
@@ -120,8 +128,8 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
 
         # Frames (trigger times) and slices (sorted along the slice normal)
         normal = np.cross(image["orientation"][:3], image["orientation"][3:])
-        triggerTimes = DICOMUtils.fileValues(files, self.tags["triggerTime"])
-        positions = DICOMUtils.fileValues(files, self.tags["position"])
+        triggerTimes = fileValues(files, self.tags["triggerTime"])
+        positions = fileValues(files, self.tags["position"])
         frames = {}
         for fileName, triggerTime, position in zip(files, triggerTimes, positions):
             if not triggerTime or not position:
@@ -243,7 +251,6 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         # Magnitude volume sequence (browsed by frame time, as volume sequences imported from DICOM) with its sequence
         # browser, and the auxiliary images of the acquisition (for example, the GE complex difference image) as
         # further sequences of the same browser
-        from DICOMLib import DICOMUtils
         frameTimes = magnitude["frameTimes"]
         browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", magnitude["seriesName"] + " browser")
         sequenceNodes = {}
@@ -285,7 +292,7 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         for image in [magnitude] + acquisition["auxiliaries"]:
             proxyNode = browserNode.GetProxyNode(sequenceNodes[id(image)])
             proxyNode.CreateDefaultDisplayNodes()
-            instanceUIDs = DICOMUtils.fileValues(image["files"], self.tags["instanceUID"])
+            instanceUIDs = fileValues(image["files"], self.tags["instanceUID"])
             proxyNode.SetAttribute("DICOM.instanceUIDs", " ".join(uid for uid in instanceUIDs if uid))
             imageLoadable = next((l for l in acquisition.get("loadables", []) if l.flowImage is image), loadable)
             self.addSeriesInSubjectHierarchy(imageLoadable, proxyNode)
@@ -314,7 +321,7 @@ class Import4DFlowDicomPluginClass(DICOMPlugin):
         logic._getSequenceFromProxyNode(inputFlowFieldNode).SetAttribute(logic.ACQUISITION_METADATA_ATTRIBUTE, json.dumps(magnitude["metadata"]))
         for axis, image in enumerate(components):
             inputFlowFieldNode.SetAttribute(f"DICOM.componentInstanceUIDs{axis}",
-                                            " ".join(uid for uid in DICOMUtils.fileValues(image["files"], self.tags["instanceUID"]) if uid))
+                                            " ".join(uid for uid in fileValues(image["files"], self.tags["instanceUID"]) if uid))
         # Show the acquisition as the volume sequence import of the DICOM module does: the magnitude images in the slice
         # views (the input flow field is not shown as a volume), the velocity as acquired as glyphs (if the vector field
         # display node is available in this Slicer version), and the sequence browser of the acquisition in the toolbar
