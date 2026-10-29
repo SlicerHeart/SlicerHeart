@@ -110,6 +110,11 @@ add_subdirectory(SimplifiedViewer)
 add_subdirectory(Converter4DSequences)
 ## NEXT_MODULE
 
+if(BUILD_TESTING)
+  # Extension-wide tests (regression check of real scenes, skipped without SLICERHEART_SCENES_DIR)
+  add_subdirectory(Testing)
+endif()
+
 #-----------------------------------------------------------------------------
 set(EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS)
 if (SlicerHeart_BUILD_ITK_FILTERS)
