@@ -265,6 +265,40 @@ class ValveBatchExportRulesTestTest(SlicerHeartTestCase):
     self.assertIn("MS", hybridRows[0].keys())
     self.assertIn("ED", hybridRows[0].keys())
 
+  def test_quantification_results_synchronize_input_valves(self):
+    """A measurement of several valves (mitral + aortic) is exported at the time points of its first
+    valve; the other valves must be moved to the same time point, like the linked valve browsers of
+    the Valve quantification module. Found by the end-to-end workflow test: the aortic valve stayed at
+    the time point it was left at, so the measurement combined MS and ED valves and was exported under
+    the phase "multiple" instead of "MS"."""
+    factory = NewFormatValveFactory()
+    mitral = factory.createValveBrowser("mitral")
+    for frame, phase in ((1, "mid-systole"), (4, "end-diastole")):
+      factory.addTimePoint(mitral, frame, phase=phase)
+      contour = factory.setContour(mitral, frame)
+      mitral.valveModel.setValveLabels([("A", *contour[0]), ("AL", *contour[3]), ("P", *contour[6]), ("PM", *contour[9])])
+    aortic = factory.createAnnotatedValve("aortic", frames=(1, 4), phases=("mid-systole", "end-diastole"))
+    measurementNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode", "Measurement")
+    measurementNode.SetHideFromEditors(False)
+    measurementNode.SetAttribute("ModuleName", "HeartValveMeasurement")
+    measurementNode.SetAttribute("MeasurementPreset", "MitralValve")
+    shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+    shNode.RequestOwnerPluginSearch(measurementNode)
+    measurementNode.SetNodeReferenceID("ValveMitralValve", mitral.heartValveNode.GetID())
+    measurementNode.SetNodeReferenceID("ValveAorticValve", aortic.heartValveNode.GetID())
+    quantLogic = slicer.modules.valvequantification.widgetRepresentation().self().logic
+    quantLogic.getMeasurementPresetById("MitralValve").metricsTable = None
+    # The aortic valve is left at ED while the mitral valve is at MS
+    scene.selectIndexValue(aortic.valveBrowserNode, factory.indexValue(4))
+    scene.selectIndexValue(mitral.valveBrowserNode, factory.indexValue(1))
+    self.rules.ValveBatchExportRule.setPhasesToExport(["MS", "ED"])
+    rule = self._run(self.rules.QuantificationResultsExportRule)
+    longRows = self._readCsv(os.path.join(rule.outputDir, rule.LONG_CSV_OUTPUT_FILENAME))
+    areaPhases = sorted(r["Phase"] for r in longRows if r["Measurement"] == "Annulus area (3D)")
+    self.assertEqual(areaPhases, ["ED", "MS"], f"one row per phase, none under 'multiple': {sorted({r['Phase'] for r in longRows})}")
+    self.assertEqual(aortic.valveBrowserNode.GetSelectedItemNumber(), 1, "the linked valve's time point is restored")
+    self.assertEqual(mitral.valveBrowserNode.GetSelectedItemNumber(), 0)
+
   def test_rules_restore_browser_selection(self):
     factory, mitral = self._buildScene(segmentation=True, aortic=False)
     browserNode = mitral.valveBrowserNode

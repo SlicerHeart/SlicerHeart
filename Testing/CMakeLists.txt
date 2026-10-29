@@ -18,3 +18,6 @@ set_tests_properties(py_SceneRegression PROPERTIES
   TIMEOUT 14400
   LABELS "SceneRegression"
   )
+
+#-----------------------------------------------------------------------------
+add_subdirectory(Python)

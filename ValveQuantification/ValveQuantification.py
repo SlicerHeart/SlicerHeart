@@ -906,7 +906,8 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     if toggle:
       if widget==self.valvesCollapsibleButton:
         layoutManager = slicer.app.layoutManager()
-        layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUp3DView)
+        if layoutManager:  # None without the main window (batch export processes, headless tests)
+          layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUp3DView)
         HeartValveLib.showSlices(False)
       elif widget==self.fieldsCollapsibleButton:
         HeartValveLib.setupDefaultLayout()

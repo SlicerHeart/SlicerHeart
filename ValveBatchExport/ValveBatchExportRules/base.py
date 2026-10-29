@@ -256,15 +256,34 @@ class ValveBatchExportRule(object):
     if not heartValveNodes:
       return
     valveModel = HeartValveLib.HeartValves.getValveModel(heartValveNodes[0])
-    for timePoint in self.iterateExportedTimePoints(valveModel):
-      phaseNames = valveQuantificationLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode)
-      if len(phaseNames) > 1:
-        if self.EXPORT_PHASES and not all(phaseName in self.EXPORT_PHASES for phaseName in phaseNames):
-          logging.debug("Multiple phases compare measurement node found but selected phases don't match those. Skipping")
-          continue
-        yield "multiple"
-      else:
-        yield phaseNames[0] if phaseNames else ''
+    # The other input valves follow the time points of the first one, like the linked valve browsers
+    # of the Valve quantification module. Otherwise a measurement of several valves would combine
+    # valves displayed at different time points and be exported under the phase "multiple".
+    linkedBrowserNodes = []
+    for heartValveNode in heartValveNodes[1:]:
+      linkedValveModel = HeartValveLib.HeartValves.getValveModel(heartValveNode)
+      linkedBrowserNode = linkedValveModel.valveBrowserNode if linkedValveModel else None
+      if linkedBrowserNode and linkedBrowserNode is not valveModel.valveBrowserNode and linkedBrowserNode not in linkedBrowserNodes:
+        linkedBrowserNodes.append(linkedBrowserNode)
+    originalLinkedItems = [(browserNode, browserNode.GetSelectedItemNumber()) for browserNode in linkedBrowserNodes]
+    try:
+      for timePoint in self.iterateExportedTimePoints(valveModel):
+        _, indexValue = valveModel.valveBrowser.getDisplayedHeartValveSequenceIndexAndValue()
+        for linkedBrowserNode in linkedBrowserNodes:
+          linkedItemNumber = linkedBrowserNode.GetMasterSequenceNode().GetItemNumberFromIndexValue(indexValue) if indexValue else -1
+          if linkedItemNumber >= 0:
+            linkedBrowserNode.SetSelectedItemNumber(linkedItemNumber)
+        phaseNames = valveQuantificationLogic.getMeasurementCardiacCyclePhaseShortNames(measurementNode)
+        if len(phaseNames) > 1:
+          if self.EXPORT_PHASES and not all(phaseName in self.EXPORT_PHASES for phaseName in phaseNames):
+            logging.debug("Multiple phases compare measurement node found but selected phases don't match those. Skipping")
+            continue
+          yield "multiple"
+        else:
+          yield phaseNames[0] if phaseNames else ''
+    finally:
+      for linkedBrowserNode, itemNumber in originalLinkedItems:
+        linkedBrowserNode.SetSelectedItemNumber(itemNumber)
 
   def addLog(self, text):
     logging.info(text)
