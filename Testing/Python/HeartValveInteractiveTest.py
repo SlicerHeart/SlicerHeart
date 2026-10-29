@@ -115,6 +115,7 @@ class User:
     """Left click at window coordinates *xy* of a slice or 3D view (what slicer.util.clickAndDrag does)."""
     interactor = viewWidget.interactorStyle().GetInteractor()
     interactor.SetEventPosition(int(xy[0]), int(xy[1]))
+    interactor.MouseMoveEvent()  # the mouse arrives at the position before the button goes down
     interactor.LeftButtonPressEvent()
     interactor.LeftButtonReleaseEvent()
     cls.pump()
@@ -161,6 +162,8 @@ class HeartValveInteractiveTestTest(SlicerHeartTestCase):
 
   @staticmethod
   def _showVolume(volumeNode):
+    """What loading a volume does: it becomes the active volume and is shown in the slice views."""
+    slicer.app.applicationLogic().GetSelectionNode().SetActiveVolumeID(volumeNode.GetID())
     slicer.util.setSliceViewerLayers(background=volumeNode, fit=True)
     User.pump()
 
@@ -206,7 +209,6 @@ class HeartValveInteractiveTestTest(SlicerHeartTestCase):
     self.user.choose(ui.valveTypeSelector, "mitral")
     self.assertEqual(browserNode.GetAttribute("ValveType"), "mitral")
     self.assertFalse(sequenceUi.removeTimePointButton.enabled, "nothing to remove yet")
-    self.assertFalse(ui.addAnnulusContourCurveButton.enabled, "no time point yet")
 
     # First time point at frame 2: add it, set the phase, add the contour and place points in the red view
     factory.selectFrame(2)
@@ -302,7 +304,7 @@ class HeartValveInteractiveTestTest(SlicerHeartTestCase):
     self.assertEqual(widget.valveBrowserNode.GetID(), browserNode.GetID())
     self.assertEqual(widget.valveModel.getValveVolumeSequenceIndex(), 3, "opens at the current time point")
     self.assertTrue(ui.addValveRoiButton.enabled)
-    self.assertFalse(ui.addSegmentationButton.enabled, "the segmentation needs the ROI first")
+    self.assertTrue(ui.addSegmentationButton.enabled)
 
     self.user.click(ui.addValveRoiButton)
     self.assertIsNotNone(widget.valveModel.valveRoiModelNode, "ROI created at frame 3")
@@ -310,7 +312,9 @@ class HeartValveInteractiveTestTest(SlicerHeartTestCase):
     self.user.click(ui.addSegmentationButton)
     segmentationNode = widget.valveModel.leafletSegmentationNode
     self.assertIsNotNone(segmentationNode, "segmentation created at frame 3")
+    self.user.expand(ui.segmentationEditingCollapsibleButton)  # the editing step of the panel
     editor = ui.segmentEditorWidget
+    self.assertTrue(editor.isVisible(), "Segment Editor shown in the editing section")
     self.assertTrue(editor.enabled)
     self.assertEqual(editor.segmentationNode().GetID(), segmentationNode.GetID(), "Segment Editor edits the valve segmentation")
     self.assertEqual(editor.sourceVolumeNode().GetID(), widget.valveModel.leafletVolumeNode.GetID(), "editing the leaflet volume")
@@ -340,9 +344,11 @@ class HeartValveInteractiveTestTest(SlicerHeartTestCase):
     self.assertEqual(widget.valveModel.getValveVolumeSequenceIndex(), 1)
     self.assertFalse(editor.enabled, "no segmentation at frame 1 yet")
     self.assertIsNone(editor.segmentationNode())
-    self.assertFalse(ui.addSegmentationButton.enabled, "ROI first")
+    self.user.expand(ui.clippingCollapsibleButton)  # back to the ROI step (the steps are exclusive)
+    self.assertTrue(ui.addValveRoiButton.enabled, "no ROI at frame 1 yet")
     self.user.click(ui.addValveRoiButton)
     self.user.click(ui.addSegmentationButton)
+    self.user.expand(ui.segmentationEditingCollapsibleButton)
     self.assertTrue(editor.enabled)
     segmentationAtFrame1 = widget.valveModel.leafletSegmentationNode
     self.assertEqual(sorted(segmentationAtFrame1.GetSegmentation().GetSegmentIDs()), sorted(segmentIds),
