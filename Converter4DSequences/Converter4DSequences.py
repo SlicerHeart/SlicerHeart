@@ -1069,40 +1069,60 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                               if segmentId != HeartValveLib.VALVE_MASK_SEGMENT_ID]
                 segmentKeys = self._getSegmentKeys(segmentation, segmentIds)
                 names = [segmentation.GetSegment(segmentId).GetName() for segmentId in segmentIds]
-                usedSegmentIds = {HeartValveLib.VALVE_MASK_SEGMENT_ID}
-                matchedCanonicalIds = set()
+                terminologies = {}
+                targets = {}  # segmentId -> harmonized segment ID
+                claimedIds = {HeartValveLib.VALVE_MASK_SEGMENT_ID}  # harmonized IDs taken in this phase
                 for segmentId in segmentIds:
-                    segment = segmentation.GetSegment(segmentId)
-                    name = segment.GetName()
                     keyType, keyValue = segmentKeys[segmentId]
-                    terminology = keyValue if keyType == "terminology" else None
-                    if terminology is None and names.count(name) > 1:
+                    terminologies[segmentId] = keyValue if keyType == "terminology" else None
+                    if terminologies[segmentId] is None and names.count(segmentation.GetSegment(segmentId).GetName()) > 1:
                         # The segment cannot be identified (two segments with the same name and no
                         # identifying terminology): keep its ID
-                        usedSegmentIds.add(segmentId)
+                        targets[segmentId] = segmentId
+                        claimedIds.add(segmentId)
+                # First the segments that match a known leaflet. The IDs are assigned for the whole phase
+                # before anything is kept, so that a leaflet may take over the ID that another segment of
+                # this phase holds and gives up (the IDs of one phase can be a permutation of another's:
+                # the segmentation copy is rebuilt from scratch by _renameSegments, see below)
+                for segmentId in segmentIds:
+                    if segmentId in targets:
                         continue
+                    name = segmentation.GetSegment(segmentId).GetName()
+                    terminology = terminologies[segmentId]
                     canonical = None
                     if terminology is not None:
                         canonical = next((c for c in canonicalSegments
-                                          if c["terminology"] == terminology and c["id"] not in matchedCanonicalIds), None)
+                                          if c["terminology"] == terminology and c["id"] not in claimedIds), None)
                     if canonical is None:
                         canonical = next((c for c in canonicalSegments
-                                          if c["name"] == name and c["id"] not in matchedCanonicalIds), None)
-                    canonicalSegmentId = canonical["id"] if canonical else None
-                    if (canonicalSegmentId and canonicalSegmentId not in usedSegmentIds
-                            and (canonicalSegmentId == segmentId or canonicalSegmentId not in segmentIds)):
-                        targetSegmentId = canonicalSegmentId
-                        if canonical["terminology"] is None and terminology is not None:
-                            canonical["terminology"] = terminology
-                    else:
-                        targetSegmentId = segmentId
-                        if segmentId not in [c["id"] for c in canonicalSegments]:
-                            canonicalSegments.append({"id": segmentId, "name": name, "terminology": terminology})
-                            segmentDefinitions[segmentId] = ValveModel.getSegmentDefinition(segment)
-                    matchedCanonicalIds.add(targetSegmentId)
-                    usedSegmentIds.add(targetSegmentId)
-                    if targetSegmentId != segmentId:
-                        remap[segmentId] = targetSegmentId
+                                          if c["name"] == name and c["id"] not in claimedIds), None)
+                    if canonical is None:
+                        continue
+                    if canonical["terminology"] is None and terminology is not None:
+                        canonical["terminology"] = terminology
+                    targets[segmentId] = canonical["id"]
+                    claimedIds.add(canonical["id"])
+                # Then the segments that match no known leaflet: each keeps its ID (joining the known leaflet
+                # of that ID, if there is one: the same leaflet renamed in one phase) unless another segment
+                # of this phase takes the ID over, in which case it gets a new unique ID (only the copies
+                # are renamed, the legacy nodes are left unchanged)
+                for segmentId in segmentIds:
+                    if segmentId in targets:
+                        continue
+                    segment = segmentation.GetSegment(segmentId)
+                    knownIds = {c["id"] for c in canonicalSegments}
+                    targetSegmentId = segmentId
+                    suffix = 1
+                    while targetSegmentId in claimedIds or (targetSegmentId != segmentId and targetSegmentId in knownIds):
+                        targetSegmentId = f"{segmentId}_{suffix}"
+                        suffix += 1
+                    targets[segmentId] = targetSegmentId
+                    claimedIds.add(targetSegmentId)
+                    if targetSegmentId not in knownIds:
+                        canonicalSegments.append({"id": targetSegmentId, "name": segment.GetName(),
+                                                  "terminology": terminologies[segmentId]})
+                        segmentDefinitions[targetSegmentId] = ValveModel.getSegmentDefinition(segment)
+                remap = {segmentId: target for segmentId, target in targets.items() if target != segmentId}
             remapByValveId[heartValveNode.GetID()] = remap
         return remapByValveId, [c["id"] for c in canonicalSegments], segmentDefinitions
 
@@ -1133,11 +1153,16 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
                 targetDisplayNode.SetSegmentOverrideColor(newSegmentId, overrideColor[0], overrideColor[1], overrideColor[2])
             else:
                 targetDisplayNode.UnsetSegmentOverrideColor(newSegmentId)
+        # Drop the properties left under the old IDs, except where the old ID is the harmonized ID of
+        # another segment (the IDs of one phase can be a permutation of another's): removing those would
+        # discard the properties just set, and the accessors do not create them again (the segment
+        # list of the display node is only refreshed when the segmentation changes)
+        targetSegmentIds = set(targetDisplayNode.GetDisplayableNode().GetSegmentation().GetSegmentIDs())
         for oldSegmentId, newSegmentId in segmentIdRemap.items():
-            if oldSegmentId != newSegmentId:
+            if oldSegmentId != newSegmentId and oldSegmentId not in targetSegmentIds:
                 targetDisplayNode.RemoveSegmentDisplayProperties(oldSegmentId)
         # Properties of the segments this phase did not have (added as empty segments)
-        for segmentId in targetDisplayNode.GetDisplayableNode().GetSegmentation().GetSegmentIDs():
+        for segmentId in targetSegmentIds:
             targetDisplayNode.GetSegmentVisibility(segmentId)
 
     @staticmethod

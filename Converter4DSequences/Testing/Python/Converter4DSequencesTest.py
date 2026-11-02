@@ -546,6 +546,69 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
       self.assertEqual(offending, [], f"{record.phase}: displaying the time point must not log segment warnings")
     self._assertSceneIsCleanNewFormat(builder)
 
+  def test_segment_ids_permuted_between_phases(self):
+    """The leaflets of one phase hold the IDs that other leaflets hold in another phase (layout of a
+    real LAVV scene: end-diastole has an extra "Segment_1" next to Segment_2/3/4, mid-systole has the
+    same three leaflets on Segment_1/3/2, end-systole uses the names as IDs). Every leaflet must get
+    the ID of its first phase at all time points, with its own content, and no leaflet may be lost or
+    end up in another leaflet's slot."""
+    names = {"Segment_1": "Segment_1", "Segment_2": "superior bridging leaflet", "Segment_3": "left mural leaflet",
+             "Segment_4": "inferior bridging leaflet"}
+    builder = LegacySceneBuilder()
+    first = builder.addLegacyValve("lavv", frameIndex=1, phase="end-diastole", segmentIds=tuple(names), segmentNames=names)
+    midNames = {"Segment_1": "superior bridging leaflet", "Segment_3": "inferior bridging leaflet",
+                "Segment_2": "left mural leaflet"}
+    second = builder.addLegacyValve("lavv", frameIndex=3, phase="mid-systole", segmentIds=tuple(midNames),
+                                    segmentNames=midNames, valveMask=False)
+    endNames = {n: n for n in ("superior bridging leaflet", "inferior bridging leaflet", "left mural leaflet")}
+    third = builder.addLegacyValve("lavv", frameIndex=5, phase="end-systole", segmentIds=tuple(endNames),
+                                   segmentNames=endNames, valveMask=False)
+    # Where each leaflet is before the conversion, by name
+    centersByName = {}
+    for record in (first, second, third):
+      legacyNode = record.nodes["LeafletSegmentation"]
+      centersByName[record.phase] = {record.segmentNames[segmentId]: list(legacyNode.GetSegmentCenterRAS(segmentId))
+                                     for segmentId in record.segmentIds}
+    self._convert()
+    valveBrowser = self._browserForValveType("lavv")
+    valveModel = valveBrowser.valveModel
+    sequenceNode = valveModel.leafletSegmentationSequenceNode
+    expectedIds = sorted(list(names) + ["ValveMask"])
+    harmonizedIdByName = {name: segmentId for segmentId, name in names.items()}
+    for record in (first, second, third):
+      storedNode = sequenceNode.GetDataNodeAtValue(record.indexValue)
+      self.assertEqual(sorted(storedNode.GetSegmentation().GetSegmentIDs()), expectedIds, f"{record.phase}: segment IDs")
+      for segmentId, name in names.items():
+        self.assertEqual(storedNode.GetSegmentation().GetSegment(segmentId).GetName(), name, f"{record.phase}: {segmentId}")
+      self._goTo(valveBrowser, record.indexValue)
+      segmentationNode = valveModel.leafletSegmentationNode
+      for name, center in centersByName[record.phase].items():
+        segmentId = harmonizedIdByName[name]
+        self.assertGreater(self._segmentVoxelCount(segmentationNode, segmentId), 0, f"{record.phase}: {name} kept")
+        np.testing.assert_allclose(segmentationNode.GetSegmentCenterRAS(segmentId), center, atol=0.5,
+                                   err_msg=f"{record.phase}: content of {name} under {segmentId}")
+      for segmentId in set(names) - {harmonizedIdByName[n] for n in centersByName[record.phase]}:
+        self.assertEqual(self._segmentVoxelCount(segmentationNode, segmentId), 0, f"{record.phase}: {segmentId} is empty")
+      for name in centersByName[record.phase]:
+        surface = valveModel.getLeafletNodeReference("LeafletSurfaceModel", harmonizedIdByName[name])
+        self.assertIsNotNone(surface, f"{record.phase}: surface of {name}")
+        self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(surface), f"{record.phase}: surface item of {name}")
+    self.assertEqual(sorted(m.segmentId for m in valveModel.leafletModels), sorted(names), "one leaflet model per harmonized ID")
+    # Display properties exist for every segment at every time point (the properties of a segment must
+    # not be dropped with the old ID that another segment of the phase gives up)
+    logModel = slicer.app.errorLogModel()
+    displayNode = valveModel.leafletSegmentationNode.GetDisplayNode()
+    for record in (first, second, third):
+      before = logModel.logEntryCount()
+      self._goTo(valveBrowser, record.indexValue)
+      for segmentId in expectedIds:
+        displayNode.GetSegmentVisibility(segmentId)
+      slicer.app.processEvents()
+      messages = [logModel.logEntryDescription(i) for i in range(before, logModel.logEntryCount())]
+      offending = [m for m in messages if "display properties" in m or "does not contain segment" in m]
+      self.assertEqual(offending, [], f"{record.phase}: displaying the time point must not log segment warnings")
+    self._assertSceneIsCleanNewFormat(builder)
+
   def test_coaptation_preserved(self):
     builder = LegacySceneBuilder()
     records = builder.addLegacyValves("mitral", self.THREE_PHASES[:2], coaptation=True)
