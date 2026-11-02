@@ -224,6 +224,10 @@ class ValveModel:
       itemNumber = sequenceNode.GetItemNumberFromIndexValue(indexValue)
       if itemNumber < 0:
         return False
+      # An empty placeholder model (stored so that the proxy keeps a mesh, see
+      # HeartValves.fillMissingModelItems) is not data of this time point
+      if HeartValves.isEmptyModelPlaceholder(sequenceNode.GetNthDataNode(itemNumber)):
+        return False
       return True
 
     def _heartValveNodeReferencedSequenceNode(self, referenceRole):

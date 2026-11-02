@@ -1867,6 +1867,14 @@ class Converter4DSequencesLogic(ScriptedLoadableModuleLogic):
 
                 logging.info(f"Organized {hierarchyCount} item(s) under heart valve '{heartValveProxyNode.GetName()}' in subject hierarchy")
 
+        # Empty placeholder models at the time points where a model sequence has no data (e.g. the
+        # surface of a leaflet segmented at one phase only), see HeartValves.fillMissingModelItems
+        from HeartValveLib import HeartValves
+        addedPlaceholders = HeartValves.fillMissingModelItems(valveBrowserNode)
+        if addedPlaceholders:
+            slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(valveBrowserNode)
+            logging.info(f"Added {addedPlaceholders} empty placeholder model(s) at time points without data")
+
         logging.info("Finished converting referenced nodes to sequences")
 
     @staticmethod

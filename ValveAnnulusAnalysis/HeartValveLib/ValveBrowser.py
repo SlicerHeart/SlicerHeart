@@ -113,6 +113,9 @@ class ValveBrowser:
       # Switch to that new node
       index = heartValveSequenceNode.GetItemNumberFromIndexValue(indexValue)
       self.valveBrowserNode.SetSelectedItemNumber(index)
+      # The model sequences have no item at the new time point: store empty placeholders so that the
+      # proxies keep a mesh (see HeartValves.fillMissingModelItems)
+      HeartValves.fillMissingModelItems(self.valveBrowserNode)
       slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(self.valveBrowserNode)
 
       # Give the new time point its own item in AxialSliceToRasTransform_Sequence, carrying forward the
@@ -470,6 +473,11 @@ class ValveBrowser:
       _, indexValue = self.getDisplayedHeartValveSequenceIndexAndValue()
 
       if indexValue is not None and sequenceNode.GetItemNumberFromIndexValue(indexValue) >= 0:
+        # An empty placeholder item (HeartValves.fillMissingModelItems) becomes a regular item now
+        # that the time point gets data: drop the tag from the item and from the proxy showing it
+        for node in (sequenceNode.GetDataNodeAtValue(indexValue, True), proxyNode):
+          if node and node.GetAttribute(HeartValves.EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE):
+            node.RemoveAttribute(HeartValves.EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE)
         # The item already exists; when SaveChanges is enabled, proxy modifications are recorded
         # into it, so no browser-wide proxy refresh is needed. Skipping it matters: this method is
         # called for every metric model during quantification, and each UpdateProxyNodesFromSequences

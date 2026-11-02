@@ -69,10 +69,10 @@ def setup(usPresetsScenePath):
   registerCustomLayouts()
   registerCustomVrPresets(usPresetsScenePath)
   updateLegacyHeartValveNodes()
-  upgradeConvertedMeasurementSequences()
+  upgradeConvertedScene()
   if SceneEndImportUpgradeObserver is None:
     SceneEndImportUpgradeObserver = slicer.mrmlScene.AddObserver(
-      slicer.vtkMRMLScene.EndImportEvent, upgradeConvertedMeasurementSequences)
+      slicer.vtkMRMLScene.EndImportEvent, upgradeConvertedScene)
   if SceneEndImportEventObserver is None:
     logging.debug("Added scene end import observer for HeartValves")
     SceneEndImportEventObserver = slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.EndImportEvent, updateLegacyHeartValveNodes)
@@ -1184,6 +1184,76 @@ def setMarkupPlaceModeToUnconstrained(markupsNode):
     return
   markupsNode.CreateDefaultDisplayNodes()
   markupsNode.GetDisplayNode().SetSnapMode(slicer.vtkMRMLMarkupsDisplayNode.SnapModeUnconstrained)
+
+
+# Attribute of the empty model items that stand in for a model at the time points where its sequence
+# has no data (see fillMissingModelItems)
+EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE = "HeartValve.EmptyPlaceholder"
+
+
+def isEmptyModelPlaceholder(node):
+  """True for a placeholder model item (or the proxy showing one) that has no mesh points."""
+  if not node or not node.IsA("vtkMRMLModelNode") or not node.GetAttribute(EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE):
+    return False
+  mesh = node.GetMesh()
+  return mesh is None or mesh.GetNumberOfPoints() == 0
+
+
+def fillMissingModelItems(browserNode):
+  """Store an empty placeholder model at every time point where a model sequence of the valve browser
+  has no item, so that the model proxy never loses its mesh.
+
+  At a time point without item the browser resets the proxy to a default node without mesh
+  (MissingItemSetToDefault), and the model displayable manager keeps the actor of the last shown
+  mesh and ignores display changes of a model without mesh: the surface of another phase (e.g. of a
+  leaflet that was segmented at one phase only) stays on screen in the default color, cannot be
+  hidden, and comes back after every browser update. An empty mesh is rendered as nothing.
+  The placeholders are tagged (EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE) and do not count as data:
+  ValveModel.isNodeSpecifiedForCurrentTimePoint reports a tagged item without points as unspecified.
+  Only sequences in MissingItemSetToDefault mode are filled (the mode of per-time-point data; the
+  measurement results use MissingItemIgnore and keep their proxies).
+  :return: number of items added
+  """
+  masterSequenceNode = browserNode.GetMasterSequenceNode()
+  if not masterSequenceNode:
+    return 0
+  indexValues = [masterSequenceNode.GetNthIndexValue(i) for i in range(masterSequenceNode.GetNumberOfDataNodes())]
+  sequenceNodes = vtk.vtkCollection()
+  browserNode.GetSynchronizedSequenceNodes(sequenceNodes, True)
+  added = 0
+  for sequenceIndex in range(sequenceNodes.GetNumberOfItems()):
+    sequenceNode = sequenceNodes.GetItemAsObject(sequenceIndex)
+    if sequenceNode.GetNumberOfDataNodes() == 0 or not sequenceNode.GetNthDataNode(0).IsA("vtkMRMLModelNode"):
+      continue
+    if browserNode.GetMissingItemMode(sequenceNode) != slicer.vtkMRMLSequenceBrowserNode.MissingItemSetToDefault:
+      continue
+    firstDataNode = sequenceNode.GetNthDataNode(0)
+    for indexValue in indexValues:
+      if sequenceNode.GetItemNumberFromIndexValue(indexValue) >= 0:
+        continue
+      placeholder = slicer.vtkMRMLModelNode()
+      placeholder.SetName(firstDataNode.GetName())
+      placeholder.SetAndObservePolyData(vtk.vtkPolyData())
+      placeholder.SetAttribute(EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE, "1")
+      sequenceNode.SetDataNodeAtValue(placeholder, indexValue)
+      added += 1
+  return added
+
+
+def upgradeConvertedScene(unused1=None, unused2=None):
+  """Upgrades of scenes converted by earlier versions of Converter4DSequences, applied when a scene
+  is imported and when the module is set up."""
+  upgradeConvertedMeasurementSequences()
+  added = 0
+  for browserNode in slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode"):
+    if browserNode.GetAttribute("ModuleName") != "HeartValve":
+      continue
+    addedForBrowser = fillMissingModelItems(browserNode)
+    if addedForBrowser:
+      slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(browserNode)
+      added += addedForBrowser
+  if added:
+    logging.info(f"Added {added} empty placeholder model(s) at time points without data to converted valve sequences")
 
 
 def upgradeConvertedMeasurementSequences(unused1=None, unused2=None):

@@ -486,6 +486,31 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     self.assertFalse(valveModel.isNodeSpecifiedForCurrentTimePoint(septalBoundary), "no septal leaflet at the first phase")
     anteriorBoundary = valveModel.getLeafletNodeReference("LeafletSurfaceBoundaryMarkup", "Anterior")
     self.assertControlPointsEqual(anteriorBoundary, two.boundaryPoints["Anterior"], msg="anterior boundary, phase 1")
+    # The surface of the leaflet absent at this phase is an empty placeholder model: a proxy without
+    # mesh would keep the surface of the other phase on screen (Slicer's model displayable manager
+    # neither clears nor hides the actor of a model that lost its mesh), and the placeholder does
+    # not count as a specified surface
+    import HeartValveLib
+    septalSurface = valveModel.getLeafletNodeReference("LeafletSurfaceModel", "Septal")
+    self.assertIsNotNone(septalSurface)
+    self.assertFalse(valveModel.isNodeSpecifiedForCurrentTimePoint(septalSurface), "placeholder surface is not specified")
+    self.assertIsNotNone(septalSurface.GetPolyData(), "placeholder surface has an (empty) mesh")
+    self.assertEqual(septalSurface.GetPolyData().GetNumberOfPoints(), 0)
+    self._goTo(valveBrowser, three.indexValue)
+    self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(septalSurface))
+    self.assertGreater(septalSurface.GetPolyData().GetNumberOfPoints(), 0)
+    # Adding the surface at the first phase turns the placeholder into a regular item
+    self._goTo(valveBrowser, two.indexValue)
+    septalSurfaceSequence = valveBrowser.valveBrowserNode.GetSequenceNode(septalSurface)
+    valveBrowser.addCurrentTimePointToSequence(septalSurfaceSequence)
+    self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(septalSurface), "surface specified once its time point was added")
+    self.assertIsNone(septalSurfaceSequence.GetDataNodeAtValue(two.indexValue, True).GetAttribute(
+      HeartValveLib.HeartValves.EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE))
+    # A scene converted before placeholders existed gets them when it is upgraded at import
+    self._goTo(valveBrowser, three.indexValue)
+    septalSurfaceSequence.RemoveDataNodeAtValue(two.indexValue)
+    self.assertEqual(HeartValveLib.HeartValves.fillMissingModelItems(valveBrowser.valveBrowserNode), 1)
+    self.assertEqual(HeartValveLib.HeartValves.fillMissingModelItems(valveBrowser.valveBrowserNode), 0, "idempotent")
 
   def test_segments_harmonized_by_terminology_or_name_and_completed_at_every_phase(self):
     """Phases segmented by different tools: one phase with specific terminology entries and plain

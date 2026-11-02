@@ -717,10 +717,11 @@ class MeasurementPreset(object):
 
       namePrefix = coaptationModel.getName(valveModel)
 
-      if not surfaceModelNode.GetPolyData():
+      # A converted scene keeps an empty placeholder model at the time points without surface
+      if not surfaceModelNode.GetPolyData() or surfaceModelNode.GetPolyData().GetNumberOfPoints() == 0:
         valveModel.updateCoaptationModels()
 
-      if not surfaceModelNode.GetPolyData():
+      if not surfaceModelNode.GetPolyData() or surfaceModelNode.GetPolyData().GetNumberOfPoints() == 0:
         self.metricsMessages.append("No coaptation model found. Skipping.")
         continue
 
