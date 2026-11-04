@@ -1193,6 +1193,14 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             parameters["InputModel"] = outputFlowMetricsModel
             parameters["OutputModel"] = outputFlowMetricsModel
             parameters["OutputArrayName"] = "Speed"
+
+            # Workaround for https://github.com/Slicer/Slicer/pull/9534: the CLI output is read back with the storage node of the
+            # model, which reports the read as failed if it still has an error message from an earlier operation (for example,
+            # from saving the scene to a full disk). This comment and the two lines below can be removed when all supported
+            # Slicer versions include that pull request.
+            if outputFlowMetricsModel.GetStorageNode():
+                outputFlowMetricsModel.GetStorageNode().GetUserMessages().ClearMessages()
+
             probeVolumeWithModel = slicer.modules.probevolumewithmodel
             probeVolumeCliNode = slicer.cli.runSync(probeVolumeWithModel, probeVolumeCliNode, parameters)
             if probeVolumeCliNode.GetStatus() & probeVolumeCliNode.ErrorsMask:
