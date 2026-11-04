@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>420</width>
-    <height>700</height>
+    <width>484</width>
+    <height>795</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -33,20 +33,20 @@
          <layout class="QHBoxLayout" name="inputFilesLayout">
           <item>
            <widget class="QListWidget" name="inputFilesListWidget">
-            <property name="toolTip">
-             <string>Mesh files to import. Drag and drop files here, or use the Add button.</string>
-            </property>
             <property name="minimumSize">
              <size>
               <width>0</width>
               <height>80</height>
              </size>
             </property>
-            <property name="selectionMode">
-             <enum>QAbstractItemView::ExtendedSelection</enum>
-            </property>
             <property name="acceptDrops">
              <bool>true</bool>
+            </property>
+            <property name="toolTip">
+             <string>Mesh files to import. Drag and drop files here, or use the Add button.</string>
+            </property>
+            <property name="selectionMode">
+             <enum>QAbstractItemView::ExtendedSelection</enum>
             </property>
            </widget>
           </item>
@@ -99,7 +99,7 @@
         <item row="1" column="1">
          <widget class="QComboBox" name="inputCoordinateSystemComboBox">
           <property name="toolTip">
-           <string>Coordinate system that point coordinates and vectors are stored in in the input files. Meshes are always imported into the scene in RAS. If LPS is selected then the first two components of the point coordinates and of all 3-component floating-point point and cell arrays are negated.</string>
+           <string>Coordinate system that point coordinates and vectors are stored in in the input files. Meshes are always imported into the scene in RAS. If LPS is selected then the first two components of the point coordinates and of vectors are negated, and tensors are rotated accordingly. The tooltip of each array name in the table shows how that array is transformed.</string>
           </property>
          </widget>
         </item>
@@ -128,21 +128,275 @@
       </item>
       <item>
        <widget class="QTableWidget" name="importTableWidget">
-        <property name="toolTip">
-         <string>Coordinates and data arrays found in the input files. The unit is guessed from the array name, select a different unit if the guess is incorrect. Scale is the factor that the values are multiplied by during import.</string>
-        </property>
         <property name="minimumSize">
          <size>
           <width>0</width>
           <height>160</height>
          </size>
         </property>
-        <property name="selectionBehavior">
-         <enum>QAbstractItemView::SelectRows</enum>
+        <property name="toolTip">
+         <string>Coordinates and data arrays found in the input files. The unit is guessed from the array name, select a different unit if the guess is incorrect. Scale is the factor that the values are multiplied by during import.</string>
         </property>
         <property name="alternatingRowColors">
          <bool>true</bool>
         </property>
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="ctkCollapsibleGroupBox" name="importAdvancedGroupBox">
+        <property name="title">
+         <string>Advanced</string>
+        </property>
+        <property name="collapsed">
+         <bool>true</bool>
+        </property>
+        <layout class="QFormLayout" name="importAdvancedLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_mergeDuplicatePoints">
+           <property name="text">
+            <string>Merge duplicate points:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QCheckBox" name="mergeDuplicatePointsCheckBox">
+           <property name="toolTip">
+            <string>Merge points of a mesh that have the same position and exactly the same values in all point data arrays. Simulation results often store a separate copy of a point for each cell that uses it, so this can reduce the memory use several-fold without changing any value. The number of cells does not change.</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_decimate">
+           <property name="text">
+            <string>Decimate large meshes:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QCheckBox" name="decimateCheckBox">
+           <property name="toolTip">
+            <string>Reduce the number of cells of tetrahedral meshes that are larger than the threshold. The shape of the boundary is preserved and the data arrays are interpolated to the decimated mesh, but the data loses resolution. It may take a few minutes for millions of cells. All the time points of a file that have the same geometry use the same decimated mesh. Other types of meshes are not decimated.</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_decimationThreshold">
+           <property name="text">
+            <string>Decimate above:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QSpinBox" name="decimationThresholdSpinBox">
+           <property name="toolTip">
+            <string>Tetrahedral meshes with more cells than this are decimated.</string>
+           </property>
+           <property name="suffix">
+            <string> cells</string>
+           </property>
+           <property name="minimum">
+            <number>0</number>
+           </property>
+           <property name="maximum">
+            <number>2000000000</number>
+           </property>
+           <property name="singleStep">
+            <number>100000</number>
+           </property>
+           <property name="value">
+            <number>1000000</number>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="label_decimationTargetReduction">
+           <property name="text">
+            <string>Target reduction:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="QSpinBox" name="decimationTargetReductionSpinBox">
+           <property name="toolTip">
+            <string>Percentage of the cells to remove. A higher value gives a smaller mesh, but less accurate data, and it takes longer. The target may not be reached if most of the remaining cells are at the boundary; this is reported in the status log, and a lower boundary weight may help.</string>
+           </property>
+           <property name="suffix">
+            <string> %</string>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>99</number>
+           </property>
+           <property name="value">
+            <number>75</number>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="label_decimationBoundaryWeight">
+           <property name="text">
+            <string>Boundary weight:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="QDoubleSpinBox" name="decimationBoundaryWeightSpinBox">
+           <property name="toolTip">
+            <string>How strongly the shape of the outer boundary is preserved. A lower value allows removing more cells at the boundary, but the shape of the mesh may change.</string>
+           </property>
+           <property name="decimals">
+            <number>1</number>
+           </property>
+           <property name="minimum">
+            <double>0.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>100000.000000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>10.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>100.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="label_resample">
+           <property name="text">
+            <string>Resample uniformly:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QCheckBox" name="resampleCheckBox">
+           <property name="toolTip">
+            <string>Replace the cells of volumetric meshes with cubes of the chosen size, aligned with the axes. A cube is kept if its center is inside the mesh, so the boundary becomes a staircase but the volume is preserved. Values are interpolated from the original mesh, details smaller than a cube are lost. Decimation is not used for meshes that are resampled. Surface meshes are not resampled.</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="0">
+          <widget class="QLabel" name="label_resampleSpacing">
+           <property name="text">
+            <string>Resolution:</string>
+           </property>
+           <property name="indent">
+            <number>10</number>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="1">
+          <widget class="QDoubleSpinBox" name="resampleSpacingSpinBox">
+           <property name="toolTip">
+            <string>Size of the cubes of the resampled mesh, in millimeters. Halving it results in about 8 times as many cells.</string>
+           </property>
+           <property name="suffix">
+            <string> mm</string>
+           </property>
+           <property name="decimals">
+            <number>3</number>
+           </property>
+           <property name="minimum">
+            <double>0.001000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>1000.000000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>1.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="0">
+          <widget class="QLabel" name="label_firstTimePointIndex">
+           <property name="text">
+            <string>First time point index:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="1">
+          <widget class="QSpinBox" name="firstTimePointIndexSpinBox">
+           <property name="toolTip">
+            <string>Index of the first time point to load from a time series. The index of the first time point in the file is 0, so with the default value all time points are loaded. Time points before this one are skipped. An error is reported if the file does not have this many time points.</string>
+           </property>
+           <property name="minimum">
+            <number>0</number>
+           </property>
+           <property name="maximum">
+            <number>1000000</number>
+           </property>
+           <property name="value">
+            <number>0</number>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="0">
+          <widget class="QLabel" name="label_keepEveryNthTimePoint">
+           <property name="text">
+            <string>Keep 1 of every:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="1">
+          <widget class="QSpinBox" name="keepEveryNthTimePointSpinBox">
+           <property name="toolTip">
+            <string>Load only the first of every N time points of a time series, starting from the first time point index. For example, with a first time point index of 0, the value 3 loads the time points 0, 3, 6, ... With the default value of 1, all time points are loaded. The time values of the loaded time points are not changed, and the arrays table is not affected.</string>
+           </property>
+           <property name="suffix">
+            <string> time point(s)</string>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>100000</number>
+           </property>
+           <property name="value">
+            <number>1</number>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="0">
+          <widget class="QLabel" name="label_approximateRanges">
+           <property name="text">
+            <string>Approximate scalar ranges:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="1">
+          <widget class="QCheckBox" name="approximateRangesCheckBox">
+           <property name="toolTip">
+            <string>List large VTKHDF files (more than 1 million cells, stored in more than 8 partitions) in the table without reading all of their data, so that adding the file takes seconds. The range of the point coordinates remains exact. The ranges of data arrays are computed from 8 partitions of the last time point, they are marked with ~ and can be much narrower than the true ranges. The ranges are only displayed, they do not affect the import.</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
       <item>
@@ -184,14 +438,14 @@
         </item>
         <item row="0" column="1">
          <widget class="qMRMLSubjectHierarchyTreeView" name="exportModelTreeView">
-          <property name="toolTip">
-           <string>Models to export. Several models can be selected (with Ctrl or Shift); selecting a folder exports all models in it. Unit information stored in each model at import time is used to convert the values to the selected unit system.</string>
-          </property>
           <property name="minimumSize">
            <size>
             <width>0</width>
             <height>150</height>
            </size>
+          </property>
+          <property name="toolTip">
+           <string>Models to export. Several models can be selected (with Ctrl or Shift); selecting a folder exports all models in it. Unit information stored in each model at import time is used to convert the values to the selected unit system.</string>
           </property>
          </widget>
         </item>
@@ -205,7 +459,7 @@
         <item row="1" column="1">
          <widget class="QComboBox" name="outputCoordinateSystemComboBox">
           <property name="toolTip">
-           <string>Coordinate system to write point coordinates and vectors in. Models are always stored in the scene in RAS. If LPS is selected then the first two components of the point coordinates and of all 3-component floating-point point and cell arrays are negated.</string>
+           <string>Coordinate system to write point coordinates and vectors in. Models are always stored in the scene in RAS. If LPS is selected then the first two components of the point coordinates and of vectors are negated, and tensors are rotated accordingly. The tooltip of each array name in the table shows how that array is transformed.</string>
           </property>
          </widget>
         </item>
@@ -262,20 +516,20 @@
       </item>
       <item>
        <widget class="QTableWidget" name="exportTableWidget">
-        <property name="toolTip">
-         <string>Coordinates and data arrays of the selected model. The unit is the unit stored in the model, expressed in the selected output unit system. Scale is the factor that the values are multiplied by during export.</string>
-        </property>
         <property name="minimumSize">
          <size>
           <width>0</width>
           <height>160</height>
          </size>
         </property>
-        <property name="selectionBehavior">
-         <enum>QAbstractItemView::SelectRows</enum>
+        <property name="toolTip">
+         <string>Coordinates and data arrays of the selected model. The unit is the unit stored in the model, expressed in the selected output unit system. Scale is the factor that the values are multiplied by during export.</string>
         </property>
         <property name="alternatingRowColors">
          <bool>true</bool>
+        </property>
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
         </property>
        </widget>
       </item>
@@ -306,9 +560,6 @@
         <property name="readOnly">
          <bool>true</bool>
         </property>
-        <property name="centerOnScroll">
-         <bool>true</bool>
-        </property>
        </widget>
       </item>
      </layout>
@@ -331,15 +582,10 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>ctkCollapsibleButton</class>
+   <class>qMRMLWidget</class>
    <extends>QWidget</extends>
-   <header>ctkCollapsibleButton.h</header>
+   <header>qMRMLWidget.h</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>ctkPathLineEdit</class>
-   <extends>QWidget</extends>
-   <header>ctkPathLineEdit.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLSubjectHierarchyTreeView</class>
@@ -347,10 +593,21 @@
    <header>qMRMLSubjectHierarchyTreeView.h</header>
   </customwidget>
   <customwidget>
-   <class>qMRMLWidget</class>
+   <class>ctkCollapsibleButton</class>
    <extends>QWidget</extends>
-   <header>qMRMLWidget.h</header>
+   <header>ctkCollapsibleButton.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>ctkCollapsibleGroupBox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

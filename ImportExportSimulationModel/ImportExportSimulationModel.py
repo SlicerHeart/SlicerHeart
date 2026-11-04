@@ -1,7 +1,11 @@
+import copy
+import hashlib
 import logging
 import os
 import re
+import time
 
+import numpy as np
 import vtk
 from vtk.util import numpy_support
 
@@ -223,21 +227,35 @@ TENSOR_COMPONENT_AXES = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (2, 0),
 # (Stress_xx, Strain_xz, sigma_yz, ...).
 TENSOR_COMPONENT_NAME_PATTERN = r"_([xyz])([xyz])$"
 
+# Arrays that hold scalars even if they have several components, so they are not rotated with the
+# coordinate system. Q-criterion is a scalar, but some solvers write it in a 3-component array.
+NON_DIRECTIONAL_ARRAY_NAME_PATTERN = r"(^|_)q_?criterion($|_)"
+
 
 def arrayComponentAxes(arrayName, numberOfComponents, isFloatingPoint=True):
     """Axes that each component of an array refers to, or None if the array is not directional.
 
     Directional arrays are the ones whose values are rotated with the coordinate system:
-    3-component vectors, 6-component symmetric tensors, 9-component tensors, and single tensor
-    components stored in a 1-component array named after the component.
+    2-component vectors of 2D simulations, 3-component vectors, 6-component symmetric tensors,
+    9-component tensors, and single tensor components stored in a 1-component array named after
+    the component.
 
     Scalars that do not depend on the coordinate system (pressure, von Mises stress, principal
     stresses and strains, and any other invariant) are not directional: None is returned for
     them, so they are left unchanged by the coordinate system conversion.
+
+    A 2-component array is only considered a vector if its name identifies a physical quantity,
+    because 2 components may store something else, such as texture coordinates.
     """
     if not isFloatingPoint:
         # Integer arrays store identifiers, labels, or counts.
         return None
+    if re.search(NON_DIRECTIONAL_ARRAY_NAME_PATTERN, normalizedArrayName(arrayName)):
+        return None
+    if numberOfComponents == 2:
+        if guessSimulationUnit(arrayName).quantity == DIMENSIONLESS_QUANTITY:
+            return None
+        return VECTOR_COMPONENT_AXES[:2]
     if numberOfComponents == 3:
         return VECTOR_COMPONENT_AXES
     if numberOfComponents == 6:
@@ -286,7 +304,7 @@ def coordinateSystemConversionDescription(arrayName, numberOfComponents, isFloat
     negatedNames = flippedComponentNames(arrayName, numberOfComponents, isFloatingPoint)
     if not negatedNames:
         return _("not affected by the coordinate system conversion")
-    if numberOfComponents == 3:
+    if numberOfComponents in (2, 3):
         kind = _("vector")
     elif numberOfComponents in (6, 9):
         kind = _("tensor")
@@ -342,6 +360,8 @@ class MeshArrayInfo:
         self.isFloatingPoint = isFloatingPoint
         # (minimum, maximum) for each component
         self.componentRanges = []
+        # True if the ranges were computed from only a part of the values
+        self.isRangeApproximate = False
         self.simulationUnit = SIMULATION_UNITS[0]
 
     @property
@@ -353,20 +373,24 @@ class MeshArrayInfo:
                                           fromUnitSystem, toUnitSystem)
 
     def rangeString(self, maximumComponents=3):
-        """Value range of each component, e.g. '[-31.2, 28.4] [-11.9, 40.1] [0, 92.7]'."""
+        """Value range of each component, e.g. '[-31.2, 28.4] [-11.9, 40.1] [0, 92.7]'.
+
+        An approximate range starts with '~'.
+        """
         if not self.componentRanges:
             return ""
         parts = ["[%.4g, %.4g]" % (valueRange[0], valueRange[1])
                  for valueRange in self.componentRanges[:maximumComponents]]
         if len(self.componentRanges) > maximumComponents:
             parts.append("...")
-        return " ".join(parts)
+        return ("~" if self.isRangeApproximate else "") + " ".join(parts)
 
     def mergeRanges(self, other):
         """Extend the value ranges so that they include the ranges of another array as well.
 
         Used when the same array is present in several input files.
         """
+        self.isRangeApproximate = self.isRangeApproximate or other.isRangeApproximate
         if len(self.componentRanges) != len(other.componentRanges):
             return
         self.componentRanges = [(min(a[0], b[0]), max(a[1], b[1]))
@@ -439,7 +463,7 @@ class ImportExportSimulationModel(ScriptedLoadableModule):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = _("Import/export simulation model")
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "Cardiac")]
-        self.parent.dependencies = []
+        self.parent.dependencies = ["Sequences"]
         self.parent.contributors = ["Andras Lasso (PerkLab, Queen's University)"]
         self.parent.helpText = _("""
 This module imports simulation meshes (surface or volumetric) into the scene and exports models
@@ -453,16 +477,17 @@ for details on unit guessing, conversion rules, stored unit information, and sup
 <b>LPS</b> (the default assumption, unless the file specifies the coordinate system) then the
 first two axes are negated, and every array is rotated accordingly:
 <ul>
-<li><b>Point coordinates and 3-component vectors</b> (velocity, displacement, WSS, ...): the x
-and y components are negated.</li>
+<li><b>Point coordinates and vectors</b> (velocity, displacement, WSS, ...): the x and y
+components are negated. A 2-component array is considered a vector if its quantity is recognized
+from its name.</li>
 <li><b>Tensors</b> stored as 6-component (symmetric) or 9-component arrays: the components that
 mix the third axis with one of the first two are negated (yz, xz, and for a full tensor zy, zx),
 which is the T -&gt; R*T*R' rotation of the tensor.</li>
 <li><b>Single tensor components</b> stored in an array of their own, named after the component
 (Stress_xz, Strain_yz, sigma_xz, ...): negated if that component is negated.</li>
 <li><b>Invariants and other scalars</b> (pressure, von Mises stress and strain, principal
-stresses and strains, Jacobian, ...) and integer arrays: left unchanged, because they do not
-depend on the coordinate system.</li>
+stresses and strains, Jacobian, Q-criterion even if stored in several components, ...) and
+integer arrays: left unchanged, because they do not depend on the coordinate system.</li>
 </ul>
 The tooltip of each array name in the table shows how that array is transformed.
 
@@ -480,7 +505,32 @@ and <i>VonMisesStress</i> are all recognized as a stress. The unit and the lengt
 array are stored in the imported model as node attributes (visible in the Data module), and are
 used when the model is exported again.
 
-<b>Supported file formats:</b> .vtu, .vtp, .vtk, .stl, .ply, and .obj can be read. For writing,
+<b>Merge duplicate points:</b> simulation results often store a separate copy of a point for each
+cell that uses it. By default, copies at the same position with exactly the same values in all
+point data arrays are merged on import, which can reduce the memory use several-fold without
+changing any value. The option is in the Advanced section of the import section.
+
+<b>Decimate large meshes:</b> by default, tetrahedral meshes with more cells than a threshold are
+decimated on import. The shape of the boundary is preserved and data arrays are transferred to the
+result, but this reduces the resolution of the data, unlike merging duplicate points. The threshold,
+the target reduction, and the boundary weight can be set in the Advanced section.
+
+<b>Resample uniformly:</b> optionally, volumetric meshes are replaced on import by cubes of the
+chosen size, aligned with the axes. The volume is preserved, but the boundary becomes a staircase
+and details smaller than a cube are lost. Decimation is not used for meshes that are resampled.
+
+<b>First time point, keep 1 of every N time points:</b> the Advanced section can also reduce the
+number of time points that are loaded from a VTKHDF file. By default, all of them are loaded.
+
+<b>Approximate scalar ranges:</b> by default, a large VTKHDF file is listed in the arrays table
+without reading all of its data, so that adding the file takes seconds. The range of the point
+coordinates remains exact, but the ranges of data arrays are computed from a sample of the file,
+they are marked with ~ and can be much narrower than the true ranges. This does not affect the import.
+
+<b>Supported file formats:</b> .vtu, .vtp, .vtk, .vtkhdf, .vtkhdf5, .vti, .stl, .ply, and .obj can
+be read. A .vtkhdf or .vtkhdf5 file with several time points is loaded as a sequence of models with
+a sequence browser, each time point converted the same way. A .vti file is loaded as a volume, with
+its origin and spacing converted to the coordinate and unit system of the scene. For writing,
 the format is selected by name and the extension follows from the mesh: <b>VTK (XML)</b> writes a
 surface mesh to .vtp and a volumetric mesh to .vtu, <b>VTK (classic)</b> writes both to .vtk, and
 <b>PLY</b>, <b>OBJ</b>, and <b>STL</b> store a surface only, without data arrays.
@@ -562,6 +612,16 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         self.ui.removeFilesButton.connect("clicked(bool)", self.onRemoveFilesButton)
         self.ui.inputCoordinateSystemComboBox.connect("currentIndexChanged(int)", self._onImportOptionChanged)
         self.ui.inputUnitSystemComboBox.connect("currentIndexChanged(int)", self._onImportUnitSystemChanged)
+        self.ui.mergeDuplicatePointsCheckBox.connect("toggled(bool)", self._onImportOptionChanged)
+        self.ui.decimateCheckBox.connect("toggled(bool)", self._onDecimateToggled)
+        self.ui.decimationThresholdSpinBox.connect("valueChanged(int)", self._onImportOptionChanged)
+        self.ui.decimationTargetReductionSpinBox.connect("valueChanged(int)", self._onImportOptionChanged)
+        self.ui.decimationBoundaryWeightSpinBox.connect("valueChanged(double)", self._onImportOptionChanged)
+        self.ui.firstTimePointIndexSpinBox.connect("valueChanged(int)", self._onImportOptionChanged)
+        self.ui.keepEveryNthTimePointSpinBox.connect("valueChanged(int)", self._onImportOptionChanged)
+        self.ui.resampleCheckBox.connect("toggled(bool)", self._onResampleToggled)
+        self.ui.resampleSpacingSpinBox.connect("valueChanged(double)", self._onImportOptionChanged)
+        self.ui.approximateRangesCheckBox.connect("toggled(bool)", self._onApproximateRangesToggled)
         self.ui.importButton.connect("clicked(bool)", self.onImportButton)
 
         self.ui.exportModelTreeView.connect("currentItemsChanged(QList<vtkIdType>)",
@@ -637,6 +697,23 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         settings = slicer.app.userSettings()
         settings.setValue(self.SETTINGS_PREFIX + "inputCoordinateSystem", self.inputCoordinateSystem)
         settings.setValue(self.SETTINGS_PREFIX + "inputUnitSystem", self.inputUnitSystem)
+        settings.setValue(self.SETTINGS_PREFIX + "mergeDuplicatePoints",
+                          self.ui.mergeDuplicatePointsCheckBox.checked)
+        settings.setValue(self.SETTINGS_PREFIX + "decimate", self.ui.decimateCheckBox.checked)
+        settings.setValue(self.SETTINGS_PREFIX + "decimationThreshold",
+                          self.ui.decimationThresholdSpinBox.value)
+        settings.setValue(self.SETTINGS_PREFIX + "decimationTargetReductionPercent",
+                          self.ui.decimationTargetReductionSpinBox.value)
+        settings.setValue(self.SETTINGS_PREFIX + "decimationBoundaryWeight",
+                          self.ui.decimationBoundaryWeightSpinBox.value)
+        settings.setValue(self.SETTINGS_PREFIX + "resample", self.ui.resampleCheckBox.checked)
+        settings.setValue(self.SETTINGS_PREFIX + "resampleSpacing", self.ui.resampleSpacingSpinBox.value)
+        settings.setValue(self.SETTINGS_PREFIX + "firstTimePointIndex",
+                          self.ui.firstTimePointIndexSpinBox.value)
+        settings.setValue(self.SETTINGS_PREFIX + "keepEveryNthTimePoint",
+                          self.ui.keepEveryNthTimePointSpinBox.value)
+        settings.setValue(self.SETTINGS_PREFIX + "approximateRanges",
+                          self.ui.approximateRangesCheckBox.checked)
         settings.setValue(self.SETTINGS_PREFIX + "outputCoordinateSystem", self.outputCoordinateSystem)
         settings.setValue(self.SETTINGS_PREFIX + "outputUnitSystem", self.outputUnitSystem)
         settings.setValue(self.SETTINGS_PREFIX + "outputFileFormat", self.outputFileFormat)
@@ -659,6 +736,30 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
                 self.SETTINGS_PREFIX + "inputCoordinateSystem", "LPS"))
             self._setComboBoxValue(self.ui.inputUnitSystemComboBox, slicer.util.settingsValue(
                 self.SETTINGS_PREFIX + "inputUnitSystem", "cgs"))
+            self.ui.mergeDuplicatePointsCheckBox.checked = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "mergeDuplicatePoints", True, converter=slicer.util.toBool)
+            self.ui.decimateCheckBox.checked = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "decimate", True, converter=slicer.util.toBool)
+            self.ui.decimationThresholdSpinBox.value = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "decimationThreshold", DEFAULT_DECIMATION_CELL_COUNT_THRESHOLD,
+                converter=int)
+            self.ui.decimationTargetReductionSpinBox.value = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "decimationTargetReductionPercent",
+                int(DEFAULT_DECIMATION_TARGET_REDUCTION * 100), converter=int)
+            self.ui.decimationBoundaryWeightSpinBox.value = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "decimationBoundaryWeight", DEFAULT_DECIMATION_BOUNDARY_WEIGHT,
+                converter=float)
+            self.ui.resampleCheckBox.checked = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "resample", False, converter=slicer.util.toBool)
+            self.ui.resampleSpacingSpinBox.value = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "resampleSpacing", DEFAULT_RESAMPLE_SPACING_MM, converter=float)
+            self._updateDecimationWidgets()
+            self.ui.firstTimePointIndexSpinBox.value = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "firstTimePointIndex", 0, converter=int)
+            self.ui.keepEveryNthTimePointSpinBox.value = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "keepEveryNthTimePoint", 1, converter=int)
+            self.ui.approximateRangesCheckBox.checked = slicer.util.settingsValue(
+                self.SETTINGS_PREFIX + "approximateRanges", True, converter=slicer.util.toBool)
             self._setComboBoxValue(self.ui.outputCoordinateSystemComboBox, slicer.util.settingsValue(
                 self.SETTINGS_PREFIX + "outputCoordinateSystem", "LPS"))
             self._setComboBoxValue(self.ui.outputUnitSystemComboBox, slicer.util.settingsValue(
@@ -783,6 +884,33 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         # Which components are negated depends on the input coordinate system.
         self._updateImportNameTooltips()
 
+    def _onApproximateRangesToggled(self, *unused) -> None:
+        if self._updatingGui:
+            return
+        self._saveSettings()
+        self._updateImportTable()
+
+    def _onDecimateToggled(self, *unused) -> None:
+        self._updateDecimationWidgets()
+        self._onImportOptionChanged()
+
+    def _onResampleToggled(self, *unused) -> None:
+        self._updateDecimationWidgets()
+        self._onImportOptionChanged()
+
+    def _updateDecimationWidgets(self) -> None:
+        # Every mesh that could be decimated is resampled instead, if resampling is enabled.
+        resample = self.ui.resampleCheckBox.checked
+        self.ui.label_decimate.enabled = not resample
+        self.ui.decimateCheckBox.enabled = not resample
+        enabled = self.ui.decimateCheckBox.checked and not resample
+        for widget in (self.ui.label_decimationThreshold, self.ui.decimationThresholdSpinBox,
+                       self.ui.label_decimationTargetReduction, self.ui.decimationTargetReductionSpinBox,
+                       self.ui.label_decimationBoundaryWeight, self.ui.decimationBoundaryWeightSpinBox):
+            widget.enabled = enabled
+        self.ui.label_resampleSpacing.enabled = resample
+        self.ui.resampleSpacingSpinBox.enabled = resample
+
     def _updateImportNameTooltips(self) -> None:
         flipFirstTwoComponents = self.inputCoordinateSystem != SCENE_COORDINATE_SYSTEM
         for row, arrayInfo in enumerate(self._importArrayInfos):
@@ -804,7 +932,9 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         self._importArrayInfos = []
         if filePaths:
             with slicer.util.tryWithErrorDisplay(_("Failed to read input files."), waitCursor=True):
-                self._importArrayInfos = self.logic.getArrayInfosFromFiles(filePaths)
+                self._importArrayInfos = self.logic.getArrayInfosFromFiles(
+                    filePaths,
+                    APPROXIMATE_RANGE_CELL_COUNT_THRESHOLD if self.ui.approximateRangesCheckBox.checked else None)
 
         tableWidget = self.ui.importTableWidget
         tableWidget.clearContents()
@@ -878,7 +1008,12 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         tableWidget.setItem(row, ImportExportSimulationModelWidget.COMPONENTS_COLUMN,
                             qt.QTableWidgetItem(str(arrayInfo.numberOfComponents)))
         rangeItem = qt.QTableWidgetItem(arrayInfo.rangeString())
-        rangeItem.setToolTip(arrayInfo.rangeString(maximumComponents=arrayInfo.numberOfComponents))
+        rangeTooltip = arrayInfo.rangeString(maximumComponents=arrayInfo.numberOfComponents)
+        if arrayInfo.isRangeApproximate:
+            rangeTooltip += "\n" + _("Approximate: computed from a sample of the file, the true range can be "
+                                     "much wider. Disable 'Approximate scalar ranges' in the Advanced section "
+                                     "to compute the exact range.")
+        rangeItem.setToolTip(rangeTooltip)
         tableWidget.setItem(row, ImportExportSimulationModelWidget.RANGE_COLUMN, rangeItem)
 
     def onImportButton(self) -> None:
@@ -886,8 +1021,17 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
             self.clearLog()
             quantities = {arrayInfo.key: arrayInfo.simulationUnit.quantity
                           for arrayInfo in self._importArrayInfos}
-            modelNodes = self.logic.importFiles(
-                self.inputFilePaths, self.inputCoordinateSystem, self.inputUnitSystem, quantities)
+            importedNodes = self.logic.importFiles(
+                self.inputFilePaths, self.inputCoordinateSystem, self.inputUnitSystem, quantities,
+                self.ui.mergeDuplicatePointsCheckBox.checked,
+                self.ui.decimationThresholdSpinBox.value if self.ui.decimateCheckBox.checked else None,
+                self.ui.decimationTargetReductionSpinBox.value / 100.0,
+                self.ui.decimationBoundaryWeightSpinBox.value,
+                self.ui.keepEveryNthTimePointSpinBox.value,
+                self.ui.firstTimePointIndexSpinBox.value,
+                self.ui.resampleSpacingSpinBox.value if self.ui.resampleCheckBox.checked else None)
+            # Only models can be exported, volumes that were imported from images cannot.
+            modelNodes = [node for node in importedNodes if node.IsA("vtkMRMLModelNode")]
             if modelNodes:
                 # Preselect the imported models for export.
                 itemIds = vtk.vtkIdList()
@@ -975,7 +1119,12 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         slicer.app.processEvents()
 
     def addLog(self, text) -> None:
+        # Keep showing the latest message, unless the user has scrolled up to read earlier ones.
+        scrollBar = self.ui.statusTextEdit.verticalScrollBar()
+        wasAtEnd = scrollBar.value >= scrollBar.maximum
         self.ui.statusTextEdit.appendPlainText(text)
+        if wasAtEnd:
+            scrollBar.value = scrollBar.maximum
         slicer.app.processEvents()
 
 
@@ -1020,6 +1169,404 @@ class _FileDropEventFilter(qt.QObject):
 
 
 #
+# Approximate value ranges
+#
+
+# The arrays table shows approximate value ranges of VTKHDF files with more cells than this,
+# computed from this many partitions, if the file has more partitions than this.
+APPROXIMATE_RANGE_CELL_COUNT_THRESHOLD = 1000000
+APPROXIMATE_RANGE_PARTITION_COUNT = 8
+
+
+#
+# Mesh decimation
+#
+
+# Default settings of the decimation of tetrahedral meshes during import.
+DEFAULT_DECIMATION_CELL_COUNT_THRESHOLD = 1000000
+DEFAULT_DECIMATION_TARGET_REDUCTION = 0.75
+DEFAULT_DECIMATION_BOUNDARY_WEIGHT = 100.0
+
+
+class MeshGeometryReplacer:
+    """Base class of the classes that replace the cells of a mesh, keeping its data arrays.
+
+    The new geometry is created once and the data arrays of the input mesh are transferred to the
+    result, therefore the time points of a sequence that have the same geometry get the same
+    new geometry, and the time-consuming creation of it is not repeated for them.
+    """
+
+    def __init__(self, logCallback=None):
+        self.logCallback = logCallback
+        self._geometryHash = None
+        self._geometry = None
+        # For each point and cell of the new geometry: nearest point and cell of the input
+        self._nearestPointIds = None
+        self._sourceCellIds = None
+        # Interpolation of each point of the new geometry: points and weights of an input cell
+        self._interpolationPointIds = None
+        self._interpolationWeights = None
+
+    def _replaceGeometry(self, mesh):
+        """Return a copy of a mesh with the new geometry, with all its data arrays."""
+        geometryHash = self._computeGeometryHash(mesh)
+        if geometryHash != self._geometryHash:
+            self._updateGeometry(mesh)
+            self._geometryHash = geometryHash
+        return self._transferArrays(mesh)
+
+    def _updateGeometry(self, mesh):
+        """Create the new geometry of the mesh and pass it to _setGeometry."""
+        raise NotImplementedError()
+
+    def _setGeometry(self, mesh, geometry):
+        self._geometry = geometry
+        self._nearestPointIds = self._findNearestPoints(mesh, geometry)
+        self._sourceCellIds = self._findSourceCells(mesh, geometry)
+        self._findInterpolation(mesh, geometry)
+
+    @staticmethod
+    def _computeGeometryHash(mesh):
+        hasher = hashlib.blake2b()
+        hasher.update(numpy_support.vtk_to_numpy(mesh.GetPoints().GetData()))
+        hasher.update(numpy_support.vtk_to_numpy(mesh.GetCells().GetConnectivityArray()))
+        return hasher.digest()
+
+    def _log(self, text):
+        if self.logCallback:
+            self.logCallback(text)
+
+    @staticmethod
+    def _findNearestPoints(mesh, geometry):
+        locator = vtk.vtkStaticPointLocator()
+        locator.SetDataSet(mesh)
+        locator.BuildLocator()
+        points = numpy_support.vtk_to_numpy(geometry.GetPoints().GetData()).astype(float)
+        return np.array([locator.FindClosestPoint(point) for point in points.tolist()], dtype=np.int64)
+
+    @staticmethod
+    def _findSourceCells(mesh, geometry):
+        """Find the input cell that contains the center of each new cell."""
+        cellIdsName = "_SourceCellIds"
+        source = vtk.vtkUnstructuredGrid()
+        source.ShallowCopy(mesh)
+        source.GetPointData().Initialize()
+        source.GetCellData().Initialize()
+        cellIds = numpy_support.numpy_to_vtkIdTypeArray(np.arange(mesh.GetNumberOfCells(), dtype=np.int64), deep=True)
+        cellIds.SetName(cellIdsName)
+        source.GetCellData().AddArray(cellIds)
+
+        cellCenters = vtk.vtkCellCenters()
+        cellCenters.SetInputData(geometry)
+        cellCenters.Update()
+        centers = cellCenters.GetOutput()
+        probe = vtk.vtkProbeFilter()
+        probe.SetInputData(centers)
+        probe.SetSourceData(source)
+        probe.Update()
+        probeOutput = probe.GetOutput().GetPointData()
+        sourceCellIds = numpy_support.vtk_to_numpy(probeOutput.GetArray(cellIdsName)).astype(np.int64)
+        isValid = numpy_support.vtk_to_numpy(probeOutput.GetArray(probe.GetValidPointMaskArrayName())).astype(bool)
+
+        # The center of a cell at a curved boundary may be slightly outside of the input mesh.
+        if not isValid.all():
+            locator = vtk.vtkStaticCellLocator()
+            locator.SetDataSet(source)
+            locator.BuildLocator()
+            closestPoint = [0.0, 0.0, 0.0]
+            cell = vtk.vtkGenericCell()
+            cellId = vtk.reference(0)
+            subId = vtk.reference(0)
+            squaredDistance = vtk.reference(0.0)
+            for index in np.nonzero(~isValid)[0].tolist():
+                locator.FindClosestPoint(centers.GetPoint(index), closestPoint, cell, cellId, subId, squaredDistance)
+                sourceCellIds[index] = cellId.get()
+        return sourceCellIds
+
+    def _findInterpolation(self, mesh, geometry):
+        """Find how to interpolate the values of the input mesh at each point of the new geometry.
+
+        A point of a curved boundary may be out of the input mesh in the new geometry. The value
+        of such a point is interpolated at the closest position of the closest input cell.
+
+        vtkProbeFilter is not used for this because, when it runs on multiple threads, it may miss
+        the cell of a point inside the mesh, differently in each run. Such a point would get the
+        value 0 in only some of the time points.
+        """
+        source = vtk.vtkUnstructuredGrid()
+        source.ShallowCopy(mesh)
+        source.GetPointData().Initialize()
+        source.GetCellData().Initialize()
+        locator = vtk.vtkStaticCellLocator()
+        locator.SetDataSet(source)
+        locator.BuildLocator()
+
+        numberOfPoints = geometry.GetNumberOfPoints()
+        maximumCellSize = mesh.GetMaxCellSize()
+        self._interpolationPointIds = np.zeros((numberOfPoints, maximumCellSize), dtype=np.int64)
+        self._interpolationWeights = np.zeros((numberOfPoints, maximumCellSize))
+        closestPoint = [0.0, 0.0, 0.0]
+        cell = vtk.vtkGenericCell()
+        cellId = vtk.reference(0)
+        subId = vtk.reference(0)
+        squaredDistance = vtk.reference(0.0)
+        parametricCoordinates = [0.0, 0.0, 0.0]
+        weights = [0.0] * maximumCellSize
+        evaluatedPoint = [0.0, 0.0, 0.0]
+        points = numpy_support.vtk_to_numpy(geometry.GetPoints().GetData()).astype(float).tolist()
+        for pointIndex, point in enumerate(points):
+            if locator.FindCell(point, 0.0, cell, parametricCoordinates, weights) < 0:
+                locator.FindClosestPoint(point, closestPoint, cell, cellId, subId, squaredDistance)
+                # The locator leaves the last cell that it examined in the cell object, not the closest.
+                source.GetCell(cellId.get(), cell)
+                if cell.EvaluatePosition(closestPoint, evaluatedPoint, subId, parametricCoordinates,
+                                         squaredDistance, weights) < 0:
+                    # The closest cell is degenerate, there are no weights for it.
+                    weights[:] = [1.0] + [0.0] * (maximumCellSize - 1)
+            numberOfCellPoints = cell.GetNumberOfPoints()
+            for corner in range(numberOfCellPoints):
+                self._interpolationPointIds[pointIndex, corner] = cell.GetPointId(corner)
+            self._interpolationWeights[pointIndex, :numberOfCellPoints] = weights[:numberOfCellPoints]
+
+        # A closest position is on the boundary of its cell, so rounding errors can make its weights
+        # slightly negative. An interpolated value must be within the range of the values of the cell.
+        self._interpolationWeights = np.maximum(self._interpolationWeights, 0.0)
+        self._interpolationWeights /= self._interpolationWeights.sum(axis=1, keepdims=True)
+
+    def _transferArrays(self, mesh):
+        """Return the new geometry with the data arrays of the mesh.
+
+        Floating-point arrays are interpolated. Identifiers and other integers cannot be
+        interpolated, so they are taken from the nearest point of the input mesh.
+        """
+        newMesh = vtk.vtkUnstructuredGrid()
+        newMesh.ShallowCopy(self._geometry)
+
+        pointData = mesh.GetPointData()
+        for arrayIndex in range(pointData.GetNumberOfArrays()):
+            array = pointData.GetArray(arrayIndex)
+            if array is None or not array.GetName():
+                continue
+            sourceValues = numpy_support.vtk_to_numpy(array)
+            if array.GetDataType() in (vtk.VTK_FLOAT, vtk.VTK_DOUBLE):
+                cornerValues = sourceValues[self._interpolationPointIds]
+                weights = self._interpolationWeights.reshape(
+                    self._interpolationWeights.shape + (1,) * (cornerValues.ndim - 2))
+                values = (cornerValues * weights).sum(axis=1)
+            else:
+                values = sourceValues[self._nearestPointIds]
+            newMesh.GetPointData().AddArray(self._arrayFromValues(array, values))
+
+        cellData = mesh.GetCellData()
+        for arrayIndex in range(cellData.GetNumberOfArrays()):
+            array = cellData.GetArray(arrayIndex)
+            if array is None or not array.GetName():
+                continue
+            values = numpy_support.vtk_to_numpy(array)[self._sourceCellIds]
+            newMesh.GetCellData().AddArray(self._arrayFromValues(array, values))
+        return newMesh
+
+    @staticmethod
+    def _arrayFromValues(sourceArray, values):
+        array = vtk.vtkDataArray.CreateDataArray(sourceArray.GetDataType())
+        array.UnRegister(None)  # Prevent memory leak
+        array.SetName(sourceArray.GetName())
+        array.SetNumberOfComponents(sourceArray.GetNumberOfComponents())
+        array.SetNumberOfTuples(len(values))
+        numpy_support.vtk_to_numpy(array)[:] = values
+        return array
+
+
+class TetrahedralMeshDecimator(MeshGeometryReplacer):
+    """Reduces the number of cells of tetrahedral meshes, preserving the shape of the boundary."""
+
+    # Decimation stops when a pass removes less than this fraction of the cells.
+    MINIMUM_REDUCTION_PER_PASS = 0.002
+
+    def __init__(self, targetReduction=DEFAULT_DECIMATION_TARGET_REDUCTION,
+                 boundaryWeight=DEFAULT_DECIMATION_BOUNDARY_WEIGHT, logCallback=None):
+        super().__init__(logCallback)
+        self.targetReduction = targetReduction
+        self.boundaryWeight = boundaryWeight
+        self.numberOfDecimations = 0
+
+    @staticmethod
+    def canDecimate(mesh):
+        return (isinstance(mesh, vtk.vtkUnstructuredGrid) and mesh.GetNumberOfCells() > 0
+                and mesh.IsHomogeneous() and mesh.GetCellType(0) == vtk.VTK_TETRA)
+
+    def decimate(self, mesh):
+        """Return a decimated copy of a mesh, with all its data arrays."""
+        return self._replaceGeometry(mesh)
+
+    def _updateGeometry(self, mesh):
+        self.numberOfDecimations += 1
+        startTime = time.time()
+
+        # Cells must be connected through their points, whatever the point values are.
+        geometry = vtk.vtkUnstructuredGrid()
+        geometry.ShallowCopy(mesh)
+        geometry.GetPointData().Initialize()
+        geometry.GetCellData().Initialize()
+        geometry.GetFieldData().Initialize()
+        mergeFilter = vtk.vtkStaticCleanUnstructuredGrid()
+        mergeFilter.SetInputData(geometry)
+        mergeFilter.Update()
+        geometry = mergeFilter.GetOutput()
+
+        # The filter selects the edges to collapse using rand() % numberOfCells. Where rand() is
+        # limited to 32767 (on Windows) it can only reach the beginning of the list of cells and
+        # stops early if there are many cells. Therefore, the filter is run repeatedly, with the
+        # cells in a different random order in each pass.
+        numberOfInputCells = mesh.GetNumberOfCells()
+        targetCellCount = max(int(numberOfInputCells * (1.0 - self.targetReduction)), 1)
+        randomGenerator = np.random.default_rng(0)
+        passIndex = 0
+        while geometry.GetNumberOfCells() > targetCellCount:
+            passIndex += 1
+            numberOfCellsBefore = geometry.GetNumberOfCells()
+            decimationFilter = vtk.vtkUnstructuredGridQuadricDecimation()
+            decimationFilter.SetInputData(self._shuffledCellsWithScalars(geometry, randomGenerator))
+            decimationFilter.SetNumberOfTetsOutput(targetCellCount)
+            decimationFilter.SetBoundaryWeight(self.boundaryWeight)
+            decimationFilter.Update()
+            geometry = decimationFilter.GetOutput()
+            self._log(_("  Decimation pass {index}: {before} -> {after} cells").format(
+                index=passIndex, before=numberOfCellsBefore, after=geometry.GetNumberOfCells()))
+            if (geometry.GetNumberOfCells() > targetCellCount
+                    and numberOfCellsBefore - geometry.GetNumberOfCells()
+                    < numberOfCellsBefore * self.MINIMUM_REDUCTION_PER_PASS):
+                self._log(_("  Warning: the target number of cells ({target}) cannot be reached. Most of "
+                            "the remaining cells are at the boundary, which is preserved according to "
+                            "the boundary weight.").format(target=targetCellCount))
+                break
+        geometry.GetPointData().Initialize()
+
+        self._setGeometry(mesh, geometry)
+        self._log(_("  Decimated {before} -> {after} cells, {points} points ({seconds:.0f}s)").format(
+            before=numberOfInputCells, after=geometry.GetNumberOfCells(),
+            points=geometry.GetNumberOfPoints(), seconds=time.time() - startTime))
+
+    @staticmethod
+    def _shuffledCellsWithScalars(geometry, randomGenerator):
+        tetrahedra = numpy_support.vtk_to_numpy(geometry.GetCells().GetConnectivityArray()).reshape(-1, 4)
+        tetrahedra = tetrahedra[randomGenerator.permutation(len(tetrahedra))]
+        cells = vtk.vtkCellArray()
+        cells.SetData(
+            numpy_support.numpy_to_vtkIdTypeArray(np.arange(0, tetrahedra.size + 1, 4, dtype=np.int64), deep=True),
+            numpy_support.numpy_to_vtkIdTypeArray(tetrahedra.ravel().astype(np.int64), deep=True))
+        shuffled = vtk.vtkUnstructuredGrid()
+        shuffled.SetPoints(geometry.GetPoints())
+        shuffled.SetCells(vtk.VTK_TETRA, cells)
+        # The filter requires a scalar array. A constant makes the decimation depend on the
+        # geometry only, so that the same result can be used for all the time points.
+        scalars = vtk.vtkFloatArray()
+        scalars.SetName("scalars")
+        scalars.SetNumberOfTuples(geometry.GetNumberOfPoints())
+        scalars.Fill(0.0)
+        shuffled.GetPointData().SetScalars(scalars)
+        return shuffled
+
+
+#
+# Uniform resampling
+#
+
+# Default distance of the grid points of uniform resampling during import, in mm.
+DEFAULT_RESAMPLE_SPACING_MM = 1.0
+
+
+class UniformMeshResampler(MeshGeometryReplacer):
+    """Replaces the cells of a volumetric mesh with axis-aligned cubes of the same size.
+
+    A cube of a regular grid is kept if its center is inside the mesh, so the boundary becomes a
+    staircase but the volume of the mesh is preserved. Its corners are the points of the result,
+    with values interpolated from the mesh. The grid points are at integer multiples of the
+    spacing, so the time points of a sequence use the same grid even if the mesh moves.
+    """
+
+    # Number of cubes in the bounding box of the mesh above which the resolution is rejected
+    MAXIMUM_GRID_CELL_COUNT = 200000000
+
+    def __init__(self, spacing, logCallback=None):
+        """:param spacing: size of the cubes, in the length unit of the meshes."""
+        super().__init__(logCallback)
+        self.spacing = spacing
+        self.numberOfResamplings = 0
+
+    @staticmethod
+    def canResample(mesh):
+        return (isinstance(mesh, vtk.vtkUnstructuredGrid) and mesh.GetNumberOfCells() > 0
+                and mesh.GetMaxSpatialDimension() == 3)
+
+    def resample(self, mesh):
+        """Return a resampled copy of a mesh, with all its data arrays."""
+        return self._replaceGeometry(mesh)
+
+    def _updateGeometry(self, mesh):
+        self.numberOfResamplings += 1
+        startTime = time.time()
+
+        bounds = np.array(mesh.GetBounds())
+        gridStart = np.floor(bounds[0::2] / self.spacing).astype(np.int64)
+        gridEnd = np.ceil(bounds[1::2] / self.spacing).astype(np.int64)
+        gridCellCounts = np.maximum(gridEnd - gridStart, 1)
+        if np.prod(gridCellCounts.astype(float)) > self.MAXIMUM_GRID_CELL_COUNT:
+            raise ValueError(_("The resampling resolution is too fine: it would need a grid of "
+                               "{x} x {y} x {z} cells. Use a larger value.").format(
+                x=gridCellCounts[0], y=gridCellCounts[1], z=gridCellCounts[2]))
+
+        cellCenters = vtk.vtkImageData()
+        cellCenters.SetDimensions(*gridCellCounts.tolist())
+        cellCenters.SetSpacing(self.spacing, self.spacing, self.spacing)
+        cellCenters.SetOrigin(*((gridStart + 0.5) * self.spacing).tolist())
+        source = vtk.vtkUnstructuredGrid()
+        source.ShallowCopy(mesh)
+        source.GetPointData().Initialize()
+        source.GetCellData().Initialize()
+        probe = vtk.vtkProbeFilter()
+        probe.SetInputData(cellCenters)
+        probe.SetSourceData(source)
+        probe.Update()
+        isInside = numpy_support.vtk_to_numpy(
+            probe.GetOutput().GetPointData().GetArray(probe.GetValidPointMaskArrayName())).astype(bool)
+        keptCells = np.nonzero(isInside)[0]
+        if len(keptCells) == 0:
+            raise ValueError(_("The resampling resolution is too coarse: the center of no grid cell "
+                               "is inside the mesh. Use a smaller value."))
+
+        # Grid indices of the cells, as they are stored in the image
+        cellK, cellJ, cellI = np.unravel_index(keptCells, gridCellCounts[::-1])
+        cornerOffsets = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
+                                  [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], dtype=np.int64)
+        gridPointCounts = gridCellCounts + 1
+        cornerGridIds = ((cellI[:, np.newaxis] + cornerOffsets[:, 0])
+                         + (cellJ[:, np.newaxis] + cornerOffsets[:, 1]) * gridPointCounts[0]
+                         + (cellK[:, np.newaxis] + cornerOffsets[:, 2]) * gridPointCounts[0] * gridPointCounts[1])
+        usedGridIds, connectivity = np.unique(cornerGridIds, return_inverse=True)
+        pointK, pointJ, pointI = np.unravel_index(usedGridIds, gridPointCounts[::-1])
+        coordinates = (np.column_stack((pointI, pointJ, pointK)) + gridStart) * self.spacing
+
+        points = vtk.vtkPoints()
+        points.SetData(numpy_support.numpy_to_vtk(
+            coordinates.astype(numpy_support.vtk_to_numpy(mesh.GetPoints().GetData()).dtype), deep=True))
+        cells = vtk.vtkCellArray()
+        cells.SetData(
+            numpy_support.numpy_to_vtkIdTypeArray(
+                np.arange(0, connectivity.size + 1, 8, dtype=np.int64), deep=True),
+            numpy_support.numpy_to_vtkIdTypeArray(connectivity.ravel().astype(np.int64), deep=True))
+        geometry = vtk.vtkUnstructuredGrid()
+        geometry.SetPoints(points)
+        geometry.SetCells(vtk.VTK_HEXAHEDRON, cells)
+
+        self._setGeometry(mesh, geometry)
+        self._log(_("  Resampled {before} -> {after} cells, {points} points ({seconds:.0f}s)").format(
+            before=mesh.GetNumberOfCells(), after=geometry.GetNumberOfCells(),
+            points=geometry.GetNumberOfPoints(), seconds=time.time() - startTime))
+
+
+
+#
 # ImportExportSimulationModelLogic
 #
 
@@ -1033,6 +1580,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
       SimulationModel.CoordinateSystem              coordinate system of the model in the scene
       SimulationModel.UnitSystem                    unit system of the model in the scene
       SimulationModel.SourceFile                    file the model was imported from
+      SimulationModel.TimeValue                     time in seconds, if a single time point of a
+                                                    time series was imported
       SimulationModel.Position.Unit                 unit of the point coordinates, e.g. mm
       SimulationModel.Position.LengthExponent       length exponent of the point coordinates
       SimulationModel.Position.Quantity             quantity name, e.g. length
@@ -1043,7 +1592,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
     ATTRIBUTE_PREFIX = "SimulationModel."
 
-    READ_FILE_EXTENSIONS = [".vtu", ".vtp", ".vtk", ".stl", ".ply", ".obj"]
+    VTKHDF_FILE_EXTENSIONS = [".vtkhdf", ".vtkhdf5"]
+    READ_FILE_EXTENSIONS = [".vtu", ".vtp", ".vtk", ".vtkhdf", ".vtkhdf5", ".vti", ".stl", ".ply", ".obj"]
     WRITE_FILE_EXTENSIONS = [".vtu", ".vtp", ".vtk", ".stl", ".ply", ".obj"]
     # Formats that cannot store data arrays.
     GEOMETRY_ONLY_FILE_EXTENSIONS = [".stl", ".ply", ".obj"]
@@ -1054,6 +1604,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         # Input files are read when the arrays table is populated. The meshes are kept so that
         # importing does not have to read the (potentially large) files again.
         self._meshCache = {}
+        # Approximate array information of large VTKHDF files, for which no mesh is kept in the cache.
+        self._approximateArrayInfoCache = {}
 
     def addLog(self, text) -> None:
         logging.info(text)
@@ -1076,14 +1628,26 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
     @staticmethod
     def readMesh(filePath):
-        """Read a mesh from file, without any conversion. Returns vtkPolyData or vtkUnstructuredGrid."""
+        """Read a mesh from file, without any conversion.
+
+        Returns vtkPolyData or vtkUnstructuredGrid, or vtkImageData for a .vti file. Only the last
+        time point of a VTKHDF file is returned: this is what the arrays table is populated from,
+        because the first time point of a simulation result is often just an empty initial state.
+        """
         if not os.path.isfile(filePath):
             raise ValueError(_("Input file not found: {filePath}").format(filePath=filePath))
         extension = os.path.splitext(filePath)[1].lower()
+        if extension in ImportExportSimulationModelLogic.VTKHDF_FILE_EXTENSIONS:
+            timeValues = ImportExportSimulationModelLogic.getVtkHdfTimeValues(filePath)
+            reader = ImportExportSimulationModelLogic._createVtkHdfReader(filePath)
+            return ImportExportSimulationModelLogic._readVtkHdfMesh(
+                reader, timeValues[-1] if timeValues else None, filePath)
         if extension == ".vtu":
             reader = vtk.vtkXMLUnstructuredGridReader()
         elif extension == ".vtp":
             reader = vtk.vtkXMLPolyDataReader()
+        elif extension == ".vti":
+            reader = vtk.vtkXMLImageDataReader()
         elif extension == ".vtk":
             # Legacy files may contain any data set type.
             reader = vtk.vtkDataSetReader()
@@ -1106,14 +1670,180 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         mesh = reader.GetOutput()
         if mesh is None or mesh.GetNumberOfPoints() == 0:
             raise ValueError(_("Failed to read mesh from {filePath}").format(filePath=filePath))
+        if extension == ".vti":
+            return mesh
+        return ImportExportSimulationModelLogic._asModelMesh(mesh)
+
+    @staticmethod
+    def _asModelMesh(mesh):
+        """Return the mesh as vtkPolyData or vtkUnstructuredGrid.
+
+        Any other data set type (structured grid, rectilinear grid, ...) is converted to a
+        surface mesh, because that is what a model node can store.
+        """
         if isinstance(mesh, (vtk.vtkPolyData, vtk.vtkUnstructuredGrid)):
             return mesh
-        # Any other data set type (structured grid, rectilinear grid, ...) is converted to a
-        # surface mesh, because that is what a model node can store.
         geometryFilter = vtk.vtkGeometryFilter()
         geometryFilter.SetInputData(mesh)
         geometryFilter.Update()
         return geometryFilter.GetOutput()
+
+    @staticmethod
+    def _createVtkHdfReader(filePath):
+        reader = vtk.vtkHDFReader()
+        if not reader.CanReadFile(filePath):
+            raise ValueError(_("Failed to read mesh from {filePath}").format(filePath=filePath))
+        reader.SetFileName(filePath)
+        reader.UpdateInformation()
+        return reader
+
+    @staticmethod
+    def getVtkHdfTimeValues(filePath):
+        """Time value of each time point of a VTKHDF file. Empty if the file has only one mesh."""
+        reader = ImportExportSimulationModelLogic._createVtkHdfReader(filePath)
+        timeStepsKey = vtk.vtkStreamingDemandDrivenPipeline.TIME_STEPS()
+        outputInformation = reader.GetOutputInformation(0)
+        if not outputInformation.Has(timeStepsKey):
+            return []
+        timeValues = outputInformation.Get(timeStepsKey)
+        return list(timeValues) if len(timeValues) > 1 else []
+
+    @staticmethod
+    def _readVtkHdfMesh(reader, timeValue, filePath):
+        """Read one time point of a VTKHDF file into a single mesh (timeValue=None if not temporal)."""
+        ImportExportSimulationModelLogic._updateVtkHdfReader(reader, timeValue)
+        mesh = ImportExportSimulationModelLogic._mergedPartitions(reader.GetOutputDataObject(0))
+        if mesh is None or mesh.GetNumberOfPoints() == 0:
+            raise ValueError(_("Failed to read mesh from {filePath}").format(filePath=filePath))
+        return ImportExportSimulationModelLogic._asModelMesh(mesh)
+
+    @staticmethod
+    def _updateVtkHdfReader(reader, timeValue, piece=0, numberOfPieces=1):
+        """Read a time point (timeValue=None if not temporal), or only one piece of it."""
+        if timeValue is None:
+            reader.UpdatePiece(piece, numberOfPieces, 0)
+        else:
+            reader.UpdateTimeStep(timeValue, piece, numberOfPieces, 0)
+
+    @staticmethod
+    def _approximateVtkHdfArrayInfos(filePath, cellCountThreshold):
+        """Array information of the last time point of a large VTKHDF file, reading only a part of it.
+
+        Value ranges are not stored in the file, and most of the time of reading a time point is
+        spent on the data arrays. Therefore only the geometry is read, which gives the exact range
+        of the point coordinates, and the data arrays of a few evenly spaced partitions, which
+        give approximate value ranges.
+
+        Returns None if the file should be read completely: it is small, or it does not have
+        more partitions than what would be sampled.
+        """
+        logic = ImportExportSimulationModelLogic
+        timeValues = logic.getVtkHdfTimeValues(filePath)
+        timeValue = timeValues[-1] if timeValues else None
+
+        reader = logic._createVtkHdfReader(filePath)
+        reader.GetPointDataArraySelection().DisableAllArrays()
+        reader.GetCellDataArraySelection().DisableAllArrays()
+        logic._updateVtkHdfReader(reader, timeValue)
+        geometry = reader.GetOutputDataObject(0)
+        if not isinstance(geometry, vtk.vtkPartitionedDataSet):
+            return None
+        numberOfPartitions = geometry.GetNumberOfPartitions()
+        partitions = [(index, geometry.GetPartition(index)) for index in range(numberOfPartitions)]
+        # A partition may be empty if a solver process had no part of the mesh assigned to it.
+        partitions = [(index, partition) for index, partition in partitions
+                      if partition is not None and partition.GetNumberOfPoints() > 0]
+        numberOfCells = sum(partition.GetNumberOfCells() for _index, partition in partitions)
+        if numberOfCells <= cellCountThreshold or len(partitions) <= APPROXIMATE_RANGE_PARTITION_COUNT:
+            return None
+        bounds = [0.0] * 6
+        geometry.GetBounds(bounds)
+        sampledPartitionIndices = [partitions[sampleIndex * len(partitions) // APPROXIMATE_RANGE_PARTITION_COUNT][0]
+                                   for sampleIndex in range(APPROXIMATE_RANGE_PARTITION_COUNT)]
+        # The geometry of the whole time point is not needed any more.
+        del partitions, geometry, reader
+
+        sampledArrayInfos = []
+        for partitionIndex in sampledPartitionIndices:
+            reader = logic._createVtkHdfReader(filePath)
+            logic._updateVtkHdfReader(reader, timeValue, partitionIndex, numberOfPartitions)
+            partition = logic._mergedPartitions(reader.GetOutputDataObject(0))
+            if partition is not None:
+                sampledArrayInfos.append(logic.getArrayInfosFromMesh(partition))
+        arrayInfos = logic._mergedArrayInfos(sampledArrayInfos)
+        for arrayInfo in arrayInfos:
+            if arrayInfo.location == POSITION_LOCATION:
+                arrayInfo.componentRanges = [(bounds[0], bounds[1]), (bounds[2], bounds[3]),
+                                             (bounds[4], bounds[5])]
+            else:
+                arrayInfo.isRangeApproximate = True
+        return arrayInfos
+
+    @staticmethod
+    def _mergedPartitions(dataObject):
+        """Append the partitions that a parallel solver wrote separately into a single mesh.
+
+        Points are not merged, so the values of the points are preserved as they are in the file.
+        """
+        if dataObject is None or not dataObject.IsA("vtkCompositeDataSet"):
+            return dataObject
+        partitions = []
+        iterator = vtk.vtkDataObjectTreeIterator()
+        iterator.SetDataSet(dataObject)
+        iterator.InitTraversal()
+        while not iterator.IsDoneWithTraversal():
+            partition = iterator.GetCurrentDataObject()
+            # A partition may be empty if a solver process had no part of the mesh assigned to it.
+            if partition is not None and partition.GetNumberOfPoints() > 0:
+                partitions.append(partition)
+            iterator.GoToNextItem()
+        if not partitions:
+            return None
+        if all(isinstance(partition, vtk.vtkPolyData) for partition in partitions):
+            appendFilter = vtk.vtkAppendPolyData()
+        else:
+            appendFilter = vtk.vtkAppendFilter()
+        for partition in partitions:
+            appendFilter.AddInputData(partition)
+        appendFilter.Update()
+        return appendFilter.GetOutput()
+
+    @staticmethod
+    def mergeDuplicatePoints(mesh):
+        """Return the mesh with the points merged that have the same position and the same values.
+
+        Points that are at the same position but have a different value in any point data array
+        are kept separate, so no value is changed or lost. Cells and their data are not changed.
+        """
+        arrayValues = []
+        pointData = mesh.GetPointData()
+        for arrayIndex in range(pointData.GetNumberOfArrays()):
+            array = pointData.GetArray(arrayIndex)
+            if array is not None:
+                values = numpy_support.vtk_to_numpy(array)
+                arrayValues.append(values.reshape(len(values), -1))
+
+        # The merge filter can only compare the values of one array, so all the values are put
+        # into a temporary array. A shallow copy is used for not adding it to the input mesh.
+        mergingMesh = mesh.NewInstance()
+        mergingMesh.ShallowCopy(mesh)
+        mergingArrayName = "_MergingValues"
+        if arrayValues:
+            mergingArray = numpy_support.numpy_to_vtk(np.concatenate(arrayValues, axis=1), deep=False)
+            mergingArray.SetName(mergingArrayName)
+            mergingMesh.GetPointData().AddArray(mergingArray)
+
+        if isinstance(mesh, vtk.vtkPolyData):
+            mergeFilter = vtk.vtkStaticCleanPolyData()
+        else:
+            mergeFilter = vtk.vtkStaticCleanUnstructuredGrid()
+        mergeFilter.SetInputData(mergingMesh)
+        mergeFilter.SetRemoveUnusedPoints(False)
+        mergeFilter.SetMergingArray(mergingArrayName if arrayValues else "")
+        mergeFilter.Update()
+        mergedMesh = mergeFilter.GetOutput()
+        mergedMesh.GetPointData().RemoveArray(mergingArrayName)
+        return mergedMesh
 
     def writeMesh(self, mesh, filePath):
         """Write a mesh to file, without any conversion."""
@@ -1178,11 +1908,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
     def getCachedMesh(self, filePath):
         """Read a mesh from file, reusing the previously read mesh if the file is unchanged."""
         filePath = os.path.normpath(filePath)
-        try:
-            fileStatus = os.stat(filePath)
-            cacheKey = (fileStatus.st_mtime, fileStatus.st_size)
-        except OSError:
-            cacheKey = None
+        cacheKey = self._fileCacheKey(filePath)
         cached = self._meshCache.get(filePath)
         if cached is not None and cacheKey is not None and cached[0] == cacheKey:
             return cached[1]
@@ -1190,8 +1916,38 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         self._meshCache[filePath] = (cacheKey, mesh)
         return mesh
 
+    @staticmethod
+    def _fileCacheKey(filePath):
+        """Value that changes if the file changes, None if the file is not accessible."""
+        try:
+            fileStatus = os.stat(filePath)
+        except OSError:
+            return None
+        return (fileStatus.st_mtime, fileStatus.st_size)
+
+    def _cachedApproximateArrayInfos(self, filePath, cellCountThreshold):
+        """Approximate array information of a file. None if it should be read completely instead."""
+        filePath = os.path.normpath(filePath)
+        if os.path.splitext(filePath)[1].lower() not in self.VTKHDF_FILE_EXTENSIONS:
+            return None
+        fileKey = self._fileCacheKey(filePath)
+        if fileKey is None:
+            return None
+        cacheKey = (fileKey, cellCountThreshold)
+        cached = self._approximateArrayInfoCache.get(filePath)
+        if cached is None or cached[0] != cacheKey:
+            cached = (cacheKey, self._approximateVtkHdfArrayInfos(filePath, cellCountThreshold))
+            self._approximateArrayInfoCache[filePath] = cached
+        if cached[1] is None:
+            return None
+        # A mesh that was read while the option was disabled would only take up memory now.
+        self._meshCache.pop(filePath, None)
+        # The caller may modify the returned objects.
+        return [copy.copy(arrayInfo) for arrayInfo in cached[1]]
+
     def clearCache(self) -> None:
         self._meshCache = {}
+        self._approximateArrayInfoCache = {}
 
     # ------------------------------------------------------------------ mesh inspection
 
@@ -1203,8 +1959,10 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         """
         arrayInfos = []
 
-        points = mesh.GetPoints()
-        if points is not None:
+        # Points of an image are implicit, they must not be requested from it because that would
+        # allocate a coordinate for every voxel.
+        isImage = isinstance(mesh, vtk.vtkImageData)
+        if isImage or mesh.GetPoints() is not None:
             positionInfo = MeshArrayInfo(POSITION_ARRAY_NAME, POSITION_LOCATION, 3)
             positionInfo.simulationUnit = simulationUnitByQuantity(LENGTH_QUANTITY)
             bounds = [0.0] * 6
@@ -1215,6 +1973,9 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
         for location, attributes in ((POINT_LOCATION, mesh.GetPointData()),
                                      (CELL_LOCATION, mesh.GetCellData())):
+            if isImage and location == CELL_LOCATION:
+                # A volume node stores voxel values, which are point data of the image.
+                continue
             for arrayIndex in range(attributes.GetNumberOfArrays()):
                 array = attributes.GetArray(arrayIndex)
                 if array is None:
@@ -1234,24 +1995,41 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
         return arrayInfos
 
-    def getArrayInfosFromFiles(self, filePaths):
+    def getArrayInfosFromFiles(self, filePaths, approximateRangeCellCountThreshold=None):
         """Coordinates and data arrays of all input files, merged into a single list.
 
         Arrays that are present in several files are listed once, with the value range extended
         to cover all files, so that the same unit is used for all of them.
+
+        :param approximateRangeCellCountThreshold: VTKHDF files with more cells than this are not
+            read completely, and the value ranges of their data arrays are only approximate.
+            None to always compute the exact ranges.
         """
         # Meshes of files that are no longer needed are released, so that the cache does not
         # keep growing as files are added to and removed from the input file list.
         normalizedFilePaths = [os.path.normpath(filePath) for filePath in filePaths]
-        for cachedFilePath in list(self._meshCache):
-            if cachedFilePath not in normalizedFilePaths:
-                del self._meshCache[cachedFilePath]
+        for cache in (self._meshCache, self._approximateArrayInfoCache):
+            for cachedFilePath in list(cache):
+                if cachedFilePath not in normalizedFilePaths:
+                    del cache[cachedFilePath]
 
+        fileArrayInfos = []
+        for filePath in filePaths:
+            arrayInfos = None
+            if approximateRangeCellCountThreshold is not None:
+                arrayInfos = self._cachedApproximateArrayInfos(filePath, approximateRangeCellCountThreshold)
+            if arrayInfos is None:
+                arrayInfos = self.getArrayInfosFromMesh(self.getCachedMesh(filePath))
+            fileArrayInfos.append(arrayInfos)
+        return self._mergedArrayInfos(fileArrayInfos)
+
+    @staticmethod
+    def _mergedArrayInfos(arrayInfoLists):
+        """Merge lists of array information into one, extending the ranges of the same array."""
         mergedArrayInfos = []
         mergedArrayInfosByKey = {}
-        for filePath in filePaths:
-            mesh = self.getCachedMesh(filePath)
-            for arrayInfo in self.getArrayInfosFromMesh(mesh):
+        for arrayInfos in arrayInfoLists:
+            for arrayInfo in arrayInfos:
                 existingArrayInfo = mergedArrayInfosByKey.get(arrayInfo.key)
                 if existingArrayInfo is None:
                     mergedArrayInfosByKey[arrayInfo.key] = arrayInfo
@@ -1264,12 +2042,16 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
     @staticmethod
     def convertMesh(mesh, arrayQuantities, flipFirstTwoComponents, fromUnitSystem, toUnitSystem):
-        """Return a converted copy of a mesh.
+        """Return a converted copy of a mesh or image.
+
+        The geometry of an image is defined by its origin, spacing, and direction, so these are
+        converted the same way as the point coordinates of a mesh.
 
         :param arrayQuantities: (location, name) -> quantity name. Arrays that are not in the
             dictionary are not scaled.
         :param flipFirstTwoComponents: negate the first two components of the point coordinates
-            and of all 3-component floating-point point and cell arrays (RAS <-> LPS conversion).
+            and rotate all directional point and cell arrays (RAS <-> LPS conversion), see
+            arrayComponentAxes.
         """
         convertedMesh = mesh.NewInstance()
         convertedMesh.DeepCopy(mesh)
@@ -1279,13 +2061,17 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             return unitSystemConversionFactor(
                 simulationUnitByQuantity(quantity).lengthExponent, fromUnitSystem, toUnitSystem)
 
-        points = convertedMesh.GetPoints()
-        if points is not None and points.GetNumberOfPoints() > 0:
-            # Point coordinates are lengths, unless the user explicitly set something else.
-            positionScale = scaleFor(POSITION_LOCATION, POSITION_ARRAY_NAME, LENGTH_QUANTITY)
-            positionFlippedIndices = flippedComponentIndices(POSITION_ARRAY_NAME, 3) \
-                if flipFirstTwoComponents else []
-            if positionFlippedIndices or positionScale != 1.0:
+        # Point coordinates are lengths, unless the user explicitly set something else.
+        positionScale = scaleFor(POSITION_LOCATION, POSITION_ARRAY_NAME, LENGTH_QUANTITY)
+        positionFlippedIndices = flippedComponentIndices(POSITION_ARRAY_NAME, 3) \
+            if flipFirstTwoComponents else []
+        if isinstance(convertedMesh, vtk.vtkImageData):
+            ImportExportSimulationModelLogic._convertImageGeometry(
+                convertedMesh, positionFlippedIndices, positionScale)
+        else:
+            points = convertedMesh.GetPoints()
+            if (points is not None and points.GetNumberOfPoints() > 0
+                    and (positionFlippedIndices or positionScale != 1.0)):
                 pointsArray = numpy_support.vtk_to_numpy(points.GetData())
                 if positionFlippedIndices:
                     pointsArray[:, positionFlippedIndices] *= -1.0
@@ -1334,6 +2120,42 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 array.Modified()
 
         return convertedMesh
+
+    @staticmethod
+    def _convertImageGeometry(image, flippedIndices, scale):
+        """Apply a coordinate system flip and a length scale to the geometry of an image, in place.
+
+        A voxel is at origin + direction * (spacing * ijk). The scale applies to the origin and the
+        spacing, the flip applies to the origin and to the rows of the direction matrix.
+        """
+        signs = [-1.0 if axis in flippedIndices else 1.0 for axis in range(3)]
+        origin = image.GetOrigin()
+        image.SetOrigin([signs[axis] * origin[axis] * scale for axis in range(3)])
+        image.SetSpacing([spacing * scale for spacing in image.GetSpacing()])
+        direction = vtk.vtkMatrix3x3()
+        direction.DeepCopy(image.GetDirectionMatrix())
+        for row in range(3):
+            for column in range(3):
+                direction.SetElement(row, column, signs[row] * direction.GetElement(row, column))
+        image.SetDirectionMatrix(direction)
+
+    @staticmethod
+    def _imageIjkToRasMatrix(image):
+        """IJK to RAS matrix of an image in the scene, for voxel indices that start from 0."""
+        origin = image.GetOrigin()
+        spacing = image.GetSpacing()
+        direction = image.GetDirectionMatrix()
+        extent = image.GetExtent()
+        ijkToRas = vtk.vtkMatrix4x4()
+        for row in range(3):
+            # An extent that does not start from 0 is equivalent to an offset of the origin.
+            position = origin[row]
+            for column in range(3):
+                columnScale = direction.GetElement(row, column) * spacing[column]
+                ijkToRas.SetElement(row, column, columnScale)
+                position += columnScale * extent[column * 2]
+            ijkToRas.SetElement(row, 3, position)
+        return ijkToRas
 
     @staticmethod
     def _replaceWithDoubleArray(attributes, name):
@@ -1431,16 +2253,36 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ import and export
 
-    def importFiles(self, filePaths, coordinateSystem, unitSystem, arrayQuantities=None):
-        """Load mesh files into the scene as model nodes.
+    def importFiles(self, filePaths, coordinateSystem, unitSystem, arrayQuantities=None,
+                    mergeDuplicatePoints=True,
+                    decimationCellCountThreshold=DEFAULT_DECIMATION_CELL_COUNT_THRESHOLD,
+                    decimationTargetReduction=DEFAULT_DECIMATION_TARGET_REDUCTION,
+                    decimationBoundaryWeight=DEFAULT_DECIMATION_BOUNDARY_WEIGHT,
+                    keepEveryNthTimePoint=1, firstTimePointIndex=0, resampleSpacing=None):
+        """Load mesh and image files into the scene.
 
-        :param coordinateSystem: coordinate system of the files (RAS or LPS). Models are always
+        A mesh is loaded as a model node. A VTKHDF file with several time points is loaded as a
+        sequence of models with a sequence browser. A .vti image is loaded as a volume node.
+
+        :param coordinateSystem: coordinate system of the files (RAS or LPS). Nodes are always
             loaded into the scene in RAS.
-        :param unitSystem: unit system of the files. Models are always loaded into the scene in
+        :param unitSystem: unit system of the files. Nodes are always loaded into the scene in
             the mm-g-s system.
         :param arrayQuantities: (location, name) -> quantity name. Arrays that are not in the
             dictionary get their unit guessed from the array name.
-        :return: list of the created model nodes.
+        :param mergeDuplicatePoints: merge the points of meshes that have the same position and the
+            same values, see mergeDuplicatePoints.
+        :param decimationCellCountThreshold: tetrahedral meshes that have more cells than this are
+            decimated, see TetrahedralMeshDecimator. None disables decimation.
+        :param decimationTargetReduction: fraction of the cells to remove from a decimated mesh.
+        :param decimationBoundaryWeight: how strongly the boundary of a decimated mesh is preserved.
+        :param keepEveryNthTimePoint: load only the first of every N time points of a time series.
+        :param firstTimePointIndex: index of the first time point to load from a time series,
+            starting from 0.
+        :param resampleSpacing: replace the cells of volumetric meshes with cubes of this size, in
+            mm, instead of decimating them. None to not resample.
+        :return: list of the created model nodes (the proxy model node of a sequence) and volume
+            nodes.
         """
         if not filePaths:
             raise ValueError(_("No input file is specified"))
@@ -1449,43 +2291,244 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 coordinateSystem=coordinateSystem))
         if unitSystem not in UNIT_SYSTEMS:
             raise ValueError(_("Invalid unit system: {unitSystem}").format(unitSystem=unitSystem))
+        if keepEveryNthTimePoint < 1:
+            raise ValueError(_("Invalid number of time points to keep: 1 of {count}").format(
+                count=keepEveryNthTimePoint))
+        if firstTimePointIndex < 0:
+            raise ValueError(_("Invalid index of the first time point: {index}").format(
+                index=firstTimePointIndex))
+        if resampleSpacing is not None and resampleSpacing <= 0:
+            raise ValueError(_("Invalid resampling resolution: {spacing}").format(spacing=resampleSpacing))
 
         flipFirstTwoComponents = (coordinateSystem != SCENE_COORDINATE_SYSTEM)
-        modelNodes = []
+        importedNodes = []
         for filePath in filePaths:
             self.addLog(_("Importing {filePath}").format(filePath=filePath))
-            mesh = self.getCachedMesh(filePath)
-            # Arrays that the caller did not specify a unit for (for example, arrays that are
-            # only present in some of the files) get their unit guessed from the array name.
-            quantities = {}
-            for arrayInfo in self.getArrayInfosFromMesh(mesh):
-                quantities[arrayInfo.key] = arrayInfo.simulationUnit.quantity
-            if arrayQuantities:
-                quantities.update(arrayQuantities)
+            nodeName = os.path.splitext(os.path.basename(filePath))[0]
+            extension = os.path.splitext(filePath)[1].lower()
+            reduceMesh = self._meshReductionFunction(
+                mergeDuplicatePoints, decimationCellCountThreshold, decimationTargetReduction,
+                decimationBoundaryWeight,
+                None if resampleSpacing is None else resampleSpacing / UNIT_SYSTEMS[unitSystem]["lengthUnitInMm"])
+            timeValues = self.getVtkHdfTimeValues(filePath) \
+                if extension in self.VTKHDF_FILE_EXTENSIONS else []
+            if timeValues:
+                keptTimeValues = timeValues[firstTimePointIndex::keepEveryNthTimePoint]
+                if not keptTimeValues:
+                    raise ValueError(_("Index of the first time point ({index}) is too large, {filePath} "
+                                       "has {count} time points (the index of the first one is 0).").format(
+                        index=firstTimePointIndex, filePath=filePath, count=len(timeValues)))
+                if len(keptTimeValues) < len(timeValues):
+                    self.addLog(_("  Keeping {kept} of {count} time points").format(
+                        kept=len(keptTimeValues), count=len(timeValues)))
+                if len(keptTimeValues) > 1:
+                    importedNodes.append(self._importTimeSeries(
+                        filePath, nodeName, keptTimeValues, flipFirstTwoComponents, unitSystem, arrayQuantities,
+                        reduceMesh))
+                    continue
+                # A sequence of a single time point would be of no use, a model is loaded instead.
+                singleTimeValue = keptTimeValues[0]
+                self._meshCache.pop(os.path.normpath(filePath), None)
+                mesh = self._readVtkHdfMesh(self._createVtkHdfReader(filePath), singleTimeValue, filePath)
+            else:
+                singleTimeValue = None
+                mesh = self.getCachedMesh(filePath)
+            if isinstance(mesh, vtk.vtkImageData):
+                importedNodes.extend(self._importImage(
+                    filePath, nodeName, mesh, flipFirstTwoComponents, unitSystem, arrayQuantities))
+                continue
 
+            mesh = reduceMesh(mesh)
+            quantities = self._fileArrayQuantities(mesh, arrayQuantities)
             convertedMesh = self.convertMesh(mesh, quantities, flipFirstTwoComponents,
                                              unitSystem, SCENE_UNIT_SYSTEM)
-            modelNode = slicer.mrmlScene.AddNewNodeByClass(
-                "vtkMRMLModelNode", os.path.splitext(os.path.basename(filePath))[0])
+            modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", nodeName)
             modelNode.SetAndObserveMesh(convertedMesh)
             modelNode.CreateDefaultDisplayNodes()
 
-            arrayInfos = self.getArrayInfosFromMesh(convertedMesh)
-            for arrayInfo in arrayInfos:
-                arrayInfo.simulationUnit = simulationUnitByQuantity(
-                    quantities.get(arrayInfo.key, DIMENSIONLESS_QUANTITY))
+            arrayInfos = self._convertedArrayInfos(convertedMesh, quantities)
             self.setModelArrayUnits(modelNode, arrayInfos, SCENE_UNIT_SYSTEM, SCENE_COORDINATE_SYSTEM)
             modelNode.SetAttribute(self.ATTRIBUTE_PREFIX + "SourceFile", filePath)
+            if singleTimeValue is not None:
+                modelNode.SetAttribute(self.ATTRIBUTE_PREFIX + "TimeValue", "%.10g" % singleTimeValue)
             self._logConversion(arrayInfos, unitSystem, SCENE_UNIT_SYSTEM, flipFirstTwoComponents)
-            modelNodes.append(modelNode)
+            importedNodes.append(modelNode)
 
         # Simulation meshes can be very large (hundreds of MB), therefore the meshes that were
         # read for populating the arrays table are released as soon as they have been imported.
         # The arrays table remains valid, it does not need the meshes any more.
         self.clearCache()
 
-        self.addLog(_("Imported {count} model(s).").format(count=len(modelNodes)))
-        return modelNodes
+        self.addLog(_("Imported {count} node(s).").format(count=len(importedNodes)))
+        return importedNodes
+
+    def _meshReductionFunction(self, mergeDuplicatePoints, decimationCellCountThreshold,
+                               decimationTargetReduction, decimationBoundaryWeight, resampleSpacing=None):
+        """Return a function that reduces the size of the meshes of a file, as requested.
+
+        All the time points of a file use the same function, so that they can share the result of
+        the time-consuming decimation if their geometry is the same.
+
+        :param resampleSpacing: resolution of uniform resampling in the length unit of the meshes,
+            None to not resample. A resampled mesh is not decimated and it has no duplicate points.
+        """
+        decimator = TetrahedralMeshDecimator(decimationTargetReduction, decimationBoundaryWeight, self.addLog)
+        resampler = None if resampleSpacing is None else UniformMeshResampler(resampleSpacing, self.addLog)
+
+        def reduceMesh(mesh):
+            if resampler is not None and resampler.canResample(mesh):
+                return resampler.resample(mesh)
+            if (decimationCellCountThreshold is not None
+                    and mesh.GetNumberOfCells() > decimationCellCountThreshold
+                    and decimator.canDecimate(mesh)):
+                # The decimated mesh has no duplicate points.
+                return decimator.decimate(mesh)
+            if not mergeDuplicatePoints:
+                return mesh
+            mergedMesh = self.mergeDuplicatePoints(mesh)
+            self.addLog(_("  Merged duplicate points: {before} -> {after}").format(
+                before=mesh.GetNumberOfPoints(), after=mergedMesh.GetNumberOfPoints()))
+            return mergedMesh
+
+        return reduceMesh
+
+    def _fileArrayQuantities(self, mesh, arrayQuantities):
+        """Quantity of each array of a mesh: the one specified by the caller, or else a guess.
+
+        Arrays that the caller did not specify a unit for (for example, arrays that are only
+        present in some of the files) get their unit guessed from the array name.
+        """
+        quantities = {}
+        for arrayInfo in self.getArrayInfosFromMesh(mesh):
+            quantities[arrayInfo.key] = arrayInfo.simulationUnit.quantity
+        if arrayQuantities:
+            quantities.update(arrayQuantities)
+        return quantities
+
+    def _convertedArrayInfos(self, convertedMesh, quantities):
+        """Arrays of a converted mesh, with the quantities that were used for the conversion."""
+        arrayInfos = self.getArrayInfosFromMesh(convertedMesh)
+        for arrayInfo in arrayInfos:
+            arrayInfo.simulationUnit = simulationUnitByQuantity(
+                quantities.get(arrayInfo.key, DIMENSIONLESS_QUANTITY))
+        return arrayInfos
+
+    @staticmethod
+    def _timeIndexValues(timeValues):
+        """Sequence index value of each time point: the shortest text that keeps them distinct."""
+        for significantDigits in range(10, 17):
+            indexValues = ["%.*g" % (significantDigits, timeValue) for timeValue in timeValues]
+            if len(set(indexValues)) == len(timeValues):
+                return indexValues
+        return [repr(timeValue) for timeValue in timeValues]
+
+    @staticmethod
+    def _createTimeSequenceNode(nodeName, timeValues):
+        """Create a sequence node that can store an item for each of the given time values."""
+        sequenceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceNode", nodeName)
+        sequenceNode.SetIndexName("time")
+        sequenceNode.SetIndexUnit("s")
+        # Index values that differ by less than the tolerance refer to the same item. The default
+        # tolerance (0.001) is larger than the time step of many simulations.
+        timeSteps = [abs(second - first) for first, second in zip(timeValues, timeValues[1:])
+                     if second != first]
+        if timeSteps:
+            sequenceNode.SetNumericIndexValueTolerance(
+                min(sequenceNode.GetNumericIndexValueTolerance(), min(timeSteps) * 0.01))
+        return sequenceNode
+
+    def _importTimeSeries(self, filePath, nodeName, timeValues, flipFirstTwoComponents, unitSystem,
+                          arrayQuantities, reduceMesh):
+        """Load each time point of a VTKHDF file into a sequence of models, add a sequence browser.
+
+        :param reduceMesh: function that reduces the size of a mesh, see _meshReductionFunction.
+        :return: the proxy model node of the sequence browser.
+        """
+        # All the time points will be read, the one read for the arrays table is not needed.
+        self._meshCache.pop(os.path.normpath(filePath), None)
+
+        sequenceNode = self._createTimeSequenceNode(nodeName, timeValues)
+        indexValues = self._timeIndexValues(timeValues)
+        try:
+            reader = self._createVtkHdfReader(filePath)
+            for timePointIndex, timeValue in enumerate(timeValues):
+                self.addLog(_("Reading time point {index}/{count} (time: {time:g}s)").format(
+                    index=timePointIndex + 1, count=len(timeValues), time=timeValue))
+                mesh = reduceMesh(self._readVtkHdfMesh(reader, timeValue, filePath))
+                quantities = self._fileArrayQuantities(mesh, arrayQuantities)
+                convertedMesh = self.convertMesh(mesh, quantities, flipFirstTwoComponents,
+                                                 unitSystem, SCENE_UNIT_SYSTEM)
+                arrayInfos = self._convertedArrayInfos(convertedMesh, quantities)
+
+                frameNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLModelNode")
+                frameNode.UnRegister(None)  # Prevent memory leak
+                self.setModelArrayUnits(frameNode, arrayInfos, SCENE_UNIT_SYSTEM, SCENE_COORDINATE_SYSTEM)
+                frameNode.SetAttribute(self.ATTRIBUTE_PREFIX + "SourceFile", filePath)
+                # The sequence stores a deep copy of the node it receives. A time point can take
+                # up gigabytes of memory, so the mesh is only set after the node has been copied.
+                sequenceDataNode = sequenceNode.SetDataNodeAtValue(frameNode, indexValues[timePointIndex])
+                sequenceDataNode.SetAndObserveMesh(convertedMesh)
+                if timePointIndex == 0:
+                    self._logConversion(arrayInfos, unitSystem, SCENE_UNIT_SYSTEM, flipFirstTwoComponents)
+            # Setting a data node replaces any item that has the same index value, without an error.
+            if sequenceNode.GetNumberOfDataNodes() != len(timeValues):
+                raise ValueError(_("Time points of {filePath} do not have distinct time values").format(
+                    filePath=filePath))
+        except Exception:
+            slicer.mrmlScene.RemoveNode(sequenceNode)
+            raise
+
+        browserNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode", nodeName + " browser")
+        browserNode.SetAndObserveMasterSequenceNodeID(sequenceNode.GetID())
+        # With this option the proxy node shares the mesh of the selected time point. Otherwise the
+        # whole mesh would be copied whenever a different time point is selected.
+        browserNode.SetSaveChanges(sequenceNode, True)
+        proxyNode = browserNode.GetProxyNode(sequenceNode)
+        proxyNode.CreateDefaultDisplayNodes()
+        slicer.modules.sequences.setToolBarActiveBrowserNode(browserNode)
+        return proxyNode
+
+    def _importImage(self, filePath, nodeName, image, flipFirstTwoComponents, unitSystem, arrayQuantities):
+        """Load each point data array of an image into a volume node, in the scene coordinate
+        and unit system.
+
+        :return: list of the created volume nodes.
+        """
+        if image.GetCellData().GetNumberOfArrays():
+            self.addLog(_("Warning: cell data arrays of the image are not loaded."))
+        quantities = self._fileArrayQuantities(image, arrayQuantities)
+        convertedImage = self.convertMesh(image, quantities, flipFirstTwoComponents,
+                                          unitSystem, SCENE_UNIT_SYSTEM)
+        ijkToRas = self._imageIjkToRasMatrix(convertedImage)
+        arrayInfos = self._convertedArrayInfos(convertedImage, quantities)
+        voxelArrayInfos = [arrayInfo for arrayInfo in arrayInfos if arrayInfo.location == POINT_LOCATION]
+        if not voxelArrayInfos:
+            raise ValueError(_("No voxel values found in {filePath}").format(filePath=filePath))
+        positionInfos = [arrayInfo for arrayInfo in arrayInfos if arrayInfo.location == POSITION_LOCATION]
+
+        volumeNodes = []
+        for arrayInfo in voxelArrayInfos:
+            # The geometry is stored in the volume node, the image of a volume node has unit
+            # spacing, zero origin, and an extent that starts from 0.
+            volumeImage = vtk.vtkImageData()
+            volumeImage.SetDimensions(convertedImage.GetDimensions())
+            volumeImage.GetPointData().SetScalars(convertedImage.GetPointData().GetArray(arrayInfo.name))
+            isScalar = arrayInfo.numberOfComponents == 1
+            volumeNode = slicer.mrmlScene.AddNewNodeByClass(
+                "vtkMRMLScalarVolumeNode" if isScalar else "vtkMRMLVectorVolumeNode",
+                nodeName if len(voxelArrayInfos) == 1 else nodeName + "_" + arrayInfo.name)
+            volumeNode.SetIJKToRASMatrix(ijkToRas)
+            volumeNode.SetAndObserveImageData(volumeImage)
+            if arrayInfo.numberOfComponents == 3 and arrayInfo.isFloatingPoint:
+                volumeNode.SetVoxelVectorType(slicer.vtkMRMLVolumeNode.VoxelVectorTypeSpatial)
+            volumeNode.CreateDefaultDisplayNodes()
+            self.setModelArrayUnits(volumeNode, positionInfos + [arrayInfo],
+                                    SCENE_UNIT_SYSTEM, SCENE_COORDINATE_SYSTEM)
+            volumeNode.SetAttribute(self.ATTRIBUTE_PREFIX + "SourceFile", filePath)
+            volumeNodes.append(volumeNode)
+        self._logConversion(arrayInfos, unitSystem, SCENE_UNIT_SYSTEM, flipFirstTwoComponents)
+        slicer.util.setSliceViewerLayers(background=volumeNodes[0], fit=True)
+        return volumeNodes
 
     @staticmethod
     def fileNameFromNodeName(nodeName):
@@ -1617,6 +2660,648 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         self.test_ArrayNameQuantityGuess()
         self.test_TensorConversion()
         self.test_IntegerArrayScaling()
+        self.test_ImportVtkHdfTimeSeries()
+        self.test_ImportImage()
+        self.test_MergeDuplicatePoints()
+        self.test_NonVectorArrayConversion()
+        self.test_DecimateTetrahedra()
+        self.test_ApproximateRanges()
+        self.test_ResampleUniformly()
+
+    def test_ResampleUniformly(self):
+        """Resampling must produce uniform cubes, preserve the volume, and transfer the data arrays."""
+        self.delayDisplay("Starting uniform resampling test")
+
+        import tempfile
+
+        def createMesh(cornerOffset, dimension=9, cellSize=0.5):
+            """Tetrahedra filling a box, with arrays that are linear functions of the position."""
+            image = vtk.vtkImageData()
+            image.SetDimensions(dimension, dimension, dimension)
+            image.SetSpacing(cellSize, cellSize, cellSize)
+            image.SetOrigin(cornerOffset, cornerOffset, cornerOffset)
+            image.AllocateScalars(vtk.VTK_FLOAT, 1)
+            tetrahedralize = vtk.vtkDataSetTriangleFilter()
+            tetrahedralize.SetInputData(image)
+            tetrahedralize.Update()
+            mesh = vtk.vtkUnstructuredGrid()
+            mesh.DeepCopy(tetrahedralize.GetOutput())
+            mesh.GetPointData().Initialize()
+            points = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData())
+            for name, values in (("Pressure", points[:, 0] + 2.0 * points[:, 1] - points[:, 2]),
+                                 ("Velocity", points * 3.0),
+                                 ("NodeID", np.arange(len(points), dtype=np.int32))):
+                array = numpy_support.numpy_to_vtk(values, deep=True)
+                array.SetName(name)
+                mesh.GetPointData().AddArray(array)
+            regionId = numpy_support.numpy_to_vtk(np.full(mesh.GetNumberOfCells(), 5, dtype=np.int32), deep=True)
+            regionId.SetName("RegionID")
+            mesh.GetCellData().AddArray(regionId)
+            return mesh
+
+        # A box of size 4, not aligned with the grid: the centers of 4 x 4 x 4 cubes are inside.
+        mesh = createMesh(0.3)
+        self.assertTrue(UniformMeshResampler.canResample(mesh))
+        resampler = UniformMeshResampler(1.0)
+        resampledMesh = resampler.resample(mesh)
+        self.assertEqual(resampledMesh.GetNumberOfCells(), 4 * 4 * 4)
+        self.assertEqual(resampledMesh.GetNumberOfPoints(), 5 * 5 * 5)
+        self.assertTrue(resampledMesh.IsHomogeneous())
+        self.assertEqual(resampledMesh.GetCellType(0), vtk.VTK_HEXAHEDRON)
+        self.assertEqual(resampledMesh.GetBounds(), (0.0, 4.0, 0.0, 4.0, 0.0, 4.0))
+        # Cell points must be in the order of a hexahedron, which results in a positive volume.
+        for cellId in range(resampledMesh.GetNumberOfCells()):
+            self.assertAlmostEqual(vtk.vtkMeshQuality.HexVolume(resampledMesh.GetCell(cellId)), 1.0)
+
+        # Inside the mesh the interpolation of a linear function must be exact.
+        points = numpy_support.vtk_to_numpy(resampledMesh.GetPoints().GetData())
+        pressure = numpy_support.vtk_to_numpy(resampledMesh.GetPointData().GetArray("Pressure"))
+        velocity = numpy_support.vtk_to_numpy(resampledMesh.GetPointData().GetArray("Velocity"))
+        isInside = np.all((points > 0.3) & (points < 4.3), axis=1)
+        self.assertEqual(int(isInside.sum()), 4 * 4 * 4)
+        np.testing.assert_allclose(pressure[isInside], (points[:, 0] + 2.0 * points[:, 1] - points[:, 2])[isInside],
+                                   atol=1e-4)
+        np.testing.assert_allclose(velocity[isInside], (points * 3.0)[isInside], atol=1e-4)
+        # Corners outside of the mesh must get the value at the closest position of the mesh.
+        closestPoints = np.clip(points, 0.3, 4.3)
+        np.testing.assert_allclose(pressure, closestPoints[:, 0] + 2.0 * closestPoints[:, 1] - closestPoints[:, 2],
+                                   atol=1e-4)
+        # Integers must not be interpolated, and all the arrays must be present.
+        self.assertEqual(resampledMesh.GetPointData().GetArray("NodeID").GetDataType(), vtk.VTK_INT)
+        self.assertEqual(resampledMesh.GetCellData().GetArray("RegionID").GetRange(), (5.0, 5.0))
+
+        # Interpolation must not extrapolate: values must remain in the range of the input.
+        self.assertGreaterEqual(resampler._interpolationWeights.min(), 0.0)
+        self.assertLessEqual(resampler._interpolationWeights.max(), 1.0 + 1e-9)
+        np.testing.assert_allclose(resampler._interpolationWeights.sum(axis=1), 1.0)
+        inputRange = mesh.GetPointData().GetArray("Pressure").GetRange()
+        self.assertGreaterEqual(pressure.min(), inputRange[0] - 1e-4)
+        self.assertLessEqual(pressure.max(), inputRange[1] + 1e-4)
+
+        # The weights of outside points must belong to the closest cell, also if the locator has
+        # to examine many cells. The box is the same as above, but it has many more cells.
+        fineMesh = createMesh(0.3, dimension=41, cellSize=0.1)
+        fineResampled = UniformMeshResampler(1.0).resample(fineMesh)
+        finePoints = numpy_support.vtk_to_numpy(fineResampled.GetPoints().GetData())
+        fineClosestPoints = np.clip(finePoints, 0.3, 4.3)
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(fineResampled.GetPointData().GetArray("Pressure")),
+            fineClosestPoints[:, 0] + 2.0 * fineClosestPoints[:, 1] - fineClosestPoints[:, 2], atol=1e-3)
+
+        # The result must be repeatable: multi-threaded probing leaves random points at 0.
+        for repeat in range(20):
+            repeatedMesh = UniformMeshResampler(1.0).resample(mesh)
+            np.testing.assert_array_equal(
+                numpy_support.vtk_to_numpy(repeatedMesh.GetPointData().GetArray("Pressure")), pressure)
+
+        # Time points with the same geometry share the result, and a moved mesh uses the same grid.
+        resampler.resample(mesh)
+        self.assertEqual(resampler.numberOfResamplings, 1)
+        movedMesh = resampler.resample(createMesh(1.3))
+        self.assertEqual(resampler.numberOfResamplings, 2)
+        self.assertEqual(movedMesh.GetBounds(), (1.0, 5.0, 1.0, 5.0, 1.0, 5.0))
+
+        # The resolution is rejected if the result would be empty or the grid would be too large.
+        with self.assertRaises(ValueError):
+            UniformMeshResampler(100.0).resample(createMesh(0.3, dimension=2))
+        with self.assertRaises(ValueError):
+            UniformMeshResampler(0.001).resample(mesh)
+
+        # Surface meshes cannot be resampled. Meshes of other cell types can be.
+        cube = vtk.vtkCubeSource()
+        cube.Update()
+        self.assertFalse(UniformMeshResampler.canResample(cube.GetOutput()))
+        appendFilter = vtk.vtkAppendFilter()
+        appendFilter.SetInputData(cube.GetOutput())
+        appendFilter.Update()
+        self.assertFalse(UniformMeshResampler.canResample(appendFilter.GetOutput()))
+        hexahedralMesh = UniformMeshResampler(0.5).resample(resampledMesh)
+        self.assertEqual(hexahedralMesh.GetNumberOfCells(), 8 * 8 * 8)
+        hexahedralPoints = numpy_support.vtk_to_numpy(hexahedralMesh.GetPoints().GetData())
+        isInterior = np.all((hexahedralPoints >= 1.0) & (hexahedralPoints <= 4.0), axis=1)
+        self.assertGreater(int(isInterior.sum()), 0)
+        hexahedralPressure = numpy_support.vtk_to_numpy(hexahedralMesh.GetPointData().GetArray("Pressure"))
+        np.testing.assert_allclose(
+            hexahedralPressure[isInterior],
+            (hexahedralPoints[:, 0] + 2.0 * hexahedralPoints[:, 1] - hexahedralPoints[:, 2])[isInterior], atol=1e-4)
+
+        # The resolution is specified in mm, whatever the unit of the file is. Resampling replaces
+        # decimation: the threshold would decimate this mesh.
+        filePath = os.path.join(tempfile.mkdtemp(), "mesh.vtu")
+        writer = vtk.vtkXMLUnstructuredGridWriter()
+        writer.SetInputData(mesh)
+        writer.SetFileName(filePath)
+        self.assertTrue(writer.Write())
+        logic = ImportExportSimulationModelLogic()
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=0, resampleSpacing=5.0)[0]
+        self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), 8 * 8 * 8)
+        self.assertEqual(modelNode.GetMesh().GetCellType(0), vtk.VTK_HEXAHEDRON)
+        bounds = modelNode.GetMesh().GetBounds()
+        self.assertAlmostEqual(bounds[1] - bounds[0], 40.0, places=4)
+        self.assertAlmostEqual(modelNode.GetMesh().GetPoint(0)[2] % 5.0, 0.0, places=4)
+        self.assertEqual(modelNode.GetAttribute("SimulationModel.UnitSystem"), "mmgs")
+        with self.assertRaises(ValueError):
+            logic.importFiles([filePath], "LPS", "cgs", resampleSpacing=0.0)
+
+        # By default the mesh must not be resampled.
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=None,
+                                      mergeDuplicatePoints=False)[0]
+        self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), mesh.GetNumberOfCells())
+
+        self.delayDisplay("Uniform resampling test passed")
+
+    def test_ApproximateRanges(self):
+        """A large VTKHDF file must be listed from a sample of its partitions, without affecting the import."""
+        self.delayDisplay("Starting approximate ranges test")
+
+        import tempfile
+
+        def writePartitionedFile(fileName, numberOfPartitions):
+            """Each partition is a cube with the index of the partition as position and value."""
+            partitioned = vtk.vtkPartitionedDataSet()
+            partitioned.SetNumberOfPartitions(numberOfPartitions)
+            for partitionIndex in range(numberOfPartitions):
+                cube = vtk.vtkCubeSource()
+                cube.SetCenter(partitionIndex * 2.0, 0.0, 0.0)
+                appendFilter = vtk.vtkAppendFilter()
+                appendFilter.SetInputConnection(cube.GetOutputPort())
+                appendFilter.Update()
+                partition = appendFilter.GetOutput()
+                values = vtk.vtkFloatArray()
+                values.SetName("Pressure")
+                for pointIndex in range(partition.GetNumberOfPoints()):
+                    values.InsertNextValue(partitionIndex)
+                partition.GetPointData().Initialize()
+                partition.GetPointData().AddArray(values)
+                partition.GetCellData().Initialize()
+                partitioned.SetPartition(partitionIndex, partition)
+            filePath = os.path.join(tempfile.mkdtemp(), fileName)
+            writer = vtk.vtkHDFWriter()
+            writer.SetInputData(partitioned)
+            writer.SetFileName(filePath)
+            self.assertTrue(writer.Write())
+            return filePath
+
+        def arrayInfoByKey(arrayInfos):
+            return {arrayInfo.key: arrayInfo for arrayInfo in arrayInfos}
+
+        pressureKey = (POINT_LOCATION, "Pressure")
+        positionKey = (POSITION_LOCATION, POSITION_ARRAY_NAME)
+        numberOfPartitions = APPROXIMATE_RANGE_PARTITION_COUNT * 2
+        filePath = writePartitionedFile("partitioned.vtkhdf", numberOfPartitions)
+        logic = ImportExportSimulationModelLogic()
+
+        exact = arrayInfoByKey(logic.getArrayInfosFromFiles([filePath]))
+        self.assertEqual(exact[pressureKey].componentRanges, [(0.0, numberOfPartitions - 1.0)])
+        self.assertFalse(exact[pressureKey].isRangeApproximate)
+        self.assertFalse(exact[pressureKey].rangeString().startswith("~"))
+        self.assertIn(os.path.normpath(filePath), logic._meshCache)
+
+        # Every other partition is sampled, so the last one is not, but the coordinates are exact.
+        logic = ImportExportSimulationModelLogic()
+        approximate = arrayInfoByKey(logic.getArrayInfosFromFiles([filePath], 0))
+        self.assertEqual(set(approximate), set(exact))
+        self.assertEqual(approximate[pressureKey].numberOfComponents, 1)
+        self.assertEqual(approximate[pressureKey].componentRanges, [(0.0, numberOfPartitions - 2.0)])
+        self.assertTrue(approximate[pressureKey].isRangeApproximate)
+        self.assertTrue(approximate[pressureKey].rangeString().startswith("~"))
+        self.assertEqual(approximate[positionKey].componentRanges, exact[positionKey].componentRanges)
+        self.assertFalse(approximate[positionKey].isRangeApproximate)
+        self.assertNotIn(os.path.normpath(filePath), logic._meshCache)
+
+        # The cached information must be protected from changes made by the caller.
+        approximate[pressureKey].simulationUnit = simulationUnitByQuantity(LENGTH_QUANTITY)
+        repeated = arrayInfoByKey(logic.getArrayInfosFromFiles([filePath], 0))
+        self.assertNotEqual(repeated[pressureKey].simulationUnit.quantity, LENGTH_QUANTITY)
+
+        # The import must load the whole file, even if only a sample of it was read for the table.
+        modelNode = logic.importFiles([filePath], "RAS", "mmgs", mergeDuplicatePoints=False)[0]
+        self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), numberOfPartitions * 6)
+        self.assertEqual(modelNode.GetMesh().GetPointData().GetArray("Pressure").GetRange(),
+                         (0.0, numberOfPartitions - 1.0))
+
+        # Small meshes, and files that have no more partitions than the sample, are read completely.
+        logic = ImportExportSimulationModelLogic()
+        smallMesh = arrayInfoByKey(logic.getArrayInfosFromFiles([filePath], numberOfPartitions * 6))
+        self.assertFalse(smallMesh[pressureKey].isRangeApproximate)
+        self.assertEqual(smallMesh[pressureKey].componentRanges, exact[pressureKey].componentRanges)
+        fewPartitionsFilePath = writePartitionedFile("fewPartitions.vtkhdf", APPROXIMATE_RANGE_PARTITION_COUNT)
+        fewPartitions = arrayInfoByKey(logic.getArrayInfosFromFiles([fewPartitionsFilePath], 0))
+        self.assertFalse(fewPartitions[pressureKey].isRangeApproximate)
+
+        # Other file formats are not affected, and an approximate file marks the merged range.
+        vtuFilePath = os.path.join(tempfile.mkdtemp(), "mesh.vtu")
+        vtuWriter = vtk.vtkXMLUnstructuredGridWriter()
+        vtuWriter.SetInputData(modelNode.GetMesh())
+        vtuWriter.SetFileName(vtuFilePath)
+        self.assertTrue(vtuWriter.Write())
+        vtuOnly = arrayInfoByKey(logic.getArrayInfosFromFiles([vtuFilePath], 0))
+        self.assertFalse(vtuOnly[pressureKey].isRangeApproximate)
+        merged = arrayInfoByKey(logic.getArrayInfosFromFiles([filePath, vtuFilePath], 0))
+        self.assertTrue(merged[pressureKey].isRangeApproximate)
+
+        self.delayDisplay("Approximate ranges test passed")
+
+    def test_DecimateTetrahedra(self):
+        """Decimation must reach the target, keep the shape, and transfer the data arrays."""
+        self.delayDisplay("Starting tetrahedral mesh decimation test")
+
+        import tempfile
+
+        def createTetrahedralMesh(dimension):
+            image = vtk.vtkImageData()
+            image.SetDimensions(dimension, dimension, dimension)
+            image.SetSpacing(1.0, 1.0, 1.0)
+            image.AllocateScalars(vtk.VTK_FLOAT, 1)
+            tetrahedralize = vtk.vtkDataSetTriangleFilter()
+            tetrahedralize.SetInputData(image)
+            tetrahedralize.Update()
+            mesh = vtk.vtkUnstructuredGrid()
+            mesh.DeepCopy(tetrahedralize.GetOutput())
+            mesh.GetPointData().Initialize()
+            points = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData())
+            for name, values in (("Pressure", points[:, 0] + 2.0 * points[:, 1] - points[:, 2]),
+                                 ("Velocity", points * 3.0),
+                                 ("NodeID", np.arange(len(points), dtype=np.int32))):
+                array = numpy_support.numpy_to_vtk(values, deep=True)
+                array.SetName(name)
+                mesh.GetPointData().AddArray(array)
+            regionId = numpy_support.numpy_to_vtk(
+                np.full(mesh.GetNumberOfCells(), 5, dtype=np.int32), deep=True)
+            regionId.SetName("RegionID")
+            mesh.GetCellData().AddArray(regionId)
+            return mesh
+
+        # More cells than what rand() can select from on Windows (32767), so several passes are needed.
+        mesh = createTetrahedralMesh(21)
+        self.assertGreater(mesh.GetNumberOfCells(), 32767)
+        self.assertTrue(TetrahedralMeshDecimator.canDecimate(mesh))
+        decimator = TetrahedralMeshDecimator(targetReduction=0.5)
+        decimatedMesh = decimator.decimate(mesh)
+
+        self.assertLessEqual(decimatedMesh.GetNumberOfCells(), mesh.GetNumberOfCells() * 0.51)
+        self.assertLess(decimatedMesh.GetNumberOfPoints(), mesh.GetNumberOfPoints())
+        self.assertTrue(TetrahedralMeshDecimator.canDecimate(decimatedMesh))
+        for actual, expected in zip(decimatedMesh.GetBounds(), mesh.GetBounds()):
+            self.assertAlmostEqual(actual, expected, places=4)
+
+        # Linear fields are reproduced exactly by interpolation, wherever the points are moved.
+        points = numpy_support.vtk_to_numpy(decimatedMesh.GetPoints().GetData())
+        pressure = numpy_support.vtk_to_numpy(decimatedMesh.GetPointData().GetArray("Pressure"))
+        self.assertLess(np.abs(pressure - (points[:, 0] + 2.0 * points[:, 1] - points[:, 2])).max(), 1e-3)
+        velocity = numpy_support.vtk_to_numpy(decimatedMesh.GetPointData().GetArray("Velocity"))
+        self.assertLess(np.abs(velocity - points * 3.0).max(), 1e-3)
+
+        # Identifiers must not be interpolated: each one must be an identifier of the input mesh.
+        nodeIds = decimatedMesh.GetPointData().GetArray("NodeID")
+        self.assertEqual(nodeIds.GetDataType(), mesh.GetPointData().GetArray("NodeID").GetDataType())
+        nodeIdValues = numpy_support.vtk_to_numpy(nodeIds)
+        self.assertTrue(((nodeIdValues >= 0) & (nodeIdValues < mesh.GetNumberOfPoints())).all())
+        regionIds = numpy_support.vtk_to_numpy(decimatedMesh.GetCellData().GetArray("RegionID"))
+        self.assertEqual(len(regionIds), decimatedMesh.GetNumberOfCells())
+        self.assertTrue((regionIds == 5).all())
+        # The input must not be changed.
+        self.assertEqual(mesh.GetPointData().GetNumberOfArrays(), 3)
+
+        # Time points with the same geometry reuse the decimated geometry, but not the values.
+        laterMesh = vtk.vtkUnstructuredGrid()
+        laterMesh.DeepCopy(mesh)
+        numpy_support.vtk_to_numpy(laterMesh.GetPointData().GetArray("Velocity"))[:] *= 2.0
+        laterDecimatedMesh = decimator.decimate(laterMesh)
+        self.assertEqual(decimator.numberOfDecimations, 1)
+        self.assertEqual(laterDecimatedMesh.GetNumberOfCells(), decimatedMesh.GetNumberOfCells())
+        laterVelocity = numpy_support.vtk_to_numpy(laterDecimatedMesh.GetPointData().GetArray("Velocity"))
+        self.assertLess(np.abs(laterVelocity - points * 6.0).max(), 1e-3)
+        self.assertLess(np.abs(velocity - points * 3.0).max(), 1e-3)
+
+        # A different geometry must be decimated again.
+        movedMesh = vtk.vtkUnstructuredGrid()
+        movedMesh.DeepCopy(mesh)
+        numpy_support.vtk_to_numpy(movedMesh.GetPoints().GetData())[:] += 1.0
+        movedMesh.GetPoints().Modified()
+        movedDecimatedMesh = decimator.decimate(movedMesh)
+        self.assertEqual(decimator.numberOfDecimations, 2)
+        self.assertAlmostEqual(movedDecimatedMesh.GetBounds()[0], mesh.GetBounds()[0] + 1.0, places=4)
+
+        # Import options
+        filePath = os.path.join(tempfile.mkdtemp(), "tetrahedra.vtu")
+        logic = ImportExportSimulationModelLogic()
+        smallMesh = createTetrahedralMesh(6)
+        logic.writeMesh(smallMesh, filePath)
+        numberOfCells = smallMesh.GetNumberOfCells()
+        # The default threshold is not reached.
+        defaultNode = logic.importFiles([filePath], "RAS", "mmgs")[0]
+        self.assertEqual(defaultNode.GetMesh().GetNumberOfCells(), numberOfCells)
+        # At the threshold the mesh is not decimated, only above it.
+        atThresholdNode = logic.importFiles([filePath], "RAS", "mmgs", decimationCellCountThreshold=numberOfCells)[0]
+        self.assertEqual(atThresholdNode.GetMesh().GetNumberOfCells(), numberOfCells)
+        decimatedNode = logic.importFiles([filePath], "RAS", "mmgs", decimationCellCountThreshold=numberOfCells - 1,
+                                          decimationTargetReduction=0.5)[0]
+        self.assertLess(decimatedNode.GetMesh().GetNumberOfCells(), numberOfCells)
+        disabledNode = logic.importFiles([filePath], "RAS", "mmgs", decimationCellCountThreshold=None)[0]
+        self.assertEqual(disabledNode.GetMesh().GetNumberOfCells(), numberOfCells)
+
+        # Only tetrahedra can be decimated.
+        surfaceFilter = vtk.vtkDataSetSurfaceFilter()
+        surfaceFilter.SetInputData(smallMesh)
+        surfaceFilter.Update()
+        self.assertFalse(TetrahedralMeshDecimator.canDecimate(surfaceFilter.GetOutput()))
+        triangles = vtk.vtkAppendFilter()
+        triangles.SetInputData(surfaceFilter.GetOutput())
+        triangles.Update()
+        self.assertFalse(TetrahedralMeshDecimator.canDecimate(triangles.GetOutput()))
+
+        self.delayDisplay("Tetrahedral mesh decimation test passed")
+
+    def test_NonVectorArrayConversion(self):
+        """2-component vectors must be flipped, Q-criterion and unknown 2-component arrays must not."""
+        self.delayDisplay("Starting 2-component and Q-criterion conversion test")
+
+        self.assertEqual(flippedComponentNames("Velocity", 2), ["x", "y"])
+        self.assertEqual(flippedComponentNames("Displacement", 2), ["x", "y"])
+        self.assertEqual(flippedComponentNames("TCoords", 2), [])
+        self.assertEqual(flippedComponentNames("SomethingUnknown", 2), [])
+        self.assertEqual(flippedComponentNames("Velocity", 2, isFloatingPoint=False), [])
+        for arrayName in ("Q-Criterion", "QCriterion", "q_criterion", "fluid_Q-Criterion"):
+            for numberOfComponents in (1, 3):
+                self.assertEqual(flippedComponentNames(arrayName, numberOfComponents), [], arrayName)
+
+        points = vtk.vtkPoints()
+        points.InsertNextPoint(1.0, 2.0, 0.0)
+        mesh = vtk.vtkPolyData()
+        mesh.SetPoints(points)
+        for name, values in (("Velocity", (1.0, 2.0)), ("TCoords", (0.25, 0.5)),
+                             ("Q-Criterion", (3.0, 4.0, 5.0))):
+            array = vtk.vtkDoubleArray()
+            array.SetName(name)
+            array.SetNumberOfComponents(len(values))
+            array.InsertNextTuple(values)
+            mesh.GetPointData().AddArray(array)
+        pointData = ImportExportSimulationModelLogic.convertMesh(mesh, {}, True, "mmgs", "mmgs").GetPointData()
+        self.assertEqual(pointData.GetArray("Velocity").GetTuple(0), (-1.0, -2.0))
+        self.assertEqual(pointData.GetArray("TCoords").GetTuple(0), (0.25, 0.5))
+        self.assertEqual(pointData.GetArray("Q-Criterion").GetTuple(0), (3.0, 4.0, 5.0))
+
+        self.delayDisplay("2-component and Q-criterion conversion test passed")
+
+    def test_MergeDuplicatePoints(self):
+        """Points must only be merged if their position and all their values are the same."""
+        self.delayDisplay("Starting merge duplicate points test")
+
+        import tempfile
+
+        # Two triangles with a separate copy of each point, sharing the edge between
+        # (1, 0, 0) and (0, 1, 0). The value is continuous at (1, 0, 0) but not at (0, 1, 0).
+        pointCoordinates = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        pressureValues = [1.0, 2.0, 3.0, 2.0, 4.0, 5.0]
+
+        def fillMesh(mesh):
+            points = vtk.vtkPoints()
+            points.SetDataTypeToFloat()
+            pressure = vtk.vtkFloatArray()
+            pressure.SetName("Pressure")
+            velocity = vtk.vtkFloatArray()
+            velocity.SetName("Velocity")
+            velocity.SetNumberOfComponents(3)
+            for coordinates, value in zip(pointCoordinates, pressureValues):
+                points.InsertNextPoint(coordinates)
+                pressure.InsertNextTuple1(value)
+                # Same at every copy of a point: this array alone would not prevent merging.
+                velocity.InsertNextTuple3(*coordinates)
+            mesh.SetPoints(points)
+            mesh.GetPointData().AddArray(pressure)
+            mesh.GetPointData().AddArray(velocity)
+            cellData = vtk.vtkIntArray()
+            cellData.SetName("attribute")
+            cellData.InsertNextTuple1(7)
+            cellData.InsertNextTuple1(8)
+            mesh.GetCellData().AddArray(cellData)
+
+        grid = vtk.vtkUnstructuredGrid()
+        fillMesh(grid)
+        grid.Allocate(2)
+        grid.InsertNextCell(vtk.VTK_TRIANGLE, 3, [0, 1, 2])
+        grid.InsertNextCell(vtk.VTK_TRIANGLE, 3, [3, 4, 5])
+        surface = vtk.vtkPolyData()
+        fillMesh(surface)
+        surface.Allocate(2)
+        surface.InsertNextCell(vtk.VTK_TRIANGLE, 3, [0, 1, 2])
+        surface.InsertNextCell(vtk.VTK_TRIANGLE, 3, [3, 4, 5])
+
+        for mesh in (grid, surface):
+            merged = ImportExportSimulationModelLogic.mergeDuplicatePoints(mesh)
+            # Only one of the two duplicated positions can be merged.
+            self.assertEqual(merged.GetNumberOfPoints(), 5, mesh.GetClassName())
+            self.assertEqual(merged.GetNumberOfCells(), 2)
+            self.assertEqual(merged.GetPoints().GetDataType(), vtk.VTK_FLOAT)
+            # The temporary array must not remain in the output or the input.
+            self.assertEqual(merged.GetPointData().GetNumberOfArrays(), 2)
+            self.assertEqual(mesh.GetPointData().GetNumberOfArrays(), 2)
+            self.assertEqual(mesh.GetNumberOfPoints(), 6)
+            self.assertEqual(merged.GetCellData().GetArray("attribute").GetTuple1(1), 8)
+            # Each cell corner must have the same position and value as in the input mesh.
+            mergedPressure = merged.GetPointData().GetArray("Pressure")
+            for cellIndex in range(2):
+                mergedCellPoints = vtk.vtkIdList()
+                merged.GetCellPoints(cellIndex, mergedCellPoints)
+                for corner in range(3):
+                    inputPointIndex = cellIndex * 3 + corner
+                    mergedPointIndex = mergedCellPoints.GetId(corner)
+                    self.assertEqual(merged.GetPoint(mergedPointIndex), pointCoordinates[inputPointIndex])
+                    self.assertEqual(mergedPressure.GetTuple1(mergedPointIndex), pressureValues[inputPointIndex])
+
+        # Mesh without any point data: only the positions are compared
+        positionsOnly = vtk.vtkUnstructuredGrid()
+        positionsOnly.DeepCopy(grid)
+        positionsOnly.GetPointData().Initialize()
+        self.assertEqual(ImportExportSimulationModelLogic.mergeDuplicatePoints(positionsOnly).GetNumberOfPoints(), 4)
+
+        # The import option
+        filePath = os.path.join(tempfile.mkdtemp(), "duplicates.vtu")
+        logic = ImportExportSimulationModelLogic()
+        logic.writeMesh(grid, filePath)
+        mergedNode = logic.importFiles([filePath], "RAS", "mmgs")[0]
+        self.assertEqual(mergedNode.GetMesh().GetNumberOfPoints(), 5)
+        notMergedNode = logic.importFiles([filePath], "RAS", "mmgs", mergeDuplicatePoints=False)[0]
+        self.assertEqual(notMergedNode.GetMesh().GetNumberOfPoints(), 6)
+
+        self.delayDisplay("Merge duplicate points test passed")
+
+    def test_ImportVtkHdfTimeSeries(self):
+        """Each time point of a VTKHDF file must be converted and stored in a browsable sequence."""
+        self.delayDisplay("Starting VTKHDF time series import test")
+
+        import tempfile
+
+        # The time source moves its mesh along the x axis, so the time points are all different.
+        timeSource = vtk.vtkTimeSourceExample()
+        timeSource.SetXAmplitude(5.0)
+        timeSource.UpdateInformation()
+        filePath = os.path.join(tempfile.mkdtemp(), "timeSeries.vtkhdf5")
+        writer = vtk.vtkHDFWriter()
+        writer.SetInputConnection(timeSource.GetOutputPort())
+        writer.SetFileName(filePath)
+        writer.SetWriteAllTimeSteps(True)
+        self.assertTrue(writer.Write())
+
+        logic = ImportExportSimulationModelLogic()
+        timeValues = logic.getVtkHdfTimeValues(filePath)
+        self.assertGreater(len(timeValues), 1)
+
+        # Points are compared one by one with the file below, so they must not be merged.
+        importedNodes = logic.importFiles([filePath], "LPS", "cgs", mergeDuplicatePoints=False)
+        self.assertEqual(len(importedNodes), 1)
+        proxyNode = importedNodes[0]
+        self.assertTrue(proxyNode.IsA("vtkMRMLModelNode"))
+        self.assertIsNotNone(proxyNode.GetDisplayNode())
+
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(proxyNode)
+        self.assertIsNotNone(browserNode)
+        sequenceNode = browserNode.GetMasterSequenceNode()
+        self.assertEqual(sequenceNode.GetNumberOfDataNodes(), len(timeValues))
+        self.assertEqual(sequenceNode.GetIndexName(), "time")
+        self.assertEqual(sequenceNode.GetIndexUnit(), "s")
+
+        # Every time point must be converted from LPS/cm to RAS/mm, compared to the file content.
+        reader = ImportExportSimulationModelLogic._createVtkHdfReader(filePath)
+        distinctPoints = set()
+        for index, timeValue in enumerate(timeValues):
+            self.assertAlmostEqual(float(sequenceNode.GetNthIndexValue(index)), timeValue)
+            fileMesh = ImportExportSimulationModelLogic._readVtkHdfMesh(reader, timeValue, filePath)
+            frameNode = sequenceNode.GetNthDataNode(index)
+            self.assertEqual(frameNode.GetAttribute("SimulationModel.UnitSystem"), "mmgs")
+            frameMesh = frameNode.GetMesh()
+            self.assertEqual(frameMesh.GetNumberOfPoints(), fileMesh.GetNumberOfPoints())
+            filePoint = fileMesh.GetPoint(0)
+            framePoint = frameMesh.GetPoint(0)
+            for actual, expected in zip(framePoint, (-filePoint[0] * 10, -filePoint[1] * 10, filePoint[2] * 10)):
+                self.assertAlmostEqual(actual, expected, places=4)
+            distinctPoints.add(round(filePoint[0], 6))
+        self.assertGreater(len(distinctPoints), 1, "Time points of the test data must differ")
+
+        # Selecting a time point in the browser must show that mesh in the proxy node.
+        lastIndex = len(timeValues) - 1
+        browserNode.SetSelectedItemNumber(lastIndex)
+        lastFrameMesh = sequenceNode.GetNthDataNode(lastIndex).GetMesh()
+        self.assertEqual(proxyNode.GetMesh().GetPoint(0), lastFrameMesh.GetPoint(0))
+        self.assertEqual(proxyNode.GetAttribute("SimulationModel.Position.Unit"), "mm")
+
+        # Time points that are closer than the default index tolerance of the sequence node, and
+        # that only differ after many digits, must all get an item of their own.
+        for closeTimeValues in ([0.0, 0.001, 0.002, 0.003], [1e-6, 2e-6, 3e-6],
+                                [1000.0000001, 1000.0000002, 1000.0000003]):
+            closeSequenceNode = ImportExportSimulationModelLogic._createTimeSequenceNode(
+                "closeTimes", closeTimeValues)
+            frameNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLModelNode")
+            frameNode.UnRegister(None)
+            indexValues = ImportExportSimulationModelLogic._timeIndexValues(closeTimeValues)
+            for indexValue in indexValues:
+                closeSequenceNode.SetDataNodeAtValue(frameNode, indexValue)
+            self.assertEqual(closeSequenceNode.GetNumberOfDataNodes(), len(closeTimeValues), closeTimeValues)
+        self.assertEqual(ImportExportSimulationModelLogic._timeIndexValues([0.9369999999999883, 4.685]),
+                         ["0.937", "4.685"])
+
+        # Keeping 1 of N time points starts from the first time point.
+        for keepEveryNth in (2, 3):
+            keptProxyNode = logic.importFiles([filePath], "LPS", "cgs", keepEveryNthTimePoint=keepEveryNth)[0]
+            keptSequenceNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(
+                keptProxyNode).GetMasterSequenceNode()
+            keptTimeValues = timeValues[::keepEveryNth]
+            self.assertEqual(keptSequenceNode.GetNumberOfDataNodes(), len(keptTimeValues))
+            for index, timeValue in enumerate(keptTimeValues):
+                self.assertAlmostEqual(float(keptSequenceNode.GetNthIndexValue(index)), timeValue)
+        with self.assertRaises(ValueError):
+            logic.importFiles([filePath], "LPS", "cgs", keepEveryNthTimePoint=0)
+
+        # The first time point to load can be selected, also together with keeping 1 of N.
+        for firstIndex, keepEveryNth in ((1, 1), (1, 2)):
+            keptProxyNode = logic.importFiles([filePath], "LPS", "cgs", keepEveryNthTimePoint=keepEveryNth,
+                                              firstTimePointIndex=firstIndex)[0]
+            keptSequenceNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(
+                keptProxyNode).GetMasterSequenceNode()
+            keptTimeValues = timeValues[firstIndex::keepEveryNth]
+            self.assertEqual(keptSequenceNode.GetNumberOfDataNodes(), len(keptTimeValues))
+            for index, timeValue in enumerate(keptTimeValues):
+                self.assertAlmostEqual(float(keptSequenceNode.GetNthIndexValue(index)), timeValue)
+        numberOfSequenceNodes = slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceNode")
+        for invalidIndex in (-1, len(timeValues)):
+            with self.assertRaises(ValueError):
+                logic.importFiles([filePath], "LPS", "cgs", firstTimePointIndex=invalidIndex)
+        self.assertEqual(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceNode"), numberOfSequenceNodes)
+
+        # If a single time point remains then it is loaded as a model, without a sequence.
+        numberOfBrowserNodes = slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceBrowserNode")
+        for firstIndex, keepEveryNth in ((len(timeValues) - 1, 1), (0, len(timeValues) + 5), (1, len(timeValues))):
+            modelNode = logic.importFiles([filePath], "LPS", "cgs", keepEveryNthTimePoint=keepEveryNth,
+                                          firstTimePointIndex=firstIndex, mergeDuplicatePoints=False)[0]
+            self.assertTrue(modelNode.IsA("vtkMRMLModelNode"))
+            self.assertIsNone(slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(modelNode))
+            self.assertAlmostEqual(float(modelNode.GetAttribute("SimulationModel.TimeValue")), timeValues[firstIndex])
+            # The model must contain the selected time point, converted to RAS and mm.
+            fileMesh = ImportExportSimulationModelLogic._readVtkHdfMesh(reader, timeValues[firstIndex], filePath)
+            filePoint = fileMesh.GetPoint(0)
+            for actual, expected in zip(modelNode.GetMesh().GetPoint(0),
+                                        (-filePoint[0] * 10, -filePoint[1] * 10, filePoint[2] * 10)):
+                self.assertAlmostEqual(actual, expected, places=4)
+        self.assertEqual(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceNode"), numberOfSequenceNodes)
+        self.assertEqual(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceBrowserNode"), numberOfBrowserNodes)
+
+        self.delayDisplay("VTKHDF time series import test passed")
+
+    def test_ImportImage(self):
+        """Geometry of a .vti image must be converted to RAS and mm, intensities must be kept."""
+        self.delayDisplay("Starting image import test")
+
+        import tempfile
+
+        # The extent intentionally does not start from 0.
+        image = vtk.vtkImageData()
+        image.SetExtent(1, 3, 0, 2, 0, 1)
+        image.SetOrigin(1.0, 2.0, 3.0)
+        image.SetSpacing(0.5, 0.25, 2.0)
+        image.AllocateScalars(vtk.VTK_SHORT, 1)
+        image.GetPointData().GetScalars().SetName("ImageScalars")
+        image.GetPointData().GetScalars().Fill(7)
+        filePath = os.path.join(tempfile.mkdtemp(), "testImage-cm.vti")
+        writer = vtk.vtkXMLImageDataWriter()
+        writer.SetInputData(image)
+        writer.SetFileName(filePath)
+        self.assertTrue(writer.Write())
+
+        logic = ImportExportSimulationModelLogic()
+        arrayInfos = logic.getArrayInfosFromFiles([filePath])
+        self.assertEqual([arrayInfo.key for arrayInfo in arrayInfos],
+                         [(POSITION_LOCATION, POSITION_ARRAY_NAME), (POINT_LOCATION, "ImageScalars")])
+
+        importedNodes = logic.importFiles([filePath], "LPS", "cgs")
+        self.assertEqual(len(importedNodes), 1)
+        volumeNode = importedNodes[0]
+        self.assertTrue(volumeNode.IsA("vtkMRMLScalarVolumeNode"))
+        self.assertEqual(volumeNode.GetName(), "testImage-cm")
+
+        # Voxel (i, j, k) of the file is at (1 + 0.5 * i, 2 + 0.25 * j, 3 + 2 * k) cm in LPS, and
+        # the first voxel of the volume is voxel (1, 0, 0) of the file.
+        ijkToRas = vtk.vtkMatrix4x4()
+        volumeNode.GetIJKToRASMatrix(ijkToRas)
+        firstVoxelRas = ijkToRas.MultiplyPoint((0, 0, 0, 1))[:3]
+        for actual, expected in zip(firstVoxelRas, (-15.0, -20.0, 30.0)):
+            self.assertAlmostEqual(actual, expected)
+        lastVoxelRas = ijkToRas.MultiplyPoint((2, 2, 1, 1))[:3]
+        for actual, expected in zip(lastVoxelRas, (-25.0, -25.0, 50.0)):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(volumeNode.GetSpacing(), (5.0, 2.5, 20.0)):
+            self.assertAlmostEqual(actual, expected)
+
+        # Voxel values have no unit that could be guessed from their name, so they must not change.
+        volumeImage = volumeNode.GetImageData()
+        self.assertEqual(volumeImage.GetExtent(), (0, 2, 0, 2, 0, 1))
+        self.assertEqual(volumeImage.GetSpacing(), (1.0, 1.0, 1.0))
+        self.assertEqual(volumeImage.GetOrigin(), (0.0, 0.0, 0.0))
+        self.assertEqual(volumeImage.GetScalarType(), vtk.VTK_SHORT)
+        self.assertEqual(volumeImage.GetScalarRange(), (7.0, 7.0))
+        self.assertEqual(volumeNode.GetAttribute("SimulationModel.Position.Unit"), "mm")
+
+        self.delayDisplay("Image import test passed")
 
     def test_TensorConversion(self):
         """Stress and strain arrays must be rotated with the coordinate system."""
