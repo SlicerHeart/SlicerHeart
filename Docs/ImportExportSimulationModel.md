@@ -28,6 +28,76 @@ was left open is restored the next time the module is used.
   values are multiplied by on import (*Scale to Slicer*). The unit is guessed from the array name
   and can be corrected before importing. If several files are imported at once then arrays with
   the same name are listed once, with the value range covering all the files.
+- **Advanced / Merge duplicate points** (enabled by default): simulation results often store a
+  separate copy of a point for each cell that uses it. Copies with the same position and exactly
+  the same values in all point data arrays are merged, which can reduce the memory use several-fold
+  without changing any value. Copies that differ in any value are kept separate, and the number of
+  cells does not change. The status log shows the number of points before and after merging. Images
+  are not affected.
+- **Advanced / Decimate large meshes** (enabled by default): reduces the number of cells
+  of tetrahedral meshes, unlike merging duplicate points this reduces the resolution of the data.
+  Other types of meshes are not decimated, they only get their duplicate points merged.
+  - **Decimate above**: only meshes with more cells than this are decimated (default: 1000000).
+  - **Target reduction**: percentage of the cells to remove (default: 75%). The status log reports
+    if the target cannot be reached, because most of the remaining cells are at the boundary.
+  - **Boundary weight**: how strongly the shape of the outer boundary is preserved (default: 100).
+    A lower value allows removing more cells, but the shape of the mesh may change.
+- **Advanced / Resample uniformly** (disabled by default): replaces the cells of volumetric meshes
+  with cubes aligned with the axes, see [Uniform resampling](#uniform-resampling). Decimation is not
+  used for meshes that are resampled. Surface meshes and images are not resampled.
+  - **Resolution**: size of the cubes, in mm (default: 1 mm).
+- **Advanced / First time point index** (default: 0, which is the first time point in the file):
+  time points of a VTKHDF file before this one are skipped, for example to load only the last
+  cardiac cycle. An error is reported if the file does not have this many time points.
+- **Advanced / Keep 1 of every N time points** (default: 1, which loads all time points): loads only
+  the first of every N time points of a VTKHDF file, starting from the first time point index. For
+  example, with an index of 0, the value 3 loads the time points 0, 3, 6, ... This counts time
+  points, not time, so the loaded time points are not evenly spaced in time if the ones in the file
+  are not. Time values are kept as they are in the file.
+
+  If only one time point remains after applying these two options then it is loaded as a regular
+  model, without a sequence, and its time is stored in the `SimulationModel.TimeValue` attribute.
+- **Advanced / Approximate scalar ranges** (enabled by default): lists large VTKHDF files in the
+  table without reading all of their data. Reading the data arrays takes most of the time, and the
+  file does not store their ranges. For a file with more than 1 million cells and more than 8
+  partitions, only the geometry and 8 evenly spaced partitions of the last time point are read. The
+  range of the point coordinates remains exact. The ranges of data arrays are marked with `~` and can
+  be much narrower than the true ranges, so disable this option to see the exact ranges. The ranges
+  are only displayed, they do not affect the import. Other file formats are always read completely.
+
+### Uniform resampling
+
+The result is an unstructured grid of hexahedra on a regular grid, stored in a model node like any
+other imported mesh. A cube is kept if its center is inside the mesh, so the boundary becomes a
+staircase but the volume of the mesh is preserved. A structure thinner than the resolution may become
+disconnected or disappear, and an error is reported if no cube is left. Grid points are at integer
+multiples of the resolution in the coordinate system of the file, so all the time points of a
+sequence use the same grid, even if the mesh moves.
+
+Values are transferred the same way as for [decimation](#decimation): floating-point point arrays
+are interpolated, the corners outside of the mesh get the value at the closest position of the mesh,
+integer point arrays are taken from the nearest point, and cell arrays from the cell that contains the
+center of the cube. Values at the staircase boundary, such as wall shear stress, are therefore not at
+the true position of the wall.
+
+### Decimation
+
+Decimation collapses edges of the mesh using `vtkUnstructuredGridQuadricDecimation`. It only looks
+at the geometry, not at the values of the data arrays, so it does not keep more cells where the
+flow is complex. The values are then transferred to the result:
+
+- Floating-point point arrays are interpolated from the original mesh at each new point. The rare
+  point that falls slightly outside the original mesh is interpolated at the closest position of
+  the closest original cell.
+- Integer point arrays (identifiers, labels) get the value of the nearest original point, because
+  interpolating them would give meaningless values.
+- Cell arrays get the value of the original cell at the center of the new cell.
+
+Quantities that change quickly over short distances lose the most accuracy, especially near walls.
+Turn off decimation if the original resolution is needed, for example for measuring wall shear
+stress. All the time points of a file that have the same geometry use the same decimated mesh, so
+the decimation only runs once for them; a time point with a different geometry is decimated again.
+Decimating millions of cells can take a few minutes.
 
 ### How the unit is guessed from the array name
 
@@ -77,10 +147,13 @@ negates the first two axes. Every array is rotated according to what it holds:
 | Array | Conversion |
 | --- | --- |
 | Point coordinates, 3-component vectors (velocity, displacement, WSS, ...) | `x` and `y` components negated |
+| 2-component vectors of 2D simulations, if the quantity is recognized from the name (`Velocity`, `Displacement`, ...) | `x` and `y` components negated |
 | 6-component symmetric tensor (VTK order `xx, yy, zz, xy, yz, xz`) | `yz` and `xz` components negated |
 | 9-component tensor (row-major) | `xz`, `yz`, `zx`, `zy` components negated |
 | Single tensor component in its own 1-component array (`Stress_xz`, `Strain_yz`, `sigma_xz`, `StressXZ`) | negated if that component is negated |
 | Invariants and other scalars (pressure, `VonMisesStress`, `VonMisesStrain`, `PrincipalStress_1`, `PrincipalStrain_1`, `Jacobian`, ...) | unchanged |
+| `Q-Criterion`, whatever the number of its components (some solvers write this scalar in a 3-component array) | unchanged |
+| Other 2-component arrays (texture coordinates, names that are not recognized, ...) | unchanged |
 | Integer arrays (identifiers, labels, counts) | unchanged |
 
 A tensor `T` transforms as `R*T*R'`, where `R` negates the first two axes; this negates exactly
@@ -127,6 +200,7 @@ imported model as node attributes, which are visible and editable in the Data mo
 | `SimulationModel.CoordinateSystem` | `RAS` |
 | `SimulationModel.UnitSystem` | `mmgs` |
 | `SimulationModel.SourceFile` | `C:/data/fluid.vtu` |
+| `SimulationModel.TimeValue` (a single time point of a time series) | `4.685` |
 | `SimulationModel.Position.Unit` | `mm` |
 | `SimulationModel.Position.LengthExponent` | `1` |
 | `SimulationModel.Position.Quantity` | `length` |
@@ -142,8 +216,26 @@ by hand), the length exponent attribute is still used to convert the values.
 
 ## Supported file formats
 
-Reading: `.vtu`, `.vtp`, `.vtk`, `.stl`, `.ply`, `.obj`. A model is loaded as a surface mesh
-(`vtkPolyData`) or as a volumetric mesh (`vtkUnstructuredGrid`), whichever the file contains.
+Reading: `.vtu`, `.vtp`, `.vtk`, `.vtkhdf`, `.vtkhdf5`, `.vti`, `.stl`, `.ply`, `.obj`. A model is
+loaded as a surface mesh (`vtkPolyData`) or as a volumetric mesh (`vtkUnstructuredGrid`), whichever
+the file contains.
+
+**VTKHDF files** (`.vtkhdf`, `.vtkhdf5`) may store several partitions and time points. Partitions
+are appended into a single mesh without merging points, so point values stay as they are in the
+file (duplicate points are then merged if that option is enabled, see above). A file with several
+time points is split up: each time point is converted to RAS and mm-g-s
+and stored in a sequence node, with the time in seconds as index, and a sequence browser node is
+added to show it. The time points are all kept in memory, so make sure that there is enough for
+the whole sequence. The value ranges in the arrays table are the ones of the last time point. The
+quantities selected in the table apply to all time points. Exporting the proxy model of the
+sequence writes the time point that is currently selected in the browser.
+
+**Images** (`.vti`) are loaded as a volume node, one for each point data array (a scalar volume for
+a 1-component array and a vector volume otherwise). The origin and spacing are scaled and the
+coordinate system is converted the same way as the point coordinates of a mesh, so the image stays
+aligned with meshes imported with the same settings. Voxel values are scaled according to the unit
+selected in the table, which is dimensionless (not scaled) by default for names such as
+`ImageScalars`. Cell data arrays of an image are not loaded, and images cannot be exported.
 
 Writing: the format is selected by name, and the extension follows from the mesh of the model
 being written, because the same format stores a surface mesh and a volumetric mesh in different
