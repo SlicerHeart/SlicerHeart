@@ -1201,18 +1201,21 @@ def isEmptyModelPlaceholder(node):
 
 def fillMissingModelItems(browserNode):
   """Store an empty placeholder model at every time point where a model sequence of the valve browser
-  has no item, so that the model proxy never loses its mesh.
+  has no item, and give an empty mesh to every item that has none, so that the model proxy never
+  loses its mesh.
 
   At a time point without item the browser resets the proxy to a default node without mesh
-  (MissingItemSetToDefault), and the model displayable manager keeps the actor of the last shown
-  mesh and ignores display changes of a model without mesh: the surface of another phase (e.g. of a
-  leaflet that was segmented at one phase only) stays on screen in the default color, cannot be
-  hidden, and comes back after every browser update. An empty mesh is rendered as nothing.
+  (MissingItemSetToDefault), and an item without mesh (e.g. the surface model of a leaflet whose
+  surface was never extracted at that phase) leaves the proxy without mesh as well. The model
+  displayable manager keeps the actor of the last shown mesh and ignores display changes of a model
+  without mesh: the surface of another phase (e.g. of a leaflet that was segmented at one phase
+  only, or the previous phase's surface) stays on screen, cannot be hidden, and comes back after
+  every browser update. An empty mesh is rendered as nothing.
   The placeholders are tagged (EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE) and do not count as data:
   ValveModel.isNodeSpecifiedForCurrentTimePoint reports a tagged item without points as unspecified.
   Only sequences in MissingItemSetToDefault mode are filled (the mode of per-time-point data; the
   measurement results use MissingItemIgnore and keep their proxies).
-  :return: number of items added
+  :return: number of items added or completed
   """
   masterSequenceNode = browserNode.GetMasterSequenceNode()
   if not masterSequenceNode:
@@ -1229,7 +1232,13 @@ def fillMissingModelItems(browserNode):
       continue
     firstDataNode = sequenceNode.GetNthDataNode(0)
     for indexValue in indexValues:
-      if sequenceNode.GetItemNumberFromIndexValue(indexValue) >= 0:
+      itemNumber = sequenceNode.GetItemNumberFromIndexValue(indexValue)
+      if itemNumber >= 0:
+        dataNode = sequenceNode.GetNthDataNode(itemNumber)
+        if dataNode.GetMesh() is None:
+          dataNode.SetAndObservePolyData(vtk.vtkPolyData())
+          dataNode.SetAttribute(EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE, "1")
+          added += 1
         continue
       placeholder = slicer.vtkMRMLModelNode()
       placeholder.SetName(firstDataNode.GetName())

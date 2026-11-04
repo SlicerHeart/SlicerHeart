@@ -224,8 +224,11 @@ class LegacySceneBuilder:
                      clippedVolume=False, segmentIds=("Anterior", "Posterior"), leafletOrder=None,
                      legacyFiducialContour=True, probePosition="TTE_APICAL", frameIndexAttribute=None,
                      uniquifyNames=True, extraAttributes=None, segmentNames=None, segmentTerminologies=None,
-                     valveMask=True):
+                     valveMask=True, meshlessSurfaces=()):
     """Create one old-format HeartValve node (one analyzed phase) with its referenced nodes.
+
+    :param meshlessSurfaces: segment IDs whose leaflet surface model node has no mesh (the surface
+      was never extracted at this phase; real scenes hold such nodes without a model file).
 
     :param legacyFiducialContour: True -> annulus contour stored as vtkMRMLMarkupsFiducialNode plus
       an AnnulusContourModel tube (very old scenes); False -> closed curve node (scenes saved after
@@ -378,6 +381,8 @@ class LegacySceneBuilder:
           surface = self._modelNode(f"{segmentId} leafletSurfaceModel", scene.sphereSource(center, 1.0), color=color,
                                     uniquify=uniquifyNames)
           surface.SetAttribute("SegmentID", segmentId)
+          if segmentId in meshlessSurfaces:
+            surface.SetAndObservePolyData(None)
           self._moveToValveFolder(valveNode, surface, "LeafletSurface")
           valveNode.AddNodeReferenceID("LeafletSurfaceModel", surface.GetID())
           record.nodes["LeafletSurfaceModel"].append(surface)

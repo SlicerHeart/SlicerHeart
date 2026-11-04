@@ -512,6 +512,40 @@ class Converter4DSequencesTestTest(SlicerHeartTestCase):
     self.assertEqual(HeartValveLib.HeartValves.fillMissingModelItems(valveBrowser.valveBrowserNode), 1)
     self.assertEqual(HeartValveLib.HeartValves.fillMissingModelItems(valveBrowser.valveBrowserNode), 0, "idempotent")
 
+  def test_leaflet_surface_without_mesh(self):
+    """A leaflet whose surface was never extracted at a phase has a surface model node without mesh
+    there (real scenes hold such nodes without a model file). The converted item must get an empty
+    placeholder mesh like a missing item: a proxy without mesh keeps the previous phase's surface on
+    screen (see test_extra_leaflet_in_one_phase)."""
+    import HeartValveLib
+    builder = LegacySceneBuilder()
+    first = builder.addLegacyValve("mitral", frameIndex=1, phase="mid-systole")
+    second = builder.addLegacyValve("mitral", frameIndex=3, phase="end-systole", meshlessSurfaces=("Anterior",))
+    self._convert()
+    valveBrowser = self._browserForValveType("mitral")
+    valveModel = valveBrowser.valveModel
+    self._goTo(valveBrowser, second.indexValue)
+    anteriorSurface = valveModel.getLeafletNodeReference("LeafletSurfaceModel", "Anterior")
+    posteriorSurface = valveModel.getLeafletNodeReference("LeafletSurfaceModel", "Posterior")
+    self.assertIsNotNone(anteriorSurface.GetPolyData(), "surface without mesh gets an empty placeholder mesh")
+    self.assertEqual(anteriorSurface.GetPolyData().GetNumberOfPoints(), 0)
+    self.assertFalse(valveModel.isNodeSpecifiedForCurrentTimePoint(anteriorSurface), "placeholder surface is not specified")
+    self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(posteriorSurface))
+    self.assertGreater(posteriorSurface.GetPolyData().GetNumberOfPoints(), 0)
+    self._goTo(valveBrowser, first.indexValue)
+    self.assertTrue(valveModel.isNodeSpecifiedForCurrentTimePoint(anteriorSurface))
+    self.assertGreater(anteriorSurface.GetPolyData().GetNumberOfPoints(), 0)
+    # A scene converted before placeholders existed keeps such items without mesh: the upgrade at
+    # import completes them
+    anteriorSequence = valveBrowser.valveBrowserNode.GetSequenceNode(anteriorSurface)
+    item = anteriorSequence.GetDataNodeAtValue(second.indexValue, True)
+    item.RemoveAttribute(HeartValveLib.HeartValves.EMPTY_MODEL_PLACEHOLDER_ATTRIBUTE)
+    item.SetAndObservePolyData(None)
+    self.assertEqual(HeartValveLib.HeartValves.fillMissingModelItems(valveBrowser.valveBrowserNode), 1)
+    self.assertEqual(HeartValveLib.HeartValves.fillMissingModelItems(valveBrowser.valveBrowserNode), 0, "idempotent")
+    self.assertIsNotNone(item.GetPolyData())
+    self.assertTrue(HeartValveLib.HeartValves.isEmptyModelPlaceholder(item))
+
   def test_segments_harmonized_by_terminology_or_name_and_completed_at_every_phase(self):
     """Phases segmented by different tools: one phase with specific terminology entries and plain
     IDs, the others with UID-style IDs and a generic terminology shared by all segments, and the
