@@ -117,6 +117,37 @@
           </property>
          </widget>
         </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="label_importCropRoi">
+          <property name="text">
+           <string>Crop to ROI:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="qMRMLNodeComboBox" name="importCropRoiNodeComboBox">
+          <property name="toolTip">
+           <string>Import only the part of the meshes that is inside this ROI, using the position that the meshes will have in the scene. Cells at the boundary of the ROI are cut, unless the mesh is resampled. Images are not cropped. Create an ROI using the Markups toolbar.</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLMarkupsROINode</string>
+           </stringlist>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="noneDisplay">
+           <string>None (do not crop)</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
       <item>
@@ -505,6 +536,37 @@
           </property>
          </widget>
         </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="label_exportCropRoi">
+          <property name="text">
+           <string>Crop to ROI:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="qMRMLNodeComboBox" name="exportCropRoiNodeComboBox">
+          <property name="toolTip">
+           <string>Write only the part of the models that is inside this ROI, as it is displayed in the scene. Cells at the boundary of the ROI are cut. The models in the scene are not changed. Create an ROI using the Markups toolbar.</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLMarkupsROINode</string>
+           </stringlist>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="noneDisplay">
+           <string>None (do not crop)</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
       <item>
@@ -588,6 +650,11 @@
    <container>1</container>
   </customwidget>
   <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
    <class>qMRMLSubjectHierarchyTreeView</class>
    <extends>QTreeView</extends>
    <header>qMRMLSubjectHierarchyTreeView.h</header>
@@ -625,6 +692,38 @@
     <hint type="destinationlabel">
      <x>210</x>
      <y>420</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ImportExportSimulationModel</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>exportCropRoiNodeComboBox</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>210</x>
+     <y>350</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>210</x>
+     <y>520</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ImportExportSimulationModel</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>importCropRoiNodeComboBox</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>210</x>
+     <y>350</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>210</x>
+     <y>120</y>
     </hint>
    </hints>
   </connection>

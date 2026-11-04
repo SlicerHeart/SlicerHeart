@@ -527,6 +527,10 @@ without reading all of its data, so that adding the file takes seconds. The rang
 coordinates remains exact, but the ranges of data arrays are computed from a sample of the file,
 they are marked with ~ and can be much narrower than the true ranges. This does not affect the import.
 
+<b>Crop to ROI:</b> optionally, only the part of the meshes that is inside the selected ROI is
+imported, or written when exporting. Cells at the boundary of the ROI are cut, except that a resampled
+mesh keeps its cubes. Exporting does not change the models in the scene, and images are not cropped.
+
 <b>Supported file formats:</b> .vtu, .vtp, .vtk, .vtkhdf, .vtkhdf5, .vti, .stl, .ply, and .obj can
 be read. A .vtkhdf or .vtkhdf5 file with several time points is loaded as a sequence of models with
 a sequence browser, each time point converted the same way. A .vti file is loaded as a volume, with
@@ -654,8 +658,10 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         try:
             if self._dropEventFilter is not None:
                 self.ui.inputFilesListWidget.removeEventFilter(self._dropEventFilter)
-            # The tree view observes the scene, release it so that the scene can be destroyed.
+            # These widgets observe the scene, release it so that the scene can be destroyed.
             self.ui.exportModelTreeView.setMRMLScene(None)
+            self.ui.importCropRoiNodeComboBox.setMRMLScene(None)
+            self.ui.exportCropRoiNodeComboBox.setMRMLScene(None)
         except (ValueError, RuntimeError):
             # The widgets have already been destroyed, so they hold nothing any more.
             pass
@@ -1029,7 +1035,8 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
                 self.ui.decimationBoundaryWeightSpinBox.value,
                 self.ui.keepEveryNthTimePointSpinBox.value,
                 self.ui.firstTimePointIndexSpinBox.value,
-                self.ui.resampleSpacingSpinBox.value if self.ui.resampleCheckBox.checked else None)
+                self.ui.resampleSpacingSpinBox.value if self.ui.resampleCheckBox.checked else None,
+                self.ui.importCropRoiNodeComboBox.currentNode())
             # Only models can be exported, volumes that were imported from images cannot.
             modelNodes = [node for node in importedNodes if node.IsA("vtkMRMLModelNode")]
             if modelNodes:
@@ -1110,7 +1117,8 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
                 self.selectedExportModelNodes,
                 self.ui.outputFolderPathLineEdit.currentPath,
                 self.outputFileFormat,
-                self.outputCoordinateSystem, self.outputUnitSystem)
+                self.outputCoordinateSystem, self.outputUnitSystem,
+                self.ui.exportCropRoiNodeComboBox.currentNode())
 
     # ------------------------------------------------------------------ log
 
@@ -2258,7 +2266,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                     decimationCellCountThreshold=DEFAULT_DECIMATION_CELL_COUNT_THRESHOLD,
                     decimationTargetReduction=DEFAULT_DECIMATION_TARGET_REDUCTION,
                     decimationBoundaryWeight=DEFAULT_DECIMATION_BOUNDARY_WEIGHT,
-                    keepEveryNthTimePoint=1, firstTimePointIndex=0, resampleSpacing=None):
+                    keepEveryNthTimePoint=1, firstTimePointIndex=0, resampleSpacing=None, roiNode=None):
         """Load mesh and image files into the scene.
 
         A mesh is loaded as a model node. A VTKHDF file with several time points is loaded as a
@@ -2281,6 +2289,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             starting from 0.
         :param resampleSpacing: replace the cells of volumetric meshes with cubes of this size, in
             mm, instead of decimating them. None to not resample.
+        :param roiNode: markups ROI node to crop the meshes to, compared to the position that the
+            meshes will have in the scene. Images are not cropped. None to not crop.
         :return: list of the created model nodes (the proxy model node of a sequence) and volume
             nodes.
         """
@@ -2309,7 +2319,9 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             reduceMesh = self._meshReductionFunction(
                 mergeDuplicatePoints, decimationCellCountThreshold, decimationTargetReduction,
                 decimationBoundaryWeight,
-                None if resampleSpacing is None else resampleSpacing / UNIT_SYSTEMS[unitSystem]["lengthUnitInMm"])
+                None if resampleSpacing is None else resampleSpacing / UNIT_SYSTEMS[unitSystem]["lengthUnitInMm"],
+                roiNode, None if roiNode is None else self._roiPlanesInFileCoordinates(
+                    roiNode, coordinateSystem, unitSystem, arrayQuantities), nodeName)
             timeValues = self.getVtkHdfTimeValues(filePath) \
                 if extension in self.VTKHDF_FILE_EXTENSIONS else []
             if timeValues:
@@ -2334,6 +2346,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 singleTimeValue = None
                 mesh = self.getCachedMesh(filePath)
             if isinstance(mesh, vtk.vtkImageData):
+                if roiNode is not None:
+                    self.addLog(_("Warning: images are not cropped to the ROI."))
                 importedNodes.extend(self._importImage(
                     filePath, nodeName, mesh, flipFirstTwoComponents, unitSystem, arrayQuantities))
                 continue
@@ -2363,7 +2377,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         return importedNodes
 
     def _meshReductionFunction(self, mergeDuplicatePoints, decimationCellCountThreshold,
-                               decimationTargetReduction, decimationBoundaryWeight, resampleSpacing=None):
+                               decimationTargetReduction, decimationBoundaryWeight, resampleSpacing=None,
+                               roiNode=None, roiPlanes=None, meshName=""):
         """Return a function that reduces the size of the meshes of a file, as requested.
 
         All the time points of a file use the same function, so that they can share the result of
@@ -2371,18 +2386,39 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
         :param resampleSpacing: resolution of uniform resampling in the length unit of the meshes,
             None to not resample. A resampled mesh is not decimated and it has no duplicate points.
+        :param roiNode: ROI to crop the meshes to, None to not crop.
+        :param roiPlanes: planes of the ROI in the coordinate system of the meshes.
+        :param meshName: name of the meshes, for reporting that one is outside of the ROI.
         """
         decimator = TetrahedralMeshDecimator(decimationTargetReduction, decimationBoundaryWeight, self.addLog)
         resampler = None if resampleSpacing is None else UniformMeshResampler(resampleSpacing, self.addLog)
 
+        def cropToRoi(mesh, cropFunction=self.cropMesh):
+            if roiNode is None:
+                return mesh
+            croppedMesh = cropFunction(mesh, roiPlanes)
+            if croppedMesh.GetNumberOfCells() == 0:
+                raise ValueError(_("No part of the model {modelName} is inside the ROI {roiName}.").format(
+                    modelName=meshName, roiName=roiNode.GetName()))
+            self.addLog(_("  Cropped to {roiName}: {before} -> {after} cells").format(
+                roiName=roiNode.GetName(), before=mesh.GetNumberOfCells(), after=croppedMesh.GetNumberOfCells()))
+            return croppedMesh
+
         def reduceMesh(mesh):
             if resampler is not None and resampler.canResample(mesh):
-                return resampler.resample(mesh)
-            if (decimationCellCountThreshold is not None
-                    and mesh.GetNumberOfCells() > decimationCellCountThreshold
-                    and decimator.canDecimate(mesh)):
-                # The decimated mesh has no duplicate points.
-                return decimator.decimate(mesh)
+                # The result must consist of cubes, so they are not cut, only selected. The mesh is not
+                # cut before resampling either, because a cut can create almost flat cells near the ROI
+                # boundary, and points inside such cells are not found, which would leave out cubes.
+                return cropToRoi(resampler.resample(mesh), self._hexahedraWithCenterInsideFunctions)
+            if decimationCellCountThreshold is not None and decimator.canDecimate(mesh):
+                # Only tetrahedra can be decimated, but cutting a mesh creates other types of cells.
+                # So at this point only the tetrahedra are removed that are outside of the ROI, which
+                # also makes the decimation faster, and the mesh is cut after it is decimated.
+                meshToDecimate = mesh if roiNode is None else self._cellsNotOutsideFunctions(mesh, roiPlanes)
+                if meshToDecimate.GetNumberOfCells() > decimationCellCountThreshold:
+                    # The decimated mesh has no duplicate points.
+                    return cropToRoi(decimator.decimate(meshToDecimate))
+            mesh = cropToRoi(mesh)
             if not mergeDuplicatePoints:
                 return mesh
             mergedMesh = self.mergeDuplicatePoints(mesh)
@@ -2537,13 +2573,14 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         return fileName or "model"
 
     def exportModels(self, modelNodes, outputDirectory, fileFormatId,
-                     coordinateSystem, unitSystem):
+                     coordinateSystem, unitSystem, roiNode=None):
         """Write each model to a separate file in the output folder, named after the model.
 
         The file extension is determined by the file format and by the mesh of each model: a
         surface mesh and a volumetric mesh are written to different file types by the VTK
         formats (.vtp and .vtu for VTK (XML), for example).
 
+        :param roiNode: markups ROI node to crop the written meshes to, None to not crop.
         :return: list of the written file paths.
         """
         if not modelNodes:
@@ -2570,15 +2607,18 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 uniqueFileName = "%s_%d" % (fileName, index)
             usedFileNames.add((uniqueFileName + extension).lower())
             filePath = os.path.join(outputDirectory, uniqueFileName + extension)
-            self.exportModel(modelNode, filePath, coordinateSystem, unitSystem)
+            self.exportModel(modelNode, filePath, coordinateSystem, unitSystem, roiNode)
             filePaths.append(filePath)
 
         self.addLog(_("Exported {count} model(s) to {outputDirectory}").format(
             count=len(filePaths), outputDirectory=outputDirectory))
         return filePaths
 
-    def exportModel(self, modelNode, filePath, coordinateSystem, unitSystem):
-        """Write a model to file, converting it to the given coordinate and unit system."""
+    def exportModel(self, modelNode, filePath, coordinateSystem, unitSystem, roiNode=None):
+        """Write a model to file, converting it to the given coordinate and unit system.
+
+        :param roiNode: markups ROI node to crop the written mesh to, None to not crop.
+        """
         if modelNode is None:
             raise ValueError(_("No model is selected"))
         if not filePath:
@@ -2610,10 +2650,172 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
         self.addLog(_("Exporting {name} to {filePath}").format(
             name=modelNode.GetName(), filePath=filePath))
+        if roiNode is not None:
+            # The ROI is compared to the model as it is displayed, so this has to be done before
+            # the conversion to the coordinate and unit system of the file.
+            croppedMesh = self.cropMesh(mesh, self._roiPlanesInModelCoordinates(modelNode, roiNode))
+            if croppedMesh.GetNumberOfCells() == 0:
+                raise ValueError(_("No part of the model {modelName} is inside the ROI {roiName}.").format(
+                    modelName=modelNode.GetName(), roiName=roiNode.GetName()))
+            self.addLog(_("  Cropped to {roiName}: {before} -> {after} cells").format(
+                roiName=roiNode.GetName(), before=mesh.GetNumberOfCells(), after=croppedMesh.GetNumberOfCells()))
+            mesh = croppedMesh
         convertedMesh = self.convertMesh(mesh, quantities, flipFirstTwoComponents,
                                          modelUnitSystem, unitSystem)
         self.writeMesh(convertedMesh, filePath)
         self._logConversion(arrayInfos, modelUnitSystem, unitSystem, flipFirstTwoComponents)
+
+    @staticmethod
+    def _roiPlanes(roiNode, meshToWorld):
+        """Planes of the sides of an ROI, negative inside the ROI, for points of a mesh.
+
+        :param meshToWorld: transform from the coordinate system of the mesh to the world, or None.
+        """
+        roiPlanes = vtk.vtkPlanes()
+        roiNode.GetPlanesWorld(roiPlanes)
+        planes = []
+        for planeIndex in range(roiPlanes.GetNumberOfPlanes()):
+            plane = vtk.vtkPlane()
+            roiPlanes.GetPlane(planeIndex, plane)
+            plane.SetTransform(meshToWorld)
+            planes.append(plane)
+        return planes
+
+    @staticmethod
+    def _roiPlanesInModelCoordinates(modelNode, roiNode):
+        """Planes of an ROI for the mesh of a model, which is stored without the transform of the model."""
+        modelToWorld = None
+        transformNode = modelNode.GetParentTransformNode()
+        if transformNode is not None:
+            modelToWorld = vtk.vtkGeneralTransform()
+            transformNode.GetTransformToWorld(modelToWorld)
+            modelToWorld.Update()
+        return ImportExportSimulationModelLogic._roiPlanes(roiNode, modelToWorld)
+
+    @staticmethod
+    def _roiPlanesInFileCoordinates(roiNode, coordinateSystem, unitSystem, arrayQuantities):
+        """Planes of an ROI for a mesh read from a file, which is not yet converted to the scene.
+
+        The conversion must be the same as the conversion of the point coordinates in convertMesh.
+        """
+        quantity = (arrayQuantities or {}).get((POSITION_LOCATION, POSITION_ARRAY_NAME), LENGTH_QUANTITY)
+        scale = unitSystemConversionFactor(
+            simulationUnitByQuantity(quantity).lengthExponent, unitSystem, SCENE_UNIT_SYSTEM)
+        signs = (1, 1, 1) if coordinateSystem == SCENE_COORDINATE_SYSTEM else COORDINATE_SYSTEM_AXIS_SIGNS
+        fileToScene = vtk.vtkTransform()
+        fileToScene.Scale(signs[0] * scale, signs[1] * scale, signs[2] * scale)
+        return ImportExportSimulationModelLogic._roiPlanes(roiNode, fileToScene)
+
+    @staticmethod
+    def _cellsNotOutsideFunctions(mesh, implicitFunctions):
+        """Return a tetrahedral mesh without the cells that are completely outside of a function.
+
+        A cell is removed only if a function is positive at all of its points. This keeps every cell
+        that has a part inside the region where no function is positive, even if none of the points
+        of the cell are in that region, and it may keep some more cells around it.
+
+        :param implicitFunctions: functions that are linear in the coordinates of the mesh.
+        :return: tetrahedral mesh, with all the data arrays. The input is not modified.
+        """
+        tetrahedra = numpy_support.vtk_to_numpy(mesh.GetCells().GetConnectivityArray()).reshape(-1, 4)
+        isKept = np.ones(len(tetrahedra), dtype=np.uint8)
+        for implicitFunction in implicitFunctions:
+            values = ImportExportSimulationModelLogic._functionValues(implicitFunction, mesh.GetPoints().GetData())
+            isKept &= (values[tetrahedra] <= 0.0).any(axis=1).astype(np.uint8)
+        return ImportExportSimulationModelLogic._meshWithCells(mesh, isKept)
+
+    @staticmethod
+    def _functionValues(implicitFunction, positions):
+        """Return the values of an implicit function at positions stored in a VTK array, as a numpy array."""
+        values = vtk.vtkDoubleArray()
+        # Without a transform a plane writes to the output array without allocating it.
+        values.SetNumberOfTuples(positions.GetNumberOfTuples())
+        implicitFunction.FunctionValue(positions, values)
+        return numpy_support.vtk_to_numpy(values)
+
+    @staticmethod
+    def _hexahedraWithCenterInsideFunctions(mesh, implicitFunctions):
+        """Return a hexahedral mesh with only the cells whose center is where no function is positive.
+
+        :return: hexahedral mesh, with all the data arrays. The input is not modified.
+        """
+        hexahedra = numpy_support.vtk_to_numpy(mesh.GetCells().GetConnectivityArray()).reshape(-1, 8)
+        points = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData()).astype(float)
+        centers = numpy_support.numpy_to_vtk(points[hexahedra].mean(axis=1), deep=True)
+        isKept = np.ones(len(hexahedra), dtype=np.uint8)
+        for implicitFunction in implicitFunctions:
+            values = ImportExportSimulationModelLogic._functionValues(implicitFunction, centers)
+            isKept &= (values <= 0.0).astype(np.uint8)
+        return ImportExportSimulationModelLogic._meshWithCells(mesh, isKept)
+
+    @staticmethod
+    def _meshWithCells(mesh, isKept):
+        """Return an unstructured grid with the cells of a mesh that are marked in a numpy array."""
+        # A shallow copy is used for not adding the temporary array to the input mesh.
+        keptArrayName = "_IsKept"
+        keptArray = numpy_support.numpy_to_vtk(isKept, deep=True)
+        keptArray.SetName(keptArrayName)
+        markedMesh = vtk.vtkUnstructuredGrid()
+        markedMesh.ShallowCopy(mesh)
+        markedMesh.GetCellData().AddArray(keptArray)
+        threshold = vtk.vtkThreshold()
+        threshold.SetInputData(markedMesh)
+        threshold.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS, keptArrayName)
+        threshold.SetUpperThreshold(0.5)
+        threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
+        threshold.Update()
+        keptMesh = threshold.GetOutput()
+        keptMesh.GetCellData().RemoveArray(keptArrayName)
+        return keptMesh
+
+    @staticmethod
+    def cropMesh(mesh, implicitFunctions):
+        """Return the part of a mesh where none of the implicit functions is positive.
+
+        The mesh is cut with one function at a time. A clip filter evaluates its function at the
+        points of the mesh and interpolates linearly between them, so a single function of a box
+        would bevel the cells that contain an edge or a corner of the box, which reduces the volume.
+        vtkClipDataSet is not used, because it cuts the wedges in its own output incorrectly, so the
+        result of the second cut would already have the wrong volume and bounds.
+
+        Cells that cross the boundary are cut, so a volumetric cell may be replaced by cells of
+        other types (tetrahedra, pyramids, wedges, hexahedra), and the faces of neighboring cut cells
+        may not match. Cells that are completely inside are not changed. Cell arrays are copied from
+        the cell that was cut. At the new points floating-point point arrays are interpolated,
+        identifiers and other integers cannot be interpolated, so they are taken from the nearest
+        point of the input mesh.
+
+        :param implicitFunctions: functions that are linear in the coordinates of the mesh, to
+            have the cut exactly where a function is 0.
+        :return: mesh of the same type as the input, which is not modified.
+        """
+        croppedMesh = mesh
+        for implicitFunction in implicitFunctions:
+            if isinstance(mesh, vtk.vtkPolyData):
+                clipFilter = vtk.vtkClipPolyData()
+            else:
+                clipFilter = vtk.vtkTableBasedClipDataSet()
+            clipFilter.SetInputData(croppedMesh)
+            clipFilter.SetClipFunction(implicitFunction)
+            clipFilter.InsideOutOn()
+            clipFilter.Update()
+            croppedMesh = clipFilter.GetOutput()
+
+        pointData = mesh.GetPointData()
+        croppedPointData = croppedMesh.GetPointData()
+        integerArrayNames = []
+        for arrayIndex in range(pointData.GetNumberOfArrays()):
+            array = pointData.GetArray(arrayIndex)
+            if (array is not None and array.GetName() and array.GetDataType() not in (vtk.VTK_FLOAT, vtk.VTK_DOUBLE)
+                    and croppedPointData.GetArray(array.GetName()) is not None):
+                integerArrayNames.append(array.GetName())
+        if integerArrayNames and croppedMesh.GetNumberOfPoints() > 0:
+            nearestPointIds = MeshGeometryReplacer._findNearestPoints(mesh, croppedMesh)
+            for name in integerArrayNames:
+                numpy_support.vtk_to_numpy(croppedPointData.GetArray(name))[:] = (
+                    numpy_support.vtk_to_numpy(pointData.GetArray(name))[nearestPointIds])
+                croppedPointData.GetArray(name).Modified()
+        return croppedMesh
 
     @staticmethod
     def _quantityWithLengthExponent(lengthExponent):
@@ -2667,6 +2869,494 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         self.test_DecimateTetrahedra()
         self.test_ApproximateRanges()
         self.test_ResampleUniformly()
+        self.test_CropToRoi()
+        self.test_ImportCropToRoi()
+
+    def test_ImportCropToRoi(self):
+        """Imported meshes must be cropped at the position that they will have in the scene."""
+        self.delayDisplay("Starting import crop to ROI test")
+
+        import tempfile
+
+        def writeMesh(mesh):
+            filePath = os.path.join(tempfile.mkdtemp(), "mesh.vtu")
+            writer = vtk.vtkXMLUnstructuredGridWriter()
+            writer.SetInputData(mesh)
+            writer.SetFileName(filePath)
+            self.assertTrue(writer.Write())
+            return filePath
+
+        # Tetrahedra filling the box [0, 4] x [0, 4] x [0, 4], with arrays that depend on the position
+        image = vtk.vtkImageData()
+        image.SetDimensions(9, 9, 9)
+        image.SetSpacing(0.5, 0.5, 0.5)
+        image.AllocateScalars(vtk.VTK_FLOAT, 1)
+        tetrahedralize = vtk.vtkDataSetTriangleFilter()
+        tetrahedralize.SetInputData(image)
+        tetrahedralize.Update()
+        mesh = vtk.vtkUnstructuredGrid()
+        mesh.DeepCopy(tetrahedralize.GetOutput())
+        mesh.GetPointData().Initialize()
+        filePoints = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData())
+        for name, values in (("Pressure", filePoints[:, 0] + 2.0 * filePoints[:, 1] - filePoints[:, 2]),
+                             ("Velocity", filePoints * 3.0),
+                             ("NodeID", np.arange(len(filePoints), dtype=np.int32))):
+            array = numpy_support.numpy_to_vtk(values, deep=True)
+            array.SetName(name)
+            mesh.GetPointData().AddArray(array)
+        regionId = numpy_support.numpy_to_vtk(np.full(mesh.GetNumberOfCells(), 5, dtype=np.int32), deep=True)
+        regionId.SetName("RegionID")
+        mesh.GetCellData().AddArray(regionId)
+        filePath = writeMesh(mesh)
+
+        def volumeOf(mesh):
+            sizeFilter = vtk.vtkCellSizeFilter()
+            sizeFilter.SetInputData(mesh)
+            sizeFilter.ComputeSumOn()
+            sizeFilter.Update()
+            return sizeFilter.GetOutput().GetFieldData().GetArray("Volume").GetValue(0)
+
+        def assertBoundsEqual(mesh, expectedBounds):
+            np.testing.assert_allclose(mesh.GetBounds(), expectedBounds, atol=1e-3)
+
+        logic = ImportExportSimulationModelLogic()
+        roiNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsROINode", "roi")
+
+        # The ROI is in the scene (RAS, mm), the file is in LPS and cm, which puts the mesh into
+        # [-40, 0] x [-40, 0] x [0, 40]. A wrong conversion would leave nothing in this ROI.
+        roiNode.SetCenter(-20.0, -20.0, 20.0)
+        roiNode.SetSize(22.0, 17.0, 13.0)
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=None, roiNode=roiNode)[0]
+        croppedMesh = modelNode.GetMesh()
+        assertBoundsEqual(croppedMesh, (-31.0, -9.0, -28.5, -11.5, 13.5, 26.5))
+        self.assertAlmostEqual(volumeOf(croppedMesh), 22.0 * 17.0 * 13.0, places=2)
+        points = numpy_support.vtk_to_numpy(croppedMesh.GetPoints().GetData())
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(croppedMesh.GetPointData().GetArray("Velocity")), points * 3.0, atol=1e-2)
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(croppedMesh.GetPointData().GetArray("Pressure")),
+            0.1 * (-points[:, 0] / 10.0 - 2.0 * points[:, 1] / 10.0 - points[:, 2] / 10.0), atol=1e-4)
+        self.assertEqual(croppedMesh.GetCellData().GetArray("RegionID").GetRange(), (5.0, 5.0))
+        self.assertEqual(croppedMesh.GetPointData().GetArray("NodeID").GetDataType(), vtk.VTK_INT)
+        self.assertEqual(modelNode.GetAttribute("SimulationModel.Position.Unit"), "mm")
+
+        # A file that is already in the coordinate and unit system of the scene
+        roiNode.SetCenter(2.0, 2.0, 2.0)
+        roiNode.SetSize(2.2, 1.7, 1.3)
+        modelNode = logic.importFiles([filePath], "RAS", "mmgs", decimationCellCountThreshold=None, roiNode=roiNode)[0]
+        assertBoundsEqual(modelNode.GetMesh(), (0.9, 3.1, 1.15, 2.85, 1.35, 2.65))
+
+        # The position of the mesh depends on the quantity selected for the point coordinates.
+        roiNode.SetCenter(-2.0, -2.0, 2.0)
+        roiNode.SetSize(2.0, 2.0, 2.0)
+        modelNode = logic.importFiles(
+            [filePath], "LPS", "cgs", {(POSITION_LOCATION, POSITION_ARRAY_NAME): DIMENSIONLESS_QUANTITY},
+            decimationCellCountThreshold=None, roiNode=roiNode)[0]
+        assertBoundsEqual(modelNode.GetMesh(), (-3.0, -1.0, -3.0, -1.0, 1.0, 3.0))
+
+        # The ROI must be used as it is displayed: here it is rotated by a transform.
+        rotation = vtk.vtkTransform()
+        rotation.Translate(-20.0, -20.0, 20.0)
+        rotation.RotateZ(45.0)
+        rotation.Translate(20.0, 20.0, -20.0)
+        transformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode")
+        transformNode.SetMatrixTransformToParent(rotation.GetMatrix())
+        roiNode.SetAndObserveTransformNodeID(transformNode.GetID())
+        roiNode.SetCenter(-20.0, -20.0, 20.0)
+        roiNode.SetSize(20.0, 20.0, 20.0)
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=None, roiNode=roiNode)[0]
+        halfDiagonal = 10.0 * np.sqrt(2.0)
+        assertBoundsEqual(modelNode.GetMesh(), (-20.0 - halfDiagonal, -20.0 + halfDiagonal,
+                                                -20.0 - halfDiagonal, -20.0 + halfDiagonal, 10.0, 30.0))
+        self.assertAlmostEqual(volumeOf(modelNode.GetMesh()), 8000.0, places=2)
+        roiNode.SetAndObserveTransformNodeID(None)
+
+        # A resampled mesh must consist of cubes, only inside of the ROI. Sides of this ROI are at
+        # points of the mesh, where a cut would create almost flat cells.
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", resampleSpacing=5.0, roiNode=roiNode)[0]
+        resampledMesh = modelNode.GetMesh()
+        self.assertEqual(resampledMesh.GetNumberOfCells(), 4 * 4 * 4)
+        self.assertEqual(resampledMesh.GetNumberOfPoints(), 5 * 5 * 5)
+        self.assertTrue(resampledMesh.IsHomogeneous())
+        self.assertEqual(resampledMesh.GetCellType(0), vtk.VTK_HEXAHEDRON)
+        assertBoundsEqual(resampledMesh, (-30.0, -10.0, -30.0, -10.0, 10.0, 30.0))
+        # Values must be the ones of the original mesh at each corner of each cube.
+        points = numpy_support.vtk_to_numpy(resampledMesh.GetPoints().GetData())
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(resampledMesh.GetPointData().GetArray("Velocity")), points * 3.0, atol=1e-2)
+        self.assertEqual(resampledMesh.GetCellData().GetArray("RegionID").GetRange(), (5.0, 5.0))
+        self.assertIsNone(resampledMesh.GetCellData().GetArray("_IsKept"))
+        # A cube is kept if its center is in the ROI, so an ROI that ends inside of a cube includes
+        # the cube if it contains the center, and the result can extend outside of the ROI.
+        roiNode.SetCenter(-20.0, -20.0, 20.0)
+        roiNode.SetSize(16.0, 20.0, 20.0)
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", resampleSpacing=5.0, roiNode=roiNode)[0]
+        assertBoundsEqual(modelNode.GetMesh(), (-30.0, -10.0, -30.0, -10.0, 10.0, 30.0))
+        roiNode.SetSize(14.0, 20.0, 20.0)
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", resampleSpacing=5.0, roiNode=roiNode)[0]
+        assertBoundsEqual(modelNode.GetMesh(), (-25.0, -15.0, -30.0, -10.0, 10.0, 30.0))
+
+        # Removing the cells outside of the ROI must keep a cell that the ROI is completely inside of,
+        # even though none of its points are in the ROI.
+        tetrahedronPoints = vtk.vtkPoints()
+        for point in ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0), (0.0, 0.0, 10.0)):
+            tetrahedronPoints.InsertNextPoint(point)
+        tetrahedron = vtk.vtkUnstructuredGrid()
+        tetrahedron.SetPoints(tetrahedronPoints)
+        tetrahedronIds = vtk.vtkIdList()
+        for pointIndex in range(4):
+            tetrahedronIds.InsertNextId(pointIndex)
+        tetrahedron.InsertNextCell(vtk.VTK_TETRA, tetrahedronIds)
+        roiNode.SetCenter(2.0, 2.0, 2.0)
+        roiNode.SetSize(0.5, 0.5, 0.5)
+        roiPlanes = logic._roiPlanes(roiNode, None)
+        self.assertEqual(logic._cellsNotOutsideFunctions(tetrahedron, roiPlanes).GetNumberOfCells(), 1)
+        self.assertAlmostEqual(volumeOf(logic.cropMesh(tetrahedron, roiPlanes)), 0.125, places=5)
+        roiNode.SetCenter(100.0, 100.0, 100.0)
+        self.assertEqual(
+            logic._cellsNotOutsideFunctions(tetrahedron, logic._roiPlanes(roiNode, None)).GetNumberOfCells(), 0)
+
+        # A mesh that would be decimated must still be decimated, because the cut comes after that.
+        roiNode.SetCenter(-20.0, -20.0, 20.0)
+        roiNode.SetSize(22.0, 22.0, 22.0)
+        undecimatedCellCount = logic.importFiles(
+            [filePath], "LPS", "cgs", decimationCellCountThreshold=None, roiNode=roiNode)[0].GetMesh().GetNumberOfCells()
+        logMessages = []
+        logic.logCallback = logMessages.append
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=0,
+                                      decimationTargetReduction=0.5, roiNode=roiNode)[0]
+        logic.logCallback = None
+        self.assertTrue(any("Decimated" in message for message in logMessages), logMessages)
+        self.assertLess(modelNode.GetMesh().GetNumberOfCells(), undecimatedCellCount)
+        bounds = np.array(modelNode.GetMesh().GetBounds())
+        roiBounds = np.array((-31.0, -9.0, -31.0, -9.0, 9.0, 31.0))
+        self.assertTrue(np.all(bounds[0::2] >= roiBounds[0::2] - 1e-3) and np.all(bounds[1::2] <= roiBounds[1::2] + 1e-3),
+                        bounds)
+        self.assertAlmostEqual(volumeOf(modelNode.GetMesh()) / 22.0 ** 3, 1.0, delta=0.05)
+        # Whether a mesh is decimated depends on the number of cells near the ROI.
+        logMessages = []
+        logic.logCallback = logMessages.append
+        logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=mesh.GetNumberOfCells() - 1,
+                          roiNode=roiNode)
+        logic.logCallback = None
+        self.assertFalse(any("Decimated" in message for message in logMessages), logMessages)
+
+        # A surface mesh must remain a surface mesh.
+        cube = vtk.vtkCubeSource()
+        cube.SetBounds(0.0, 4.0, 0.0, 4.0, 0.0, 4.0)
+        triangulate = vtk.vtkTriangleFilter()
+        triangulate.SetInputConnection(cube.GetOutputPort())
+        triangulate.Update()
+        surfaceFilePath = os.path.join(tempfile.mkdtemp(), "surface.vtp")
+        surfaceWriter = vtk.vtkXMLPolyDataWriter()
+        surfaceWriter.SetInputData(triangulate.GetOutput())
+        surfaceWriter.SetFileName(surfaceFilePath)
+        self.assertTrue(surfaceWriter.Write())
+        roiNode.SetCenter(0.0, -20.0, 20.0)
+        roiNode.SetSize(20.0, 20.0, 20.0)
+        surfaceMesh = logic.importFiles([surfaceFilePath], "LPS", "cgs", roiNode=roiNode)[0].GetMesh()
+        self.assertIsInstance(surfaceMesh, vtk.vtkPolyData)
+        assertBoundsEqual(surfaceMesh, (0.0, 0.0, -30.0, -10.0, 10.0, 30.0))
+
+        # Each time point of a time series must be cropped.
+        timeSource = vtk.vtkTimeSourceExample()
+        timeSource.SetXAmplitude(5.0)
+        timeSource.UpdateInformation()
+        timeSeriesFilePath = os.path.join(tempfile.mkdtemp(), "timeSeries.vtkhdf5")
+        timeSeriesWriter = vtk.vtkHDFWriter()
+        timeSeriesWriter.SetInputConnection(timeSource.GetOutputPort())
+        timeSeriesWriter.SetFileName(timeSeriesFilePath)
+        timeSeriesWriter.SetWriteAllTimeSteps(True)
+        self.assertTrue(timeSeriesWriter.Write())
+        timeValues = logic.getVtkHdfTimeValues(timeSeriesFilePath)
+        lastMesh = logic.readMesh(timeSeriesFilePath)
+        fileBounds = lastMesh.GetBounds()
+        # The ROI contains the whole range of positions along the first two axes, and half of the third.
+        sceneMiddleZ = 10.0 * (fileBounds[4] + fileBounds[5]) / 2.0
+        sceneHeight = 10.0 * (fileBounds[5] - fileBounds[4])
+        roiNode.SetCenter(0.0, 0.0, sceneMiddleZ)
+        roiNode.SetSize(1000.0, 1000.0, sceneHeight / 2.0)
+        proxyNode = logic.importFiles([timeSeriesFilePath], "LPS", "cgs", roiNode=roiNode)[0]
+        sequenceNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(proxyNode).GetMasterSequenceNode()
+        self.assertEqual(sequenceNode.GetNumberOfDataNodes(), len(timeValues))
+        for index in range(sequenceNode.GetNumberOfDataNodes()):
+            frameBounds = sequenceNode.GetNthDataNode(index).GetMesh().GetBounds()
+            self.assertAlmostEqual(frameBounds[4], sceneMiddleZ - sceneHeight / 4.0, places=3)
+            self.assertAlmostEqual(frameBounds[5], sceneMiddleZ + sceneHeight / 4.0, places=3)
+
+        # A mesh that is completely outside of the ROI must be reported, and nothing must be left
+        # in the scene, also when it is a time series.
+        roiNode.SetCenter(5000.0, 5000.0, 5000.0)
+        roiNode.SetSize(1.0, 1.0, 1.0)
+        for outsideFilePath in (filePath, timeSeriesFilePath):
+            numberOfNodes = slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLModelNode")
+            numberOfSequenceNodes = slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceNode")
+            with self.assertRaises(ValueError):
+                logic.importFiles([outsideFilePath], "LPS", "cgs", roiNode=roiNode)
+            self.assertEqual(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLModelNode"), numberOfNodes)
+            self.assertEqual(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLSequenceNode"), numberOfSequenceNodes)
+        logic.clearCache()
+
+        # An image is not cropped, and this must be reported.
+        imageFilePath = os.path.join(tempfile.mkdtemp(), "image.vti")
+        imageWriter = vtk.vtkXMLImageDataWriter()
+        imageWriter.SetInputData(image)
+        imageWriter.SetFileName(imageFilePath)
+        self.assertTrue(imageWriter.Write())
+        logMessages = []
+        logic.logCallback = logMessages.append
+        volumeNode = logic.importFiles([imageFilePath], "LPS", "cgs", roiNode=roiNode)[0]
+        logic.logCallback = None
+        self.assertEqual(volumeNode.GetImageData().GetDimensions(), (9, 9, 9))
+        self.assertTrue(any("not cropped" in message for message in logMessages), logMessages)
+
+        # Without an ROI the whole mesh must be imported.
+        modelNode = logic.importFiles([filePath], "LPS", "cgs", decimationCellCountThreshold=None)[0]
+        self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), mesh.GetNumberOfCells())
+
+        # The module widget must pass the selected ROI to the import.
+        widget = slicer.util.getModuleWidget("ImportExportSimulationModel")
+        self.assertEqual(widget.ui.importCropRoiNodeComboBox.nodeTypes, ("vtkMRMLMarkupsROINode",))
+        roiNode.SetCenter(-20.0, -20.0, 20.0)
+        roiNode.SetSize(20.0, 20.0, 20.0)
+        widget.ui.importCropRoiNodeComboBox.setCurrentNode(roiNode)
+        # The test must not change the import options that the user has saved in the settings.
+        widget._updatingGui = True
+        try:
+            coordinateSystem = widget.inputCoordinateSystem
+            unitSystem = widget.inputUnitSystem
+            decimate = widget.ui.decimateCheckBox.checked
+            resample = widget.ui.resampleCheckBox.checked
+            widget._setComboBoxValue(widget.ui.inputCoordinateSystemComboBox, "LPS")
+            widget._setComboBoxValue(widget.ui.inputUnitSystemComboBox, "cgs")
+            widget.ui.decimateCheckBox.checked = False
+            widget.ui.resampleCheckBox.checked = False
+            widget.addInputFiles([filePath])
+            widget.onImportButton()
+        finally:
+            widget.ui.inputFilesListWidget.clear()
+            widget._updateImportTable()
+            widget._setComboBoxValue(widget.ui.inputCoordinateSystemComboBox, coordinateSystem)
+            widget._setComboBoxValue(widget.ui.inputUnitSystemComboBox, unitSystem)
+            widget.ui.decimateCheckBox.checked = decimate
+            widget.ui.resampleCheckBox.checked = resample
+            widget.ui.importCropRoiNodeComboBox.setCurrentNode(None)
+            widget._updatingGui = False
+        models = slicer.util.getNodesByClass("vtkMRMLModelNode")
+        importedMesh = [node for node in models if node.GetName() == "mesh"][-1].GetMesh()
+        assertBoundsEqual(importedMesh, (-30.0, -10.0, -30.0, -10.0, 10.0, 30.0))
+
+        self.delayDisplay("Import crop to ROI test passed")
+
+    def test_CropToRoi(self):
+        """Exported meshes must be cut at the ROI, as it is displayed, keeping the data arrays."""
+        self.delayDisplay("Starting crop to ROI test")
+
+        import tempfile
+
+        def addArrays(mesh):
+            """Add arrays that are linear functions of the position."""
+            points = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData())
+            for name, values in (("Pressure", points[:, 0] + 2.0 * points[:, 1] - points[:, 2]),
+                                 ("Velocity", points * 3.0),
+                                 ("NodeID", np.arange(len(points), dtype=np.int32))):
+                array = numpy_support.numpy_to_vtk(values, deep=True)
+                array.SetName(name)
+                mesh.GetPointData().AddArray(array)
+            regionId = numpy_support.numpy_to_vtk(np.full(mesh.GetNumberOfCells(), 5, dtype=np.int32), deep=True)
+            regionId.SetName("RegionID")
+            mesh.GetCellData().AddArray(regionId)
+            return mesh
+
+        # Tetrahedra filling the box [0, 4] x [0, 4] x [0, 4]
+        image = vtk.vtkImageData()
+        image.SetDimensions(9, 9, 9)
+        image.SetSpacing(0.5, 0.5, 0.5)
+        image.AllocateScalars(vtk.VTK_FLOAT, 1)
+        tetrahedralize = vtk.vtkDataSetTriangleFilter()
+        tetrahedralize.SetInputData(image)
+        tetrahedralize.Update()
+        volumetricMesh = vtk.vtkUnstructuredGrid()
+        volumetricMesh.DeepCopy(tetrahedralize.GetOutput())
+        volumetricMesh.GetPointData().Initialize()
+        addArrays(volumetricMesh)
+        numberOfCells = volumetricMesh.GetNumberOfCells()
+
+        def volumeOf(mesh):
+            sizeFilter = vtk.vtkCellSizeFilter()
+            sizeFilter.SetInputData(mesh)
+            sizeFilter.ComputeSumOn()
+            sizeFilter.Update()
+            return sizeFilter.GetOutput().GetFieldData().GetArray("Volume").GetValue(0)
+
+        def readMesh(filePath):
+            return ImportExportSimulationModelLogic.readMesh(filePath)
+
+        def assertBoundsEqual(mesh, expectedBounds):
+            np.testing.assert_allclose(mesh.GetBounds(), expectedBounds, atol=1e-4)
+
+        logic = ImportExportSimulationModelLogic()
+        outputDirectory = tempfile.mkdtemp()
+        filePath = os.path.join(outputDirectory, "cropped.vtu")
+
+        modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "volumetric")
+        modelNode.SetAndObserveMesh(volumetricMesh)
+        roiNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsROINode", "roi")
+        roiNode.SetCenter(2.0, 2.0, 2.0)
+        roiNode.SetSize(2.0, 2.0, 2.0)
+
+        # The mesh must be cut at the ROI, and the mesh in the scene must not change.
+        logic.exportModel(modelNode, filePath, "RAS", "mmgs", roiNode)
+        croppedMesh = readMesh(filePath)
+        self.assertIsInstance(croppedMesh, vtk.vtkUnstructuredGrid)
+        assertBoundsEqual(croppedMesh, (1.0, 3.0, 1.0, 3.0, 1.0, 3.0))
+        self.assertAlmostEqual(volumeOf(croppedMesh), 8.0, places=4)
+        self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), numberOfCells)
+
+        # This ROI cuts cells: their cut point values must be correct.
+        roiNode.SetCenter(2.0, 2.0, 2.0)
+        roiNode.SetSize(2.2, 1.7, 1.3)
+        logic.exportModel(modelNode, filePath, "RAS", "mmgs", roiNode)
+        croppedMesh = readMesh(filePath)
+        assertBoundsEqual(croppedMesh, (0.9, 3.1, 1.15, 2.85, 1.35, 2.65))
+        self.assertAlmostEqual(volumeOf(croppedMesh), 2.2 * 1.7 * 1.3, places=4)
+        points = numpy_support.vtk_to_numpy(croppedMesh.GetPoints().GetData())
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(croppedMesh.GetPointData().GetArray("Pressure")),
+            points[:, 0] + 2.0 * points[:, 1] - points[:, 2], atol=1e-4)
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(croppedMesh.GetPointData().GetArray("Velocity")), points * 3.0, atol=1e-4)
+        self.assertEqual(croppedMesh.GetCellData().GetArray("RegionID").GetRange(), (5.0, 5.0))
+        # Integers must not be interpolated: each one is the identifier of the nearest input point.
+        nodeIds = croppedMesh.GetPointData().GetArray("NodeID")
+        self.assertEqual(nodeIds.GetDataType(), vtk.VTK_INT)
+        inputPoints = numpy_support.vtk_to_numpy(volumetricMesh.GetPoints().GetData())
+        distances = np.linalg.norm(inputPoints[numpy_support.vtk_to_numpy(nodeIds)] - points, axis=1)
+        self.assertLessEqual(distances.max(), 0.5 * np.sqrt(3.0) / 2.0 + 1e-4)
+        self.assertLess(
+            np.count_nonzero(~np.isin(numpy_support.vtk_to_numpy(nodeIds),
+                                      numpy_support.vtk_to_numpy(volumetricMesh.GetPointData().GetArray("NodeID")))), 1)
+
+        # The written mesh must be converted after cropping.
+        logic.exportModel(modelNode, filePath, "LPS", "cgs", roiNode)
+        assertBoundsEqual(readMesh(filePath), (-0.31, -0.09, -0.285, -0.115, 0.135, 0.265))
+
+        # The ROI must be used as it is displayed: here it is rotated by a transform.
+        roiNode.SetSize(2.0, 2.0, 2.0)
+        rotation = vtk.vtkTransform()
+        rotation.Translate(2.0, 2.0, 2.0)
+        rotation.RotateZ(45.0)
+        rotation.Translate(-2.0, -2.0, -2.0)
+        roiTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode")
+        roiTransformNode.SetMatrixTransformToParent(rotation.GetMatrix())
+        roiNode.SetAndObserveTransformNodeID(roiTransformNode.GetID())
+        logic.exportModel(modelNode, filePath, "RAS", "mmgs", roiNode)
+        croppedMesh = readMesh(filePath)
+        halfDiagonal = np.sqrt(2.0)
+        assertBoundsEqual(croppedMesh, (2.0 - halfDiagonal, 2.0 + halfDiagonal,
+                                        2.0 - halfDiagonal, 2.0 + halfDiagonal, 1.0, 3.0))
+        self.assertAlmostEqual(volumeOf(croppedMesh), 8.0, places=4)
+        roiNode.SetAndObserveTransformNodeID(None)
+
+        # The model must be used as it is displayed, but the mesh is written without its transform.
+        modelTransformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLinearTransformNode")
+        translation = vtk.vtkTransform()
+        translation.Translate(10.0, 0.0, 0.0)
+        modelTransformNode.SetMatrixTransformToParent(translation.GetMatrix())
+        modelNode.SetAndObserveTransformNodeID(modelTransformNode.GetID())
+        roiNode.SetCenter(12.0, 2.0, 2.0)
+        logic.exportModel(modelNode, filePath, "RAS", "mmgs", roiNode)
+        assertBoundsEqual(readMesh(filePath), (1.0, 3.0, 1.0, 3.0, 1.0, 3.0))
+        modelNode.SetAndObserveTransformNodeID(None)
+
+        # Meshes of other cell types must be cut as well.
+        hexahedralMesh = UniformMeshResampler(1.0).resample(volumetricMesh)
+        hexahedralModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "hexahedral")
+        hexahedralModelNode.SetAndObserveMesh(hexahedralMesh)
+        roiNode.SetCenter(2.0, 2.0, 2.0)
+        roiNode.SetSize(1.5, 2.0, 2.5)
+        logic.exportModel(hexahedralModelNode, filePath, "RAS", "mmgs", roiNode)
+        croppedMesh = readMesh(filePath)
+        assertBoundsEqual(croppedMesh, (1.25, 2.75, 1.0, 3.0, 0.75, 3.25))
+        self.assertAlmostEqual(volumeOf(croppedMesh), 1.5 * 2.0 * 2.5, places=4)
+
+        # A surface mesh must remain a surface mesh, with all its data arrays.
+        cube = vtk.vtkCubeSource()
+        cube.SetBounds(0.0, 4.0, 0.0, 4.0, 0.0, 4.0)
+        triangulate = vtk.vtkTriangleFilter()
+        triangulate.SetInputConnection(cube.GetOutputPort())
+        triangulate.Update()
+        surfaceMesh = vtk.vtkPolyData()
+        surfaceMesh.DeepCopy(triangulate.GetOutput())
+        surfaceMesh.GetPointData().Initialize()
+        surfaceMesh.GetCellData().Initialize()
+        addArrays(surfaceMesh)
+        surfaceModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "surface")
+        surfaceModelNode.SetAndObservePolyData(surfaceMesh)
+        roiNode.SetCenter(0.0, 2.0, 2.0)
+        roiNode.SetSize(2.0, 2.0, 2.0)
+        filePaths = logic.exportModels([surfaceModelNode], outputDirectory, "vtkxml", "RAS", "mmgs", roiNode)
+        self.assertEqual(os.path.splitext(filePaths[0])[1], ".vtp")
+        croppedMesh = readMesh(filePaths[0])
+        self.assertIsInstance(croppedMesh, vtk.vtkPolyData)
+        # The ROI only reaches the side of the cube at x=0, where it cuts out a 2 x 2 square.
+        assertBoundsEqual(croppedMesh, (0.0, 0.0, 1.0, 3.0, 1.0, 3.0))
+        massProperties = vtk.vtkMassProperties()
+        massProperties.SetInputData(croppedMesh)
+        massProperties.Update()
+        self.assertAlmostEqual(massProperties.GetSurfaceArea(), 4.0, places=4)
+        self.assertEqual(croppedMesh.GetCellData().GetArray("RegionID").GetRange(), (5.0, 5.0))
+        self.assertEqual(croppedMesh.GetPointData().GetArray("NodeID").GetDataType(), vtk.VTK_INT)
+        points = numpy_support.vtk_to_numpy(croppedMesh.GetPoints().GetData())
+        np.testing.assert_allclose(
+            numpy_support.vtk_to_numpy(croppedMesh.GetPointData().GetArray("Pressure")),
+            points[:, 0] + 2.0 * points[:, 1] - points[:, 2], atol=1e-4)
+
+        # A model that is completely outside of the ROI must be reported, not written empty.
+        roiNode.SetCenter(100.0, 100.0, 100.0)
+        emptyFilePath = os.path.join(outputDirectory, "empty.vtu")
+        with self.assertRaises(ValueError):
+            logic.exportModel(modelNode, emptyFilePath, "RAS", "mmgs", roiNode)
+        self.assertFalse(os.path.exists(emptyFilePath))
+
+        # Without an ROI the whole mesh must be written.
+        logic.exportModel(modelNode, filePath, "RAS", "mmgs")
+        self.assertEqual(readMesh(filePath).GetNumberOfCells(), numberOfCells)
+
+        # The module widget must pass the selected ROI to the export.
+        widget = slicer.util.getModuleWidget("ImportExportSimulationModel")
+        self.assertEqual(widget.ui.exportCropRoiNodeComboBox.nodeTypes, ("vtkMRMLMarkupsROINode",))
+        widget.ui.exportCropRoiNodeComboBox.setCurrentNode(roiNode)
+        self.assertEqual(widget.ui.exportCropRoiNodeComboBox.currentNode(), roiNode)
+        roiNode.SetCenter(2.0, 2.0, 2.0)
+        roiNode.SetSize(2.0, 2.0, 2.0)
+        subjectHierarchyNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+        itemIds = vtk.vtkIdList()
+        itemIds.InsertNextId(subjectHierarchyNode.GetItemByDataNode(modelNode))
+        widget.ui.exportModelTreeView.setCurrentItems(itemIds)
+        # The test must not change the export options that the user has saved in the settings.
+        widget._updatingGui = True
+        try:
+            outputFolder = widget.ui.outputFolderPathLineEdit.currentPath
+            coordinateSystem = widget.outputCoordinateSystem
+            unitSystem = widget.outputUnitSystem
+            fileFormat = widget.outputFileFormat
+            widget.ui.outputFolderPathLineEdit.currentPath = outputDirectory
+            widget._setComboBoxValue(widget.ui.outputCoordinateSystemComboBox, "RAS")
+            widget._setComboBoxValue(widget.ui.outputUnitSystemComboBox, "mmgs")
+            widget._setComboBoxValue(widget.ui.outputFileFormatComboBox, "vtkxml")
+            widget.onExportButton()
+        finally:
+            widget.ui.outputFolderPathLineEdit.currentPath = outputFolder
+            widget._setComboBoxValue(widget.ui.outputCoordinateSystemComboBox, coordinateSystem)
+            widget._setComboBoxValue(widget.ui.outputUnitSystemComboBox, unitSystem)
+            widget._setComboBoxValue(widget.ui.outputFileFormatComboBox, fileFormat)
+            widget.ui.exportCropRoiNodeComboBox.setCurrentNode(None)
+            widget._updatingGui = False
+        assertBoundsEqual(readMesh(os.path.join(outputDirectory, "volumetric.vtu")),
+                          (1.0, 3.0, 1.0, 3.0, 1.0, 3.0))
+
+        self.delayDisplay("Crop to ROI test passed")
 
     def test_ResampleUniformly(self):
         """Resampling must produce uniform cubes, preserve the volume, and transfer the data arrays."""

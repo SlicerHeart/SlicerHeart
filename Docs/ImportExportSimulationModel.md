@@ -23,6 +23,8 @@ was left open is restored the next time the module is used.
   the scene in RAS.
 - **Unit system in file**: unit system of the input files (CGS or mm-g-s). Meshes are always
   imported into the scene in mm-g-s, because Slicer works in mm.
+- **Crop to ROI** (default: none): imports only the part of each mesh that is inside the selected
+  markups ROI, see [Cropping](#cropping). Create the ROI using the Markups toolbar.
 - **Coordinates and data arrays**: the point coordinates and every point and cell array of the
   input files, with the number of components, the value range, the unit, and the factor that the
   values are multiplied by on import (*Scale to Slicer*). The unit is guessed from the array name
@@ -132,12 +134,53 @@ unscaled, which is always safe; set its unit by hand in the table if it should b
 - **Output folder**: each selected model is written to a separate file in this folder, named
   after the model (characters that are not allowed in file names are replaced with `_`, and a
   number is appended if two models have the same name, so nothing is overwritten silently).
+- **Crop to ROI** (default: none): writes only the part of each model that is inside the selected
+  markups ROI, see [Cropping](#cropping). Create the ROI using the Markups toolbar.
 
 The units stored in each model at import time (see below) are used to compute the scale factor
 for each array, shown in the table. If several models are selected, an array that occurs in more
 than one of them is listed once, with the value range covering all of them. Arrays of a model
 that has no stored unit information (for example, a model that was not imported with this
 module) get their unit guessed from the array name.
+
+### Cropping
+
+**Export.** The ROI is compared to each model as they are displayed in the scene, including their
+transforms and any rotation of the ROI, and the result is then converted to the selected coordinate
+and unit system. As without cropping, the transform of the model is not applied to the written mesh.
+The models in the scene are not changed, and the value ranges in the table are still the ones of the
+whole models.
+
+**Import.** The ROI is compared to the position that each mesh will have in the scene, so it depends
+on the coordinate system and unit system selected for the file and on the unit of the point
+coordinates in the table. Every time point of a sequence is cropped with the same ROI. The value
+ranges in the table are the ones of the whole file. Images are not cropped, which is reported in the
+status log. Cropping is combined with the other import options this way:
+
+- **Merge duplicate points**: done after cropping.
+- **Decimate large meshes**: only the tetrahedra that are completely outside of the ROI are removed
+  first, because only tetrahedral meshes can be decimated and cutting a mesh creates other types of
+  cells. This also makes the decimation faster. The threshold applies to the number of remaining
+  cells, and the result of the decimation is cut at the ROI. If the mesh is not decimated then it is
+  simply cut at the ROI.
+- **Resample uniformly**: the whole mesh is resampled, then a cube is kept if its center is inside
+  the ROI. The result consists only of cubes, so its boundary is a staircase that can extend out of
+  the ROI by up to half a cube. The description below of how cells are cut does not apply to this
+  case.
+
+The rest of this section applies to both import and export.
+
+Cells that cross the boundary of the ROI are cut, so the boundary of the result is flat. Cells that
+are completely inside the ROI are not changed, but a volumetric cell that is cut is replaced by cells
+of other types, so a tetrahedral mesh may contain pyramids, wedges, and hexahedra after cropping. The
+faces of neighboring cut cells may not match, and if a side of the ROI passes very close to points of
+the mesh then the cut can create almost flat cells, so check the mesh before using it in a solver
+that requires a single cell type, a conforming mesh, or a minimum cell quality. Cell arrays get the
+value of the cell that was cut. At the new points on the cut, floating-point point arrays are
+interpolated, and integer point arrays (identifiers, labels) get the value of the nearest original
+point. Surface meshes remain surface meshes. An error is reported if a mesh is completely outside of
+the ROI, and the files or models that come after it in the list are not processed. A time series is
+not imported at all if any of its time points are completely outside of the ROI.
 
 ## Conversion
 
