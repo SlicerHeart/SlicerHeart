@@ -26,8 +26,8 @@ import slicer
 
 LIBRARY_NAME = "slicerheart_4dflow"
 # Lowest version that has all the functions that the modules and their tests use (test case format 4, mask_fraction,
-# estimate_lumen, testing_data for the clinical test data set)
-MINIMUM_LIBRARY_VERSION = "0.5.0"
+# estimate_lumen, testing_data for the clinical test data set) and that releases the memory of pathline computation
+MINIMUM_LIBRARY_VERSION = "0.5.1"
 # Environment variable or application setting with the path of a slicerheart_4dflow source tree
 # to install in editable mode (for development), instead of the released package.
 LIBRARY_SOURCE_ENVIRONMENT_VARIABLE = "SLICERHEART_4DFLOW_SOURCE"
