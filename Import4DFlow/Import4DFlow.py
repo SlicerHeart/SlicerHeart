@@ -284,6 +284,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # These connections ensure that we update parameter node when scene is closed
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndImportEvent, self.onSceneEndImport)
 
         # Buttons
         self.ui.exportPathLineEdit.connect('currentPathChanged(QString)', self.updateParameterNodeFromGUI)
@@ -349,10 +350,17 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 if not self._parameterNode.outputFlowField and self._parameterNode.inputFlowField:
                     self._parameterNode.outputFlowField = self.logic.findOutputFlowFieldNode(self._parameterNode.inputFlowField)
 
+        # Phase wrap segmentations and velocity component volumes are browsed with the flow field in this module only
+        self.logic.setPhaseWrapEditingSequencesPlayback(True)
+
     def exit(self) -> None:
         """
         Called each time the user opens a different module.
         """
+        # Phase wrap segmentations and velocity component volumes are only used in this module, and updating them would
+        # slow down browsing of the flow field in all other modules
+        if hasattr(slicer.modules, "sequences"):  # not available anymore when the application is closing
+            self.logic.setPhaseWrapEditingSequencesPlayback(False)
         # Do not react to parameter node changes (GUI will be updated when the user enters into the module)
         if self._parameterNode:
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
@@ -462,6 +470,14 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.parent.isEntered:
             self.initializeParameterNode()
         self.initializeSegmentEditorNode()
+
+    def onSceneEndImport(self, caller, event) -> None:
+        """
+        Called just after a scene is loaded.
+        """
+        # Replay of the phase wrap segmentations and velocity component volumes is loaded as it was when the scene was
+        # saved (enabled only if it was saved while this module was shown)
+        self.logic.setPhaseWrapEditingSequencesPlayback(self.parent.isEntered)
 
     def initializeSegmentEditorNode(self):
         segmentEditorNode = slicer.mrmlScene.GetSingletonNode(self.segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
@@ -1858,6 +1874,53 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         self._placeInSameFolder(componentVolumeNode, inputFlowFieldNode)
         return componentVolumeNode
 
+    def _phaseWrapEditingSequences(self, flowFieldNode=None):
+        """Sequences that are only used for reviewing and editing phase wraps: the phase wrap segmentations of output flow
+        fields and the encoded velocity component volumes of input flow fields (see _getComponentSegmentationNode,
+        getRawComponentVolume). Of the flow field and its input flow field, or of all flow fields in the scene if
+        flowFieldNode is not specified.
+        Returns a list of (sequence browser node, sequence node, True if changes of the proxy node are saved)."""
+        if flowFieldNode is not None:
+            flowFieldNodes = [flowFieldNode, flowFieldNode.GetNodeReference("inputFlowField")]
+        else:
+            flowFieldNodes = [node for nodeClassName in ["vtkMRMLTransformNode", "vtkMRMLVectorVolumeNode"]
+                              for node in slicer.util.getNodesByClass(nodeClassName)]
+        sequences = []
+        for node in flowFieldNodes:
+            if node is None:
+                continue
+            proxyNodes = [(node.GetNthNodeReference("phaseWrapSegmentation", component), True) for component in range(3)]
+            proxyNodes += [(node.GetNodeReference(f"rawComponentVolume{component}"), False) for component in range(3)]
+            for proxyNode, saveChanges in proxyNodes:
+                if proxyNode is None:
+                    continue
+                browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(proxyNode)
+                sequenceNode = browserNode.GetSequenceNode(proxyNode) if browserNode else None
+                if sequenceNode:
+                    sequences.append((browserNode, sequenceNode, saveChanges))
+        return sequences
+
+    def setPhaseWrapEditingSequencesPlayback(self, enabled, flowFieldNode=None):
+        """Enable or disable replay of the phase wrap segmentation sequences and of the encoded velocity component volume
+        sequences (of the flow field and its input flow field, or of all flow fields in the scene if flowFieldNode is not
+        specified). They are only needed for reviewing and editing phase wraps, and updating their proxy nodes makes
+        browsing of the flow field slower, therefore the module disables their replay while it is not shown.
+        While replay is disabled, the proxy nodes do not follow the selected frame, therefore saving changes of the phase
+        wrap segmentations is disabled with it (a modified proxy node would overwrite the selected frame).
+        Returns True if replay of all these sequences was enabled before."""
+        sequences = self._phaseWrapEditingSequences(flowFieldNode)
+        wasEnabled = all(browserNode.GetPlayback(sequenceNode) for browserNode, sequenceNode, _ in sequences)
+        for browserNode in {browserNode for browserNode, _, _ in sequences}:
+            # Proxy nodes are updated once, after all the sequences of the sequence browser are set
+            with slicer.util.NodeModify(browserNode):
+                for sequenceBrowserNode, sequenceNode, saveChanges in sequences:
+                    if sequenceBrowserNode is not browserNode:
+                        continue
+                    browserNode.SetPlayback(sequenceNode, enabled)
+                    if saveChanges:
+                        browserNode.SetSaveChanges(sequenceNode, enabled)
+        return wasEnabled
+
     def _getSegmentIds(self):
         """In phase wrap segmentation, order of segments: no wrap = 0, positive wraps 1x = 1, 2x = 2, 3x = 3, ..., negative wraps 3x = 4, 2x = 5, 1x = 6, ..."""
         segmentIds = vtk.vtkStringArray()
@@ -1957,6 +2020,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         originalItemNumber = sequenceBrowserNode.GetSelectedItemNumber()
         labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "___temp2___")
         numberOfFrames = wrapCounts.shape[0]
+        # The segmentations are written by browsing the flow field, which requires replay of their sequences
+        # (it is disabled while the module is not shown)
+        wasReplayEnabled = self.setPhaseWrapEditingSequencesPlayback(True, outputFlowField)
         try:
             for component in range(3):
                 segmentationNode = self._getComponentSegmentationNode(outputFlowField, component)
@@ -1993,6 +2059,9 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         finally:
             slicer.mrmlScene.RemoveNode(labelmapNode)
             sequenceBrowserNode.SetSelectedItemNumber(originalItemNumber)
+            if not wasReplayEnabled:
+                # Includes the phase wrap segmentations that were created now
+                self.setPhaseWrapEditingSequencesPlayback(False, outputFlowField)
 
     def getWrapCounts(self, outputFlowField):
         """Phase wrap counts (t, k, j, i, component) int8 array from the phase wrap segmentations of the flow field

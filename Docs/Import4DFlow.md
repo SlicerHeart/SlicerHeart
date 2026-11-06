@@ -64,6 +64,9 @@ Corrections are set in the `Corrections` section and applied by `Recompute flow 
 - `Output flow field`: the corrected flow field. If none is selected (`Create new flow field`), a new one is created.
 - `Show`: show the flow vectors, the magnitude image, or one of the velocity components (labeled by their encoding
   direction) in the slice views. The velocity components are shown as acquired, so that phase wraps can be seen and edited.
+  The velocity component images and the phase wrap segmentations follow the selected frame only while this module is
+  shown: in other modules their replay is disabled (they keep showing the frame that was selected when the module was
+  left), because updating them would slow down browsing of the flow field.
 - `Lumen`: optional segmentation of the blood pool (vessels and heart chambers). It is used by the slicerheart_4dflow
   methods: it is excluded from the background fit, and it is the region of divergence-free filtering, the encoding check and
   the quality report. `Compute` estimates the lumen automatically (see below) and overwrites the selected segment; a new

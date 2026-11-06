@@ -2062,6 +2062,87 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         self.report.table(["Patient", "Indexing (s)", "Plugin examine (s)", "Plugin load (s)", "MultiVolumeImporter magnitude (s)", "MultiVolumeImporter S component (s)"],
             rows, "Timings per patient")
 
+    @reportedTest("Replay of phase wrap segmentations and velocity component volumes only while the module is shown",
+        "The phase wrap segmentation sequences and the encoded velocity component volume sequences are only used for reviewing"
+        " and editing phase wraps in this module, and updating their proxy nodes slows down browsing of the flow field."
+        " Their replay must be disabled when the user leaves the module and enabled when the user enters it. While replay"
+        " is disabled, changes of the phase wrap segmentation proxy nodes must not be saved (they do not show the selected"
+        " frame), and storing phase wraps (which browses the flow field) must still work.")
+    def test_36_PhaseWrapEditingSequencesReplay(self):
+        vencCmPerSec = 70.0  # phase wraps
+        phantom = FlowPhantom()
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=True)
+        component = 2
+        segmentationNodes = [flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", c) for c in range(3)]
+        componentVolumeNodes = [self.logic.getRawComponentVolume(flowFieldNode, c) for c in range(3)]
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        segmentationSequenceNodes = [browserNode.GetSequenceNode(node) for node in segmentationNodes]
+        componentSequenceNodes = [browserNode.GetSequenceNode(node) for node in componentVolumeNodes]
+        otherSequenceNodes = [browserNode.GetSequenceNode(node) for node in
+                              [flowFieldNode, inputFlowFieldNode, inputFlowFieldNode.GetNodeReference("magnitudeVolume")]]
+
+        def checkReplay(label, enabled):
+            self.report.checkEqual(f"[{label}] Replay of the phase wrap segmentations and velocity component volumes",
+                [bool(browserNode.GetPlayback(node)) for node in segmentationSequenceNodes + componentSequenceNodes], [enabled] * 6)
+            self.report.checkEqual(f"[{label}] Saving changes of the phase wrap segmentations",
+                [bool(browserNode.GetSaveChanges(node)) for node in segmentationSequenceNodes], [enabled] * 3)
+            self.report.checkEqual(f"[{label}] Replay of the flow fields and magnitude images",
+                [bool(browserNode.GetPlayback(node)) for node in otherSequenceNodes], [True] * 3)
+
+        def componentVolumeShowsFrame(frameIndex):
+            """True if the velocity component volume (proxy node) has the voxel values of the frame."""
+            return bool(np.array_equal(slicer.util.arrayFromVolume(componentVolumeNodes[component]),
+                                       slicer.util.arrayFromVolume(componentSequenceNodes[component].GetNthDataNode(frameIndex))))
+
+        def segmentIds(segmentationNode):
+            segmentation = segmentationNode.GetSegmentation()
+            return [segmentation.GetNthSegmentID(i) for i in range(segmentation.GetNumberOfSegments())]
+
+        wrapCounts = self.logic.getWrapCounts(flowFieldNode)
+        peakFrame = phantom.peakFrameIndex()
+        wrappedFrames = [frameIndex for frameIndex in range(phantom.numberOfFrames) if np.any(wrapCounts[frameIndex, ..., component])]
+        self.report.checkTrue("Phantom has phase wraps in the peak frame and in another frame", peakFrame in wrappedFrames and len(wrappedFrames) > 1,
+            wrappedFrames)
+        otherFrame = next(frameIndex for frameIndex in wrappedFrames if frameIndex != peakFrame)
+
+        slicer.util.selectModule("Import4DFlow")
+        checkReplay("module is shown", True)
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, 0)
+        self.report.checkTrue("[module is shown] Velocity component volume shows the selected frame",
+            componentVolumeShowsFrame(0) and not componentVolumeShowsFrame(peakFrame))
+
+        slicer.util.selectModule("Data")
+        checkReplay("another module is shown", False)
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+        self.report.checkTrue("[another module is shown] Velocity component volume is not updated when another frame is selected",
+            componentVolumeShowsFrame(0) and not componentVolumeShowsFrame(peakFrame))
+
+        # Phase wraps are stored by browsing the flow field
+        self.logic.setWrapCounts(flowFieldNode, np.zeros_like(wrapCounts))
+        self.report.checkTrue("[another module is shown] Phase wraps can be removed", not np.any(self.logic.getWrapCounts(flowFieldNode)))
+        self.logic.setWrapCounts(flowFieldNode, wrapCounts)
+        self.report.checkTrue("[another module is shown] Phase wraps can be stored", np.array_equal(self.logic.getWrapCounts(flowFieldNode), wrapCounts))
+        checkReplay("another module is shown, after storing phase wraps", False)
+        self.report.checkEqual("Selected frame is restored after storing phase wraps", browserNode.GetSelectedItemNumber(), peakFrame)
+
+        # The proxy node keeps showing the frame that was selected when replay was disabled (the peak frame), therefore
+        # its changes must not be saved into the selected frame
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, otherFrame)
+        segmentationNodes[component].GetSegmentation().RemoveAllSegments()
+        self.report.checkTrue("[another module is shown] Changes of a phase wrap segmentation proxy node are not saved into the selected frame",
+            np.array_equal(self.logic.getWrapCounts(flowFieldNode)[otherFrame], wrapCounts[otherFrame]))
+        self.logic.setWrapCounts(flowFieldNode, wrapCounts)
+
+        slicer.util.selectModule("Import4DFlow")
+        checkReplay("module is shown again", True)
+        self.report.checkTrue("[module is shown again] Velocity component volume shows the selected frame",
+            componentVolumeShowsFrame(otherFrame) and not componentVolumeShowsFrame(0))
+        expectedSegmentIds = segmentIds(segmentationSequenceNodes[component].GetNthDataNode(otherFrame))
+        self.report.checkTrue("[module is shown again] Phase wrap segmentation shows the selected frame",
+            len(expectedSegmentIds) > 0 and segmentIds(segmentationNodes[component]) == expectedSegmentIds,
+            segmentIds(segmentationNodes[component]), expectedSegmentIds)
+
     def _realDataPluginTest(self, vendor):
         variable = FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES[vendor]
         dataDir = FlowTestingUtils.environmentValue(variable)
