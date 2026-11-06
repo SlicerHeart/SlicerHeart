@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>510</width>
-    <height>712</height>
+    <width>547</width>
+    <height>619</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -110,41 +110,47 @@
        </widget>
       </item>
       <item row="2" column="1">
-        <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
-           <horstretch>1</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="toolTip">
-          <string>Output flow field: velocity after the corrections (noise mask, phase unwrapping, background correction, divergence-free filtering), computed from the input flow field. A new flow field is created if none is selected.</string>
-         </property>
-         <property name="nodeTypes">
-          <stringlist notr="true">
-           <string>vtkMRMLTransformNode</string>
-           <string>vtkMRMLVectorVolumeNode</string>
-          </stringlist>
-         </property>
-         <property name="showChildNodeTypes">
-          <bool>false</bool>
-         </property>
-         <property name="noneEnabled">
-          <bool>true</bool>
-         </property>
-         <property name="addEnabled">
-          <bool>false</bool>
-         </property>
-         <property name="removeEnabled">
-          <bool>true</bool>
-         </property>
-         <property name="renameEnabled">
-          <bool>true</bool>
-         </property>
-         <property name="SlicerParameterName" stdset="0">
-          <string notr="true">outputFlowField</string>
-         </property>
-        </widget>
+       <widget class="qMRMLNodeComboBox" name="outputTransformSelector">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="toolTip">
+         <string>Output flow field: velocity after the corrections (noise mask, phase unwrapping, background correction, divergence-free filtering), computed from the input flow field. A new flow field is created if none is selected.</string>
+        </property>
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLTransformNode</string>
+          <string>vtkMRMLVectorVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="showChildNodeTypes">
+         <bool>false</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="editEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="noneDisplay">
+         <string>(Create new)</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string notr="true">outputFlowField</string>
+        </property>
+       </widget>
       </item>
       <item row="3" column="0">
        <widget class="QLabel" name="label_5">
@@ -233,17 +239,17 @@
       <item row="4" column="1">
        <layout class="QHBoxLayout" name="lumenLayout">
         <item>
-          <widget class="qMRMLSegmentSelectorWidget" name="lumenSegmentSelectorWidget">
-           <property name="toolTip">
-            <string>Optional segmentation of the vessel lumen (blood pool). Used by slicerheart_4dflow methods: it is excluded from background phase fitting, and it is the region of divergence-free filtering, encoding check, and quality report. It can be computed automatically (Compute): the selected segment is overwritten, or a new segmentation or segment is created if none is selected.</string>
-           </property>
-           <property name="noneEnabled">
-            <bool>true</bool>
-           </property>
-           <property name="editEnabled">
-            <bool>true</bool>
-           </property>
-          </widget>
+         <widget class="qMRMLSegmentSelectorWidget" name="lumenSegmentSelectorWidget">
+          <property name="toolTip">
+           <string>Optional segmentation of the vessel lumen (blood pool). Used by slicerheart_4dflow methods: it is excluded from background phase fitting, and it is the region of divergence-free filtering, encoding check, and quality report. It can be computed automatically (Compute): the selected segment is overwritten, or a new segmentation or segment is created if none is selected.</string>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="editEnabled">
+           <bool>true</bool>
+          </property>
+         </widget>
         </item>
         <item alignment="Qt::AlignTop">
          <widget class="QPushButton" name="computeLumenButton">
@@ -554,7 +560,7 @@
          <string>Recompute flow field after adjusting segmentation</string>
         </property>
         <property name="text">
-         <string>Recompute flow field</string>
+         <string>Compute output flow field</string>
         </property>
        </widget>
       </item>
