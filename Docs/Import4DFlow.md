@@ -127,14 +127,20 @@ the computation. The segment keeps the finer grid, so it can be edited at that r
 
 The `Quality` section uses slicerheart_4dflow:
 
-- `Check encoding directions`: ranks all signed permutations of the velocity components by the divergence of the
-  time-averaged velocity in the lumen. A warning is displayed if the component directions or signs detected from the DICOM
-  header are not the most consistent with mass conservation.
-- `Compute quality report`: checks the following, and stores the results in a table and shows them in the text box:
-  - venc adequacy (aliasing)
-  - velocity noise and venc-to-noise ratio
-  - residual background offset in static tissue (acceptable below 0.6 cm/s)
-  - divergence in the lumen
+- `Compute quality report`: computes the sections of the quality report that are checked, stores the results in a table
+  and shows them in the text box. Each value is given for the input flow field (velocity as acquired) and for the output
+  flow field (velocity after the corrections); if there is no output flow field then both are of the input flow field.
+  - `Velocity noise`: velocity noise in static tissue and venc-to-noise ratio
+  - `Background offset`: residual background offset in static tissue (acceptable below 0.6 cm/s)
+  - `venc adequacy (aliasing)`: peak velocity in the lumen compared to venc, and the lumen voxels that were aliased in the
+    input and unwrapped in the output
+  - `Divergence`: divergence in the lumen
+  - `Encoding directions`: ranks all signed permutations of the velocity components by the divergence of the
+    time-averaged velocity in the lumen. A warning is displayed if the component directions or signs detected from the
+    DICOM header are not the most consistent with mass conservation.
+
+  The last three sections are computed in the lumen, which is estimated from the flow field if no lumen segmentation is
+  selected. The first two sections require the magnitude image.
 
 ### Export flow field to files
 
@@ -218,8 +224,8 @@ corresponds to venc.
 
 The sign conventions of GE and Philips are not in the DICOM headers. They were verified on one data set per vendor
 (GE DISCOVERY MR750, software 27, `mm4dflow` sequence, axial acquisition of a sheep, venc 250 cm/s; Philips Ingenia
-Ambition X, software 12.3, sagittal acquisition, venc 200 cm/s) with the encoding direction check (`Check encoding
-directions` in the `Quality checks` section: the divergence of the time-averaged velocity in the lumen must be lowest
+Ambition X, software 12.3, sagittal acquisition, venc 200 cm/s) with the encoding direction check (`Encoding
+directions` of the quality report in the `Quality` section: the divergence of the time-averaged velocity in the lumen must be lowest
 for the imported mapping, which fixes the directions and relative signs) and the flow direction in the descending aorta
 (caudal in systole, which fixes the global sign). If the check reports an inconsistent mapping for data of another
 scanner or software version, the conventions in `FlowDicom.PATIENT_AXIS_CONFIGURATIONS` need to be revised for that

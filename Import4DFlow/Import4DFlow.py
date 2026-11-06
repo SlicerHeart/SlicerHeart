@@ -189,6 +189,12 @@ class Import4DFlowParameterNode:
     # encoding check, quality report). Segment ID is stored in lumenSegmentID.
     lumenSegmentation: Optional[vtkMRMLSegmentationNode]
     lumenSegmentID: str
+    # Sections of the quality report to compute (see Import4DFlowLogic.QUALITY_REPORT_SECTIONS)
+    qualityReportVelocityNoise: bool = True
+    qualityReportBackgroundOffset: bool = True
+    qualityReportVenc: bool = True
+    qualityReportDivergence: bool = True
+    qualityReportEncoding: bool = True
 
 #
 # Import4DFlowWidget
@@ -312,7 +318,6 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.computePcmraButton.connect('clicked(bool)', self.onComputePcmraButton)
         self.ui.deleteInputFlowFieldButton.connect('clicked(bool)', self.onDeleteInputFlowFieldButton)
         self.ui.magnitudeVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onMagnitudeVolumeSelected)
-        self.ui.checkEncodingButton.connect('clicked(bool)', self.onCheckEncodingButton)
         self.ui.computeQualityReportButton.connect('clicked(bool)', self.onComputeQualityReportButton)
 
         # Make sure parameter node is initialized (needed for module reload)
@@ -564,8 +569,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.showFlowFieldButton.enabled = flowFieldNode is not None
         for button in [self.ui.computeLumenButton, self.ui.computePcmraButton]:
             button.enabled = hasMagnitudeImage
-        self.ui.computeQualityReportButton.enabled = hasInput and outputFlowFieldNode is not None
-        self.ui.checkEncodingButton.enabled = flowFieldNode is not None
+        self.ui.computeQualityReportButton.enabled = flowFieldNode is not None and len(self.qualityReportSections()) > 0
         self.ui.exportButton.enabled = flowFieldNode is not None
 
         self.ui.exportPathLineEdit.setCurrentPath(self._parameterNode.exportDirectory)
@@ -788,25 +792,33 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNode.pcmraVolume = pcmraVolumeNode
             slicer.util.setSliceViewerLayers(background=pcmraVolumeNode, fit=True)
 
-    def onCheckEncodingButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay("Failed to check encoding directions.", waitCursor=True), self._progressStatus("Checking encoding directions"):
-            flowFieldNode = self._requireFlowField()
-            result = self.logic.checkEncodingDirections(flowFieldNode, self.lumenMask(flowFieldNode))
-            summary = self.logic.encodingCheckSummary(result)
-            self.ui.qualityReportTextBrowser.setPlainText(summary)
-            if not result["consistent"] and not slicer.app.testingEnabled():
-                slicer.util.warningDisplay(summary, windowTitle="Velocity encoding check")
+    def qualityReportSections(self):
+        """Sections of the quality report that are selected (keys of Import4DFlowLogic.QUALITY_REPORT_SECTIONS)."""
+        return [section for section, parameterName in Import4DFlowLogic.QUALITY_REPORT_SECTIONS.items()
+                if getattr(self._parameterNode, parameterName)]
 
     def onComputeQualityReportButton(self) -> None:
+        """Compute the selected sections of the quality report of the flow field (the output flow field and its input flow
+        field; the input flow field as both if there is no output flow field)."""
         with slicer.util.tryWithErrorDisplay("Failed to compute quality report.", waitCursor=True), self._progressStatus("Computing quality report"):
             flowFieldNode = self._requireFlowField()
-            report = self.logic.computeQualityReport(flowFieldNode, self.lumenMask(flowFieldNode))
-            self.ui.qualityReportTextBrowser.setMarkdown(self.logic.qualityReportToMarkdown(report))
+            isInputFlowField = flowFieldNode is self._parameterNode.inputFlowField
+            if isInputFlowField:
+                self._requireInputFlowField()  # a velocity field loaded from file is used as input flow field
+            report = self.logic.computeQualityReport(flowFieldNode, self.lumenMask(flowFieldNode), sections=self.qualityReportSections(),
+                                                     estimateLumen=True)
+            markdown = self.logic.qualityReportToMarkdown(report)
+            if isInputFlowField:
+                markdown += "\nThere is no output flow field: the input and output values are both of the input flow field.\n"
+            self.ui.qualityReportTextBrowser.setMarkdown(markdown)
             tableName = f"{flowFieldNode.GetName()} quality report"
             tableNode = slicer.mrmlScene.GetFirstNodeByName(tableName)
             if not tableNode:
                 tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", tableName)
             self.logic.qualityReportToTable(report, tableNode)
+            encodingWarning = self.logic.qualityReportEncodingWarning(report)
+            if encodingWarning and not slicer.app.testingEnabled():
+                slicer.util.warningDisplay(encodingWarning, windowTitle="Velocity encoding check")
 
     def onLoadTestCaseButton(self) -> None:
         caseDirectory = qt.QFileDialog.getExistingDirectory(slicer.util.mainWindow(),
@@ -2420,29 +2432,69 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
                 f"Lowest divergence mapping of components (R, A, S): {bestMapping}"
                 f" (divergence ratio of the current mapping to the best: {result['ratio']:.2f}).\n{result.get('note', '')}")
 
-    def computeQualityReport(self, flowFieldNode, lumenMask=None, studyId=None):
+    # Sections of the quality report (names of slicerheart_4dflow.report.SECTIONS) and the parameter that selects each
+    QUALITY_REPORT_SECTIONS = {
+        "velocity_noise": "qualityReportVelocityNoise",
+        "background_offset": "qualityReportBackgroundOffset",
+        "venc": "qualityReportVenc",
+        "divergence": "qualityReportDivergence",
+        "encoding": "qualityReportEncoding",
+        }
+    # Sections that select tissue by the magnitude image, and sections that are computed in the lumen
+    QUALITY_REPORT_MAGNITUDE_SECTIONS = ["velocity_noise", "background_offset"]
+    QUALITY_REPORT_LUMEN_SECTIONS = ["venc", "divergence", "encoding"]
+
+    def computeQualityReport(self, flowFieldNode, lumenMask=None, studyId=None, sections=None, estimateLumen=False):
         """Quality report of the flow field (slicerheart_4dflow.quality_report): venc adequacy, velocity noise,
-        residual background offset, divergence, encoding. Returns the report dictionary."""
+        residual background offset, divergence, encoding, each for the velocity of the input flow field (raw) and of the
+        flow field (processed). `sections` are the sections to compute (keys of QUALITY_REPORT_SECTIONS, all by default).
+        Sections that are computed in the lumen are left out if no lumen mask is given, unless estimateLumen is True:
+        then the lumen is estimated from the flow field. Returns the report dictionary."""
         library = FlowLibraryBridge.ensureLibrary()
-        self._progress("Reading the flow field...", 0.0)
-        rawVelocity = FlowLibraryBridge.rawWorldVelocity(flowFieldNode)
-        velocity, voxelToWorld, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
-        magnitude = FlowLibraryBridge.magnitudeArray(flowFieldNode)
-        _, vencs, _ = FlowLibraryBridge.componentEncoding(flowFieldNode)
-        with self._progressRange(0.05, 0.3):
-            wrapCounts = self.getWrapCounts(flowFieldNode)
-        if wrapCounts is not None:
-            wrapCounts = wrapCounts * np.diag(FlowLibraryBridge.encodingToWorld(flowFieldNode)).astype(np.int8)
-        heartRateBpm = self.heartRateBpm(flowFieldNode)
-        self._progress("Computing the quality report...", 0.3)
-        return library.quality_report(rawVelocity, velocity, magnitude, vencs, voxelToWorld, lumen_mask=lumenMask,
-                                      wrap_count=wrapCounts, study_id=studyId or flowFieldNode.GetName(),
-                                      rr_ms=60000.0 / heartRateBpm if heartRateBpm else None)
+        sections = list(self.QUALITY_REPORT_SECTIONS) if sections is None else list(sections)
+        hasMagnitudeImage = flowFieldNode.GetNodeReference("magnitudeVolume") is not None
+        if not hasMagnitudeImage and any(section in sections for section in self.QUALITY_REPORT_MAGNITUDE_SECTIONS):
+            raise ValueError("Velocity noise and background offset cannot be computed, because the flow field has no magnitude image."
+                             " Select a magnitude image or disable these sections of the quality report.")
+        reportStart = 0.0
+        if lumenMask is None and estimateLumen and any(section in sections for section in self.QUALITY_REPORT_LUMEN_SECTIONS):
+            if not hasMagnitudeImage:
+                raise ValueError("The lumen cannot be estimated, because the flow field has no magnitude image. Select a lumen segmentation.")
+            reportStart = 0.6
+            with self._progressRange(0.0, reportStart):
+                lumenMask = self.estimateLumenFromFlowField(flowFieldNode)["lumen"]
+        with self._progressRange(reportStart, 1.0):
+            self._progress("Reading the flow field...", 0.0)
+            rawVelocity = FlowLibraryBridge.rawWorldVelocity(flowFieldNode)
+            velocity, voxelToWorld, _ = FlowLibraryBridge.velocityArrayFromFlowField(flowFieldNode)
+            magnitude = FlowLibraryBridge.magnitudeArray(flowFieldNode) if hasMagnitudeImage else None
+            _, vencs, _ = FlowLibraryBridge.componentEncoding(flowFieldNode)
+            with self._progressRange(0.05, 0.3):
+                wrapCounts = self.getWrapCounts(flowFieldNode)
+            if wrapCounts is not None:
+                wrapCounts = wrapCounts * np.diag(FlowLibraryBridge.encodingToWorld(flowFieldNode)).astype(np.int8)
+            heartRateBpm = self.heartRateBpm(flowFieldNode)
+            self._progress("Computing the quality report...", 0.3)
+            return library.quality_report(rawVelocity, velocity, magnitude, vencs, voxelToWorld, lumen_mask=lumenMask,
+                                          wrap_count=wrapCounts, study_id=studyId or flowFieldNode.GetName(),
+                                          rr_ms=60000.0 / heartRateBpm if heartRateBpm else None, sections=sections)
 
     @staticmethod
     def qualityReportToMarkdown(report):
         library = FlowLibraryBridge.ensureLibrary()
         return library.to_markdown(report)
+
+    @staticmethod
+    def qualityReportEncodingWarning(report):
+        """Warning message if the encoding section of the quality report found velocity component directions or signs
+        that are not consistent with mass conservation, None otherwise."""
+        encoding = report.get("encoding", {})
+        inconsistent = [f"{title} flow field: {encoding[stage]['note']}."
+                        for stage, title in (("raw", "Input"), ("processed", "Output"))
+                        if stage in encoding and not encoding[stage]["consistent"]]
+        if not inconsistent:
+            return None
+        return "Velocity encoding directions are not consistent with mass conservation.\n" + "\n".join(inconsistent)
 
     @staticmethod
     def qualityReportToTable(report, tableNode):

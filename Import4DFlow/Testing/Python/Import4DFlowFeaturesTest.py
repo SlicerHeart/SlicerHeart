@@ -1862,10 +1862,27 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         widget.onRecomputeFlowFieldButton()
         processing = json.loads(self.logic._getSequenceFromProxyNode(flowFieldNode).GetAttribute("SlicerHeart.processing"))
         self.report.checkEqual("[GUI] Divergence filter is applied", processing["divergenceFilter"], "FdmProjection")
-        widget.onCheckEncodingButton()
-        self.report.checkTrue("[GUI] Encoding check result is shown", "consistent" in widget.ui.qualityReportTextBrowser.toPlainText())
+        sectionTitles = {"qualityReportVelocityNoise": "Velocity noise", "qualityReportBackgroundOffset": "Background offset",
+                         "qualityReportVenc": "venc  (", "qualityReportDivergence": "Divergence", "qualityReportEncoding": "Encoding directions"}
+        self.report.checkEqual("[GUI] Each section of the quality report has a parameter",
+                               sorted(sectionTitles), sorted(self.logic.QUALITY_REPORT_SECTIONS.values()))
         widget.onComputeQualityReportButton()
-        self.report.checkTrue("[GUI] Quality report is shown", len(widget.ui.qualityReportTextBrowser.toPlainText()) > 100)
+        reportText = widget.ui.qualityReportTextBrowser.toPlainText()
+        self.report.checkTrue("[GUI] Quality report with all sections is shown", all(title in reportText for title in sectionTitles.values()))
+        self.report.checkTrue("[GUI] Quality report has input and output values", "input" in reportText and "output" in reportText)
+        for parameterName in sectionTitles:
+            setattr(parameterNode, parameterName, parameterName == "qualityReportEncoding")
+        widget.onComputeQualityReportButton()
+        reportText = widget.ui.qualityReportTextBrowser.toPlainText()
+        self.report.checkTrue("[GUI] Quality report with only the encoding check is shown",
+                              [title for title in sectionTitles.values() if title in reportText] == ["Encoding directions"])
+        self.report.checkTrue("[GUI] Encoding check result is shown", "declared mapping" in reportText)
+        for parameterName in sectionTitles:
+            setattr(parameterNode, parameterName, False)
+        self.report.checkTrue("[GUI] Quality report cannot be computed if no section is selected", not widget.ui.computeQualityReportButton.enabled)
+        for parameterName in sectionTitles:
+            setattr(parameterNode, parameterName, True)
+        self.report.checkTrue("[GUI] Quality report can be computed if sections are selected", widget.ui.computeQualityReportButton.enabled)
         parameterNode.pcmraVolume = None
         widget.onComputePcmraButton()
         self.report.checkTrue("[GUI] PC-MRA volume is created and selected", parameterNode.pcmraVolume is not None)

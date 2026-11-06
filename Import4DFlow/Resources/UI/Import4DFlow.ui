@@ -581,35 +581,86 @@
      </property>
      <layout class="QVBoxLayout" name="qualityLayout">
       <item>
-       <layout class="QHBoxLayout" name="qualityButtonsLayout2">
-        <item>
-         <widget class="QPushButton" name="checkEncodingButton">
-          <property name="toolTip">
-           <string>Check that the velocity component directions and signs are consistent with mass conservation in the lumen (slicerheart_4dflow encoding check). The lumen is estimated from the PC-MRA if not specified.</string>
-          </property>
-          <property name="text">
-           <string>Check encoding directions</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="computeQualityReportButton">
-          <property name="toolTip">
-           <string>Compute quality report of the flow field (slicerheart_4dflow): venc adequacy, velocity noise, residual background offset, divergence. Results are also stored in a table.</string>
-          </property>
-          <property name="text">
-           <string>Compute quality report</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
+       <widget class="QCheckBox" name="qualityReportVelocityNoiseCheckBox">
+        <property name="toolTip">
+         <string>Velocity noise in static tissue and venc-to-noise ratio. Requires the magnitude image.</string>
+        </property>
+        <property name="text">
+         <string>Velocity noise</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>qualityReportVelocityNoise</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="qualityReportBackgroundOffsetCheckBox">
+        <property name="toolTip">
+         <string>Residual velocity in static tissue (acceptable below 0.6 cm/s). Requires the magnitude image.</string>
+        </property>
+        <property name="text">
+         <string>Background offset</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>qualityReportBackgroundOffset</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="qualityReportVencCheckBox">
+        <property name="toolTip">
+         <string>venc adequacy: peak velocity in the lumen compared to venc, and the lumen voxels that were aliased and unwrapped. The lumen is estimated from the flow field if not specified.</string>
+        </property>
+        <property name="text">
+         <string>venc adequacy (aliasing)</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>qualityReportVenc</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="qualityReportDivergenceCheckBox">
+        <property name="toolTip">
+         <string>Divergence of the velocity in the lumen (zero for an incompressible fluid). The lumen is estimated from the flow field if not specified.</string>
+        </property>
+        <property name="text">
+         <string>Divergence</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>qualityReportDivergence</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="qualityReportEncodingCheckBox">
+        <property name="toolTip">
+         <string>Check that the velocity component directions and signs are consistent with mass conservation in the lumen (slicerheart_4dflow encoding check). A warning is displayed if they are not. The lumen is estimated from the flow field if not specified.</string>
+        </property>
+        <property name="text">
+         <string>Encoding directions</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>qualityReportEncoding</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="computeQualityReportButton">
+        <property name="toolTip">
+         <string>Compute the selected sections of the quality report (slicerheart_4dflow), for the input and for the output flow field. Results are also stored in a table.</string>
+        </property>
+        <property name="text">
+         <string>Compute quality report</string>
+        </property>
+       </widget>
       </item>
       <item>
        <widget class="QTextBrowser" name="qualityReportTextBrowser">
         <property name="minimumSize">
          <size>
           <width>0</width>
-          <height>150</height>
+          <height>250</height>
          </size>
         </property>
        </widget>
