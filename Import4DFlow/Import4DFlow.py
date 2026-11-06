@@ -316,7 +316,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.lumenSegmentSelectorWidget.connect('currentSegmentChanged(QString)', self.updateParameterNodeFromGUI)
         self.ui.computeLumenButton.connect('clicked(bool)', self.onComputeLumenButton)
         self.ui.computePcmraButton.connect('clicked(bool)', self.onComputePcmraButton)
-        self.ui.deleteInputFlowFieldButton.connect('clicked(bool)', self.onDeleteInputFlowFieldButton)
+        self.ui.deleteRawInputButton.connect('clicked(bool)', self.onDeleteRawInputButton)
         self.ui.magnitudeVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onMagnitudeVolumeSelected)
         self.ui.computeQualityReportButton.connect('clicked(bool)', self.onComputeQualityReportButton)
 
@@ -556,7 +556,8 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         flowFieldNode = self._flowField()
         hasInput = inputFlowFieldNode is not None
         hasMagnitudeImage = flowFieldNode is not None and flowFieldNode.GetNodeReference("magnitudeVolume") is not None
-        self.ui.deleteInputFlowFieldButton.enabled = hasInput
+        # Only after an output flow field is computed (otherwise no flow field would remain)
+        self.ui.deleteRawInputButton.enabled = hasInput and self.logic.findOutputFlowFieldNode(inputFlowFieldNode) is not None
         # Magnitude image of the input flow field (stored in its magnitudeVolume reference)
         wasBlocked = self.ui.magnitudeVolumeSelector.blockSignals(True)
         self.ui.magnitudeVolumeSelector.setCurrentNode(inputFlowFieldNode.GetNodeReference("magnitudeVolume") if hasInput else None)
@@ -758,17 +759,31 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             finally:
                 self.updateGUIFromParameterNode()
 
-    def onDeleteInputFlowFieldButton(self) -> None:
+    def onDeleteRawInputButton(self) -> None:
+        """Delete the raw input data of the input flow field (see Import4DFlowLogic.deleteRawInput) after confirmation."""
         inputFlowFieldNode = self._parameterNode.inputFlowField
-        if not inputFlowFieldNode:
+        if not inputFlowFieldNode or not self.logic.findOutputFlowFieldNode(inputFlowFieldNode):
             return
+        proxyNodes = self.logic.rawInputProxyNodes(inputFlowFieldNode)
+        numberOfSegmentations = len([node for node in proxyNodes if node.IsA("vtkMRMLSegmentationNode")])
+        numberOfComponentVolumes = len(proxyNodes) - numberOfSegmentations - 1
+        deleted = ["input flow field (velocity as acquired)"]
+        if numberOfComponentVolumes:
+            deleted.append(f"{numberOfComponentVolumes} velocity component images")
+        if numberOfSegmentations:
+            deleted.append(f"{numberOfSegmentations} phase wrap segmentations")
+        message = (f"Delete the input flow field '{self.logic._getSequenceFromProxyNode(inputFlowFieldNode).GetName()}'?\n\n"
+                   "These sequences and their proxy nodes are deleted from the scene:\n"
+                   + "".join(f"  - {item}\n" for item in deleted)
+                   + "\nThe output flow field and the magnitude images are kept. After this, the output flow field cannot be"
+                   " recomputed, and its phase wraps cannot be reviewed or edited.")
+        # The user can choose not to be asked again
         if not slicer.app.testingEnabled() and not slicer.util.confirmOkCancelDisplay(
-                f"Delete the input flow field '{inputFlowFieldNode.GetName()}' (velocity as acquired)?"
-                " Output flow fields that were computed from it cannot be recomputed after this.", windowTitle="Delete input flow field"):
+                message, windowTitle="Delete input flow field", dontShowAgainSettingsKey="Import4DFlow/DontConfirmDeleteRawInput"):
             return
-        with slicer.util.tryWithErrorDisplay("Failed to delete input flow field.", waitCursor=True):
+        with slicer.util.tryWithErrorDisplay("Failed to delete the input flow field.", waitCursor=True):
             self._parameterNode.inputFlowField = None
-            self.logic.deleteFlowField(inputFlowFieldNode)
+            self.logic.deleteRawInput(inputFlowFieldNode)
 
     def onComputeLumenButton(self) -> None:
         """Compute the lumen segmentation into the selected segment (overwritten); a new segmentation or segment is created
@@ -1175,11 +1190,26 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             if synchronizedSequenceNodes.GetNumberOfItems() == 0:
                 slicer.mrmlScene.RemoveNode(browserNode)
 
-    def deleteFlowField(self, flowFieldNode):
-        """Remove a flow field: its sequence and proxy node, and the component volumes that were created from it for display."""
-        for component in range(3):
-            self._removeSequenceAndProxy(flowFieldNode.GetNodeReference(f"rawComponentVolume{component}"))
-        self._removeSequenceAndProxy(flowFieldNode)
+    def rawInputProxyNodes(self, inputFlowFieldNode):
+        """Proxy nodes of the raw input data, which is only needed for computing output flow fields: the phase wrap
+        segmentations of the output flow fields that are computed from the input flow field, the encoded velocity
+        component volumes of the input flow field, and the input flow field (velocity as acquired; the last in the list).
+        The magnitude images are not included, they are used with the output flow fields."""
+        proxyNodes = []
+        for nodeClassName in ["vtkMRMLTransformNode", "vtkMRMLVectorVolumeNode"]:
+            for node in slicer.util.getNodesByClass(nodeClassName):
+                if node.GetNodeReference("inputFlowField") is inputFlowFieldNode:
+                    proxyNodes += [node.GetNthNodeReference("phaseWrapSegmentation", component) for component in range(3)]
+        proxyNodes += [inputFlowFieldNode.GetNodeReference(f"rawComponentVolume{component}") for component in range(3)]
+        proxyNodes.append(inputFlowFieldNode)
+        return [node for node in proxyNodes if node is not None]
+
+    def deleteRawInput(self, inputFlowFieldNode):
+        """Remove the raw input data (sequences and proxy nodes, see rawInputProxyNodes) from the scene, which makes the
+        scene much smaller. The output flow fields are kept, but they cannot be recomputed and their phase wraps cannot be
+        reviewed or edited anymore."""
+        for proxyNode in self.rawInputProxyNodes(inputFlowFieldNode):
+            self._removeSequenceAndProxy(proxyNode)
 
     def _getComponentBackground(self, magnitudeVoxelArray, componentVoxelArray, noiseMagnitudeThreshold, backgroundSubtractionMethod, stationaryTissueMask):
         """Compute background phase offset of a component image by fitting a smooth function to the stationary tissue voxels.

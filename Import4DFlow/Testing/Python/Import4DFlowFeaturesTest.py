@@ -2181,6 +2181,72 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
             len(expectedSegmentIds) > 0 and segmentIds(segmentationNodes[component]) == expectedSegmentIds,
             segmentIds(segmentationNodes[component]), expectedSegmentIds)
 
+    @reportedTest("Delete input flow field and the data created from it for phase wrap editing",
+        "The raw input data (the input flow field, its velocity component images, and the phase wrap segmentations) is large"
+        " and it is only needed for computing the output flow field. The `Delete input flow field` button must be enabled only"
+        " when an output flow field is computed from the selected input flow field, and it must remove the sequences and"
+        " proxy nodes of the raw input data from the scene (after a confirmation, which is not shown in testing mode). The"
+        " output flow field must remain unchanged and browsable, with the magnitude images.")
+    def test_37_DeleteRawInput(self):
+        vencCmPerSec = 70.0  # phase wraps
+        phantom = FlowPhantom()
+        inputFlowFieldNode = phantom.createInputFlowFieldInScene(vencCmPerSec)
+        magnitudeVolumeNode = inputFlowFieldNode.GetNodeReference("magnitudeVolume")
+
+        slicer.util.selectModule("Import4DFlow")
+        widget = slicer.modules.import4dflow.widgetRepresentation().self()
+        widget.enter()
+        parameterNode = widget._parameterNode
+        parameterNode.inputFlowField = inputFlowFieldNode
+        parameterNode.outputFlowField = None
+        self.report.checkTrue("Button is disabled while there is no output flow field", not widget.ui.deleteRawInputButton.enabled)
+
+        flowFieldNode = self.createFlowField(inputFlowFieldNode, False, unwrap=True)
+        for component in range(3):
+            self.logic.getRawComponentVolume(flowFieldNode, component)
+        parameterNode.outputFlowField = flowFieldNode
+        self.report.checkTrue("Button is enabled when an output flow field is computed", widget.ui.deleteRawInputButton.enabled)
+
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        proxyNodes = self.logic.rawInputProxyNodes(inputFlowFieldNode)
+        self.report.checkEqual("Raw input data: 3 phase wrap segmentations, 3 velocity component images, and the input flow field",
+            [node.GetClassName() for node in proxyNodes],
+            ["vtkMRMLSegmentationNode"] * 3 + ["vtkMRMLScalarVolumeNode"] * 3 + ["vtkMRMLVectorVolumeNode"])
+        rawInputNodeIds = [node.GetID() for node in proxyNodes] + [browserNode.GetSequenceNode(node).GetID() for node in proxyNodes]
+        numberOfSequences = browserNode.GetNumberOfSynchronizedSequenceNodes(True)
+        expectedFrames = self.velocityFrames(flowFieldNode)
+        del proxyNodes
+
+        widget.onDeleteRawInputButton()
+        remainingNodeIds = [nodeId for nodeId in rawInputNodeIds if slicer.mrmlScene.GetNodeByID(nodeId)]
+        self.report.checkEqual("Sequences and proxy nodes of the raw input data that remain in the scene", remainingNodeIds, [])
+        self.report.checkEqual("Segmentation and volume nodes that remain in the scene (the magnitude image and the output flow field)",
+            [node.GetID() for className in ["vtkMRMLSegmentationNode", "vtkMRMLVolumeNode"] for node in slicer.util.getNodesByClass(className)],
+            [magnitudeVolumeNode.GetID(), flowFieldNode.GetID()])
+        self.report.checkEqual("Number of sequences in the sequence browser of the flow field (output flow field and magnitude images)",
+            (numberOfSequences, browserNode.GetNumberOfSynchronizedSequenceNodes(True)), (9, 2))
+        self.report.checkTrue("Input flow field is not selected in the module anymore", parameterNode.inputFlowField is None)
+        self.report.checkTrue("Output flow field is still selected in the module", parameterNode.outputFlowField is flowFieldNode)
+        self.report.checkTrue("Button is disabled after the raw input data is deleted", not widget.ui.deleteRawInputButton.enabled)
+        self.report.checkTrue("Output flow field has no phase wrap segmentations",
+            not any(flowFieldNode.GetNthNodeReference("phaseWrapSegmentation", c) for c in range(3)) and self.logic.getWrapCounts(flowFieldNode) is None)
+        self.checkVelocityFrames("Output flow field after deleting the raw input data", self.velocityFrames(flowFieldNode), expectedFrames, 0.0)
+        peakFrame = phantom.peakFrameIndex()
+        FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
+        self.report.checkClose("Output flow field is browsable: maximum difference of the shown frame from the peak frame",
+            float(np.abs(slicer.util.arrayFromVolume(flowFieldNode) / 1000.0 - expectedFrames[peakFrame]).max()), 0.0, atol=1e-6, unit="m/s")
+        with self.assertRaises(ValueError):
+            self.logic.computeOutputFlowField(flowFieldNode, 5.0, BackgroundSubtractionMethodEnum.NoSubtraction, 10.0)
+        self.report.checkTrue("Output flow field cannot be recomputed without the input flow field", True)
+
+        # Entering the module again selects the output flow field as input flow field (it is the only flow field): it must
+        # not be possible to delete it as raw input data
+        widget.enter()
+        self.report.checkTrue("Button is disabled when the module is entered again",
+            not widget.ui.deleteRawInputButton.enabled)
+        widget.onDeleteRawInputButton()
+        self.report.checkTrue("Output flow field is not deleted", slicer.mrmlScene.GetNodeByID(flowFieldNode.GetID()) is not None)
+
     def _realDataPluginTest(self, vendor):
         variable = FlowTestingUtils.REAL_DATA_VENDOR_ENV_VARIABLES[vendor]
         dataDir = FlowTestingUtils.environmentValue(variable)

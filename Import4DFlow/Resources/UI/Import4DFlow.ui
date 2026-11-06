@@ -66,16 +66,6 @@
           </property>
          </widget>
         </item>
-        <item>
-         <widget class="QPushButton" name="deleteInputFlowFieldButton">
-          <property name="toolTip">
-           <string>Delete the input flow field (its sequence and proxy node)</string>
-          </property>
-          <property name="text">
-           <string>Delete</string>
-          </property>
-         </widget>
-        </item>
        </layout>
       </item>
       <item row="1" column="0">
@@ -565,6 +555,16 @@
         </property>
         <property name="text">
          <string>Recompute flow field</string>
+        </property>
+       </widget>
+      </item>
+      <item row="10" column="0" colspan="2">
+       <widget class="QPushButton" name="deleteRawInputButton">
+        <property name="toolTip">
+         <string>Delete the raw input data, which is only needed for computing the output flow field: the input flow field (velocity as acquired), its velocity component images, and the phase wrap segmentations (their sequences and proxy nodes). This makes the scene much smaller. The output flow field and the magnitude images are kept. Available after the output flow field is computed.</string>
+        </property>
+        <property name="text">
+         <string>Delete input flow field</string>
         </property>
        </widget>
       </item>

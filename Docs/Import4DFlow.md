@@ -59,7 +59,8 @@ A vector volume sequence (for example a `.seq.nrrd` file) of the velocity as acq
 
 Corrections are set in the `Corrections` section and applied by `Recompute flow field`.
 
-- `Input flow field`: velocity as acquired. `Delete` removes the input flow field (its sequence and proxy node).
+- `Input flow field`: velocity as acquired. It can be deleted when the output flow field is final, see
+  [Delete input flow field](#delete-input-flow-field).
 - `Magnitude image`: magnitude images of the input flow field.
 - `Output flow field`: the corrected flow field. If none is selected (`Create new flow field`), a new one is created.
 - `Show`: show the flow vectors, the magnitude image, or one of the velocity components (labeled by their encoding
@@ -168,6 +169,21 @@ are read as mm/s. The NRRD files only contain the flow field, they do not contai
 If a flow field exported as a stack of NRRD files from a flow field stored in grid transforms is read back into Slicer as
 a transform, invert the transform after reading it, to make sure the transform is used as "transform to parent"
 (not "transform from parent", as it is assumed when reading a displacement field from file).
+
+### Delete input flow field
+
+The raw input data is large, and it is only needed for computing the output flow field. When the output flow field is
+final, `Delete input flow field` (at the bottom of the `Corrections` section, enabled when an output flow field has been
+computed from the selected input flow field) removes it from the scene, which makes the scene much smaller:
+
+- the input flow field (velocity as acquired),
+- its velocity component images,
+- the phase wrap segmentations of the output flow fields computed from it.
+
+Their sequences and proxy nodes are deleted, after a confirmation that lists them (it is not shown again if
+`Don't show this message again` is checked). The output flow field and the magnitude images are kept. After this, the
+output flow field cannot be recomputed, its phase wraps cannot be reviewed or edited, and the quality report and the test
+case export, which use the velocity as acquired, are not available for it.
 
 ### Adjust flow field visualization settings
 
