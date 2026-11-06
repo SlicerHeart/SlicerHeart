@@ -2927,7 +2927,8 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         planeNode.SetSize(2 * plane["radius"], 2 * plane["radius"])
         return planeNode
 
-    def writeTestCaseFlows(self, datasetDirectory, caseId, flowFieldNode, planeNodes=None, samplingDistanceMm=0.5, overwritePlanes=False):
+    def writeTestCaseFlows(self, datasetDirectory, caseId, flowFieldNode, planeNodes=None, samplingDistanceMm=0.5, overwritePlanes=False,
+                           progressCallback=None):
         """Write measurement planes and plane flows of a test case written by Import4DFlowLogic.exportTestCase.
 
         Planes (inputs of the case): the specified plane nodes, otherwise the existing planes of the case (which may have been
@@ -2939,7 +2940,10 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
         plane the per-frame flow rate (ml/s) and the net, forward, backward volume and peak velocity, and conservation checks
         for plane pairs (_a and _b planes, and the conservation checks of annotations.json: planes.conservation_checks);
         quality_report.json the quality report of the flow field.
+        progressCallback(message, fraction) is called when a processing step starts (fraction: progress in [0, 1]).
         """
+        if progressCallback is None:
+            progressCallback = lambda message, fraction: None
         import Import4DFlow
         importLogic = Import4DFlow.Import4DFlowLogic()
         library = FlowLibraryBridge.ensureLibrary()
@@ -2968,6 +2972,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
                     planesDescription = importLogic.testCaseAnnotationDescription("manual", software)
                 else:
                     parameters = {"numberOfSites": 3, "pairDistanceMm": 4.0, "minimumSiteDistanceMm": 30.0, "maximumCandidates": 3000}
+                    progressCallback("Placing measurement planes...", 0.0)
                     planes = self.findMeasurementPlanes(velocity, voxelToWorld, lumenMask, **parameters)
                     planesDescription = importLogic.testCaseAnnotationDescription("automatic", software, {
                         "name": "Analyze4DFlowLogic.findMeasurementPlanes",
@@ -3016,8 +3021,9 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
 
             rrMs = acquisition.get("rr_ms") or self.cycleDurationMs(flowFieldNode)
             referencePlanes = {}
-            for plane in planes:
+            for planeIndex, plane in enumerate(planes):
                 self.log(f"Computing flow through {plane['name']}...")
+                progressCallback(f"Computing flow through {plane['name']}...", 0.05 + 0.9 * planeIndex / len(planes))
                 if voxelPositions is None:
                     k, j, i = np.indices(segmentationMask.shape)
                     voxelPositions = (np.stack([i, j, k, np.ones(segmentationMask.shape)], axis=-1) @ np.asarray(segmentationVoxelToWorld).T)[..., :3]
@@ -3075,6 +3081,7 @@ class Analyze4DFlowLogic(ScriptedLoadableModuleLogic):
             importLogic.writeTestCaseJson(datasetDirectory, caseId, "flows", flows)
 
             # Quality report of the corrected flow field
+            progressCallback("Computing the quality report...", 0.95)
             report = importLogic.computeQualityReport(flowFieldNode, lumenMask, studyId=caseId)
             qualityReportPath = importLogic.testCasePath(datasetDirectory, caseId, "quality_report")
             os.makedirs(os.path.dirname(qualityReportPath), exist_ok=True)
