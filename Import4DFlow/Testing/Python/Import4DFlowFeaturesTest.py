@@ -592,6 +592,12 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         peakFrame = phantom.peakFrameIndex()
         FlowTestingUtils.selectSequenceItem(flowFieldNode, peakFrame)
         componentVolumeNode = self.logic.getRawComponentVolume(flowFieldNode, 2)
+        # Named after the sequence of the input flow field, not after its node that has the time of the shown frame in its name
+        inputSequenceName = self.logic._getSequenceFromProxyNode(inputFlowFieldNode).GetName()
+        componentSequenceName = self.logic._getSequenceFromProxyNode(componentVolumeNode).GetName()
+        self.report.checkTrue("Input flow field node name has the time of the shown frame", "[time=" in inputFlowFieldNode.GetName(), inputFlowFieldNode.GetName())
+        self.report.checkTrue("Velocity component image is named after the input flow field sequence",
+            componentSequenceName.startswith(f"{inputSequenceName} C3 "), componentSequenceName)
         FlowTestingUtils.showVolumeInSliceViews(componentVolumeNode, phantom.centerRas)
         for c, segmentationNode in enumerate(segmentationNodes):
             if segmentationNode and segmentationNode.GetDisplayNode():
@@ -1855,6 +1861,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parameterNode.lumenSegmentID = ""
         widget.onComputeLumenButton()
         self.report.checkTrue("[GUI] Lumen segmentation is created and selected", parameterNode.lumenSegmentation is not None and parameterNode.lumenSegmentID)
+        lumenSegmentationName = parameterNode.lumenSegmentation.GetName()
         segmentationNode, segmentId = phantom.createVesselSegmentation(inputFlowFieldNode.GetNodeReference("magnitudeVolume"))
         parameterNode.lumenSegmentation = segmentationNode
         parameterNode.lumenSegmentID = segmentId
@@ -1870,6 +1877,19 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         reportText = widget.ui.qualityReportTextBrowser.toPlainText()
         self.report.checkTrue("[GUI] Quality report with all sections is shown", all(title in reportText for title in sectionTitles.values()))
         self.report.checkTrue("[GUI] Quality report has input and output values", "input" in reportText and "output" in reportText)
+        # The report is of all frames, so it is named after the sequence, not after the flow field node that has the
+        # time of the shown frame in its name; showing another frame updates the same table. Same for the lumen
+        # segmentation and the PC-MRA volume.
+        sequenceName = self.logic._getSequenceFromProxyNode(flowFieldNode).GetName()
+        browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(flowFieldNode)
+        self.report.checkTrue("[GUI] Flow field node name has the time of the shown frame", "[time=" in flowFieldNode.GetName(), flowFieldNode.GetName())
+        self.report.checkEqual("[GUI] Lumen segmentation name has no frame time", lumenSegmentationName, f"{sequenceName} lumen")
+        self.report.checkTrue("[GUI] Quality report title has no frame time", sequenceName in reportText and "[time=" not in reportText,
+                              reportText.splitlines()[0])
+        browserNode.SetSelectedItemNumber(browserNode.GetSelectedItemNumber() + 1)
+        widget.onComputeQualityReportButton()
+        reportTableNames = [tableNode.GetName() for tableNode in slicer.util.getNodesByClass("vtkMRMLTableNode") if "quality report" in tableNode.GetName()]
+        self.report.checkEqual("[GUI] Quality report of any frame is in one table", reportTableNames, [f"{sequenceName} quality report"])
         for parameterName in sectionTitles:
             setattr(parameterNode, parameterName, parameterName == "qualityReportEncoding")
         widget.onComputeQualityReportButton()
@@ -1886,6 +1906,7 @@ class Import4DFlowFeaturesTest(FlowTestingUtils.FeatureTestCase):
         parameterNode.pcmraVolume = None
         widget.onComputePcmraButton()
         self.report.checkTrue("[GUI] PC-MRA volume is created and selected", parameterNode.pcmraVolume is not None)
+        self.report.checkEqual("[GUI] PC-MRA volume name has no frame time", parameterNode.pcmraVolume.GetName(), f"{sequenceName} PC-MRA")
         self.report.screenshot("Import 4D Flow module GUI with slicerheart_4dflow methods", kind="window")
 
         datasetDirectory, caseId = self.temporaryDirectory("GuiTestCase"), "Phantom0002"

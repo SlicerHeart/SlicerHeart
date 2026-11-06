@@ -811,7 +811,7 @@ class Import4DFlowWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             if isInputFlowField:
                 markdown += "\nThere is no output flow field: the input and output values are both of the input flow field.\n"
             self.ui.qualityReportTextBrowser.setMarkdown(markdown)
-            tableName = f"{flowFieldNode.GetName()} quality report"
+            tableName = f"{self.logic.flowFieldName(flowFieldNode)} quality report"
             tableNode = slicer.mrmlScene.GetFirstNodeByName(tableName)
             if not tableNode:
                 tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", tableName)
@@ -1049,6 +1049,13 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
     def _getSequenceAttribute(self, proxyNode, attributeName):
         sequenceNode = self._getSequenceFromProxyNode(proxyNode)
         return sequenceNode.GetAttribute(attributeName)
+
+    @staticmethod
+    def flowFieldName(flowFieldNode):
+        """Name of a flow field for naming what is created from it: the name of its sequence. The name of the flow field
+        node has the time of the shown frame in it, which would suggest that what is created from all frames (quality
+        report, PC-MRA, lumen segmentation, velocity component images) is of that frame."""
+        return FlowLibraryBridge.sequenceFromProxyNode(flowFieldNode).GetName()
 
     # Unit of the velocity values of the flow fields created by this module (vector volumes, declared in their voxel value
     # units). Flow fields in other units (m/s, cm/s) can be read, see FlowLibraryBridge.velocityUnitScaleToMmPerSec.
@@ -1874,7 +1881,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
         geometryVolumeNode = self._flowFieldGeometryVolume(inputFlowFieldNode)
         inputSequenceNode = self._getSequenceFromProxyNode(inputFlowFieldNode)
         browserNode = slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(inputFlowFieldNode)
-        name = f"{inputFlowFieldNode.GetName()} C{component + 1} {FlowLibraryBridge.directionCodes(inputFlowFieldNode)[component]}"
+        name = f"{inputSequenceNode.GetName()} C{component + 1} {FlowLibraryBridge.directionCodes(inputFlowFieldNode)[component]}"
         componentVolumeNode = FlowLibraryBridge.createScalarVolumeSequenceInBrowser(
             name, rawEncodedVelocity[..., component], FlowLibraryBridge.voxelToWorld(geometryVolumeNode),
             FlowLibraryBridge.sequenceIndexValues(inputSequenceNode), browserNode=browserNode)
@@ -2334,7 +2341,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             pcmra = self.computePcmra(flowFieldNode)
         self._progress("Creating the PC-MRA volume...", 0.95)
         if outputVolumeNode is None:
-            outputVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", slicer.mrmlScene.GenerateUniqueName(f"{flowFieldNode.GetName()} PC-MRA"))
+            outputVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", slicer.mrmlScene.GenerateUniqueName(f"{self.flowFieldName(flowFieldNode)} PC-MRA"))
             shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
             shNode.SetItemParent(shNode.GetItemByDataNode(outputVolumeNode), shNode.GetItemParent(shNode.GetItemByDataNode(flowFieldNode)))
         slicer.util.updateVolumeFromArray(outputVolumeNode, pcmra)
@@ -2391,7 +2398,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             lumen = self.estimateLumenFromFlowField(flowFieldNode)
         self._progress("Creating the lumen segment...", 0.95)
         if segmentationNode is None:
-            segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", slicer.mrmlScene.GenerateUniqueName(f"{flowFieldNode.GetName()} lumen"))
+            segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", slicer.mrmlScene.GenerateUniqueName(f"{self.flowFieldName(flowFieldNode)} lumen"))
             segmentationNode.CreateDefaultDisplayNodes()
             self._placeInSameFolder(segmentationNode, flowFieldNode)
         if not segmentId:
@@ -2476,7 +2483,7 @@ class Import4DFlowLogic(ScriptedLoadableModuleLogic):
             heartRateBpm = self.heartRateBpm(flowFieldNode)
             self._progress("Computing the quality report...", 0.3)
             return library.quality_report(rawVelocity, velocity, magnitude, vencs, voxelToWorld, lumen_mask=lumenMask,
-                                          wrap_count=wrapCounts, study_id=studyId or flowFieldNode.GetName(),
+                                          wrap_count=wrapCounts, study_id=studyId or self.flowFieldName(flowFieldNode),
                                           rr_ms=60000.0 / heartRateBpm if heartRateBpm else None, sections=sections)
 
     @staticmethod

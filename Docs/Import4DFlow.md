@@ -74,6 +74,8 @@ Corrections are set in the `Corrections` section and applied by `Recompute flow 
   segment on a grid finer than the image is used with partial voxels at its boundary.
 - `PC-MRA`: velocity-weighted phase-contrast MR angiogram (Bock 2010). `Compute` overwrites the selected volume, or creates
   a new one.
+- The lumen and the PC-MRA are computed from all time frames, whichever frame is shown: a new segmentation or volume is
+  named after the flow field sequence, without the time of the shown frame.
 - `Noise mask`: voxels in the mask are set to zero velocity.
   - `magnitude threshold`: magnitude below `Noise magnitude threshold`.
   - `magnitude and velocity noise (slicerheart_4dflow)`: low time-averaged magnitude (Otsu threshold) or random phase
@@ -130,6 +132,8 @@ The `Quality` section uses slicerheart_4dflow:
 - `Compute quality report`: computes the sections of the quality report that are checked, stores the results in a table
   and shows them in the text box. Each value is given for the input flow field (velocity as acquired) and for the output
   flow field (velocity after the corrections); if there is no output flow field then both are of the input flow field.
+  The report is computed from all time frames, whichever frame is shown: the report and its table are named after the
+  flow field sequence, without the time of the shown frame.
   - `Velocity noise`: velocity noise in static tissue and venc-to-noise ratio
   - `Background offset`: residual background offset in static tissue (acceptable below 0.6 cm/s)
   - `venc adequacy (aliasing)`: peak velocity in the lumen compared to venc, and the lumen voxels that were aliased in the
