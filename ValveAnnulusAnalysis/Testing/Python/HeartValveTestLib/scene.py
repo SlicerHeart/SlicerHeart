@@ -147,10 +147,54 @@ def sphereSource(center, radius=3.0):
 
 
 def addSphereSegment(segmentationNode, segmentId, name, center, radius=3.0, color=(1.0, 0.0, 0.0)):
+  """Add a sphere segment with the given ID, or paint the sphere into the existing segment of that ID.
+
+  HeartValveLib pre-creates empty leaflet segments for a new time point and the user paints into
+  them, so an existing segment is painted the way a Segment Editor effect does it: with a labelmap in
+  the segmentation's reference geometry. The segment is not removed and added again: Slicer's
+  vtkSegmentation.AddSegment does not reject an existing ID (the ID is then listed twice and the 3D
+  segmentations displayable manager leaks one display pipeline per duplicated ID), and adding a
+  segment from a closed surface next to a valve mask segment left the mask resampled to the coarser
+  geometry of the reference volume."""
+  import vtkSegmentationCorePython as vtkSegmentationCore
   segmentation = segmentationNode.GetSegmentation()
-  segmentationNode.AddSegmentFromClosedSurfaceRepresentation(sphereSource(center, radius), name, color, segmentId)
   segment = segmentation.GetSegment(segmentId)
-  return segment
+  referenceGeometry = segmentation.GetConversionParameter(
+    vtkSegmentationCore.vtkSegmentationConverter.GetReferenceImageGeometryParameterName())
+  if segment and referenceGeometry:
+    segment.SetName(name)
+    segment.SetColor(*color)
+    slicer.vtkSlicerSegmentationsModuleLogic.SetBinaryLabelmapToSegment(
+      sphereLabelmap(center, radius, referenceGeometry), segmentationNode, segmentId)
+    return segment
+  if segment:
+    segmentation.RemoveSegment(segmentId)
+  segmentationNode.AddSegmentFromClosedSurfaceRepresentation(sphereSource(center, radius), name, color, segmentId)
+  return segmentation.GetSegment(segmentId)
+
+
+def sphereLabelmap(center, radius, referenceGeometry):
+  """Binary labelmap (vtkOrientedImageData) of a sphere, in a serialized image geometry."""
+  import numpy as np
+  import vtk
+  import vtkSegmentationCorePython as vtkSegmentationCore
+  from vtk.util import numpy_support
+  labelmap = slicer.vtkOrientedImageData()
+  vtkSegmentationCore.vtkSegmentationConverter.DeserializeImageGeometry(
+    referenceGeometry, labelmap, True, vtk.VTK_UNSIGNED_CHAR, 1)
+  ijkToWorld = vtk.vtkMatrix4x4()
+  labelmap.GetImageToWorldMatrix(ijkToWorld)
+  matrix = np.array([[ijkToWorld.GetElement(row, col) for col in range(4)] for row in range(4)])
+  extent = labelmap.GetExtent()
+  k, j, i = np.meshgrid(np.arange(extent[4], extent[5] + 1), np.arange(extent[2], extent[3] + 1),
+                        np.arange(extent[0], extent[1] + 1), indexing="ij")
+  ijk1 = np.stack([i.ravel(), j.ravel(), k.ravel(), np.ones(i.size)])
+  world = (matrix @ ijk1)[:3].T
+  inside = (np.linalg.norm(world - np.array(center, dtype=float), axis=1) < radius).astype(np.uint8)
+  scalars = numpy_support.vtk_to_numpy(labelmap.GetPointData().GetScalars())
+  scalars[:] = inside
+  labelmap.GetPointData().GetScalars().Modified()
+  return labelmap
 
 
 # -------------------------------------------------------------------------------------------------

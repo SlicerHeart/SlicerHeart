@@ -314,13 +314,9 @@ class HeartValveWorkflowTestTest(SlicerHeartTestCase):
 
   @staticmethod
   def _voxelCounts(segmentationNode):
-    """Voxel count per leaflet segment. The valve mask segment is derived from the ROI and
-    regenerated when the segmentation is set up again (e.g. after loading), so it is left out."""
-    import HeartValveLib
+    """Voxel count per segment, the valve mask segment included."""
     counts = {}
     for segmentId in segmentationNode.GetSegmentation().GetSegmentIDs():
-      if segmentId == HeartValveLib.VALVE_MASK_SEGMENT_ID:
-        continue
       labelmap = slicer.vtkOrientedImageData()
       if segmentationNode.GetBinaryLabelmapRepresentation(segmentId, labelmap) and labelmap.GetNumberOfPoints():
         from vtk.util import numpy_support
