@@ -616,8 +616,11 @@ class ValveQuantificationWidget(ScriptedLoadableModuleWidget):
     if heartValveMeasurementNode:
       heartValveMeasurementNode.SetNodeReferenceID('Valve'+inputValveIds[inputValveIndex], valveNode.GetID() if valveNode else None)
 
-    # Set and observe new labels markup node
-    labelsMarkupNode = valveModel.getAnnulusLabelsMarkupNode() if valveModel else None
+    # Set and observe new labels markup node.
+    # Observe the proxy node that is shared between all time points, not the labels of the displayed
+    # time point: those are None while the time point has no labels yet, and then the reference point
+    # sliders would never be updated (not when labels get added, not when the time point changes).
+    labelsMarkupNode = valveModel.valveLabelsProxyNode if valveModel else None
     self.annulusLabelsMarkupNodes[inputValveIndex] = labelsMarkupNode
     if labelsMarkupNode:
       self.annulusLabelsMarkupNodeObservers[inputValveIndex].append(
