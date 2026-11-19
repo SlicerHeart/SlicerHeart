@@ -1,0 +1,4 @@
+# Detailed tests of the module and its library (ImportExportSimulationModelLib)
+slicer_add_python_unittest(SCRIPT ImportExportSimulationModelConversionTest.py)
+slicer_add_python_unittest(SCRIPT ImportExportSimulationModelMeshReductionTest.py)
+slicer_add_python_unittest(SCRIPT ImportExportSimulationModelImportExportTest.py)
