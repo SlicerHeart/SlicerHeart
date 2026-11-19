@@ -139,6 +139,28 @@ than one of them is listed once, with the value range covering all of them. Arra
 that has no stored unit information (for example, a model that was not imported with this
 module) get their unit guessed from the array name.
 
+## Cancelling an import or export
+
+A progress bar is shown in the *Status* section while files are imported or exported, above the log
+of the steps that are performed. The rest of the application cannot be used in the meantime.
+Clicking *Cancel* next to the progress bar stops the operation, also in the middle of a file:
+
+- Files are read before they are added to the input file list (with the *Add* button or by drag
+  and drop), to list their data arrays. The progress bar is shown if this takes longer than half a
+  second. Each file appears in the list when it has been read. If reading is cancelled or it fails
+  then the files that have not been read by then are not added.
+
+- The file that was being imported is not loaded, and the file that was being written is deleted.
+  Files that had been completed before are kept: models that are already imported remain in the
+  scene and files that are already written remain in the output folder.
+- Reading of VTK XML files (`.vtu`, `.vtp`, `.vti`) and the transfer of data arrays to a decimated
+  or resampled mesh stop within a moment.
+- A VTKHDF time point is read in 10 parts, and it can be cancelled between them.
+- Some steps cannot be interrupted, so cancelling takes effect when they finish: a decimation pass
+  (the passes are listed in the log), merging the duplicate points of a volumetric mesh, finding
+  the grid cells of a resampled mesh, and writing a file. The button shows *Cancelling...* in the
+  meantime.
+
 ## Conversion
 
 **Coordinate system.** RAS and LPS differ by a 180-degree rotation about the third axis, which

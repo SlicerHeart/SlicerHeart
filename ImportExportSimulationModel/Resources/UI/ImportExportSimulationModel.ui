@@ -54,6 +54,12 @@
            <layout class="QVBoxLayout" name="inputFilesButtonsLayout">
             <item>
              <widget class="QToolButton" name="addFilesButton">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
               <property name="toolTip">
                <string>Add mesh files to the list.</string>
               </property>
@@ -64,6 +70,12 @@
             </item>
             <item>
              <widget class="QToolButton" name="removeFilesButton">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
               <property name="toolTip">
                <string>Remove the selected files from the list. If no file is selected then all files are removed.</string>
               </property>
@@ -555,6 +567,30 @@
       <string>Status</string>
      </property>
      <layout class="QVBoxLayout" name="statusLayout">
+      <item>
+       <layout class="QHBoxLayout" name="progressLayout">
+        <item>
+         <widget class="QProgressBar" name="progressBar">
+          <property name="toolTip">
+           <string>Progress of the current step of the import or export.</string>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="cancelButton">
+          <property name="toolTip">
+           <string>Stop the import or export. The file that is being processed is abandoned, the files that have been completed are kept.</string>
+          </property>
+          <property name="text">
+           <string>Cancel</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
       <item>
        <widget class="QPlainTextEdit" name="statusTextEdit">
         <property name="readOnly">

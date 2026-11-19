@@ -527,6 +527,12 @@ without reading all of its data, so that adding the file takes seconds. The rang
 coordinates remains exact, but the ranges of data arrays are computed from a sample of the file,
 they are marked with ~ and can be much narrower than the true ranges. This does not affect the import.
 
+<b>Cancelling:</b> a progress bar is shown in the Status section during import and export, with a
+Cancel button. The file that is being processed is abandoned and the files that have been completed
+are kept. Some steps cannot be interrupted (a decimation pass, for example), they are finished first.
+A file is added to the input file list when it has been read. Reading can be cancelled the same
+way, the files that have not been read by then are not added.
+
 <b>Supported file formats:</b> .vtu, .vtp, .vtk, .vtkhdf, .vtkhdf5, .vti, .stl, .ply, and .obj can
 be read. A .vtkhdf or .vtkhdf5 file with several time points is loaded as a sequence of models with
 a sequence browser, each time point converted the same way. A .vti file is loaded as a volume, with
@@ -564,6 +570,10 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         self._updatingGui = False
         self._updatingSections = False
         self._dropEventFilter = None
+        # True while importing or exporting
+        self._operationInProgress = False
+        # The log of the previous operation is cleared when the current operation logs its first message
+        self._clearLogBeforeNextMessage = False
 
     def setup(self) -> None:
         ScriptedLoadableModuleWidget.setup(self)
@@ -590,8 +600,11 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
 
         # Files can be dropped on the file list. Virtual method overrides of Qt classes are not
         # available in Python, therefore drag and drop is implemented in an event filter.
+        # The files are read after the drop is completed, so that the application that the files
+        # were dragged from does not have to wait for it.
         self._dropEventFilter = _FileDropEventFilter(
-            ImportExportSimulationModelLogic.READ_FILE_EXTENSIONS, self.addInputFiles)
+            ImportExportSimulationModelLogic.READ_FILE_EXTENSIONS,
+            lambda filePaths: qt.QTimer.singleShot(0, lambda: self.addInputFiles(filePaths)))
         self.ui.inputFilesListWidget.installEventFilter(self._dropEventFilter)
 
         # Several models can be selected for export. Selecting a folder exports everything in it.
@@ -623,6 +636,8 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         self.ui.resampleSpacingSpinBox.connect("valueChanged(double)", self._onImportOptionChanged)
         self.ui.approximateRangesCheckBox.connect("toggled(bool)", self._onApproximateRangesToggled)
         self.ui.importButton.connect("clicked(bool)", self.onImportButton)
+        self.ui.cancelButton.connect("clicked(bool)", self.onCancelButton)
+        self._setProgressVisible(False)
 
         self.ui.exportModelTreeView.connect("currentItemsChanged(QList<vtkIdType>)",
                                             self._onExportModelChanged)
@@ -839,7 +854,12 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
     # ------------------------------------------------------------------ input file list
 
     def addInputFiles(self, filePaths) -> None:
-        """Add files to the input file list, skipping files that are already in the list."""
+        """Add files to the input file list, skipping files that are already in the list.
+
+        Each file is added to the list when it has been read, so that the list never contains
+        a file that is not taken into account in the arrays table. If reading of a file fails or
+        the user cancels it, then that file and the files after it are not added.
+        """
         existingFilePaths = self.inputFilePaths
         addedFilePaths = []
         for filePath in filePaths:
@@ -847,12 +867,21 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
             if filePath in existingFilePaths or filePath in addedFilePaths:
                 continue
             addedFilePaths.append(filePath)
+        if not addedFilePaths:
+            return
+
+        def onFileCompleted(filePath, arrayInfos) -> None:
+            if filePath not in addedFilePaths:
+                return
             item = qt.QListWidgetItem(os.path.basename(filePath))
             item.setData(qt.Qt.UserRole, filePath)
             item.setToolTip(filePath)
             self.ui.inputFilesListWidget.addItem(item)
-        if addedFilePaths:
-            self._updateImportTable()
+            # The files that were already in the list are processed before the added ones,
+            # so this is the array information of the files that are in the list now.
+            self._updateImportTable(arrayInfos)
+
+        self._readArrayInfos(existingFilePaths + addedFilePaths, onFileCompleted)
 
     def onAddFilesButton(self) -> None:
         lastDirectory = slicer.util.settingsValue(self.SETTINGS_PREFIX + "lastInputDirectory", "")
@@ -888,7 +917,14 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         if self._updatingGui:
             return
         self._saveSettings()
-        self._updateImportTable()
+        if self._updateImportTable():
+            # Cancelled: the option is restored, the files have already been read with that.
+            wasUpdatingGui = self._updatingGui
+            self._updatingGui = True
+            self.ui.approximateRangesCheckBox.checked = not self.ui.approximateRangesCheckBox.checked
+            self._updatingGui = wasUpdatingGui
+            self._saveSettings()
+            self._updateImportTable()
 
     def _onDecimateToggled(self, *unused) -> None:
         self._updateDecimationWidgets()
@@ -926,15 +962,43 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         # therefore the input files do not have to be read again.
         self._updateImportUnitColumns()
 
-    def _updateImportTable(self) -> None:
-        """Read the input files and show their coordinates and data arrays in the table."""
+    def _readArrayInfos(self, filePaths, fileCompletedCallback=None):
+        """Read the coordinates and data arrays of files, showing the progress if it takes long.
+
+        :param fileCompletedCallback: called when a file has been processed, with the file path
+            and the array information of the files that have been processed by then.
+        :return: list of array information (None if reading failed or it was cancelled), and
+            True if the user cancelled reading.
+        """
+        if not filePaths:
+            return [], False
+        result = {"arrayInfos": None}
+
+        def readArrayInfos() -> None:
+            result["arrayInfos"] = self.logic.getArrayInfosFromFiles(
+                filePaths,
+                APPROXIMATE_RANGE_CELL_COUNT_THRESHOLD if self.ui.approximateRangesCheckBox.checked else None,
+                fileCompletedCallback)
+
+        # Files that have been read before are not read again: the progress is not shown then,
+        # and the log of the previous operation is kept.
+        wasCancelled = self._runWithProgress(
+            readArrayInfos, _("Failed to read input files."), _("Reading of the input files was cancelled."),
+            clearLog=False, progressDisplayDelay=self.PROGRESS_DISPLAY_DELAY)
+        return result["arrayInfos"], wasCancelled
+
+    def _updateImportTable(self, arrayInfos=None) -> bool:
+        """Show the coordinates and data arrays of the input files in the table.
+
+        :param arrayInfos: array information of the input files, if they have been read already.
+            By default the files are read.
+        :return: True if the user cancelled reading of the files. The table is empty then.
+        """
         filePaths = self.inputFilePaths
-        self._importArrayInfos = []
-        if filePaths:
-            with slicer.util.tryWithErrorDisplay(_("Failed to read input files."), waitCursor=True):
-                self._importArrayInfos = self.logic.getArrayInfosFromFiles(
-                    filePaths,
-                    APPROXIMATE_RANGE_CELL_COUNT_THRESHOLD if self.ui.approximateRangesCheckBox.checked else None)
+        wasCancelled = False
+        if arrayInfos is None:
+            arrayInfos, wasCancelled = self._readArrayInfos(filePaths)
+        self._importArrayInfos = arrayInfos or []
 
         tableWidget = self.ui.importTableWidget
         tableWidget.clearContents()
@@ -956,6 +1020,7 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
             self._updateImportScaleCell(row)
 
         self.ui.importButton.enabled = bool(filePaths) and bool(self._importArrayInfos)
+        return wasCancelled
 
     def _updateImportUnitColumns(self) -> None:
         """Update the unit and scale columns after the input unit system changed."""
@@ -1016,30 +1081,111 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         rangeItem.setToolTip(rangeTooltip)
         tableWidget.setItem(row, ImportExportSimulationModelWidget.RANGE_COLUMN, rangeItem)
 
-    def onImportButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay(_("Failed to import simulation model."), waitCursor=True):
+    def _setProgressVisible(self, visible) -> None:
+        """Show or hide the progress bar and the cancel button of the Status section."""
+        self.ui.progressBar.visible = visible
+        self.ui.cancelButton.visible = visible
+
+    # Reading of input files is often immediate, its progress is shown only if it takes longer than this (seconds).
+    PROGRESS_DISPLAY_DELAY = 0.5
+
+    def _showProgress(self) -> None:
+        """Show the progress bar and the Cancel button, also if their section is collapsed or scrolled out."""
+        self._setProgressVisible(True)
+        self.ui.statusCollapsibleButton.collapsed = False
+        slicer.app.processEvents()
+        scrollArea = self.ui.cancelButton.parent()
+        while scrollArea is not None and not scrollArea.inherits("QScrollArea"):
+            scrollArea = scrollArea.parent()
+        if scrollArea is not None:
+            scrollArea.ensureWidgetVisible(self.ui.cancelButton)
+
+    def _runWithProgress(self, operation, errorMessage, cancelledMessage, clearLog=True,
+                         progressDisplayDelay=0.0) -> bool:
+        """Run an operation, showing its progress in the Status section, where it can be cancelled.
+
+        The application processes its events while the operation is running, so that the progress
+        bar is updated and the Cancel button can be clicked. All other user input is discarded in
+        the meantime, therefore the user cannot change the scene or the settings of the module.
+
+        :param clearLog: if False then the log of the previous operation is kept until the
+            operation logs a message, so it is kept if the operation has nothing to do.
+        :param progressDisplayDelay: the progress bar and the Cancel button are shown only if the
+            operation takes longer than this (seconds).
+        :return: True if the user cancelled the operation.
+        """
+        if clearLog:
             self.clearLog()
-            quantities = {arrayInfo.key: arrayInfo.simulationUnit.quantity
-                          for arrayInfo in self._importArrayInfos}
-            importedNodes = self.logic.importFiles(
-                self.inputFilePaths, self.inputCoordinateSystem, self.inputUnitSystem, quantities,
-                self.ui.mergeDuplicatePointsCheckBox.checked,
-                self.ui.decimationThresholdSpinBox.value if self.ui.decimateCheckBox.checked else None,
-                self.ui.decimationTargetReductionSpinBox.value / 100.0,
-                self.ui.decimationBoundaryWeightSpinBox.value,
-                self.ui.keepEveryNthTimePointSpinBox.value,
-                self.ui.firstTimePointIndexSpinBox.value,
-                self.ui.resampleSpacingSpinBox.value if self.ui.resampleCheckBox.checked else None)
-            # Only models can be exported, volumes that were imported from images cannot.
-            modelNodes = [node for node in importedNodes if node.IsA("vtkMRMLModelNode")]
-            if modelNodes:
-                # Preselect the imported models for export.
-                itemIds = vtk.vtkIdList()
-                subjectHierarchyNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-                if subjectHierarchyNode is not None:
-                    for modelNode in modelNodes:
-                        itemIds.InsertNextId(subjectHierarchyNode.GetItemByDataNode(modelNode))
-                    self.ui.exportModelTreeView.setCurrentItems(itemIds)
+        self._clearLogBeforeNextMessage = not clearLog
+        self.ui.progressBar.value = 0
+        self.ui.cancelButton.text = _("Cancel")
+        self.ui.cancelButton.enabled = True
+        startTime = time.time()
+        if progressDisplayDelay <= 0.0:
+            self._showProgress()
+
+        def onProgress(progress) -> None:
+            if not self.ui.cancelButton.visible and time.time() - startTime >= progressDisplayDelay:
+                self._showProgress()
+            if progress is not None:
+                self.ui.progressBar.value = int(progress * self.ui.progressBar.maximum)
+            slicer.app.processEvents()
+
+        wasCancelled = False
+        self._operationInProgress = True
+        self.logic.monitor.progressCallback = onProgress
+        try:
+            with slicer.util.tryWithErrorDisplay(errorMessage):
+                # The log can be scrolled during the operation. The error popup is shown after
+                # the user input is enabled again.
+                userInputBlocker = _UserInputBlocker([self.ui.cancelButton, self.ui.statusTextEdit])
+                slicer.app.installEventFilter(userInputBlocker)
+                try:
+                    operation()
+                except OperationCancelledError:
+                    wasCancelled = True
+                    self.addLog(cancelledMessage)
+                finally:
+                    slicer.app.removeEventFilter(userInputBlocker)
+        finally:
+            self.logic.monitor.progressCallback = None
+            self._operationInProgress = False
+            self._clearLogBeforeNextMessage = False
+            self._setProgressVisible(False)
+        return wasCancelled
+
+    def onCancelButton(self) -> None:
+        self.logic.monitor.cancel()
+        # The operation may not stop immediately.
+        self.ui.cancelButton.enabled = False
+        self.ui.cancelButton.text = _("Cancelling...")
+
+    def onImportButton(self) -> None:
+        self._runWithProgress(
+            self._importFiles, _("Failed to import simulation model."), _("Import was cancelled."))
+
+    def _importFiles(self) -> None:
+        quantities = {arrayInfo.key: arrayInfo.simulationUnit.quantity
+                      for arrayInfo in self._importArrayInfos}
+        importedNodes = self.logic.importFiles(
+            self.inputFilePaths, self.inputCoordinateSystem, self.inputUnitSystem, quantities,
+            self.ui.mergeDuplicatePointsCheckBox.checked,
+            self.ui.decimationThresholdSpinBox.value if self.ui.decimateCheckBox.checked else None,
+            self.ui.decimationTargetReductionSpinBox.value / 100.0,
+            self.ui.decimationBoundaryWeightSpinBox.value,
+            self.ui.keepEveryNthTimePointSpinBox.value,
+            self.ui.firstTimePointIndexSpinBox.value,
+            self.ui.resampleSpacingSpinBox.value if self.ui.resampleCheckBox.checked else None)
+        # Only models can be exported, volumes that were imported from images cannot.
+        modelNodes = [node for node in importedNodes if node.IsA("vtkMRMLModelNode")]
+        if modelNodes:
+            # Preselect the imported models for export.
+            itemIds = vtk.vtkIdList()
+            subjectHierarchyNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+            if subjectHierarchyNode is not None:
+                for modelNode in modelNodes:
+                    itemIds.InsertNextId(subjectHierarchyNode.GetItemByDataNode(modelNode))
+                self.ui.exportModelTreeView.setCurrentItems(itemIds)
 
     # ------------------------------------------------------------------ export table
 
@@ -1104,13 +1250,15 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
                                         and bool(self.ui.outputFolderPathLineEdit.currentPath))
 
     def onExportButton(self) -> None:
-        with slicer.util.tryWithErrorDisplay(_("Failed to export simulation model."), waitCursor=True):
-            self.clearLog()
-            self.logic.exportModels(
-                self.selectedExportModelNodes,
-                self.ui.outputFolderPathLineEdit.currentPath,
-                self.outputFileFormat,
-                self.outputCoordinateSystem, self.outputUnitSystem)
+        self._runWithProgress(
+            self._exportModels, _("Failed to export simulation model."), _("Export was cancelled."))
+
+    def _exportModels(self) -> None:
+        self.logic.exportModels(
+            self.selectedExportModelNodes,
+            self.ui.outputFolderPathLineEdit.currentPath,
+            self.outputFileFormat,
+            self.outputCoordinateSystem, self.outputUnitSystem)
 
     # ------------------------------------------------------------------ log
 
@@ -1119,13 +1267,51 @@ class ImportExportSimulationModelWidget(ScriptedLoadableModuleWidget):
         slicer.app.processEvents()
 
     def addLog(self, text) -> None:
+        if self._clearLogBeforeNextMessage:
+            self._clearLogBeforeNextMessage = False
+            self.ui.statusTextEdit.plainText = ""
         # Keep showing the latest message, unless the user has scrolled up to read earlier ones.
         scrollBar = self.ui.statusTextEdit.verticalScrollBar()
         wasAtEnd = scrollBar.value >= scrollBar.maximum
         self.ui.statusTextEdit.appendPlainText(text)
         if wasAtEnd:
             scrollBar.value = scrollBar.maximum
+        if self._operationInProgress:
+            # The progress bar shows the progress of the step that the latest message is about.
+            self.ui.progressBar.value = 0
         slicer.app.processEvents()
+
+
+class _UserInputBlocker(qt.QObject):
+    """Discards the user input of the application, except what is sent to the given widgets.
+
+    It is installed on the application while an operation processes the events of the application,
+    so that the user can only use the widgets that are safe to use during the operation.
+    """
+
+    BLOCKED_EVENT_TYPES = (
+        qt.QEvent.MouseButtonPress, qt.QEvent.MouseButtonRelease, qt.QEvent.MouseButtonDblClick,
+        qt.QEvent.Wheel, qt.QEvent.KeyPress, qt.QEvent.KeyRelease,
+        qt.QEvent.Shortcut, qt.QEvent.ShortcutOverride, qt.QEvent.ContextMenu,
+        qt.QEvent.DragEnter, qt.QEvent.DragMove, qt.QEvent.Drop, qt.QEvent.Close)
+
+    def __init__(self, allowedWidgets):
+        qt.QObject.__init__(self)
+        self.allowedWidgets = allowedWidgets
+
+    def eventFilter(self, obj, event):
+        eventType = event.type()
+        if eventType not in self.BLOCKED_EVENT_TYPES:
+            return False
+        if eventType != qt.QEvent.Shortcut:
+            if not obj.isWidgetType():
+                # A window, it passes on the event to one of its widgets.
+                return False
+            if any(widget == obj or widget.isAncestorOf(obj) for widget in self.allowedWidgets):
+                return False
+        # Not accepted, so that for example a window is not closed.
+        event.ignore()
+        return True
 
 
 class _FileDropEventFilter(qt.QObject):
@@ -1169,6 +1355,80 @@ class _FileDropEventFilter(qt.QObject):
 
 
 #
+# Cancelling
+#
+
+
+class OperationCancelledError(Exception):
+    """Raised by an import or export that was cancelled."""
+
+
+class OperationMonitor:
+    """Lets a long operation report its progress and be cancelled while it is running.
+
+    The operation calls check() between its steps and runs its VTK algorithms with update().
+    Both call progressCallback, which can show the progress, process the events of the
+    application, and call cancel() if the user asked for it. The operation then stops by
+    raising OperationCancelledError.
+    """
+
+    def __init__(self):
+        # Called with the progress of the current step (0.0-1.0), or None if it is not known.
+        self.progressCallback = None
+        # Minimum time between two calls of the callback, in seconds. Progress may be reported
+        # many thousand times a second, processing the application events each time would be slow.
+        self.callbackInterval = 0.1
+        self._cancelRequested = False
+        self._lastCallbackTime = 0.0
+
+    def reset(self) -> None:
+        """Forget a cancel request that no operation has stopped for."""
+        self._cancelRequested = False
+        self._lastCallbackTime = 0.0
+
+    def cancel(self) -> None:
+        """Ask the running operation to stop as soon as it can."""
+        self._cancelRequested = True
+
+    def _isCancelRequested(self, progress=None):
+        if (not self._cancelRequested and self.progressCallback is not None
+                and time.time() - self._lastCallbackTime >= self.callbackInterval):
+            self.progressCallback(progress)
+            self._lastCallbackTime = time.time()
+        return self._cancelRequested
+
+    def check(self, progress=None) -> None:
+        """Report the progress of the current step, and stop the operation if it was cancelled."""
+        if self._isCancelRequested(progress):
+            # The request has been fulfilled, it must not stop the next operation as well.
+            self._cancelRequested = False
+            raise OperationCancelledError(_("The operation was cancelled."))
+
+    def update(self, algorithm, update=None):
+        """Run a VTK algorithm, so that it can be cancelled while it is running.
+
+        An algorithm can only be cancelled while it is running if it reports its progress, because
+        that is the only time when the application can process a click on a cancel button.
+        Otherwise, the operation stops when the algorithm has finished.
+
+        :param update: function that runs the algorithm, by default the Update method of it.
+        :return: what the update function returned.
+        """
+        def onProgress(caller, event):
+            # An exception cannot be raised through the algorithm, it is asked to stop instead.
+            if self._isCancelRequested(caller.GetProgress()):
+                caller.SetAbortExecute(True)
+
+        observerTag = algorithm.AddObserver(vtk.vtkCommand.ProgressEvent, onProgress)
+        try:
+            result = update() if update is not None else algorithm.Update()
+        finally:
+            algorithm.RemoveObserver(observerTag)
+        self.check()
+        return result
+
+
+#
 # Approximate value ranges
 #
 
@@ -1196,8 +1456,12 @@ class MeshGeometryReplacer:
     new geometry, and the time-consuming creation of it is not repeated for them.
     """
 
-    def __init__(self, logCallback=None):
+    # Loops over the points of a mesh let the operation be cancelled after this many points.
+    CANCEL_CHECK_POINT_COUNT = 10000
+
+    def __init__(self, logCallback=None, monitor=None):
         self.logCallback = logCallback
+        self.monitor = monitor if monitor is not None else OperationMonitor()
         self._geometryHash = None
         self._geometry = None
         # For each point and cell of the new geometry: nearest point and cell of the input
@@ -1236,16 +1500,20 @@ class MeshGeometryReplacer:
         if self.logCallback:
             self.logCallback(text)
 
-    @staticmethod
-    def _findNearestPoints(mesh, geometry):
+    def _findNearestPoints(self, mesh, geometry):
         locator = vtk.vtkStaticPointLocator()
         locator.SetDataSet(mesh)
         locator.BuildLocator()
-        points = numpy_support.vtk_to_numpy(geometry.GetPoints().GetData()).astype(float)
-        return np.array([locator.FindClosestPoint(point) for point in points.tolist()], dtype=np.int64)
+        points = numpy_support.vtk_to_numpy(geometry.GetPoints().GetData()).astype(float).tolist()
+        nearestPointIds = []
+        for firstIndex in range(0, len(points), self.CANCEL_CHECK_POINT_COUNT):
+            self.monitor.check(firstIndex / len(points))
+            nearestPointIds.extend(
+                locator.FindClosestPoint(point)
+                for point in points[firstIndex:firstIndex + self.CANCEL_CHECK_POINT_COUNT])
+        return np.array(nearestPointIds, dtype=np.int64)
 
-    @staticmethod
-    def _findSourceCells(mesh, geometry):
+    def _findSourceCells(self, mesh, geometry):
         """Find the input cell that contains the center of each new cell."""
         cellIdsName = "_SourceCellIds"
         source = vtk.vtkUnstructuredGrid()
@@ -1258,12 +1526,12 @@ class MeshGeometryReplacer:
 
         cellCenters = vtk.vtkCellCenters()
         cellCenters.SetInputData(geometry)
-        cellCenters.Update()
+        self.monitor.update(cellCenters)
         centers = cellCenters.GetOutput()
         probe = vtk.vtkProbeFilter()
         probe.SetInputData(centers)
         probe.SetSourceData(source)
-        probe.Update()
+        self.monitor.update(probe)
         probeOutput = probe.GetOutput().GetPointData()
         sourceCellIds = numpy_support.vtk_to_numpy(probeOutput.GetArray(cellIdsName)).astype(np.int64)
         isValid = numpy_support.vtk_to_numpy(probeOutput.GetArray(probe.GetValidPointMaskArrayName())).astype(bool)
@@ -1278,7 +1546,9 @@ class MeshGeometryReplacer:
             cellId = vtk.reference(0)
             subId = vtk.reference(0)
             squaredDistance = vtk.reference(0.0)
-            for index in np.nonzero(~isValid)[0].tolist():
+            for count, index in enumerate(np.nonzero(~isValid)[0].tolist()):
+                if count % self.CANCEL_CHECK_POINT_COUNT == 0:
+                    self.monitor.check()
                 locator.FindClosestPoint(centers.GetPoint(index), closestPoint, cell, cellId, subId, squaredDistance)
                 sourceCellIds[index] = cellId.get()
         return sourceCellIds
@@ -1315,6 +1585,8 @@ class MeshGeometryReplacer:
         evaluatedPoint = [0.0, 0.0, 0.0]
         points = numpy_support.vtk_to_numpy(geometry.GetPoints().GetData()).astype(float).tolist()
         for pointIndex, point in enumerate(points):
+            if pointIndex % self.CANCEL_CHECK_POINT_COUNT == 0:
+                self.monitor.check(pointIndex / numberOfPoints)
             if locator.FindCell(point, 0.0, cell, parametricCoordinates, weights) < 0:
                 locator.FindClosestPoint(point, closestPoint, cell, cellId, subId, squaredDistance)
                 # The locator leaves the last cell that it examined in the cell object, not the closest.
@@ -1384,8 +1656,8 @@ class TetrahedralMeshDecimator(MeshGeometryReplacer):
     MINIMUM_REDUCTION_PER_PASS = 0.002
 
     def __init__(self, targetReduction=DEFAULT_DECIMATION_TARGET_REDUCTION,
-                 boundaryWeight=DEFAULT_DECIMATION_BOUNDARY_WEIGHT, logCallback=None):
-        super().__init__(logCallback)
+                 boundaryWeight=DEFAULT_DECIMATION_BOUNDARY_WEIGHT, logCallback=None, monitor=None):
+        super().__init__(logCallback, monitor)
         self.targetReduction = targetReduction
         self.boundaryWeight = boundaryWeight
         self.numberOfDecimations = 0
@@ -1411,7 +1683,7 @@ class TetrahedralMeshDecimator(MeshGeometryReplacer):
         geometry.GetFieldData().Initialize()
         mergeFilter = vtk.vtkStaticCleanUnstructuredGrid()
         mergeFilter.SetInputData(geometry)
-        mergeFilter.Update()
+        self.monitor.update(mergeFilter)
         geometry = mergeFilter.GetOutput()
 
         # The filter selects the edges to collapse using rand() % numberOfCells. Where rand() is
@@ -1429,7 +1701,8 @@ class TetrahedralMeshDecimator(MeshGeometryReplacer):
             decimationFilter.SetInputData(self._shuffledCellsWithScalars(geometry, randomGenerator))
             decimationFilter.SetNumberOfTetsOutput(targetCellCount)
             decimationFilter.SetBoundaryWeight(self.boundaryWeight)
-            decimationFilter.Update()
+            # The filter does not report its progress, so cancelling stops it between two passes.
+            self.monitor.update(decimationFilter)
             geometry = decimationFilter.GetOutput()
             self._log(_("  Decimation pass {index}: {before} -> {after} cells").format(
                 index=passIndex, before=numberOfCellsBefore, after=geometry.GetNumberOfCells()))
@@ -1488,9 +1761,9 @@ class UniformMeshResampler(MeshGeometryReplacer):
     # Number of cubes in the bounding box of the mesh above which the resolution is rejected
     MAXIMUM_GRID_CELL_COUNT = 200000000
 
-    def __init__(self, spacing, logCallback=None):
+    def __init__(self, spacing, logCallback=None, monitor=None):
         """:param spacing: size of the cubes, in the length unit of the meshes."""
-        super().__init__(logCallback)
+        super().__init__(logCallback, monitor)
         self.spacing = spacing
         self.numberOfResamplings = 0
 
@@ -1527,7 +1800,7 @@ class UniformMeshResampler(MeshGeometryReplacer):
         probe = vtk.vtkProbeFilter()
         probe.SetInputData(cellCenters)
         probe.SetSourceData(source)
-        probe.Update()
+        self.monitor.update(probe)
         isInside = numpy_support.vtk_to_numpy(
             probe.GetOutput().GetPointData().GetArray(probe.GetValidPointMaskArrayName())).astype(bool)
         keptCells = np.nonzero(isInside)[0]
@@ -1593,6 +1866,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
     ATTRIBUTE_PREFIX = "SimulationModel."
 
     VTKHDF_FILE_EXTENSIONS = [".vtkhdf", ".vtkhdf5"]
+    # Number of groups that the partitions of a time point of a VTKHDF file are read in.
+    VTKHDF_PARTITION_GROUP_COUNT = 10
     READ_FILE_EXTENSIONS = [".vtu", ".vtp", ".vtk", ".vtkhdf", ".vtkhdf5", ".vti", ".stl", ".ply", ".obj"]
     WRITE_FILE_EXTENSIONS = [".vtu", ".vtp", ".vtk", ".stl", ".ply", ".obj"]
     # Formats that cannot store data arrays.
@@ -1606,6 +1881,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         self._meshCache = {}
         # Approximate array information of large VTKHDF files, for which no mesh is kept in the cache.
         self._approximateArrayInfoCache = {}
+        # Reports the progress of importing and exporting, and lets them be cancelled.
+        self.monitor = OperationMonitor()
 
     def addLog(self, text) -> None:
         logging.info(text)
@@ -1626,8 +1903,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
     # ------------------------------------------------------------------ reading and writing
 
-    @staticmethod
-    def readMesh(filePath):
+    def readMesh(self, filePath):
         """Read a mesh from file, without any conversion.
 
         Returns vtkPolyData or vtkUnstructuredGrid, or vtkImageData for a .vti file. Only the last
@@ -1637,11 +1913,10 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         if not os.path.isfile(filePath):
             raise ValueError(_("Input file not found: {filePath}").format(filePath=filePath))
         extension = os.path.splitext(filePath)[1].lower()
-        if extension in ImportExportSimulationModelLogic.VTKHDF_FILE_EXTENSIONS:
-            timeValues = ImportExportSimulationModelLogic.getVtkHdfTimeValues(filePath)
-            reader = ImportExportSimulationModelLogic._createVtkHdfReader(filePath)
-            return ImportExportSimulationModelLogic._readVtkHdfMesh(
-                reader, timeValues[-1] if timeValues else None, filePath)
+        if extension in self.VTKHDF_FILE_EXTENSIONS:
+            timeValues = self.getVtkHdfTimeValues(filePath)
+            reader = self._createVtkHdfReader(filePath)
+            return self._readVtkHdfMesh(reader, timeValues[-1] if timeValues else None, filePath)
         if extension == ".vtu":
             reader = vtk.vtkXMLUnstructuredGridReader()
         elif extension == ".vtp":
@@ -1666,16 +1941,15 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         else:
             raise ValueError(_("Unsupported file format: {filePath}").format(filePath=filePath))
         reader.SetFileName(filePath)
-        reader.Update()
+        self.monitor.update(reader)
         mesh = reader.GetOutput()
         if mesh is None or mesh.GetNumberOfPoints() == 0:
             raise ValueError(_("Failed to read mesh from {filePath}").format(filePath=filePath))
         if extension == ".vti":
             return mesh
-        return ImportExportSimulationModelLogic._asModelMesh(mesh)
+        return self._asModelMesh(mesh)
 
-    @staticmethod
-    def _asModelMesh(mesh):
+    def _asModelMesh(self, mesh):
         """Return the mesh as vtkPolyData or vtkUnstructuredGrid.
 
         Any other data set type (structured grid, rectilinear grid, ...) is converted to a
@@ -1685,7 +1959,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             return mesh
         geometryFilter = vtk.vtkGeometryFilter()
         geometryFilter.SetInputData(mesh)
-        geometryFilter.Update()
+        self.monitor.update(geometryFilter)
         return geometryFilter.GetOutput()
 
     @staticmethod
@@ -1708,14 +1982,38 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         timeValues = outputInformation.Get(timeStepsKey)
         return list(timeValues) if len(timeValues) > 1 else []
 
-    @staticmethod
-    def _readVtkHdfMesh(reader, timeValue, filePath):
+    def _readVtkHdfMesh(self, reader, timeValue, filePath):
         """Read one time point of a VTKHDF file into a single mesh (timeValue=None if not temporal)."""
-        ImportExportSimulationModelLogic._updateVtkHdfReader(reader, timeValue)
-        mesh = ImportExportSimulationModelLogic._mergedPartitions(reader.GetOutputDataObject(0))
+        if isinstance(reader.GetOutputDataObject(0), vtk.vtkPartitionedDataSet):
+            mesh = self._appendedPartitions(self._readVtkHdfPartitions(reader, timeValue))
+        else:
+            self._updateVtkHdfReader(reader, timeValue)
+            self.monitor.check()
+            mesh = self._mergedPartitions(reader.GetOutputDataObject(0))
         if mesh is None or mesh.GetNumberOfPoints() == 0:
             raise ValueError(_("Failed to read mesh from {filePath}").format(filePath=filePath))
-        return ImportExportSimulationModelLogic._asModelMesh(mesh)
+        return self._asModelMesh(mesh)
+
+    def _readVtkHdfPartitions(self, reader, timeValue):
+        """Read the partitions of a time point of a VTKHDF file, in the order they are in the file.
+
+        The reader does not report its progress, so reading cannot be cancelled while it is
+        running. Therefore the partitions are not read all at once but in several groups, and
+        reading can be cancelled between them.
+        """
+        numberOfGroups = self.VTKHDF_PARTITION_GROUP_COUNT
+        groups = []
+        for groupIndex in range(numberOfGroups):
+            # The reader takes every numberOfGroups-th partition of the file, starting from groupIndex.
+            self._updateVtkHdfReader(reader, timeValue, groupIndex, numberOfGroups)
+            partitioned = reader.GetOutputDataObject(0)
+            groups.append([partitioned.GetPartition(index)
+                           for index in range(partitioned.GetNumberOfPartitions())])
+            self.monitor.check((groupIndex + 1) / numberOfGroups)
+        partitions = []
+        for indexInGroup in range(max(len(group) for group in groups)):
+            partitions.extend(group[indexInGroup] for group in groups if indexInGroup < len(group))
+        return partitions
 
     @staticmethod
     def _updateVtkHdfReader(reader, timeValue, piece=0, numberOfPieces=1):
@@ -1725,8 +2023,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         else:
             reader.UpdateTimeStep(timeValue, piece, numberOfPieces, 0)
 
-    @staticmethod
-    def _approximateVtkHdfArrayInfos(filePath, cellCountThreshold):
+    def _approximateVtkHdfArrayInfos(self, filePath, cellCountThreshold):
         """Array information of the last time point of a large VTKHDF file, reading only a part of it.
 
         Value ranges are not stored in the file, and most of the time of reading a time point is
@@ -1737,39 +2034,41 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         Returns None if the file should be read completely: it is small, or it does not have
         more partitions than what would be sampled.
         """
-        logic = ImportExportSimulationModelLogic
+        logic = self
         timeValues = logic.getVtkHdfTimeValues(filePath)
         timeValue = timeValues[-1] if timeValues else None
 
         reader = logic._createVtkHdfReader(filePath)
+        if not isinstance(reader.GetOutputDataObject(0), vtk.vtkPartitionedDataSet):
+            return None
         reader.GetPointDataArraySelection().DisableAllArrays()
         reader.GetCellDataArraySelection().DisableAllArrays()
-        logic._updateVtkHdfReader(reader, timeValue)
-        geometry = reader.GetOutputDataObject(0)
-        if not isinstance(geometry, vtk.vtkPartitionedDataSet):
-            return None
-        numberOfPartitions = geometry.GetNumberOfPartitions()
-        partitions = [(index, geometry.GetPartition(index)) for index in range(numberOfPartitions)]
+        geometryPartitions = logic._readVtkHdfPartitions(reader, timeValue)
+        numberOfPartitions = len(geometryPartitions)
         # A partition may be empty if a solver process had no part of the mesh assigned to it.
-        partitions = [(index, partition) for index, partition in partitions
+        partitions = [(index, partition) for index, partition in enumerate(geometryPartitions)
                       if partition is not None and partition.GetNumberOfPoints() > 0]
         numberOfCells = sum(partition.GetNumberOfCells() for _index, partition in partitions)
         if numberOfCells <= cellCountThreshold or len(partitions) <= APPROXIMATE_RANGE_PARTITION_COUNT:
             return None
+        boundingBox = vtk.vtkBoundingBox()
+        for _index, partition in partitions:
+            boundingBox.AddBounds(partition.GetBounds())
         bounds = [0.0] * 6
-        geometry.GetBounds(bounds)
+        boundingBox.GetBounds(bounds)
         sampledPartitionIndices = [partitions[sampleIndex * len(partitions) // APPROXIMATE_RANGE_PARTITION_COUNT][0]
                                    for sampleIndex in range(APPROXIMATE_RANGE_PARTITION_COUNT)]
         # The geometry of the whole time point is not needed any more.
-        del partitions, geometry, reader
+        del partitions, geometryPartitions, reader
 
         sampledArrayInfos = []
-        for partitionIndex in sampledPartitionIndices:
+        for sampleIndex, partitionIndex in enumerate(sampledPartitionIndices):
             reader = logic._createVtkHdfReader(filePath)
             logic._updateVtkHdfReader(reader, timeValue, partitionIndex, numberOfPartitions)
             partition = logic._mergedPartitions(reader.GetOutputDataObject(0))
             if partition is not None:
                 sampledArrayInfos.append(logic.getArrayInfosFromMesh(partition))
+            logic.monitor.check((sampleIndex + 1) / len(sampledPartitionIndices))
         arrayInfos = logic._mergedArrayInfos(sampledArrayInfos)
         for arrayInfo in arrayInfos:
             if arrayInfo.location == POSITION_LOCATION:
@@ -1779,8 +2078,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 arrayInfo.isRangeApproximate = True
         return arrayInfos
 
-    @staticmethod
-    def _mergedPartitions(dataObject):
+    def _mergedPartitions(self, dataObject):
         """Append the partitions that a parallel solver wrote separately into a single mesh.
 
         Points are not merged, so the values of the points are preserved as they are in the file.
@@ -1792,11 +2090,15 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         iterator.SetDataSet(dataObject)
         iterator.InitTraversal()
         while not iterator.IsDoneWithTraversal():
-            partition = iterator.GetCurrentDataObject()
-            # A partition may be empty if a solver process had no part of the mesh assigned to it.
-            if partition is not None and partition.GetNumberOfPoints() > 0:
-                partitions.append(partition)
+            partitions.append(iterator.GetCurrentDataObject())
             iterator.GoToNextItem()
+        return self._appendedPartitions(partitions)
+
+    def _appendedPartitions(self, partitions):
+        """Append meshes into a single mesh, without merging points. None if they are all empty."""
+        # A partition may be empty if a solver process had no part of the mesh assigned to it.
+        partitions = [partition for partition in partitions
+                      if partition is not None and partition.GetNumberOfPoints() > 0]
         if not partitions:
             return None
         if all(isinstance(partition, vtk.vtkPolyData) for partition in partitions):
@@ -1805,11 +2107,10 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             appendFilter = vtk.vtkAppendFilter()
         for partition in partitions:
             appendFilter.AddInputData(partition)
-        appendFilter.Update()
+        self.monitor.update(appendFilter)
         return appendFilter.GetOutput()
 
-    @staticmethod
-    def mergeDuplicatePoints(mesh):
+    def mergeDuplicatePoints(self, mesh):
         """Return the mesh with the points merged that have the same position and the same values.
 
         Points that are at the same position but have a different value in any point data array
@@ -1840,7 +2141,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         mergeFilter.SetInputData(mergingMesh)
         mergeFilter.SetRemoveUnusedPoints(False)
         mergeFilter.SetMergingArray(mergingArrayName if arrayValues else "")
-        mergeFilter.Update()
+        self.monitor.update(mergeFilter)
         mergedMesh = mergeFilter.GetOutput()
         mergedMesh.GetPointData().RemoveArray(mergingArrayName)
         return mergedMesh
@@ -1883,7 +2184,14 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             os.makedirs(directory)
         writer.SetFileName(filePath)
         writer.SetInputData(mesh)
-        if not writer.Write():
+        try:
+            isWritten = self.monitor.update(writer, writer.Write)
+        except OperationCancelledError:
+            # The file may be incomplete.
+            if os.path.isfile(filePath):
+                os.remove(filePath)
+            raise
+        if not isWritten:
             raise RuntimeError(_("Failed to write {filePath}").format(filePath=filePath))
 
     def _asPolyData(self, mesh):
@@ -1893,16 +2201,15 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                       "volumetric cells are not written."))
         geometryFilter = vtk.vtkGeometryFilter()
         geometryFilter.SetInputData(mesh)
-        geometryFilter.Update()
+        self.monitor.update(geometryFilter)
         return geometryFilter.GetOutput()
 
-    @staticmethod
-    def _asUnstructuredGrid(mesh):
+    def _asUnstructuredGrid(self, mesh):
         if isinstance(mesh, vtk.vtkUnstructuredGrid):
             return mesh
         appendFilter = vtk.vtkAppendFilter()
         appendFilter.SetInputData(mesh)
-        appendFilter.Update()
+        self.monitor.update(appendFilter)
         return appendFilter.GetOutput()
 
     def getCachedMesh(self, filePath):
@@ -1944,6 +2251,20 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         self._meshCache.pop(filePath, None)
         # The caller may modify the returned objects.
         return [copy.copy(arrayInfo) for arrayInfo in cached[1]]
+
+    def _isFileCached(self, filePath, approximateRangeCellCountThreshold):
+        """True if the array information of the file is available without reading the file."""
+        filePath = os.path.normpath(filePath)
+        fileKey = self._fileCacheKey(filePath)
+        if fileKey is None:
+            return False
+        cachedMesh = self._meshCache.get(filePath)
+        if cachedMesh is not None and cachedMesh[0] == fileKey:
+            return True
+        cachedArrayInfos = self._approximateArrayInfoCache.get(filePath)
+        return (approximateRangeCellCountThreshold is not None and cachedArrayInfos is not None
+                and cachedArrayInfos[0] == (fileKey, approximateRangeCellCountThreshold)
+                and cachedArrayInfos[1] is not None)
 
     def clearCache(self) -> None:
         self._meshCache = {}
@@ -1995,7 +2316,8 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
 
         return arrayInfos
 
-    def getArrayInfosFromFiles(self, filePaths, approximateRangeCellCountThreshold=None):
+    def getArrayInfosFromFiles(self, filePaths, approximateRangeCellCountThreshold=None,
+                               fileCompletedCallback=None):
         """Coordinates and data arrays of all input files, merged into a single list.
 
         Arrays that are present in several files are listed once, with the value range extended
@@ -2004,7 +2326,12 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         :param approximateRangeCellCountThreshold: VTKHDF files with more cells than this are not
             read completely, and the value ranges of their data arrays are only approximate.
             None to always compute the exact ranges.
+        :param fileCompletedCallback: called when a file has been processed, with the file path
+            and the merged array information of the files that have been processed by then.
+        :raises OperationCancelledError: if the operation is cancelled using the monitor. The
+            files that have been read by then do not have to be read again.
         """
+        self.monitor.reset()
         # Meshes of files that are no longer needed are released, so that the cache does not
         # keep growing as files are added to and removed from the input file list.
         normalizedFilePaths = [os.path.normpath(filePath) for filePath in filePaths]
@@ -2013,15 +2340,20 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 if cachedFilePath not in normalizedFilePaths:
                     del cache[cachedFilePath]
 
-        fileArrayInfos = []
+        mergedArrayInfos = []
         for filePath in filePaths:
+            if not self._isFileCached(filePath, approximateRangeCellCountThreshold):
+                self.addLog(_("Reading {filePath}").format(filePath=filePath))
             arrayInfos = None
             if approximateRangeCellCountThreshold is not None:
                 arrayInfos = self._cachedApproximateArrayInfos(filePath, approximateRangeCellCountThreshold)
             if arrayInfos is None:
                 arrayInfos = self.getArrayInfosFromMesh(self.getCachedMesh(filePath))
-            fileArrayInfos.append(arrayInfos)
-        return self._mergedArrayInfos(fileArrayInfos)
+            mergedArrayInfos = self._mergedArrayInfos([mergedArrayInfos, arrayInfos])
+            if fileCompletedCallback is not None:
+                fileCompletedCallback(filePath, mergedArrayInfos)
+            self.monitor.check()
+        return mergedArrayInfos
 
     @staticmethod
     def _mergedArrayInfos(arrayInfoLists):
@@ -2283,7 +2615,10 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             mm, instead of decimating them. None to not resample.
         :return: list of the created model nodes (the proxy model node of a sequence) and volume
             nodes.
+        :raises OperationCancelledError: if the import was cancelled, see OperationMonitor. The file
+            that was being imported is not loaded, the files imported before it remain in the scene.
         """
+        self.monitor.reset()
         if not filePaths:
             raise ValueError(_("No input file is specified"))
         if coordinateSystem not in COORDINATE_SYSTEMS:
@@ -2303,6 +2638,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         flipFirstTwoComponents = (coordinateSystem != SCENE_COORDINATE_SYSTEM)
         importedNodes = []
         for filePath in filePaths:
+            self.monitor.check()
             self.addLog(_("Importing {filePath}").format(filePath=filePath))
             nodeName = os.path.splitext(os.path.basename(filePath))[0]
             extension = os.path.splitext(filePath)[1].lower()
@@ -2339,9 +2675,11 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
                 continue
 
             mesh = reduceMesh(mesh)
+            self.monitor.check()
             quantities = self._fileArrayQuantities(mesh, arrayQuantities)
             convertedMesh = self.convertMesh(mesh, quantities, flipFirstTwoComponents,
                                              unitSystem, SCENE_UNIT_SYSTEM)
+            self.monitor.check()
             modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", nodeName)
             modelNode.SetAndObserveMesh(convertedMesh)
             modelNode.CreateDefaultDisplayNodes()
@@ -2372,8 +2710,10 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         :param resampleSpacing: resolution of uniform resampling in the length unit of the meshes,
             None to not resample. A resampled mesh is not decimated and it has no duplicate points.
         """
-        decimator = TetrahedralMeshDecimator(decimationTargetReduction, decimationBoundaryWeight, self.addLog)
-        resampler = None if resampleSpacing is None else UniformMeshResampler(resampleSpacing, self.addLog)
+        decimator = TetrahedralMeshDecimator(
+            decimationTargetReduction, decimationBoundaryWeight, self.addLog, self.monitor)
+        resampler = None if resampleSpacing is None else UniformMeshResampler(
+            resampleSpacing, self.addLog, self.monitor)
 
         def reduceMesh(mesh):
             if resampler is not None and resampler.canResample(mesh):
@@ -2452,12 +2792,15 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         try:
             reader = self._createVtkHdfReader(filePath)
             for timePointIndex, timeValue in enumerate(timeValues):
+                self.monitor.check()
                 self.addLog(_("Reading time point {index}/{count} (time: {time:g}s)").format(
                     index=timePointIndex + 1, count=len(timeValues), time=timeValue))
                 mesh = reduceMesh(self._readVtkHdfMesh(reader, timeValue, filePath))
+                self.monitor.check()
                 quantities = self._fileArrayQuantities(mesh, arrayQuantities)
                 convertedMesh = self.convertMesh(mesh, quantities, flipFirstTwoComponents,
                                                  unitSystem, SCENE_UNIT_SYSTEM)
+                self.monitor.check()
                 arrayInfos = self._convertedArrayInfos(convertedMesh, quantities)
 
                 frameNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLModelNode")
@@ -2545,7 +2888,10 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         formats (.vtp and .vtu for VTK (XML), for example).
 
         :return: list of the written file paths.
+        :raises OperationCancelledError: if the export was cancelled, see OperationMonitor. The file
+            that was being written is removed, the files written before it are kept.
         """
+        self.monitor.reset()
         if not modelNodes:
             raise ValueError(_("No model is selected"))
         if not outputDirectory:
@@ -2560,6 +2906,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
         filePaths = []
         usedFileNames = set()
         for modelNode in modelNodes:
+            self.monitor.check()
             fileName = self.fileNameFromNodeName(modelNode.GetName())
             extension = fileFormat.extension(modelNode.GetMesh())
             # Two nodes may have the same name; make sure that they do not overwrite each other.
@@ -2612,6 +2959,7 @@ class ImportExportSimulationModelLogic(ScriptedLoadableModuleLogic):
             name=modelNode.GetName(), filePath=filePath))
         convertedMesh = self.convertMesh(mesh, quantities, flipFirstTwoComponents,
                                          modelUnitSystem, unitSystem)
+        self.monitor.check()
         self.writeMesh(convertedMesh, filePath)
         self._logConversion(arrayInfos, modelUnitSystem, unitSystem, flipFirstTwoComponents)
 
@@ -2667,6 +3015,7 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         self.test_DecimateTetrahedra()
         self.test_ApproximateRanges()
         self.test_ResampleUniformly()
+        self.test_Cancel()
 
     def test_ResampleUniformly(self):
         """Resampling must produce uniform cubes, preserve the volume, and transfer the data arrays."""
@@ -2859,6 +3208,19 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
 
         # Every other partition is sampled, so the last one is not, but the coordinates are exact.
         logic = ImportExportSimulationModelLogic()
+        # Partial reading of the file can be cancelled, and it can be repeated after that.
+        progressValues = []
+
+        def cancelAtSecondProgress(progress):
+            progressValues.append(progress)
+            if len(progressValues) == 2:
+                logic.monitor.cancel()
+
+        logic.monitor.callbackInterval = 0.0
+        logic.monitor.progressCallback = cancelAtSecondProgress
+        with self.assertRaises(OperationCancelledError):
+            logic.getArrayInfosFromFiles([filePath], 0)
+        logic.monitor.progressCallback = None
         approximate = arrayInfoByKey(logic.getArrayInfosFromFiles([filePath], 0))
         self.assertEqual(set(approximate), set(exact))
         self.assertEqual(approximate[pressureKey].numberOfComponents, 1)
@@ -2879,6 +3241,10 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), numberOfPartitions * 6)
         self.assertEqual(modelNode.GetMesh().GetPointData().GetArray("Pressure").GetRange(),
                          (0.0, numberOfPartitions - 1.0))
+        # The partitions are read in groups, and they must remain in the order they are in the file.
+        self.assertGreater(numberOfPartitions, logic.VTKHDF_PARTITION_GROUP_COUNT)
+        importedPressure = numpy_support.vtk_to_numpy(modelNode.GetMesh().GetPointData().GetArray("Pressure"))
+        self.assertTrue(np.all(np.diff(importedPressure) >= 0))
 
         # Small meshes, and files that have no more partitions than the sample, are read completely.
         logic = ImportExportSimulationModelLogic()
@@ -3089,7 +3455,7 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         surface.InsertNextCell(vtk.VTK_TRIANGLE, 3, [3, 4, 5])
 
         for mesh in (grid, surface):
-            merged = ImportExportSimulationModelLogic.mergeDuplicatePoints(mesh)
+            merged = ImportExportSimulationModelLogic().mergeDuplicatePoints(mesh)
             # Only one of the two duplicated positions can be merged.
             self.assertEqual(merged.GetNumberOfPoints(), 5, mesh.GetClassName())
             self.assertEqual(merged.GetNumberOfCells(), 2)
@@ -3114,7 +3480,7 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         positionsOnly = vtk.vtkUnstructuredGrid()
         positionsOnly.DeepCopy(grid)
         positionsOnly.GetPointData().Initialize()
-        self.assertEqual(ImportExportSimulationModelLogic.mergeDuplicatePoints(positionsOnly).GetNumberOfPoints(), 4)
+        self.assertEqual(ImportExportSimulationModelLogic().mergeDuplicatePoints(positionsOnly).GetNumberOfPoints(), 4)
 
         # The import option
         filePath = os.path.join(tempfile.mkdtemp(), "duplicates.vtu")
@@ -3167,7 +3533,7 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
         distinctPoints = set()
         for index, timeValue in enumerate(timeValues):
             self.assertAlmostEqual(float(sequenceNode.GetNthIndexValue(index)), timeValue)
-            fileMesh = ImportExportSimulationModelLogic._readVtkHdfMesh(reader, timeValue, filePath)
+            fileMesh = logic._readVtkHdfMesh(reader, timeValue, filePath)
             frameNode = sequenceNode.GetNthDataNode(index)
             self.assertEqual(frameNode.GetAttribute("SimulationModel.UnitSystem"), "mmgs")
             frameMesh = frameNode.GetMesh()
@@ -3238,7 +3604,7 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
             self.assertIsNone(slicer.modules.sequences.logic().GetFirstBrowserNodeForProxyNode(modelNode))
             self.assertAlmostEqual(float(modelNode.GetAttribute("SimulationModel.TimeValue")), timeValues[firstIndex])
             # The model must contain the selected time point, converted to RAS and mm.
-            fileMesh = ImportExportSimulationModelLogic._readVtkHdfMesh(reader, timeValues[firstIndex], filePath)
+            fileMesh = logic._readVtkHdfMesh(reader, timeValues[firstIndex], filePath)
             filePoint = fileMesh.GetPoint(0)
             for actual, expected in zip(modelNode.GetMesh().GetPoint(0),
                                         (-filePoint[0] * 10, -filePoint[1] * 10, filePoint[2] * 10)):
@@ -3543,6 +3909,93 @@ class ImportExportSimulationModelTest(ScriptedLoadableModuleTest):
                          "dimensionless")
 
         self.delayDisplay("Array name test passed")
+
+    def test_Cancel(self):
+        """Import and export must stop when cancelled, also while a single file is being processed."""
+        self.delayDisplay("Starting cancel test")
+
+        import tempfile
+
+        image = vtk.vtkImageData()
+        image.SetDimensions(20, 20, 20)
+        tetrahedralize = vtk.vtkDataSetTriangleFilter()
+        tetrahedralize.SetInputData(image)
+        tetrahedralize.Update()
+        mesh = tetrahedralize.GetOutput()
+        pressure = numpy_support.numpy_to_vtk(np.arange(mesh.GetNumberOfPoints(), dtype=np.float32), deep=True)
+        pressure.SetName("Pressure")
+        mesh.GetPointData().AddArray(pressure)
+        temporaryDirectory = tempfile.mkdtemp()
+        meshFilePath = os.path.join(temporaryDirectory, "mesh.vtu")
+
+        timeSource = vtk.vtkTimeSourceExample()
+        timeSource.UpdateInformation()
+        timeSeriesFilePath = os.path.join(temporaryDirectory, "timeSeries.vtkhdf")
+        timeSeriesWriter = vtk.vtkHDFWriter()
+        timeSeriesWriter.SetInputConnection(timeSource.GetOutputPort())
+        timeSeriesWriter.SetFileName(timeSeriesFilePath)
+        timeSeriesWriter.SetWriteAllTimeSteps(True)
+        self.assertTrue(timeSeriesWriter.Write())
+
+        logic = ImportExportSimulationModelLogic()
+        logic.writeMesh(mesh, meshFilePath)
+        # The progress is reported every time, so that the test does not depend on the speed of the computer.
+        logic.monitor.callbackInterval = 0.0
+
+        def reportedProgress(operation, cancelAtCall=None):
+            """Run an operation, cancel it when the progress is reported for the given time."""
+            progressValues = []
+
+            def onProgress(progress):
+                progressValues.append(progress)
+                if len(progressValues) == cancelAtCall:
+                    logic.monitor.cancel()
+
+            logic.monitor.progressCallback = onProgress
+            try:
+                operation()
+            finally:
+                logic.monitor.progressCallback = None
+            return progressValues
+
+        def numberOfNodes():
+            return [slicer.mrmlScene.GetNumberOfNodesByClass(className)
+                    for className in ("vtkMRMLModelNode", "vtkMRMLSequenceNode", "vtkMRMLSequenceBrowserNode")]
+
+        def assertCancellable(operation):
+            """The operation must stop whenever it is cancelled, without adding anything to the scene."""
+            progressValues = reportedProgress(operation)
+            self.assertGreater(len(progressValues), 2)
+            for cancelAtCall in (1, len(progressValues) // 2, len(progressValues)):
+                numberOfNodesBefore = numberOfNodes()
+                with self.assertRaises(OperationCancelledError):
+                    reportedProgress(operation, cancelAtCall)
+                self.assertEqual(numberOfNodes(), numberOfNodesBefore)
+            return progressValues
+
+        # Reading a file must report how far it is, so that it can be cancelled before it ends.
+        progressValues = assertCancellable(lambda: logic.importFiles([meshFilePath], "LPS", "cgs"))
+        self.assertTrue(any(progress is not None and 0.0 < progress < 1.0 for progress in progressValues))
+        # Reading the files that are added to the input file list
+        assertCancellable(lambda: (logic.clearCache(), logic.getArrayInfosFromFiles([meshFilePath])))
+        # Mesh reduction and time series
+        assertCancellable(lambda: logic.importFiles([meshFilePath], "LPS", "cgs", decimationCellCountThreshold=0))
+        assertCancellable(lambda: logic.importFiles([meshFilePath], "LPS", "cgs", resampleSpacing=20.0))
+        assertCancellable(lambda: logic.importFiles([timeSeriesFilePath], "LPS", "cgs"))
+
+        # A cancel request that came too late to stop an operation must not stop the next one.
+        logic.monitor.cancel()
+        modelNode = logic.importFiles([meshFilePath], "LPS", "cgs")[0]
+        self.assertEqual(modelNode.GetMesh().GetNumberOfCells(), mesh.GetNumberOfCells())
+
+        # A file must not be left behind if writing it was cancelled.
+        outputDirectory = os.path.join(temporaryDirectory, "exported")
+        assertCancellable(lambda: logic.exportModels([modelNode], outputDirectory, "vtkxml", "LPS", "cgs"))
+        self.assertEqual(os.listdir(outputDirectory), [])
+        exportedFilePaths = logic.exportModels([modelNode], outputDirectory, "vtkxml", "LPS", "cgs")
+        self.assertEqual(logic.readMesh(exportedFilePaths[0]).GetNumberOfCells(), mesh.GetNumberOfCells())
+
+        self.delayDisplay("Cancel test passed")
 
     def test_ImportExport(self):
         self.delayDisplay("Starting import/export test")
