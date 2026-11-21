@@ -219,6 +219,16 @@ class EchoVolumeRenderLogic(ScriptedLoadableModuleLogic):
     else:  # VTK >= 9.2
       self.computeColorReplacement = self.ComputeColorReplacementVTK902
 
+    # VTK 9.3 removed the assignment of the g_eyePosObj shader global (it is still
+    # declared in raycasterfs.glsl but never written) and replaced it with the
+    # in_eyePosObjs[] uniform. Reading g_eyePosObj on VTK >= 9.3 is undefined
+    # behavior: on some drivers it reads as zero, which still yields a plausible
+    # looking (but camera independent) gradient; on others it reads garbage and the
+    # depth ratio collapses to a constant, which disables depth coloring entirely.
+    if vtkVersion >= 903:
+      self.computeColorReplacement = self.computeColorReplacement.replace(
+        "g_eyePosObj.xyz", "in_eyePosObjs[0].xyz")
+
   def sequenceFromVolume(self, proxyNode):
     if not proxyNode:
       return [None, None]
